@@ -1,0 +1,4 @@
+# 仓库里的文本一律按 LF 存/取（本机是 Windows，默认 autocrlf 会在检出时换成 CRLF ——
+# 那样同一次提交在不同机器上 diff 全变）。字体是二进制，别让 git 去"规范化"它。
+* text=auto eol=lf
+*.woff2 binary
