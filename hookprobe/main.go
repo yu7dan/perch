@@ -23,12 +23,27 @@ import (
 	"time"
 )
 
-const (
-	claudeExe = `C:\Users\Administrator\.local\claude.exe`
-	configDir = `D:\AIAgents\claude-code`
-	smokeDir  = `D:\AIAgents\_spike\hooksmoke`
-	outPath   = smokeDir + `\probe-out.bin`
-	evPath    = smokeDir + `\events.jsonl`
+// 探针不写死任何本机路径：agent 可执行文件、Claude 状态根、临时目录都从
+// 环境/系统默认值取。要指向别处的 agent 就设 CLAUDE_EXE。
+var (
+	claudeExe = func() string {
+		if v := strings.TrimSpace(os.Getenv("CLAUDE_EXE")); v != "" {
+			return v
+		}
+		return "claude.exe"
+	}()
+	configDir = func() string {
+		if v := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); v != "" {
+			return v
+		}
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, ".claude")
+		}
+		return ".claude"
+	}()
+	smokeDir = filepath.Join(os.TempDir(), "perch-hooksmoke")
+	outPath  = filepath.Join(smokeDir, "probe-out.bin")
+	evPath   = filepath.Join(smokeDir, "events.jsonl")
 )
 
 func newUUID() string {

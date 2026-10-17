@@ -1,4 +1,4 @@
-module spike/term
+module perch
 
 go 1.27.2
 

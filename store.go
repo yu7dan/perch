@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,7 +17,7 @@ import (
 //
 // 这一版只解决「界面要有真东西可渲染」。数据来源完全按已批准计划里的原则：
 //
-//   1. **绝不反解目录名**。`D--AIAgents-workspace-ai---` 这种编码是有损的
+//   1. **绝不反解目录名**。`C--Users-someone-my-project` 这种编码是有损的
 //      （中文、连字符都还原不回来），只能当定位用的 key；真正的 cwd 一律
 //      从文件**内容**里读。
 //   2. 标题走四级降级：aiTitle → slug → 第一条 user 文本 → 会话 ID。
@@ -75,13 +76,6 @@ type Session struct {
 	LastTool bool   `json:"lastTool"` // 末尾那条事件是一次**没拿到结果**的工具调用
 }
 
-type Workspace struct {
-	Name     string `json:"name"`
-	Path     string `json:"path"`
-	Updated  string `json:"updated"`
-	Sessions int    `json:"sessions"`
-}
-
 type HistoryItem struct {
 	Role string `json:"role"`
 	At   string `json:"at"`
@@ -89,8 +83,7 @@ type HistoryItem struct {
 }
 
 type ShellPayload struct {
-	Workspaces []Workspace             `json:"workspaces"`
-	Sessions   []Session               `json:"sessions"`
+	Sessions []Session `json:"sessions"`
 	History    map[string][]HistoryItem `json:"history"` // key = sessionId
 	StateDir   string                  `json:"stateDir"`
 	// Cwd 是终端的工作目录。以前它是前端 HTML 里写死的一行文本（#p-path），
@@ -100,9 +93,16 @@ type ShellPayload struct {
 	// 后端是它的唯一一份事实：卡片和标签都读这里，用户起的名字压过 agent
 	// 自己写在标题里的名字（Orca 的 tab.customTitle ?? tab.title）。
 	Titles map[string]string `json:"titles"`
+	// Projects 是左栏的主角：用户声明的项目池（见 projects.go），已排好序
+	// （置顶在前，其余按组内最近活动倒序）并带上算出来的会话数。
+	Projects []projectWire `json:"projects"`
+	// Assign 是会话 id → 项目路径。**不在这张表里的就是「未归类」** ——
+	// 前端不要自己重算归属（那样两边的口径会漂），也别把"没出现在表里"
+	// 当成"归属为空字符串"：前者是一个真实分组，后者是数据的缺失。
+	Assign map[string]string `json:"assign"`
+	// Roots 是"去哪儿找项目"的根目录（发现/扫描的起点，见 projects.go）。
+	Roots []string `json:"roots"`
 }
-
-const workspaceRoot = `D:\AIAgents\workspace`
 
 // maxLine 是单行 JSON 的上限。attachment / file-history-snapshot 事件
 // 里会内嵌整份文件内容，实测单行能到几 MB，默认的 64KB scanner 会直接报
@@ -126,44 +126,26 @@ func buildShellPayload(stateDir, cwd string, titles map[string]string) ShellPayl
 			p.History[s.ID] = h
 		}
 	}
-	p.Workspaces = scanWorkspaces(sessions)
+	// 项目池：归属与排序都从 sessions 这一遍里算（见 projects.go 的 projectStats）。
+	// pool 为 nil = 池子没初始化（读盘失败），这时**不发 projects 字段**，
+	// 让前端自己走"池子不可用"那条路，而不是收到一个空池子就以为用户没项目。
+	if pool != nil {
+		projects, roots := pool.snapshot()
+		// 合成的默认工作区（见 projects.go）：并进这份副本，池子本身不动。
+		// 少了这一句，"未归类"里那些落在 Documents\Perch 的会话就永远没有归属。
+		projects = withDefaultWorkspace(projects)
+		assign, recent, count := projectStats(sessions, projects)
+		p.Projects = wireProjects(projects, recent, count)
+		p.Assign = assign
+		p.Roots = roots
+		// 启动这份载荷就是用户**第一眼**看到的那一屏，它也得过同一条不变量
+		// （判据与四个数都出自 poolAudit，调用方只负责打印）。之所以两处都量，
+		// 是因为"某条会话在界面上不存在"这种错常常就出在启动这一遍。
+		sum, nUn, nMain, nAll := poolAudit(sessions, assign, p.Projects)
+		log.Printf("[pool] 启动载荷：%d 个项目 / 归属 %d 条（Σ项目 %d + 未归类 %d = %d，主会话共 %d，全部 %d）",
+			len(p.Projects), len(assign), sum, nUn, sum+nUn, nMain, nAll)
+	}
 	return p
-}
-
-// scanWorkspaces 用「工作区目录」当第一性数据，会话数按 cwd 归并。
-// 故意不从会话反推工作区 —— 会话可能来自任意 cwd，那会把目录列成假的。
-func scanWorkspaces(sessions []Session) []Workspace {
-	entries, err := os.ReadDir(workspaceRoot)
-	if err != nil {
-		return nil
-	}
-	countByPath := map[string]int{}
-	for _, s := range sessions {
-		// 子代理不算进工作区的会话数：那是主会话派生出来的，
-		// 算进去会让「2 会话」变成「13 会话」，数字就不再是「我有几个活」。
-		if s.Cwd != "" && !s.Sidechain {
-			countByPath[strings.ToLower(filepath.Clean(s.Cwd))]++
-		}
-	}
-	out := make([]Workspace, 0, len(entries))
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		full := filepath.Join(workspaceRoot, e.Name())
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		out = append(out, Workspace{
-			Name:     e.Name(),
-			Path:     full,
-			Updated:  info.ModTime().UTC().Format(time.RFC3339),
-			Sessions: countByPath[strings.ToLower(filepath.Clean(full))],
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Updated > out[j].Updated })
-	return out
 }
 
 func scanSessions(stateDir string) []Session {
@@ -284,9 +266,42 @@ func indexSession(path, project string, sidechain bool) (Session, bool) {
 		line := sc.Bytes()
 
 		if bytes.Contains(line, []byte(`"type":"user"`)) {
-			s.Turns++
-			if firstUser == "" {
-				firstUser = extractText(line, "user")
+			/* ⚠️ 上下文压缩行**也是 `"type":"user"`**（它是被折成一页的摘要，
+			   不是你说的一轮）。不摘出来的话「N 轮」会被它一格一格地抬高，
+			   而且第一句提问的位置上会站着一份 2 万字的摘要当标题 ——
+			   界面上看着像"用户打了 2 万字"。判据就是它自己的标记
+			   （`isCompactSummary:true`，本机 42/42 条压缩行都带），
+			   见 transcript.go 的 consumeCompact。 */
+			if !bytes.Contains(line, []byte(`"isCompactSummary":true`)) {
+				/* ⚠️ 还有一类"以 user 轮的形状出现、但**不是你写的**"：斜杠命令的回显
+				   （`<command-name>` / `<local-command-stdout>` / `<local-command-caveat>`）
+				   和系统提醒。实测症状就在左栏上：有一行会话的标题是 `<local-comma…`，
+				   而那一格其实只是敲过一次 `/xxx`；「N 轮」也把它算了一轮。
+				   （实测那份转录 798928f6 的第一条 user 行就是 local-command-caveat。）
+
+				   判据**不在这里再写一份名单**：transcript.go 的 systemTurn 已经按
+				   "整条文本是不是以一个 <tag …> 开头"认过同一件事（那里判"这一行是谁
+				   在说话"，好决定流水栏怎么显示）。两边必须认同一批 —— 否则会出现
+				   "流水栏里藏起来了、标题里又冒出来"这种自相矛盾的界面。
+				   只丢 drop=true 的那几种（只给模型看的：提醒 + 命令回显）；子代理回报、
+				   跨会话消息照样算一轮、也能当标题 —— 那些是真的有话。
+
+				   ⚠️ 那一层 prefilter 是**有意的**：extractText 要反序列化整行，而会话
+				   索引是全量扫（143MB / 56 份），文件头第 3 条写着"靠 bytes.Contains
+				   前置过滤，过滤后是毫秒级"。`"<` 这个序列两种编码都盖得住
+				   （`"content":"<…"` 和 `"text":"<…"`），不写标签名 = 不引入第二份名单。 */
+				drop := false
+				if bytes.Contains(line, []byte(`"<`)) {
+					if v := extractText(line, "user"); v != "" {
+						_, drop = systemTurn(v)
+					}
+				}
+				if !drop {
+					s.Turns++
+					if firstUser == "" {
+						firstUser = extractText(line, "user")
+					}
+				}
 			}
 		}
 		// C7：记下**最后一条**事件是什么（只认 assistant/user 两种 —— 其余
@@ -384,7 +399,7 @@ func indexSession(path, project string, sidechain bool) (Session, bool) {
 }
 
 // tailHistory 取一个会话最近的对话轮次，给右侧「历史流」用。
-// 全部读进来再截尾是浪费 —— 但两个流式读（先定位再回读）在 spike 阶段
+// 全部读进来再截尾是浪费 —— 但两个流式读（先定位再回读）在开发阶段
 // 不值当，5MB 扫一遍是毫秒级，先这样。
 func tailHistory(s Session, stateDir string, keep int) []HistoryItem {
 	path := filepath.Join(stateDir, "projects", s.Project, s.ID+".jsonl")

@@ -7,7 +7,7 @@
 //
 // 用法（由 --settings 注入，exec 形式）：
 //
-//	spike-hook.exe <dest.jsonl>
+//	perch-hook.exe <dest.jsonl>
 //
 // 任何失败都必须静默 exit 0：hook 挂掉可以丢事件，但绝不能拖住 agent 的轮次。
 // （实测的 stdout 契约：SessionStart 的 exit-0 stdout **会进模型上下文**，

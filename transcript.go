@@ -77,7 +77,7 @@ type FileTouch struct {
 // 所以 id 在这里补齐：`s<序号>`，进程内递增、只增不减，前端当成身份用。
 type ActItem struct {
 	ID    string `json:"id"`
-	Kind  string `json:"kind"` // "prompt" | "text" | "thinking" | "tool" | "system"
+	Kind  string `json:"kind"` // "prompt" | "text" | "thinking" | "tool" | "system" | "compact"
 	Tool  string `json:"tool,omitempty"`
 	Text  string `json:"text"`
 	Path  string `json:"path,omitempty"`
@@ -105,6 +105,20 @@ type ActItem struct {
 	   为什么要有它：只留一个没头没尾的 `…`，读的人分不清那是作者写的还是我们砍的
 	   （实测就是被当成"作者就这么写的"）。0/缺省 = 没截。见 msgText。 */
 	FullLen int `json:"fullLen,omitempty"`
+
+	/* **只有 Kind=="compact" 会有**（同上，omitempty）。
+
+	   Turn 是这次压缩发生在**这个会话的第几回合**（转录顶层
+	   `turnPosition.turnIndex`，实测 41/42 条压缩行都有它，且逐条递增）；
+	   Swallowed 是它跟**上一个**压缩点之间隔了几个回合（第一个压缩点没有值）。
+	   —— 两个都是**转录里真有的数**。
+
+	   ⚠️ 别把它们理解成"这次吞了 N 轮对话"：转录里**没有**那个数。
+	   实测 42 条压缩行：`summarizedTurnPromptUuids` 要么 1 个（31 条）要么
+	   压根没有（11 条），`compact_metadata` **一次都没出现**。
+	   所以这里只报能看见的（第几回合 / 距上次几个回合），不编 token、不编回合数。 */
+	Turn      int `json:"turn,omitempty"`
+	Swallowed int `json:"swallowed,omitempty"`
 }
 
 // QOpt 是 AskUserQuestion 的一个选项。
@@ -147,6 +161,10 @@ type trace struct {
 	// 第一次读盘（可能是恢复的会话，历史很长）：只把**最后 30 条**流水推给前端。
 	// 全推会把刚打开的界面淹掉，而且那些是过去的事。
 	first bool
+
+	// 上一个压缩点的回合号（0 = 还没有过）。只为了算出"距上次压缩几个回合"，
+	// 见 consumeCompact。**不是**"吞了几回合"。
+	lastCompactTurn int
 }
 
 func newTrace(path, cwd string) *trace {
@@ -356,6 +374,13 @@ func (tr *trace) consumeLine(line string) *ActItem {
 		Timestamp     string          `json:"timestamp"`
 		Message       json.RawMessage `json:"message"`
 		ToolUseResult json.RawMessage `json:"toolUseResult"`
+
+		// 上下文压缩那三个字段（只有压缩行有，见 consumeCompact）
+		IsCompactSummary bool `json:"isCompactSummary"`
+		TurnPosition     *struct {
+			PromptIndex int `json:"promptIndex"`
+			TurnIndex   int `json:"turnIndex"`
+		} `json:"turnPosition"`
 	}
 	if json.Unmarshal([]byte(line), &ev) != nil {
 		return nil
@@ -364,6 +389,16 @@ func (tr *trace) consumeLine(line string) *ActItem {
 	case "assistant":
 		return tr.consumeAssistant(ev.Message, ev.Timestamp)
 	case "user":
+		// ⚠️ 压缩行**也是 user 轮的形状**，而且消息体比普通提问大一个量级
+		// （实测 17–26KB vs 几百字），所以从前它整段以"你说的话"的样子
+		// 混进流水、还占掉了「N 轮」里的一轮。判据放在这里、**先于**其它两条。
+		if ev.IsCompactSummary {
+			turn := 0
+			if ev.TurnPosition != nil {
+				turn = ev.TurnPosition.TurnIndex
+			}
+			return tr.consumeCompact(ev.Message, ev.Timestamp, turn)
+		}
 		if len(ev.ToolUseResult) > 0 {
 			return tr.consumeResult(ev.Message, ev.ToolUseResult, ev.Timestamp)
 		}
@@ -447,6 +482,63 @@ func (tr *trace) consumePrompt(raw json.RawMessage, at string) *ActItem {
 	}
 	ptxt, pfull := msgText(txt)
 	return tr.append(ActItem{Kind: "prompt", Text: ptxt, FullLen: pfull, At: at})
+}
+
+/* consumeCompact 吃一条**上下文压缩**行。
+
+   这是 Claude Code 自带的机制，发生在**一个会话文件的内部**：把此前若干回合
+   折成一页摘要落进转录（`isCompactSummary:true`、`isVisibleInTranscriptOnly:true`，
+   `message.content` 是**字符串**而不是块数组）。它**不是**一次新的会话 ——
+   所以它在界面上是**会话内部的节点**，不是左边栏的一行、也不算一轮。
+
+   为什么它非要单独一条 Kind：从前它走 consumePrompt，于是那 17–26KB 的摘要
+   以"你说的一大段话"的样子占满流水，还把 store.go 的「N 轮」抬高一格
+   （那一行同样是 `"type":"user"`）。界面上看着就是"用户打了 2 万字"。
+
+   ⚠️ **不画 token 数**。计划书里那张 `98k → 21k` 的图是照 Orca 的形态画的，
+   落地时按实测降级了：本机 42 条压缩行里 `compact_metadata` **一次都没出现**。
+   `summarizedTurnPromptUuids` 也不是"吞了几回合"的清单（1 个 / 没有）。
+   所以这里只报两个转录里真有的数：**第几回合**、**距上次压缩几个回合**。 */
+func (tr *trace) consumeCompact(raw json.RawMessage, at string, turn int) *ActItem {
+	var msg struct {
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(raw, &msg) != nil {
+		return nil
+	}
+	txt := textOf(msg.Content)
+	if strings.TrimSpace(txt) == "" {
+		return nil
+	}
+	txt, full := msgText(txt)
+	it := ActItem{Kind: "compact", Text: txt, FullLen: full, At: at, Turn: turn}
+	// 回合号偶尔缺失（实测 1/42），缺了就两个数都不报 —— 不猜。
+	// 也要求递增：同一份转录被整读两遍、或者反过来拿到旧的一行时，
+	// 相减会得到负数或负数长度的"距离"，那种数不如不显示。
+	if turn > 0 && tr.lastCompactTurn > 0 && turn > tr.lastCompactTurn {
+		it.Swallowed = turn - tr.lastCompactTurn
+	}
+	if turn > 0 {
+		tr.lastCompactTurn = turn
+	}
+	// 一行事实：几个压缩点、各在第几回合、摘要多大（前端画出来不一定在屏幕上）。
+	// 这条日志也是"`N 轮` 有没有被压缩行抬高"的对照物。
+	pos, dist := "回合未知", ""
+	if it.Turn > 0 {
+		pos = "第 " + itoa(it.Turn) + " 回合"
+	}
+	if it.Swallowed > 0 {
+		dist = "，距上次 " + itoa(it.Swallowed) + " 回合"
+	}
+	cut := ""
+	size := full
+	if size > 0 {
+		cut = "，截到 " + itoa(msgMax) + " 字送出"
+	} else {
+		size = len([]rune(txt)) // full==0 表示没截，txt 就是原文
+	}
+	log.Printf("[trace] 上下文压缩点：%s%s，摘要 %d 字%s", pos, dist, size, cut)
+	return tr.append(it)
 }
 
 // systemTurn 认出"以 user 轮的形状出现、但不是用户说的话"的那些条目。
@@ -688,7 +780,7 @@ func (tr *trace) append(it ActItem) *ActItem {
 	   跟随协程**整个死掉**：从此这一格的「流水/改动」两条腿一起静默停更，
 	   界面上什么都看不出来（日志里那串 panic 是唯一的痕迹）。
 	   它平时不出现，是因为要一条会话攒到 300 条以上才踩得到 —— 我灌了 320 条
-	   一次性读入，才把它炸出来（见 [[spike-verify-loop]] 的"负结果也是证据"那条）。 */
+	   一次性读入，才把它炸出来（负结果也是证据）。 */
 	if len(tr.acts) > maxActs {
 		drop := len(tr.acts) - maxActs
 		tr.acts = append([]ActItem(nil), tr.acts[drop:]...)
@@ -715,7 +807,7 @@ func (tr *trace) fileList() []FileTouch {
 	return out
 }
 
-// rel 把绝对路径压成相对 cwd 的形式 —— 面板里全是 D:\AIAgents\… 噪音太大。
+// rel 把绝对路径压成相对 cwd 的形式 —— 面板里全是长绝对路径，噪音太大。
 // cwd 之外的路径保持绝对（那不是"这个项目的文件"）。
 func (tr *trace) rel(p string) string {
 	if tr.cwd == "" {

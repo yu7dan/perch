@@ -2,7 +2,7 @@ package main
 
 /* C3：进程级 Job Object —— 应用一退，它拉起来的整棵树跟着走。
 
-   问题（实测的，不是设想的；数据见下面"实测记录"）：spike.exe 被杀掉之后，
+   问题（实测的，不是设想的；数据见下面"实测记录"）：perch.exe 被杀掉之后，
    **它那些格子的 claude 会被 ConPTY 的收尾顺带带走**（伪控制台关闭 → 附着在上面的
    进程结束），但**后代留下来了** —— 后台命令、dev server、`Start-Process` 拉起来的
    东西，一个都不少地活着。留着的后果不只是"多了几个进程"：
@@ -75,17 +75,17 @@ package main
    ---------------------------------------------------------------------------
    实测记录（2026-10-16，Windows 11）：
 
-   1. **A 面（不打补丁的现状）**：起 spike → 格子里 `!Start-Process powershell
+   1. **A 面（不打补丁的现状）**：起 Perch → 格子里 `!Start-Process powershell
       -ArgumentList '-NoProfile','-c','Start-Sleep 400'`（脱离控制台的孙进程）
-      → `taskkill /F /PID <spike>`（**不带 /T**，带 /T 会替 job 把活干了，那是作弊）
+      → `taskkill /F /PID <Perch>`（**不带 /T**，带 /T 会替 job 把活干了，那是作弊）
       → 4 秒后：那格的 claude 没了（conhost 收尾带走），**那个 powershell 还活着**。
 
    2. **B 面（本改动）**：同样两步之后，那个 powershell **被带走了**。
       判据不是"我看到它没了"，而是"它在前一步是活着的、这一步没了" —— A/B 对照。
-      完整那次（spike=29316，格子 claude=30244/7324，孙进程=21632）：
+      完整那次（Perch=29316，格子 claude=30244/7324，孙进程=21632）：
         · 起 tab=2 时内核给的成员清单 13 个，里面有 **21632**（那个脱离控制台的孙进程）
           —— 这是"继承生效"的**正面**证据，不是靠"它后来死了"反推的；
-        · 杀 spike 后 5 秒：spike / claude 30244 / claude 7324 / **21632** 全没了，
+        · 杀 Perch 后 5 秒：Perch / claude 30244 / claude 7324 / **21632** 全没了，
           只剩我自己那个 Claude Code 会话的 8216 —— 本轮**没有**任何需要手工按 pid 清理的东西。
 
    3. **关一格（`关格` 坐标见 renderGrid 那条日志）**：两格时点左边那格的 × →
@@ -97,7 +97,7 @@ package main
 
    4. **差点漏掉的那次**：第一版标志写错（= SILENT_BREAKAWAY_OK）时，B 面看起来
       "也还行"（claude 照样死，因为那是 conhost 干的），但那个孙进程**照样活着**。
-      戳穿它的是本文件自带的观察腿：`C3 job 成员 1 个: [<spike pid>]` ——
+      戳穿它的是本文件自带的观察腿：`C3 job 成员 1 个: [<Perch pid>]` ——
       成员清单里没有刚起来的 claude。**"挂上了"和"系统说挂上了"是两件事**，
       所以复核这一步（问内核要成员清单）不是装饰，是它把 bug 抓出来的。
 
@@ -152,12 +152,12 @@ func ownProcessTree() bool {
 		// x/sys 的布局是对的（它有测试），留这一条只是为了把"结构体没对上"
 		// 和"设标志失败"这两种失败在日志里分开 —— 它们看起来一样。
 		if n := unsafe.Sizeof(windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}); n != 144 {
-			log.Printf("[spike] C3 job：结构体尺寸自检不过（%d ≠ 144）—— **不建 job**", n)
+			log.Printf("[perch] C3 job：结构体尺寸自检不过（%d ≠ 144）—— **不建 job**", n)
 			return
 		}
 		h, err := windows.CreateJobObject(nil, nil) // 匿名 job：名字传 nil
 		if err != nil {
-			log.Printf("[spike] C3 job：CreateJobObject 失败: %v", err)
+			log.Printf("[perch] C3 job：CreateJobObject 失败: %v", err)
 			return
 		}
 		info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
@@ -167,11 +167,11 @@ func ownProcessTree() bool {
 			windows.JobObjectExtendedLimitInformation,
 			uintptr(unsafe.Pointer(&info)),
 			uint32(unsafe.Sizeof(info))); err != nil {
-			// 没有标志的 job 是**光有名头的 job**：它不会在 spike 退出时动手，
+			// 没有标志的 job 是**光有名头的 job**：它不会在 Perch 退出时动手，
 			// 留着它只会让人以为"已经有保护了"。所以关掉它，如实说没有。
 			_ = windows.CloseHandle(h)
-			log.Printf("[spike] C3 job：设 KILL_ON_JOB_CLOSE|BREAKAWAY_OK 失败: %v —— 已放弃，"+
-				"agent 不会随 spike 退出而死", err)
+			log.Printf("[perch] C3 job：设 KILL_ON_JOB_CLOSE|BREAKAWAY_OK 失败: %v —— 已放弃，"+
+				"agent 不会随 Perch 退出而死", err)
 			return
 		}
 		if err := windows.AssignProcessToJobObject(h, windows.CurrentProcess()); err != nil {
@@ -179,15 +179,15 @@ func ownProcessTree() bool {
 			// 最常见的一种：宿主自己已经在一个**不许嵌套**的外层 job 里
 			// （Orca 记的情形：某些 EDR / 容器宿主）。Orca 对此也是"容忍失败、
 			// 让调用方降级"（patch :923-928），不是硬失败。
-			log.Printf("[spike] C3 job：把自己挂进 job 失败: %v%s —— 已放弃，"+
-				"agent 不会随 spike 退出而死", err, assignHint(err))
+			log.Printf("[perch] C3 job：把自己挂进 job 失败: %v%s —— 已放弃，"+
+				"agent 不会随 Perch 退出而死", err, assignHint(err))
 			return
 		}
 		// ⚠️ 刻意**不** CloseHandle：句柄必须活到进程退出（内核替我们关），
 		// 那一刻 job 销毁 → 里面的进程全被终止。这就是"不需要 onExit 钩子"的全部秘密：
 		// 能崩溃的清理代码不是清理代码。
 		jobHandle, jobOwned = h, true
-		log.Printf("[spike] C3 job：本进程已挂进 kill-on-close job handle=%v "+
+		log.Printf("[perch] C3 job：本进程已挂进 kill-on-close job handle=%v "+
 			"标志=KILL_ON_JOB_CLOSE|BREAKAWAY_OK（句柄刻意留到进程退出）", h)
 		// 复核：问内核要一份成员清单，里面**必须**有本进程。
 		// 判据是它，不是"这两个调用都没报错" —— 第一版就是"没报错但没生效"，
@@ -250,11 +250,11 @@ func logJobInventory(why string) {
 	}
 	pids := jobMembers()
 	if pids == nil {
-		log.Printf("[spike] C3 job 成员清单：问不到（%s）", why)
+		log.Printf("[perch] C3 job 成员清单：问不到（%s）", why)
 		return
 	}
 	sort.Ints(pids)
-	log.Printf("[spike] C3 job 成员 %d 个（%s）: %v", len(pids), why, pids)
+	log.Printf("[perch] C3 job 成员 %d 个（%s）: %v", len(pids), why, pids)
 }
 
 // processTreeOwned：本进程是否真的被这个 job 攥着。给"要不要显式请求脱离"那种判断用

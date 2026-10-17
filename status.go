@@ -82,13 +82,17 @@ func startAgentStatusPoller(push func(any)) {
 				if h.pid == 0 {
 					continue
 				}
-				reg, ok := readSessionReg(spikeStateDir, h.pid)
+				reg, ok := readSessionReg(claudeStateDir, h.pid)
 				if !ok {
 					continue
 				}
 				// ① 关联：第一次拿到 sessionId 就绑上，并说清楚这件事发生了。
 				// （正常情况下 hook 事件已经先绑好了，这里是兜底 + 补那个"派生名"。）
-				if tabs.bindSession(h.id, reg.SessionID, reg.Name) {
+				// ⚠️ source 传空串：登记表这条路**没有** source 这个字段，而
+				// 步 5 那条判据（judgeResume）也不依赖它 —— 它只看"请求的是不是
+				// 这一条"。这条兜底路径同样受那条规则管（这是故意的：它比 hook
+				// 只慢，先到的话照样可能写进一条错的记录）。
+				if tabs.bindSession(h.id, reg.SessionID, reg.Name, "") {
 					log.Printf("[agent t%d] 关联建立 pid=%d → session=%s（登记表，%s）",
 						h.id, h.pid, reg.SessionID, reg.Kind)
 				}

@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// 从 _spike\term\main.go 逐字拷来。存在的理由见那边的注释：
+// 从主程序的 main.go 逐字拷来。存在的理由见那边的注释：
 // 宿主自己就是一个 Claude Code 会话，它的 CLAUDE* 环境对子进程全是谎话，
 // 而且实测栽过两次（CLAUDE_CODE_CHILD_SESSION 让历史不落盘、NO_COLOR 让整个终端黑白）。
 var envBlocked = map[string]bool{

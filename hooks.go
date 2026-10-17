@@ -44,7 +44,9 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	hookExeName = "spike-hook.exe"
+	// ⚠️ 文件名**写死在代码里**；构建脚本要产出一份同名的 exe 放在主程序旁边。
+	// 少这个文件的症状是"hook 功能静默消失"（buildHookSettings 返回空串）。
+	hookExeName = "perch-hook.exe"
 	hookDirName = "hook-events"
 
 	// 事件文件是**实时信号**不是历史，轮询要快；一次只加几百字节，代价可忽略。
@@ -64,17 +66,18 @@ var hookEventTypes = []string{
 	"Notification", "SubagentStart", "SubagentStop",
 }
 
-func hookDir() string { return filepath.Join(spikeStateDir, hookDirName) }
+func hookDir() string { return filepath.Join(claudeStateDir, hookDirName) }
 
 // hookEventsPathFor 每个格子一份事件文件。tag 形如 "t1"（标签）/"wt"（对比窗口）。
 func hookEventsPathFor(tag string) string {
 	return filepath.Join(hookDir(), tag+".jsonl")
 }
 
-// hookExePath 找 hook 接收器：和 spike.exe 同目录。
+// hookExePath 找 hook 接收器：和主程序同目录。
 //
-// ⚠️ 这是 spike 期的形态（两个产物并排构建）。做成产品时它该被 go:embed
-// 进主程序、启动时释放到状态目录 —— 否则"少一个 exe"就变成"功能静默消失"。
+// ⚠️ 当前形态是两个产物并排构建（主程序 + 几 KB 的接收器）。以后可以把它
+// go:embed 进主程序、启动时释放到状态目录 —— 否则"少一个 exe"就变成
+// "功能静默消失"。
 func hookExePath() string {
 	exe, err := os.Executable()
 	if err != nil {
@@ -236,13 +239,19 @@ func handleHookLine(line string, tabID int, push func(any)) {
 	}
 	// 顺带把关联钉下来：事件里的 session_id 是**第一时间**到达的那个，
 	// 比登记表轮询还早。绑定只在第一次生效，所以它和登记表那条路不会打架。
-	if tab != 0 && ev.SessionID != "" && tabs.bindSession(tab, ev.SessionID, "") {
+	if tab != 0 && ev.SessionID != "" && tabs.bindSession(tab, ev.SessionID, "", ev.Source) {
 		log.Printf("[agent t%d] 关联建立 session=%s（来自 hook 事件，比登记表更早）", tab, ev.SessionID)
 	}
 
 	switch ev.HookEventName {
 	case "Stop":
 		log.Printf("[hook t%d] Stop session=%s 最后一句=%q", tab, short(ev.SessionID), clip(ev.LastAssistantMessage, 120))
+		// 「这一格说过话」的唯一证据（见 panes.Pane.Spoke）：一轮跑完 = 这条会话
+		// 有内容，盘上那份 jsonl 于是开始存在。冷恢复靠它分辨"上次这条会话丢了"
+		// 和"上一格压根没说过话"—— 后者安安静静地开新格，别吓唬用户。
+		if id := paneIDFor(tab); id > 0 {
+			panes.markSpoke(id, "一轮跑完 tab="+itoa(tab))
+		}
 	case "Notification":
 		// 「需要你」的正主：官方的人机信号，类型就在 payload 里。
 		log.Printf("[hook t%d] Notification type=%s session=%s msg=%q",
@@ -258,6 +267,12 @@ func handleHookLine(line string, tabID int, push func(any)) {
 		log.Printf("[hook t%d] SessionEnd session=%s", tab, short(ev.SessionID))
 	case "StopFailure":
 		log.Printf("[hook t%d] StopFailure session=%s reason=%q", tab, short(ev.SessionID), clip(ev.Reason, 120))
+		// 非正常收尾也算"说过话"：撞限额/鉴权失败之前那一轮是真跑过的，
+		// 转录也在盘上。Orca 把 interrupted turn 明确算作可续
+		// （resume-sleeping-agent-session.ts:182-183），我们这里同一件事的另一半。
+		if id := paneIDFor(tab); id > 0 {
+			panes.markSpoke(id, "非正常收尾 tab="+itoa(tab))
+		}
 	case "SubagentStart", "SubagentStop":
 		log.Printf("[hook t%d] %s agent_id=%s agent_type=%s", tab, ev.HookEventName, short(ev.AgentID), ev.AgentType)
 	default:

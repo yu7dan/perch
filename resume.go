@@ -42,7 +42,22 @@ import (
    `launched:"unlaunched"`）。
    =========================================================================== */
 
-type refusal struct{ code, msg string }
+type refusal struct {
+	code, msg string
+	// Retryable：**同一件事再试一次有没有可能成功**。判在产生判决的这一侧，
+	// 不由前端拿 code 去查表 —— 理由照 Orca（native-chat-resume-failure-guidance.ts:41-45）：
+	// "The host already knows a retry would not run, whatever the reason suggests"，
+	// 也就是"能不能重试"这件事**只有做判决的人知道**，UI 只能转述。
+	//
+	// 我们这边这么分：
+	//	agent_session_conflict —— **瞬时**：判据是"某个 pid 正占着 / 某个格子正跑着"，
+	//	   而冷启动正是它最不可靠的时刻（上一轮的 claude 由 KILL_ON_JOB_CLOSE
+	//	   异步收掉，登记表残留不自清，pid 还可能被复用）。等 800ms 再问一次
+	//	   往往就过了 —— 实测过的那条"关掉后立刻重开"就是它。
+	//	unavailable / bad_id / unknown_kind —— **终局**：文件不在、id 形状不对、
+	//	   意图不认识，再试一百次也还是这样。
+	retryable bool
+}
 
 // safeSessionID 是**白名单**，比 Orca 的黑名单严（那边只挡"空 / 超长 / 以 - 开头 /
 // 含控制字符"，agent-session-resume.ts:101-115）。理由是我们的 id 还有两个去处：
@@ -80,7 +95,7 @@ func sessionFileExists(id string) bool {
 	if !safeSessionID(id) {
 		return false
 	}
-	m, err := filepath.Glob(filepath.Join(spikeStateDir, "projects", "*", id+".jsonl"))
+	m, err := filepath.Glob(filepath.Join(claudeStateDir, "projects", "*", id+".jsonl"))
 	return err == nil && len(m) > 0
 }
 
@@ -95,7 +110,7 @@ func sessionFileExists(id string) bool {
 // 两道判据都留着，不是重复：登记表可能还没写出来（claude 刚起来那一两秒），
 // 而 bySession 从 hook 事件就能绑上，比登记表早（见 bindSession 的注释）。
 func sessionLiveElsewhere(sid string) int {
-	ents, err := os.ReadDir(filepath.Join(spikeStateDir, "sessions"))
+	ents, err := os.ReadDir(filepath.Join(claudeStateDir, "sessions"))
 	if err != nil {
 		return 0
 	}
@@ -109,7 +124,7 @@ func sessionLiveElsewhere(sid string) int {
 		if err != nil || !processAlive(pid) {
 			continue
 		}
-		reg, ok := readSessionReg(spikeStateDir, pid)
+		reg, ok := readSessionReg(claudeStateDir, pid)
 		if !ok || !strings.EqualFold(reg.SessionID, sid) {
 			continue
 		}
@@ -125,7 +140,7 @@ func anyClaudeInCWD(cwd string) int {
 	if cwd == "" {
 		return 0
 	}
-	ents, err := os.ReadDir(filepath.Join(spikeStateDir, "sessions"))
+	ents, err := os.ReadDir(filepath.Join(claudeStateDir, "sessions"))
 	if err != nil {
 		return 0
 	}
@@ -137,7 +152,7 @@ func anyClaudeInCWD(cwd string) int {
 		if err != nil || !processAlive(pid) {
 			continue
 		}
-		if reg, ok := readSessionReg(spikeStateDir, pid); ok && sameDir(reg.CWD, cwd) {
+		if reg, ok := readSessionReg(claudeStateDir, pid); ok && sameDir(reg.CWD, cwd) {
 			return pid
 		}
 	}
@@ -163,25 +178,25 @@ func resumeRefusal(spec spawnSpec) *refusal {
 
 	case "latest":
 		if owner, sid := tabs.anyLiveSession(); owner != 0 {
-			return &refusal{"agent_session_conflict", fmt.Sprintf(
+			return &refusal{code: "agent_session_conflict", retryable: true, msg: fmt.Sprintf(
 				"格子 t%d 正跑着会话 %s：--continue 会挑中同一条，两个进程一起写会毁掉它。要开新的请用 +。",
 				owner, short(sid))}
 		}
 		// 这一格之外的 claude 也算：`--continue` 解析的是"这个目录里最新的会话"，
 		// 而登记表是全机器范围的，所以这一条能挡住"另一个终端正在这个目录里跑"。
 		if pid := anyClaudeInCWD(spec.CWD); pid != 0 {
-			return &refusal{"agent_session_conflict", fmt.Sprintf(
+			return &refusal{code: "agent_session_conflict", retryable: true, msg: fmt.Sprintf(
 				"这个目录里已经有一个 claude 在跑（pid=%d）：--continue 会挑中同一条会话。要开新的请用 +。", pid)}
 		}
 		return nil
 
 	case "exact", "fork":
 		if !safeSessionID(r.ID) {
-			return &refusal{"bad_id", "会话 id 的形状不对（只允许字母数字和 -_，长度 ≤128），不接：" +
+			return &refusal{code: "bad_id", msg: "会话 id 的形状不对（只允许字母数字和 -_，长度 ≤128），不接：" +
 				strconv.Quote(r.ID)}
 		}
 		if !sessionFileExists(r.ID) {
-			return &refusal{"unavailable", "盘上找不到这条会话 —— 可能是张旧卡片，" +
+			return &refusal{code: "unavailable", msg: "盘上找不到这条会话 —— 可能是张旧卡片，" +
 				"或者它是子代理会话（子代理的 id 不是一条能单独接上的会话）"}
 		}
 		// fork 到这儿就放行：它写的是**新**文件，不碰旧的。
@@ -192,18 +207,18 @@ func resumeRefusal(spec spawnSpec) *refusal {
 		// 登记表是全机器的（能看见别的终端的 claude），bySession 从 hook 就能绑
 		// （比登记表早，claude 刚起来那一两秒只有它知道）。
 		if pid := sessionLiveElsewhere(r.ID); pid != 0 {
-			return &refusal{"agent_session_conflict", fmt.Sprintf(
+			return &refusal{code: "agent_session_conflict", retryable: true, msg: fmt.Sprintf(
 				"这条会话正被一个 claude 进程跑着（pid=%d）—— 两个进程同时写同一份会话"+
 					"文件会毁掉它。先停掉那一个，或者用「另起分支」（fork 写的是新文件）。", pid)}
 		}
 		if owner := tabs.liveOwnerOf(r.ID); owner != 0 {
-			return &refusal{"agent_session_conflict", fmt.Sprintf(
+			return &refusal{code: "agent_session_conflict", retryable: true, msg: fmt.Sprintf(
 				"这条会话正被格子 t%d 跑着 —— 两条 claude 同时写同一份会话文件会毁掉它。"+
 					"先关掉那一格，或者用「另起分支」（fork 写的是新文件）。", owner)}
 		}
 		return nil
 	}
-	return &refusal{"unknown_kind", "未知的续接意图：" + strconv.Quote(r.Kind)}
+	return &refusal{code: "unknown_kind", msg: "未知的续接意图：" + strconv.Quote(r.Kind)}
 }
 
 // liveOwnerOf：这条会话正被哪个**活着的**格子占着？没有就 0。
@@ -258,15 +273,15 @@ func (tm *tabManager) anyLiveSession() (int, string) {
 // 不是我们能控制的常量。explorer 收的是 argv，没有第二层解析。
 func openPath(mode, path string) {
 	if path == "" {
-		log.Printf("[spike] open 拿到空路径，忽略")
+		log.Printf("[perch] open 拿到空路径，忽略")
 		return
 	}
 	if !filepath.IsAbs(path) {
-		log.Printf("[spike] open 只接受绝对路径，拒绝 %q", path)
+		log.Printf("[perch] open 只接受绝对路径，拒绝 %q", path)
 		return
 	}
 	if _, err := os.Stat(path); err != nil {
-		log.Printf("[spike] open 目标不在了（%v），忽略：%s", err, path)
+		log.Printf("[perch] open 目标不在了（%v），忽略：%s", err, path)
 		return
 	}
 	args := []string{path}
@@ -276,8 +291,8 @@ func openPath(mode, path string) {
 		args = []string{"/select," + path}
 	}
 	if err := exec.Command("explorer.exe", args...).Start(); err != nil {
-		log.Printf("[spike] open 失败 mode=%s path=%s: %v", mode, path, err)
+		log.Printf("[perch] open 失败 mode=%s path=%s: %v", mode, path, err)
 		return
 	}
-	log.Printf("[spike] open mode=%s path=%s", mode, path)
+	log.Printf("[perch] open mode=%s path=%s", mode, path)
 }

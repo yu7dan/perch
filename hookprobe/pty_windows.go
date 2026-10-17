@@ -11,7 +11,7 @@ import (
 	"github.com/UserExistsError/conpty"
 )
 
-// 从 _spike\term\pty_windows.go 逐字拷来（探针不重写已有一遍的代码）。
+// 从主程序的 pty_windows.go 逐字拷来（探针不重写已有一遍的代码）。
 type ptySession struct {
 	cpty *conpty.ConPty
 	wmu  sync.Mutex
