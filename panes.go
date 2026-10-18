@@ -628,11 +628,11 @@ func (p *paneStore) restorePlan() restorePlan {
 			// 它不参与"这一轮接谁"，但决定左栏那一行该怎么提醒用户（见 PaneView.OnDisk）。
 			v = "closed"
 			if strings.TrimSpace(r.SessionID) != "" {
-				onDisk = sessionFileExists(r.SessionID)
+				onDisk = sessionFileExistsFor(r.Agent, r.CWD, r.SessionID)
 			}
 		case strings.TrimSpace(r.SessionID) == "":
 			v = "no_id"
-		case !sessionFileExists(r.SessionID):
+		case !sessionFileExistsFor(r.Agent, r.CWD, r.SessionID):
 			v = "no_session"
 		default:
 			if rep, isDup := seen[r.SessionID]; isDup {

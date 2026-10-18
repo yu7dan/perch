@@ -1,0 +1,333 @@
+package main
+
+import (
+	"context"
+	_ "embed"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// ---------------------------------------------------------------------------
+// Pi 适配器（1.2.0）
+//
+// 机制选的是 **每格一个扩展**，而不是 RPC/JSON 模式：
+//
+//	pi -e <observer.ts>   → 扩展在 TUI 进程里订阅生命周期
+//	                      → 追加写 PERCH_PI_EVENTS 指定的 JSONL
+//	                      → Go 侧 tail 这个文件，归一化成 agentEvent
+//
+// 为什么不走 `--mode json` / `--mode rpc`：那两条是**无界面**入口，会取代 TUI；
+// 而 Perch 要的正是“用户继续用 Pi 自己的终端界面，我们在旁边看状态”。
+//
+// 每格一份事件文件（同 hooks 的理由）：归属由文件名定，不做 session 反查，
+// 也就没有“SessionStart 比登记表早到、事件没主”的竞态。
+//
+// 扩展源码在仓库的 pi/observer.ts，go:embed 进二进制、启动时释放到
+// %APPDATA%\Perch\pi-ext\perch-observer.ts；用户目录里那份是派生物，不是配置。
+// ---------------------------------------------------------------------------
+
+const (
+	piPollEvery     = 200 * time.Millisecond
+	piExtDirName    = "pi-ext"
+	piEventsDirName = "pi-events"
+)
+
+//go:embed pi/observer.ts
+var piObserverSource string
+
+func piAgentDef() agentDef {
+	d := genericAgentDef("pi")
+	// 续接参数走这里（和 Claude 的 Args 同一个位置）；扩展参数在 Prepare 里追加。
+	d.Args = func(r resumeIntent, _ string) []string {
+		switch r.Kind {
+		case "latest":
+			return []string{"--continue"}
+		case "exact":
+			if r.ID != "" {
+				// ⚠️ 用 --session-id 而不是 --session：后者“先在本项目找，找不到
+				// 就提出 fork 一个跨项目匹配”，那是一个**交互式提问**，会把格子
+				// 停在没人能回答的菜单上。--session-id 是确定的：本项目里有这条
+				// 就打开，没有就用这个 id 建一条（实测 1.2.0，docs/cli.md:90-93）。
+				return []string{"--session-id", r.ID}
+			}
+		case "fork":
+			if r.ID != "" {
+				return []string{"--fork", r.ID}
+			}
+		}
+		// "new"：裸启动就是新会话。
+		return nil
+	}
+	d.Prepare = preparePi
+	return d
+}
+
+func piDataDir() (string, error) {
+	d, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, poolDirName), nil
+}
+
+// ensurePiObserver 把二进制里的扩展释放到磁盘。
+//
+// 每次都对比内容：升级 Perch 后扩展跟着更新，不会出现“二进制是新的、盘上的
+// 扩展还是旧的”这种最难查的半新半旧状态。先写临时文件再 rename，避免 Pi 在
+// 启动窗口里读到半截源码。
+func ensurePiObserver() (string, error) {
+	base, err := piDataDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(base, piExtDirName)
+	path := filepath.Join(dir, "perch-observer.ts")
+	if b, err := os.ReadFile(path); err == nil && string(b) == piObserverSource {
+		return path, nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(piObserverSource), 0o644); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	return path, nil
+}
+
+func preparePi(tag string, tabID int) (map[string]string, []string, func(context.Context), error) {
+	ext, err := ensurePiObserver()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("准备 Pi 观察扩展: %w", err)
+	}
+	base, err := piDataDir()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("找 Pi 事件目录: %w", err)
+	}
+	dir := filepath.Join(base, piEventsDirName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, nil, nil, fmt.Errorf("建 Pi 事件目录: %w", err)
+	}
+	path := filepath.Join(dir, tag+".jsonl")
+	// 实时信号不是历史：每次开格清空（同 hooks.resetHookDir）。
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("清空 Pi 事件文件: %w", err)
+	}
+	_ = f.Close()
+
+	env := map[string]string{"PERCH_PI_EVENTS": path}
+	args := []string{"-e", ext}
+	log.Printf("[pi %s] 观察扩展=%s 事件=%s", tag, ext, path)
+	observe := func(ctx context.Context) {
+		observePi(ctx, tabID, path, piPollEvery, emitAgentStatus)
+	}
+	return env, args, observe, nil
+}
+
+// piEvent 是 observer.ts 写出的记录。字段只增不改（v1）。
+type piEvent struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Session string `json:"session"`
+	Kind    string `json:"kind"`
+	Text    string `json:"text"`
+	Name    string `json:"name"`
+	Reason  string `json:"reason"`
+	Aborted bool   `json:"aborted"`
+}
+
+// observePi tail 一个格子的 JSONL。语义与 hooks 的轮询一致：
+// 只追加、文件被截断就从头读、最后一行没写完就留到下一次。
+func observePi(ctx context.Context, tabID int, path string, every time.Duration, sink func(agentEvent)) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+
+	var off int64
+	var carry string
+	// name 只是顺带记下：Pi 的 /name 改的是会话显示名，不是状态。
+	// 把它塞进**下一条** status 事件（emitAgentStatus 只认状态变化，
+	// 单发一条没有 status 的 agent 消息会把前端 v.st 清成 ""）。
+	st := &piPaneState{}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		fi, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		if fi.Size() < off {
+			off, carry = 0, ""
+		}
+		if fi.Size() == off {
+			continue
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		if _, err := f.Seek(off, io.SeekStart); err != nil {
+			_ = f.Close()
+			continue
+		}
+		b, rerr := io.ReadAll(f)
+		_ = f.Close()
+		if rerr != nil {
+			continue
+		}
+		off += int64(len(b))
+		buf := carry + string(b)
+		for {
+			i := strings.IndexByte(buf, '\n')
+			if i < 0 {
+				break
+			}
+			line := buf[:i]
+			buf = buf[i+1:]
+			handlePiLine(tabID, line, st, sink)
+		}
+		carry = buf
+	}
+}
+
+// piPaneState 是一次观察里的格内上下文（目前只有显示名）。
+type piPaneState struct {
+	name string
+}
+
+func handlePiLine(tabID int, line string, st *piPaneState, sink func(agentEvent)) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	var ev piEvent
+	if json.Unmarshal([]byte(line), &ev) != nil {
+		return
+	}
+
+	// session 是这一格的身份：session_start 和每条 status 都带它。
+	// 绑定/改写只在第一次或换会话时生效，和 OpenCode 走同一个口。
+	if ev.Session != "" {
+		bindObservedSession(tabID, ev.Session, "pi")
+	}
+
+	switch ev.Type {
+	case "session_start":
+		log.Printf("[pi t%d] session_start reason=%s session=%s",
+			tabID, orNone(ev.Reason), short(ev.Session))
+		return
+	case "name":
+		// 名字不是状态：**不能**单独推一条没有 status 的 agent 消息 ——
+		// 前端 applyAgent 会执行 v.st = m.status || ""，把忙/闲清空。
+		// 记在这里，跟下一条 status 一起发。空名字 = 用户清掉了显示名。
+		st.name = ev.Name
+		log.Printf("[pi t%d] 名字 → %q", tabID, clip(ev.Name, 80))
+		return
+	case "status":
+	default:
+		return
+	}
+
+	if ev.Status != "busy" && ev.Status != "idle" && ev.Status != "waiting" {
+		return
+	}
+	sink(agentEvent{
+		V: 1, Tab: tabID, Agent: "pi", Event: "status",
+		Status: ev.Status, Kind: ev.Kind, Text: ev.Text,
+		Session: ev.Session, Name: st.name,
+	})
+}
+
+// piSessionRoot 找 Pi 的会话目录（<root>/--<项目路径>--/<时间戳>_<id>.jsonl）。
+//
+// 解析顺序照 Pi 自己的优先级（docs/environment-variables.md、docs/settings.md）：
+//
+//	--session-dir（我们不传，Perch 永远走默认）> PI_CODING_AGENT_SESSION_DIR
+//	> settings.json 的 sessionDir > <agent-dir>/sessions
+//
+// 相对路径按 Pi 的规则从**工作目录**解析。读 settings.json 是只读的；
+// 解析不了就退回默认目录 —— 找不到会话文件只会让冷恢复降级成新会话，
+// 不会写任何东西。
+func piSessionRoot(cwd string) string {
+	if v := strings.TrimSpace(os.Getenv("PI_CODING_AGENT_SESSION_DIR")); v != "" {
+		if filepath.IsAbs(v) || cwd == "" {
+			return v
+		}
+		return filepath.Join(cwd, v)
+	}
+	agentDir := strings.TrimSpace(os.Getenv("PI_CODING_AGENT_DIR"))
+	if agentDir == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			agentDir = filepath.Join(home, ".pi", "agent")
+		}
+	}
+	if agentDir == "" {
+		return ""
+	}
+	if b, err := os.ReadFile(filepath.Join(agentDir, "settings.json")); err == nil {
+		var s struct {
+			SessionDir string `json:"sessionDir"`
+		}
+		if json.Unmarshal(b, &s) == nil {
+			if v := strings.TrimSpace(s.SessionDir); v != "" {
+				if filepath.IsAbs(v) || cwd == "" {
+					return v
+				}
+				return filepath.Join(cwd, v)
+			}
+		}
+	}
+	return filepath.Join(agentDir, "sessions")
+}
+
+// piSessionFileExists：这条 Pi 会话在盘上还有没有。
+//
+// 项目目录名是有损 slug（`C:\a\b` → `--C--a-b--`），不从 cwd 反推 ——
+// 只 glob 一层项目目录。找到的是**文件名以 _<id>.jsonl 结尾**的文件；
+// Pi 默认命名是 <时间戳>_<session-id>.jsonl（实测 1.2.0）。
+func piSessionFileExists(cwd, id string) bool {
+	if !safeSessionID(id) {
+		return false
+	}
+	root := piSessionRoot(cwd)
+	if root == "" {
+		return false
+	}
+	m, err := filepath.Glob(filepath.Join(root, "*", "*_"+id+".jsonl"))
+	return err == nil && len(m) > 0
+}
+
+// sessionFileExistsFor：冷恢复/续接护栏的 agent 分派口。
+// Claude 的判据原样保留（projects/<slug>/<id>.jsonl），别的 agent 各问各的盘。
+func sessionFileExistsFor(agent, cwd, id string) bool {
+	if agent == "pi" {
+		return piSessionFileExists(cwd, id)
+	}
+	return sessionFileExists(id)
+}
+
+// bindObservedSession 是“外部状态源报告了会话身份”的统一入口。
+// agent 只用于日志措辞；bind/rebind 的语义见 main.go。
+func bindObservedSession(tabID int, sid, agent string) {
+	if tabs.bindSession(tabID, sid, "", agent) {
+		log.Printf("[agent t%d] 关联建立 session=%s（%s）", tabID, short(sid), agent)
+		return
+	}
+	if tabs.rebindSession(tabID, sid, "", agent) {
+		log.Printf("[agent t%d] 会话改写 session=%s（%s）", tabID, short(sid), agent)
+	}
+}

@@ -50,6 +50,13 @@ var agentAdapterCaps = map[string]agentCaps{
 		Launch: true, Status: true, Waiting: true,
 		Mechanism: "http",
 	},
+	"pi": {
+		// 状态/等待来自 pi -e 挂进去的观察扩展（pi/observer.ts）。
+		// 等待是**条件性**的：Pi 没有内建审批，只有扩展的 ctx.ui 提示才会
+		// 出现 waiting；没有扩展提问时不会等 —— 这是能力边界，不假装。
+		Launch: true, Resume: true, Status: true, Waiting: true,
+		Mechanism: "extension",
+	},
 }
 
 // capsForAgent 决定 Agent 名单上那一行该说什么。

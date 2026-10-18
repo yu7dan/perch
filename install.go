@@ -471,6 +471,14 @@ func probeAgentVersion(bin string) string {
 // 以后有同类落点的 agent，也加在这里，别把候选表抄成第二份。
 func agentExeHints(bin, home, local string) []string {
 	switch strings.ToLower(strings.TrimSpace(bin)) {
+	case "pi":
+		// Pi 的安装脚本把二进制放在 ~/.local/pi/pi.exe（不在 PATH，也不在
+		// ~/.local/bin）。实测 1.2.0。
+		out := []string{filepath.Join(home, ".local", "pi", "pi.exe")}
+		if local != "" {
+			out = append(out, filepath.Join(local, "Programs", "pi", "pi.exe"))
+		}
+		return out
 	case "codex":
 		out := []string{
 			filepath.Join(home, ".codex", "packages", "standalone", "current", "bin", "codex.exe"),

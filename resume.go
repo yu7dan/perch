@@ -184,9 +184,12 @@ func resumeRefusal(spec spawnSpec) *refusal {
 		}
 		// 这一格之外的 claude 也算：`--continue` 解析的是"这个目录里最新的会话"，
 		// 而登记表是全机器范围的，所以这一条能挡住"另一个终端正在这个目录里跑"。
-		if pid := anyClaudeInCWD(spec.CWD); pid != 0 {
-			return &refusal{code: "agent_session_conflict", retryable: true, msg: fmt.Sprintf(
-				"这个目录里已经有一个 claude 在跑（pid=%d）：--continue 会挑中同一条会话。要开新的请用 +。", pid)}
+		// Pi 不写这份登记表，这道判据只对 claude 有意义。
+		if spec.Agent == "claude" {
+			if pid := anyClaudeInCWD(spec.CWD); pid != 0 {
+				return &refusal{code: "agent_session_conflict", retryable: true, msg: fmt.Sprintf(
+					"这个目录里已经有一个 claude 在跑（pid=%d）：--continue 会挑中同一条会话。要开新的请用 +。", pid)}
+			}
 		}
 		return nil
 
@@ -195,7 +198,7 @@ func resumeRefusal(spec spawnSpec) *refusal {
 			return &refusal{code: "bad_id", msg: "会话 id 的形状不对（只允许字母数字和 -_，长度 ≤128），不接：" +
 				strconv.Quote(r.ID)}
 		}
-		if !sessionFileExists(r.ID) {
+		if !sessionFileExistsFor(spec.Agent, spec.CWD, r.ID) {
 			return &refusal{code: "unavailable", msg: "盘上找不到这条会话 —— 可能是张旧卡片，" +
 				"或者它是子代理会话（子代理的 id 不是一条能单独接上的会话）"}
 		}
@@ -206,10 +209,13 @@ func resumeRefusal(spec spawnSpec) *refusal {
 		// 两道占用判据，**谁也不替谁**（见 sessionLiveElsewhere 的说明）：
 		// 登记表是全机器的（能看见别的终端的 claude），bySession 从 hook 就能绑
 		// （比登记表早，claude 刚起来那一两秒只有它知道）。
-		if pid := sessionLiveElsewhere(r.ID); pid != 0 {
-			return &refusal{code: "agent_session_conflict", retryable: true, msg: fmt.Sprintf(
-				"这条会话正被一个 claude 进程跑着（pid=%d）—— 两个进程同时写同一份会话"+
-					"文件会毁掉它。先停掉那一个，或者用「另起分支」（fork 写的是新文件）。", pid)}
+		// 全机器登记表只有 claude 会写；Pi/OpenCode 没有等价的“外部进程”视图。
+		if spec.Agent == "claude" {
+			if pid := sessionLiveElsewhere(r.ID); pid != 0 {
+				return &refusal{code: "agent_session_conflict", retryable: true, msg: fmt.Sprintf(
+					"这条会话正被一个 claude 进程跑着（pid=%d）—— 两个进程同时写同一份会话"+
+						"文件会毁掉它。先停掉那一个，或者用「另起分支」（fork 写的是新文件）。", pid)}
+			}
 		}
 		if owner := tabs.liveOwnerOf(r.ID); owner != 0 {
 			return &refusal{code: "agent_session_conflict", retryable: true, msg: fmt.Sprintf(

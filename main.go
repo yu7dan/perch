@@ -270,6 +270,8 @@ func init() {
 	// 通用适配只负责“能开一格”；OpenCode 有自己的一套启动参数/状态观察，
 	// 覆盖掉通用那条。以后 Pi/Codex 同样在这里覆盖。
 	agentDefs["opencode"] = openCodeAgentDef()
+	// Pi 也覆盖通用那条：续接参数 + -e 观察扩展。
+	agentDefs["pi"] = piAgentDef()
 }
 
 func genericAgentDef(bin string) agentDef {

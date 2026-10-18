@@ -29,6 +29,9 @@
 # --- 前端（没有打包器：一个 index.html + 资产，go:embed 直接进二进制）---
 !/assets/
 
+# --- Pi 观察扩展（go:embed 进二进制，启动时释放到 %APPDATA%\Perch\pi-ext）---
+!/pi/
+
 # --- 结构说明（docs/STRUCTURE.md：模块边界、图标规则、改动后必须重建）---
 !/docs/
 
