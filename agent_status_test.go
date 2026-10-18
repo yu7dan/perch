@@ -13,6 +13,37 @@ import (
 	"time"
 )
 
+// TestNormalizeAgentEvent 守住四态与 wire 状态的换算。State 是权威：
+// 适配器给了 blocked（提问）/working/done 时，wire 上的 busy/idle/waiting
+// 必须由它推出来；只给 status 时按表补 state。
+func TestNormalizeAgentEvent(t *testing.T) {
+	cases := []struct {
+		in         agentEvent
+		wantState  string
+		wantStatus string
+	}{
+		{agentEvent{Status: "busy"}, agentStateWorking, "busy"},
+		{agentEvent{Status: "waiting", Kind: "perm"}, agentStateWaiting, "waiting"},
+		{agentEvent{Status: "idle"}, agentStateDone, "idle"},
+		{agentEvent{State: agentStateBlocked}, agentStateBlocked, "waiting"},
+		{agentEvent{State: agentStateWaiting}, agentStateWaiting, "waiting"},
+		{agentEvent{State: agentStateWorking}, agentStateWorking, "busy"},
+		{agentEvent{State: agentStateDone}, agentStateDone, "idle"},
+		// State 和 Status 打架时 State 赢（状态是更具体的那一层）。
+		{agentEvent{Status: "busy", State: agentStateBlocked}, agentStateBlocked, "waiting"},
+		// 认不出的 State 丢掉，退回 status。
+		{agentEvent{Status: "busy", State: "thinking"}, agentStateWorking, "busy"},
+	}
+	for _, c := range cases {
+		ev := c.in
+		normalizeAgentEvent(&ev)
+		if ev.State != c.wantState || ev.Status != c.wantStatus {
+			t.Fatalf("%+v → state=%s status=%s，想要 state=%s status=%s",
+				c.in, ev.State, ev.Status, c.wantState, c.wantStatus)
+		}
+	}
+}
+
 func TestCapsForAgent(t *testing.T) {
 	claude := capsForAgent("claude")
 	if !claude.Resume || !claude.Status || !claude.Waiting || !claude.Actions {

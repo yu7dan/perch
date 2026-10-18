@@ -27,6 +27,12 @@ let spawnTabCalls = 0;        // 临时探针：spawnTab 被调了几次
    步 4 把同一批会话**再接一遍**（两个写者写同一份 jsonl —— 这个项目唯一不可逆的失败）。
    ⚠️ 它只是一份**建议**：每一格建的时候照旧走 Go 的 resumeRefusal 那道护栏。 */
 const RESTORE = { state: "init", panes: [], err: "", asked: false };
+/* 冷恢复应答里顺带来的本机 Agent 名单 + 设置里的默认 agent。
+   为什么必须跟着 panes.list 走：建第一格发生在 shell 载荷**之前**（见上面那段），
+   而“默认用哪个 agent”不能等 shell。名单的权威探测在 Go（magpie.go 的
+   scanAgentCatalog），前端只读，不自己再探一遍。 */
+let BOOT_AGENTS = [];
+let BOOT_DEFAULT_AGENT = "";
 let restoreTimer = 0;
 function askRestorePlan() {
   if (RESTORE.asked) { ctl.send({ type: "log", msg: "冷恢复：已经问过了，不重问（重问可能让同一批会话被接两遍）" }); return; }
@@ -410,6 +416,15 @@ function dispatchCtl(m) {
       RESTORE.panes = Array.isArray(m.panes) ? m.panes : [];
       RESTORE.err = m.err || "";
       RESTORE.state = m.err ? "failed" : "ready";
+      /* Agent 名单：建第一格之前就要知道默认是谁（见 30-pages 的
+         defaultAgentId）。它和总览的 catalog 是同一份 Go 探测结果。 */
+      BOOT_AGENTS = Array.isArray(m.agents) ? m.agents : [];
+      BOOT_DEFAULT_AGENT = typeof m.defaultAgent === "string" ? m.defaultAgent : "";
+      const installed = BOOT_AGENTS.filter((a) => a && a.installed).length;
+      const launchable = BOOT_AGENTS.filter((a) => a && a.installed &&
+        a.caps && a.caps.launch).length;
+      bootFact(`Agent 名单：${BOOT_AGENTS.length} 个（已安装 ${installed}、可启动 ${launchable}）；` +
+        `设置默认=${BOOT_DEFAULT_AGENT || "(自动)"}`);
       /* 「已关闭」那几条**不占座位**（awaitRestorePlan 会滤掉），但用户上次关掉的
          agent 还得在工作区里看得见、点得回来 —— 在这里重建那份薄快照。 */
       CLOSED_PANES.clear();

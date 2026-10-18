@@ -567,7 +567,7 @@ function applyLibrary(p) {
 function liveOf(tab) {
   let v = LIVE.get(tab);
   if (!v) {
-    v = { st: "", name: "", at: "", note: null, wait: null,
+    v = { st: "", state: "", evidence: "", name: "", at: "", note: null, wait: null,
           subs: [], files: [], acts: [] };
     LIVE.set(tab, v);
   }
@@ -605,6 +605,64 @@ function pendingAsk(v) {
 //  否则两处迟早漂移。）
 function watchedNow(t) {
   return (t === activeTab) && document.hasFocus();
+}
+
+/* 冷恢复出来的格子先标成“未确认”（createTab 里按 spec.restored 打标）。
+   app-server 重连会先发一帧 thread/read 的补状态（evidence=resync），那一帧
+   里的 waiting 可能是**重启前**留下的旧事实 —— 不能凭它给用户记一条未读。
+   任何一条活证据（hook / registry / extension / http / 非 resync 的 app-server）
+   到了才解除。 */
+function confirmRestored(t, why) {
+  if (!t || !t.restoredUnconfirmed) return;
+  t.restoredUnconfirmed = false;
+  sendCtrl({ type: "log", msg: `冷恢复 tab=${t.id} 已确认（${why}）：之后的状态按活事件算` });
+}
+
+/* hook 的**低延迟**等待信号（2026-10-19，Wave 1）：
+     PermissionRequest                 批准框出现 → kind=perm, state=waiting
+     PreToolUse(AskUserQuestion)      提问卡片出现 → kind=ask, state=blocked
+   它比登记表（≤700ms）和 Notification（实测晚 6 秒）都早，而且知道具体是
+   哪一种。登记表随后到的 waiting 只会走 applyAgent 的“已在等待”分支，
+   不会重复记未读（alreadyBlocked / prev 判断）。 */
+function enterWaitingFromHook(t, v, kind, text, why) {
+  const at = new Date().toISOString();
+  const was = v.st === "waiting";
+  v.st = "waiting";
+  // 四态：提问工具 = blocked（有具体卡片），批准框 = waiting（泛化等待）。
+  // wire 上两者都是 waiting，UI 现有判据不分叉。
+  v.state = why === "PreToolUse" ? "blocked" : "waiting";
+  v.evidence = "hook";
+  v.wait = { kind, text: text || "", at };
+  v.at = at;
+  if (!was) {
+    if (!watchedNow(t)) {
+      v.note = { kind, text: text || "", at };
+      sendCtrl({ type: "log", msg:
+        `记未读 tab=${t.id} 因=hook ${why}（${kind}${text ? "，" + text : ""}）` });
+    }
+  } else if (v.note && (v.note.kind === "ask" || v.note.kind === "perm")) {
+    // 还在等，但提问/批准换了：更新那一行（和 applyAgent 的同状态分支一致）。
+    v.note.kind = kind;
+    if (text) v.note.text = text;
+  }
+  scheduleLive();
+}
+
+/* hook 侧的收尾（Wave 1 的配套）：Stop / StopFailure 说明这一轮**结束了**，
+   hook 记下的 waiting 必须在这里销掉。
+   为什么不能等 applyAgent：登记表只在状态**变化**时推。启动后一直空闲的格子
+   （实测：主题选择屏上弹批准框，登记表里始终是 idle）在等待期间没有任何状态
+   变化，答完之后也不会有一帧“离开等待”——那条未读会一直挂到下一轮。
+   Stop 是 hook 能拿到的、语义最硬的一次“不再等了”。 */
+function leaveWaitingFromHook(t, v, why) {
+  if (!v || v.st !== "waiting") return;
+  // note 是 ask/perm 才销；stop/fail（上一轮留下的）不归这条管。
+  if (v.note && (v.note.kind === "ask" || v.note.kind === "perm")) ackNote(t, why);
+  v.st = "idle";
+  v.state = "done";
+  v.evidence = "hook";
+  v.wait = null;
+  scheduleLive();
 }
 
 // 「这一格**已经**处于卡在等你」—— 由两条**比 hook 更早、更具体**的腿判断：
@@ -681,16 +739,21 @@ function applyHook(m) {
      会话**变了**（格内 /clear 换了一条）就改写：这里答的是"现在在跑谁"，旧那条
      已经不在这一格里了（Go 侧 panes.bind 同一时刻也把 Spoke 清掉）。 */
   adoptSession(t, m.session, `${m.event}${m.source ? " " + m.source : ""}`);
+  // 任何一条 hook 都是活证据：冷恢复的 resync 静音到此为止。
+  confirmRestored(t, `hook ${m.event || "?"}`);
   const v = liveOf(tab);
   const at = new Date().toISOString();
   v.at = at;
   const watched = watchedNow(t);   // "你在看它吗"（判据见 watchedNow）
   switch (m.event) {
     case "Stop":
+      // 这轮结束了：hook 记下的“在等你”随之作废（理由见 leaveWaitingFromHook）。
+      leaveWaitingFromHook(t, v, "hook Stop：这轮结束");
       // 只看没看着它。看着它跑完不是新闻（那是你等的结果，不是"有事找你"）。
       if (!watched) v.note = { kind: "stop", text: m.last || "", at };
       break;
     case "StopFailure":
+      leaveWaitingFromHook(t, v, `hook StopFailure：${m.reason || m.msg || "非正常收尾"}`);
       v.note = { kind: "fail", text: m.reason || m.msg || "", at };
       break;
     case "Notification": {
@@ -719,14 +782,31 @@ function applyHook(m) {
       // 它有自己的数据源（转录里的 Agent 工具调用带描述），不在这里重复记账。
       break;
     }
+    case "PermissionRequest":
+      // 批准框出现。这是 perm 等待的第一手证据（比 Notification 早得多），
+      // 带 tool_name；state 是 waiting（不是 blocked —— 没有提问卡片）。
+      enterWaitingFromHook(t, v, "perm", m.tool || "", "PermissionRequest");
+      break;
+    case "PreToolUse":
+      // 只订阅了 AskUserQuestion（matcher 写死在 --settings 里）。这里再判一次
+      // 工具名：旧 --settings（订阅表是启动时写死的）万一送来别的工具，不能
+      // 把一次普通工具调用记成“在等你提问”。
+      if (!m.tool || m.tool === "AskUserQuestion") {
+        enterWaitingFromHook(t, v, "ask", m.tool || "", "PreToolUse");
+      }
+      break;
     case "SessionStart":
       // 新会话（含 /clear、/compact）⇒ 之前那条"等你"作废。
       v.note = null;
       v.wait = null;
+      v.state = "";
+      v.evidence = "";
       break;
     case "SessionEnd":
       v.note = null;
       v.wait = null;
+      v.state = "";
+      v.evidence = "";
       break;
     case "SubagentStart": case "SubagentStop": {
       // 钩子给的是 agent_id + agent_type，转录那边给的 Agent 工具调用里有**描述**
@@ -749,9 +829,25 @@ function applyAgent(m) {
   if (!t) return;
   // OpenCode 等外部状态源也会带 session；和 hook 走同一个绑定口。
   adoptSession(t, m.session, `状态 ${m.agent || "agent"} ${m.status || ""}`.trim());
+  const evidence = m.evidence || "";
+  /* 冷恢复的 resync：这是 app-server 补齐的**快照**，不是新事件。waiting 可能
+     是重启前留下的（用户可能早就回答过了），先不认 —— 等一条活事件。busy/idle
+     照常应用：它们不会凭空记一条“需要你”。 */
+  if (t.restoredUnconfirmed && evidence === "resync" && m.status === "waiting") {
+    if (!t.resyncWaitIgnored) {
+      t.resyncWaitIgnored = true;
+      sendCtrl({ type: "log", msg:
+        `冷恢复 tab=${t.id} 忽略 resync 的 waiting（state=${m.state || "?"} ` +
+        `kind=${m.kind || "?"}）：等一条活事件再认` });
+    }
+    return;
+  }
+  if (evidence && evidence !== "resync") confirmRestored(t, `活证据 ${evidence}`);
   const v = liveOf(tab);
   const prev = v.st;
   v.st = m.status || "";
+  if (m.state) v.state = m.state;
+  if (evidence) v.evidence = evidence;
   if (m.name) v.name = m.name;
   // waiting 的 kind/text 单独留一份：note 只在“没看着它”的时候才写，
   // 你正看着它时也需要它来决定那一行是“等回答”还是“等批准”。

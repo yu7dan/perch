@@ -671,7 +671,7 @@ await fontsReady;
 const restoreSeats = await awaitRestorePlan();
 const bootPromises = restoreSeats.length
   ? restoreSeats.map((v) => createTab(seatSpecFrom(v)))
-  : [createTab(DEFAULT_SPAWN_SPEC)];
+  : [createTab(defaultSpawnSpec())];
 const bootTabs = await Promise.all(bootPromises);
 /* 首格要挑一个**还在 TAB_LIST 里**的：被拒的格子会就地 closeTab（见 createTab ③），
    拿一个已经不在模型里的格子去 setActive 就是空指针那一类毛病。

@@ -98,14 +98,28 @@ func startAgentStatusPoller(push func(any)) {
 				}
 				// ② 忙闲：只在**变化**时说一句，否则 700ms 一次会把日志淹掉。
 				if prev, changed := tabs.setStatus(h.id, reg.Status); changed {
-					log.Printf("[agent t%d] status %s → %s session=%s（%s）",
-						h.id, prev, reg.Status, short(reg.SessionID), idleHint(reg.Status))
+					// 登记表只说“在等”，说不出是提问还是批准 —— 所以 state 是
+					// waiting（泛化等待），不是 blocked；kind 由前端从转录里补。
+					state := ""
+					switch reg.Status {
+					case "busy":
+						state = agentStateWorking
+					case "waiting":
+						state = agentStateWaiting
+					case "idle":
+						state = agentStateDone
+					}
+					log.Printf("[agent t%d] status %s → %s state=%s evidence=%s session=%s（%s）",
+						h.id, prev, reg.Status, orNone(state), agentEvidenceRegistry,
+						short(reg.SessionID), idleHint(reg.Status))
 					push(map[string]any{
-						"type":    "agent",
-						"tab":     h.id,
-						"session": reg.SessionID,
-						"status":  reg.Status,
-						"name":    reg.Name,
+						"type":     "agent",
+						"tab":      h.id,
+						"session":  reg.SessionID,
+						"status":   reg.Status,
+						"state":    state,
+						"evidence": agentEvidenceRegistry,
+						"name":     reg.Name,
 					})
 				}
 			}

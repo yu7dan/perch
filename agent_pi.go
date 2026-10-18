@@ -139,6 +139,7 @@ func preparePi(tag string, tabID int, _ string) (map[string]string, []string, fu
 type piEvent struct {
 	Type    string `json:"type"`
 	Status  string `json:"status"`
+	State   string `json:"state"` // working|blocked|waiting|done（见 observer.ts）
 	Session string `json:"session"`
 	Kind    string `json:"kind"`
 	Text    string `json:"text"`
@@ -245,11 +246,15 @@ func handlePiLine(tabID int, line string, st *piPaneState, sink func(agentEvent)
 	if ev.Status != "busy" && ev.Status != "idle" && ev.Status != "waiting" {
 		return
 	}
-	sink(agentEvent{
+	out := agentEvent{
 		V: 1, Tab: tabID, Agent: "pi", Event: "status",
-		Status: ev.Status, Kind: ev.Kind, Text: ev.Text,
-		Session: ev.Session, Name: st.name,
-	})
+		Status: ev.Status, State: ev.State, Kind: ev.Kind, Text: ev.Text,
+		Session: ev.Session, Name: st.name, Evidence: agentEvidenceExtension,
+	}
+	// 观察扩展只写它确定的部分（比如提问工具会给 state=blocked）；
+	// 剩下的 working/done 从这里按 status 补齐，UI 不需要猜。
+	normalizeAgentEvent(&out)
+	sink(out)
 }
 
 // piSessionRoot 找 Pi 的会话目录（<root>/--<项目路径>--/<时间戳>_<id>.jsonl）。

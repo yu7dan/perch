@@ -6,6 +6,32 @@ import (
 	"testing"
 )
 
+// TestPiBlockedState：观察扩展对提问工具写 state=blocked；Go 侧必须原样
+// 带到 agentEvent，并把 wire 状态换成 waiting（UI 现有判据只认 status）。
+func TestPiBlockedState(t *testing.T) {
+	var got []agentEvent
+	handlePiLine(1, `{"type":"status","session":"ses_pi","status":"waiting",`+
+		`"state":"blocked","kind":"ask","text":"AskUserQuestion"}`, &piPaneState{}, func(ev agentEvent) {
+		got = append(got, ev)
+	})
+	if len(got) != 1 {
+		t.Fatalf("应收到 1 条事件，实际 %d", len(got))
+	}
+	ev := got[0]
+	if ev.State != agentStateBlocked || ev.Status != "waiting" ||
+		ev.Evidence != agentEvidenceExtension || ev.Kind != "ask" {
+		t.Fatalf("提问工具事件不对: %+v", ev)
+	}
+
+	// 普通 busy 没有 state：按 status 补成 working。
+	handlePiLine(1, `{"type":"status","session":"ses_pi","status":"busy"}`, &piPaneState{}, func(ev agentEvent) {
+		got = append(got, ev)
+	})
+	if ev := got[len(got)-1]; ev.State != agentStateWorking || ev.Evidence != agentEvidenceExtension {
+		t.Fatalf("busy 事件不对: %+v", ev)
+	}
+}
+
 func TestPiResumeArgs(t *testing.T) {
 	def := piAgentDef()
 	cases := []struct {

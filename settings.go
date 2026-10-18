@@ -48,6 +48,10 @@ type appSettings struct {
 	TermFontFamily string `json:"termFontFamily"`
 	// StartView 是下次启动先落在哪："dash" | "workspace"。
 	StartView string `json:"startView"`
+	// DefaultAgent 是「新开一格」默认用谁；空 = 自动（优先有状态能力的已安装
+	// agent，见 assets/js/30-pages.js 的 defaultAgentId）。存的是 agent id，
+	// 不是名字 —— 名字会变，id 不会。
+	DefaultAgent string `json:"defaultAgent"`
 	// 两个确认默认**开**（Orca 的默认也是 false = 不跳过确认）：
 	// 关窗会带走所有正在跑的 agent，结束 agent 会删掉它的座位记录。
 	ConfirmClose    bool `json:"confirmClose"`
@@ -91,6 +95,14 @@ func (s appSettings) normalize() appSettings {
 	default:
 		s.StartView = d.StartView
 	}
+	// 只认能启动的 agent id。空串是合法值 = 自动；认不出的（手改配置/卸载了）
+	// 落回自动 —— 别把一个不存在的 agent 当成“设置过”。
+	s.DefaultAgent = strings.ToLower(strings.TrimSpace(s.DefaultAgent))
+	if s.DefaultAgent != "" {
+		if _, ok := agentDefs[s.DefaultAgent]; !ok {
+			s.DefaultAgent = ""
+		}
+	}
 	return s
 }
 
@@ -101,13 +113,15 @@ type settingsPatch struct {
 	TermFontSize    *int    `json:"termFontSize,omitempty"`
 	TermFontFamily  *string `json:"termFontFamily,omitempty"`
 	StartView       *string `json:"startView,omitempty"`
+	DefaultAgent    *string `json:"defaultAgent,omitempty"`
 	ConfirmClose    *bool   `json:"confirmClose,omitempty"`
 	ConfirmEndAgent *bool   `json:"confirmEndAgent,omitempty"`
 }
 
 func (p settingsPatch) empty() bool {
 	return p.DefaultCWD == nil && p.TermFontSize == nil && p.TermFontFamily == nil &&
-		p.StartView == nil && p.ConfirmClose == nil && p.ConfirmEndAgent == nil
+		p.StartView == nil && p.DefaultAgent == nil &&
+		p.ConfirmClose == nil && p.ConfirmEndAgent == nil
 }
 
 type settingsStore struct {
@@ -152,9 +166,9 @@ func loadSettingsStore() *settingsStore {
 	}
 	cur = cur.normalize()
 	s.cur = cur
-	log.Printf("[settings] 载入：默认目录=%s 字号=%d 字体=%s 启动=%s 关窗确认=%v 结束确认=%v（%s）",
+	log.Printf("[settings] 载入：默认目录=%s 字号=%d 字体=%s 启动=%s 默认 agent=%s 关窗确认=%v 结束确认=%v（%s）",
 		pick(cur.DefaultCWD, "(内置)"), cur.TermFontSize, cur.TermFontFamily,
-		cur.StartView, cur.ConfirmClose, cur.ConfirmEndAgent, f)
+		cur.StartView, pick(cur.DefaultAgent, "(自动)"), cur.ConfirmClose, cur.ConfirmEndAgent, f)
 	return s
 }
 
@@ -205,6 +219,15 @@ func (s *settingsStore) patch(p settingsPatch) (appSettings, error) {
 	}
 	if p.StartView != nil {
 		next.StartView = *p.StartView
+	}
+	if p.DefaultAgent != nil {
+		v := strings.ToLower(strings.TrimSpace(*p.DefaultAgent))
+		if v != "" {
+			if _, ok := agentDefs[v]; !ok {
+				return old, fmt.Errorf("不认识这个 agent：%s", v)
+			}
+		}
+		next.DefaultAgent = v
 	}
 	if p.ConfirmClose != nil {
 		next.ConfirmClose = *p.ConfirmClose
@@ -263,7 +286,7 @@ func (s *settingsStore) filePath() string {
 	return s.file
 }
 
-// settingsWire 是发给前端的整份读数。除了落盘的六项，还带上**算出来的**三样：
+// settingsWire 是发给前端的整份读数。除了落盘的七项，还带上**算出来的**三样：
 //
 //	· cwd             当前生效的默认工作目录（自定义失效时是内置那个）
 //	· builtinCwd      内置默认目录，设置页拿它写"恢复默认"的说明
@@ -308,9 +331,9 @@ func applySettingsPatch(p settingsPatch, why string) {
 		pushSettings(err.Error())
 		return
 	}
-	log.Printf("[settings] %s：默认目录=%s 字号=%d 字体=%s 启动=%s 关窗确认=%v 结束确认=%v",
+	log.Printf("[settings] %s：默认目录=%s 字号=%d 字体=%s 启动=%s 默认 agent=%s 关窗确认=%v 结束确认=%v",
 		why, pick(next.DefaultCWD, "(内置)"), next.TermFontSize, next.TermFontFamily,
-		next.StartView, next.ConfirmClose, next.ConfirmEndAgent)
+		next.StartView, pick(next.DefaultAgent, "(自动)"), next.ConfirmClose, next.ConfirmEndAgent)
 	pushSettings("")
 	if next.DefaultCWD != old.DefaultCWD {
 		ensureDefaultWorkspace()

@@ -33,8 +33,19 @@ import (
 //  4. `onFailure` 默认 `continue`，且在 async/Stop 上被忽略 —— "hook 挂了不影响
 //     agent" 是默认行为，不用额外声明。
 //
-// 订阅表刻意**不含** PreToolUse / PostToolUse：那是每次工具调用起一个进程，
-// 而这一层要的是「这一轮的状态」。要「改动」的细粒度走 jsonl（store.go），不走 hook。
+// 订阅表刻意**不含** PostToolUse / 宽 matcher 的 PreToolUse：那是每次工具调用起一个
+// 进程，而这一层要的是「这一轮的状态」。要「改动」的细粒度走 jsonl（store.go），不走 hook。
+//
+// 2026-10-19 加了两个**窄**例外（Wave 1：低延迟的“卡在等你”信号）：
+//
+//	PermissionRequest        批准框一出现就到（比 Notification 早、还带 tool_name）
+//	PreToolUse(matcher=AskUserQuestion)  提问选择器一出现就到
+//
+// 这两个是交互点，不是背景观察，所以它们**同步**跑（不加 async）：观察进程只写
+// 一行就退出（毫秒级），同步不会拖慢用户；而 async 会把“它到底卡住了没有”变成
+// 一个事件到达前的猜测。matcher 是启动时写死的 —— 所以只订阅 AskUserQuestion，
+// 不是每次工具调用都起进程（Orca 的 managed hook 也是同一组事件，见
+// _ref\orca\fetched\src\main\claude\claude-managed-hook-events.ts:46-63）。
 //
 // ⚠️ 一条从自己代码里踩出来的设计教训：**每个格子一个事件文件，归属由文件名定**。
 // 第一版所有格子共用一个文件、靠 session_id 反查格子，结果 SessionStart 比登记表
@@ -61,9 +72,25 @@ const (
 //	Notification            —— 官方的人机信号（permission_prompt / idle_prompt /
 //	                           agent_needs_input / agent_completed / quota_* …）
 //	SubagentStart/Stop      —— 「子代理」那一栏的数据源
+//	PermissionRequest       —— 批准框出现（精确的 perm 等待）
+//	PreToolUse              —— 只订阅 AskUserQuestion（精确的 ask 等待）
 var hookEventTypes = []string{
 	"SessionStart", "SessionEnd", "Stop", "StopFailure",
 	"Notification", "SubagentStart", "SubagentStop",
+	"PermissionRequest", "PreToolUse",
+}
+
+// hookSyncEvents 是**交互点**：事件本身就是“人现在要做决定”，观察不能让
+// agent 抢在事件落地之前继续跑。其余订阅仍是 async（见文件头第 2 条）。
+var hookSyncEvents = map[string]bool{
+	"PermissionRequest": true,
+	"PreToolUse":        true,
+}
+
+// hookMatchers 给 PreToolUse 收窄到提问工具。PermissionRequest 不加 matcher：
+// 任何批准框都是“卡在等你”，都要看见。
+var hookMatchers = map[string]string{
+	"PreToolUse": "AskUserQuestion",
 }
 
 func hookDir() string { return filepath.Join(claudeStateDir, hookDirName) }
@@ -99,19 +126,26 @@ func buildHookSettings(tag string) string {
 	if exe == "" {
 		return ""
 	}
-	one := map[string]any{
-		"type": "command",
-		// exec 形式：command 是可执行文件本身，参数在 args 里 —— 不过 shell。
-		"command": filepath.ToSlash(exe),
-		"args":    []string{filepath.ToSlash(hookEventsPathFor(tag))},
-		"async":   true,
-		"timeout": 5,
-	}
 	hooks := make(map[string]any, len(hookEventTypes))
-	// 刻意**不加 matcher**：matcher 是启动时写死的，改订阅就得重开所有格子；
-	// 而 notification_type 本来就在 payload 里，过滤放 Go 端改一次就生效。
+	// 大部分事件刻意**不加 matcher**：matcher 是启动时写死的，改订阅就得重开
+	// 所有格子；而 notification_type 本来就在 payload 里，过滤放 Go 端改一次就生效。
+	// 只有 PreToolUse 必须加 —— 见 hookMatchers。
 	for _, e := range hookEventTypes {
-		hooks[e] = []any{map[string]any{"hooks": []any{one}}}
+		one := map[string]any{
+			"type": "command",
+			// exec 形式：command 是可执行文件本身，参数在 args 里 —— 不过 shell。
+			"command": filepath.ToSlash(exe),
+			"args":    []string{filepath.ToSlash(hookEventsPathFor(tag))},
+			"timeout": 5,
+		}
+		if !hookSyncEvents[e] {
+			one["async"] = true
+		}
+		entry := map[string]any{"hooks": []any{one}}
+		if m := hookMatchers[e]; m != "" {
+			entry["matcher"] = m
+		}
+		hooks[e] = []any{entry}
 	}
 	b, err := json.Marshal(map[string]any{"hooks": hooks})
 	if err != nil {
@@ -134,6 +168,7 @@ type hookEvent struct {
 	AgentType            string `json:"agent_type"`             // 只有子代理里才有
 	AgentID              string `json:"agent_id"`               // 只有子代理里才有
 	Reason               string `json:"reason"`                 // StopFailure
+	ToolName             string `json:"tool_name"`              // PreToolUse / PermissionRequest
 }
 
 // resetHookDir 启动时清空事件目录：这是**实时信号**不是历史，
@@ -273,6 +308,14 @@ func handleHookLine(line string, tabID int, push func(any)) {
 		if id := paneIDFor(tab); id > 0 {
 			panes.markSpoke(id, "非正常收尾 tab="+itoa(tab))
 		}
+	case "PermissionRequest":
+		// 批准框出现：比 Notification(permission_prompt) 早，而且 tool_name 直接
+		// 告诉我们批的是什么。State 是 waiting（批准），不是 blocked（提问卡片）。
+		log.Printf("[hook t%d] PermissionRequest tool=%s session=%s", tab, orNone(ev.ToolName), short(ev.SessionID))
+	case "PreToolUse":
+		// 只订阅了 AskUserQuestion（matcher 写死在 --settings 里）。这条就是
+		// “提问卡片刚画出来”的第一手证据；State 用 blocked（具体提问）。
+		log.Printf("[hook t%d] PreToolUse tool=%s session=%s", tab, orNone(ev.ToolName), short(ev.SessionID))
 	case "SubagentStart", "SubagentStop":
 		log.Printf("[hook t%d] %s agent_id=%s agent_type=%s", tab, ev.HookEventName, short(ev.AgentID), ev.AgentType)
 	default:
@@ -291,6 +334,10 @@ func handleHookLine(line string, tabID int, push func(any)) {
 		"agt":     ev.AgentType,
 		"reason":  ev.Reason,
 		"source":  ev.Source,
+		"tool":    ev.ToolName,
+		// 证据来源：前端拿它区分“活事件”和冷恢复时的重放（见 80-live.js
+		// 的 restoredUnconfirmed）。hook 永远算活事件。
+		"evidence": agentEvidenceHook,
 	})
 }
 

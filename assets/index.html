@@ -787,6 +787,17 @@
     <div class="op-newcard">
       <div class="op-newtitle">在这个工作区里开一个全新的 agent</div>
       <div class="op-newpath" id="op-newpath"></div>
+      <!-- Agent 名单（2026-10-19）：只列**已安装且能启动**的；默认预选。
+           名单来自 panes.list 的启动快照 / 总览的 catalog（同一份 Go 探测）。
+           「设为默认」写 settings.defaultAgent，左栏一键新开与群组 + 都读它。 -->
+      <div class="op-agents">
+        <div class="op-aghead"><span class="op-aglab">Agent</span></div>
+        <div class="op-aglist" id="op-aglist" role="listbox" aria-label="选择 Agent"></div>
+        <div class="op-agfoot">
+          <span class="op-agtip" id="op-agtip"></span>
+          <button type="button" class="op-agdef" id="op-agdef">设为默认</button>
+        </div>
+      </div>
       <button class="op-go" id="op-go">+ 新开一个 agent</button>
     </div>
   </div>

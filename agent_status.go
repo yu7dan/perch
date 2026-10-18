@@ -31,6 +31,36 @@ import (
 // 不要把计划要接的写进来——UI 会把它当成事实。
 // ---------------------------------------------------------------------------
 
+// 内部四态（照 Orca 的 AGENT_STATUS_STATES，_ref\orca\fetched\src\shared\
+// agent-status-types.ts:51-52）。wire 上的 busy/idle/waiting 只留给现有 UI：
+//
+//	working  在跑
+//	blocked  卡在一个**具体提问**上（有 question 卡片可画；Pi 的 ask 工具、
+//	         Claude 的 AskUserQuestion）
+//	waiting  泛化等待（批准框、扩展的 ui prompt、只有忙闲的登记表 ——
+//	         说不清是哪一种，但人确实要来看）
+//	done     没有自动工作
+//
+// blocked 和 waiting 在 UI 上都是“需要你”，区别留给以后画不同的卡片。
+// 别把 blocked 当成“出错”：出错是 done + 一条 fail note（见 80-live.js）。
+const (
+	agentStateWorking = "working"
+	agentStateBlocked = "blocked"
+	agentStateWaiting = "waiting"
+	agentStateDone    = "done"
+)
+
+// 状态证据的来源（wire 字段 evidence）。前端用它判断冷恢复后收到的是
+// **重放**还是活事件：resync 的 waiting 在确认之前不许记未读。
+const (
+	agentEvidenceHook      = "hook"
+	agentEvidenceRegistry  = "registry"
+	agentEvidenceExtension = "extension"
+	agentEvidenceHTTP      = "http"
+	agentEvidenceAppServer = "app-server"
+	agentEvidenceResync    = "resync"
+)
+
 type agentCaps struct {
 	Launch    bool   `json:"launch"`    // Perch 能在终端里启动它
 	Resume    bool   `json:"resume"`    // 能按会话续接
@@ -87,22 +117,59 @@ type agentEvent struct {
 	Tab     int    `json:"tab,omitempty"`
 	Agent   string `json:"agent,omitempty"`
 	Event   string `json:"event,omitempty"`  // status（目前只用到这个）
-	Status  string `json:"status,omitempty"` // busy | idle | waiting
+	Status  string `json:"status,omitempty"` // busy | idle | waiting（wire 兼容层）
+	State   string `json:"state,omitempty"`  // working | blocked | waiting | done（内部四态）
 	Kind    string `json:"kind,omitempty"`   // ask | perm
 	Text    string `json:"text,omitempty"`
 	Session string `json:"session,omitempty"`
 	Name    string `json:"name,omitempty"`
-	At      int64  `json:"at,omitempty"`
+	// Evidence 是这条状态从哪条腿来的：hook | registry | extension | http |
+	// app-server | resync。适配器必须填；resync 表示“这是补状态的重放”。
+	Evidence string `json:"evidence,omitempty"`
+	At       int64  `json:"at,omitempty"`
+}
+
+// normalizeAgentEvent 把四态和 wire 状态对齐。State 是**权威**：给了 state
+// 就一定按它推 status；只给 status 时按表补 state。这样适配器可以只写自己
+// 确定的那一半，UI 永远拿得到 busy/idle/waiting。
+func normalizeAgentEvent(ev *agentEvent) {
+	switch ev.State {
+	case agentStateWorking, agentStateBlocked, agentStateWaiting, agentStateDone:
+		switch ev.State {
+		case agentStateWorking:
+			ev.Status = "busy"
+		case agentStateBlocked, agentStateWaiting:
+			ev.Status = "waiting"
+		case agentStateDone:
+			ev.Status = "idle"
+		}
+		return
+	default:
+		ev.State = ""
+	}
+	switch ev.Status {
+	case "busy":
+		ev.State = agentStateWorking
+	case "waiting":
+		// 只说“在等”、说不出是提问还是批准：泛化等待，不是 blocked。
+		ev.State = agentStateWaiting
+	case "idle":
+		ev.State = agentStateDone
+	}
 }
 
 var (
-	agentNoteMu   sync.Mutex
-	agentLastNote = map[int]string{} // tab -> kind + "\x00" + text
+	agentNoteMu       sync.Mutex
+	agentLastNote     = map[int]string{} // tab -> kind + "\x00" + text
+	agentLastState    = map[int]string{} // tab -> working|blocked|waiting|done
+	agentLastEvidence = map[int]string{} // tab -> hook|registry|…
 )
 
 // emitAgentStatus 是归一化事件落到前端的那一层。非 Claude 适配器都走它。
-// 只在 status 或 waiting 的 kind/text 变化时推，避免每次轮询都刷一条。
+// 只在 status / waiting 的 kind+text / 四态 / 证据变化时推，避免每次轮询都刷一条。
+// 证据变化也要推：冷恢复后“resync → 活事件”本身就是要让前端看见的事实。
 func emitAgentStatus(ev agentEvent) {
+	normalizeAgentEvent(&ev)
 	if ev.Tab <= 0 || ev.Status == "" {
 		return
 	}
@@ -121,23 +188,36 @@ func emitAgentStatus(ev agentEvent) {
 	} else {
 		delete(agentLastNote, ev.Tab)
 	}
+	prevState := agentLastState[ev.Tab]
+	if ev.State != "" {
+		agentLastState[ev.Tab] = ev.State
+	}
+	prevEvidence := agentLastEvidence[ev.Tab]
+	if ev.Evidence != "" {
+		agentLastEvidence[ev.Tab] = ev.Evidence
+	}
 	agentNoteMu.Unlock()
 	noteChanged := !hadNote || prevNote != noteKey
+	stateChanged := ev.State != "" && ev.State != prevState
+	evidenceChanged := ev.Evidence != "" && ev.Evidence != prevEvidence
 
 	prev, changed := tabs.setStatus(ev.Tab, ev.Status)
-	if !changed && !(ev.Status == "waiting" && noteChanged) {
+	if !changed && !(ev.Status == "waiting" && noteChanged) && !stateChanged && !evidenceChanged {
 		return
 	}
-	log.Printf("[agent t%d] %s status %s → %s%s", ev.Tab, ev.Agent, prev, ev.Status, waitingHint(ev))
+	log.Printf("[agent t%d] %s status %s → %s state=%s evidence=%s%s", ev.Tab, ev.Agent,
+		prev, ev.Status, orNone(ev.State), orNone(ev.Evidence), waitingHint(ev))
 	pushJSON(map[string]any{
-		"type":    "agent",
-		"tab":     ev.Tab,
-		"session": ev.Session,
-		"status":  ev.Status,
-		"name":    ev.Name,
-		"kind":    ev.Kind,
-		"text":    ev.Text,
-		"agent":   ev.Agent,
+		"type":     "agent",
+		"tab":      ev.Tab,
+		"session":  ev.Session,
+		"status":   ev.Status,
+		"state":    ev.State,
+		"evidence": ev.Evidence,
+		"name":     ev.Name,
+		"kind":     ev.Kind,
+		"text":     ev.Text,
+		"agent":    ev.Agent,
 	})
 }
 
@@ -306,11 +386,13 @@ func observeOpenCode(ctx context.Context, tabID int, baseURL, password string, e
 			continue
 		}
 		lastStatus, lastKind, lastText = st.status, st.kind, st.text
-		sink(agentEvent{
+		out := agentEvent{
 			V: 1, Tab: tabID, Agent: "opencode", Event: "status",
 			Status: st.status, Kind: st.kind, Text: st.text,
-			Session: st.session,
-		})
+			Session: st.session, Evidence: agentEvidenceHTTP,
+		}
+		normalizeAgentEvent(&out)
+		sink(out)
 	}
 }
 

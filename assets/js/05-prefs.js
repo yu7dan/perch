@@ -18,6 +18,7 @@ const SETTINGS_DEFAULTS = Object.freeze({
   termFontSize: 14,
   termFontFamily: "cascadia",  // "cascadia" | "jetbrains"
   startView: "dash",           // "dash" | "workspace"
+  defaultAgent: "",            // 空 = 自动（优先有状态能力的已安装 agent）
   confirmClose: true,
   confirmEndAgent: true,
 });
@@ -46,6 +47,9 @@ function normalizeSettings(raw) {
   s.startView = String(s.startView || "").toLowerCase() === "workspace"
     ? "workspace"
     : "dash";
+  // agent id 只做去空白；能不能用由 30-pages 的 defaultAgentId() 对着
+  // **当前探测到的名单**判（设置里写着、但这台机器没装 = 回落到自动）。
+  s.defaultAgent = typeof s.defaultAgent === "string" ? s.defaultAgent.trim().toLowerCase() : "";
   s.confirmClose = s.confirmClose !== false;
   s.confirmEndAgent = s.confirmEndAgent !== false;
   return s;

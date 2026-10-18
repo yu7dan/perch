@@ -342,6 +342,8 @@ func observeCodex(ctx context.Context, tabID int, cwd, url, token string, conn *
 		threads:   map[string]codexThreadStatus{},
 		ephemeral: map[string]bool{},
 		subagent:  map[string]bool{},
+		// 第一帧是快照：冷恢复的格子可能带着重启前的旧状态，前端要按 resync 处理。
+		evidence: agentEvidenceResync,
 	}
 	backoff := codexRetryMin
 	for {
@@ -490,6 +492,9 @@ type codexPaneState struct {
 	threads   map[string]codexThreadStatus
 	ephemeral map[string]bool // 标题生成之类的内部线程：状态不算这一格的
 	subagent  map[string]bool // parentThreadId 非空：子代理线程，同样不算
+	// evidence 是**下一条**事件的证据来源。连上后的第一帧（thread/started）
+	// 和重连后的 thread/read 都是快照，标 resync；其余通知是 app-server。
+	evidence string
 }
 
 func (st *codexPaneState) bindSession(id string) {
@@ -577,9 +582,23 @@ func (st *codexPaneState) emit(sink func(agentEvent)) {
 	if !ok {
 		return
 	}
+	evidence := st.evidence
+	if evidence == "" {
+		// 测试构造的 state 没有这个字段；生产构造时一定是 resync。
+		evidence = agentEvidenceAppServer
+	}
+	st.evidence = agentEvidenceAppServer
+	state := agentStateWaiting // waitingOnApproval / waitingOnUserInput 都是“在等你”
+	switch status {
+	case "busy":
+		state = agentStateWorking
+	case "idle":
+		state = agentStateDone
+	}
 	sink(agentEvent{
 		V: 1, Tab: st.tabID, Agent: "codex", Event: "status",
-		Status: status, Kind: kind, Session: st.session, Name: st.name,
+		Status: status, State: state, Kind: kind, Session: st.session, Name: st.name,
+		Evidence: evidence,
 	})
 }
 
@@ -663,6 +682,9 @@ func (st *codexPaneState) handleThreadRead(result json.RawMessage, sink func(age
 	if !th.Ephemeral {
 		st.bindSession(th.ID)
 	}
+	// 这是**断线期间**的补齐：前端刚冷恢复时，先把这一帧当 resync（waiting 要等
+	// 一条活事件才认，见 80-live.js 的 restoredUnconfirmed）。
+	st.evidence = agentEvidenceResync
 	st.emit(sink)
 }
 

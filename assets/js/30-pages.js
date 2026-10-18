@@ -423,12 +423,15 @@ async function newParallelTab(why) {
   // （这就是这个按钮的标题："新开一个并行 agent"），留在页面上会让人点了没反应
   // （新格子藏在 display:none 里）。回网格那一下顺手把主区宽度按新 N 折回来。
   if (soloTab) backToGrid();
-  const t = await createTab(DEFAULT_SPAWN_SPEC);
+  // 群组那排 +（收起时没有地方挂选择面板）：用设置里的默认 agent，和左栏一键新开一致。
+  const spec = defaultSpawnSpec();
+  const t = await createTab(spec);
   // 建格失败那条路（护栏拒绝）里 createTab 已经把这一格撤了（closeTab）——
   // 它照样返回了 T，别拿着一个不在 TAB_LIST 里的格去 setActive。
   if (!TAB_LIST.includes(t)) return;
   renderGroup();
-  sendCtrl({ type: "log", msg: `新开并行 agent tab=${t.id}（${why || "点 +"}）现在 ${TAB_LIST.length} 格` });
+  sendCtrl({ type: "log", msg: `新开并行 agent tab=${t.id} agent=${spec.agent} ` +
+    `（${why || "点 +"}）现在 ${TAB_LIST.length} 格` });
   /* ⚠️ 从**群组**里点 + （此时是收起的）必须**进去**那一格，不能只 setActive：
      新格的 PTY 还没起 —— 前端的首帧尺寸就是 PTY 的启动闸（Go 侧 awaitInitialSize），
      而收起的群组里那一格是 0×0，报不出尺寸（实测：点完 + 过了 45s 日志里都没有
@@ -457,6 +460,197 @@ async function newParallelTab(why) {
 let opTab = "new";
 let opAllWs = false;
 let opWSPath = "";
+// 面板里当前选中的 agent。打开面板时回到默认（用户定的形态：默认预选，不记 recents）。
+let opAgent = "";
+
+/* ---------------------------------------------------------------------------
+   默认 Agent 的解析（2026-10-19，选择面板 + 左栏一键新开共用）
+   ---------------------------------------------------------------------------
+   三条事实分开：
+     · 设置里显式选的（Go 的 settings.defaultAgent，随 panes.list / shell 下来）；
+     · 这台机器**已安装且能启动**的（Go 探测，catalog 的 installed + caps.launch）；
+     · 自动时的偏好：优先能给出忙/闲的那一层（总览里看得到状态的那些）。
+   显式选的如果没装/不能启动，回落到自动 —— 不静默换人，但也不能拿一个
+   起不来的 id 去建格。 */
+/* 名单完全没送到（ctl 超时 / 老载荷）时的退路。只在**两份来源都空**时用：
+   总览的 catalog 和 panes.list 的快照是同一份 Go 探测，两个都空才说明是载荷问题，
+   不是“这台机器什么都没装”。 */
+const OP_FALLBACK_AGENT = {
+  id: "claude", name: "Claude Code", icon: "claudecode-color", installed: true,
+  caps: { launch: true, status: true, resume: true, waiting: true, actions: true,
+          mechanism: "hook" },
+};
+let OP_CATALOG_MISSING = false;
+function opCatalog() {
+  let list = [];
+  try {
+    // MAGPIE 是 85-dash 里的 let；这个函数只在启动闸之后调用（面板打开/建格），
+    // 那时它已经初始化。try 兜住"有人把调用挪到求值期"的情况（TDZ 里 typeof 也会抛）。
+    if (MAGPIE && Array.isArray(MAGPIE.catalog)) list = MAGPIE.catalog;
+  } catch (_) { list = []; }
+  if (!list.length && Array.isArray(BOOT_AGENTS)) list = BOOT_AGENTS;
+  if (!Array.isArray(list)) list = [];
+  OP_CATALOG_MISSING = !list.length;
+  if (OP_CATALOG_MISSING) list = [OP_FALLBACK_AGENT];
+  return list;
+}
+function opLaunchable(a) {
+  return !!a && a.installed === true && !!(a.caps && a.caps.launch);
+}
+function opAgentById(id) {
+  return opCatalog().find((a) => a && a.id === id) || null;
+}
+function opDefaultPinned() {
+  return String((SETTINGS && SETTINGS.defaultAgent) || BOOT_DEFAULT_AGENT || "");
+}
+function defaultAgentId() {
+  const cat = opCatalog();
+  const want = opDefaultPinned();
+  if (want && opLaunchable(cat.find((a) => a && a.id === want))) return want;
+  // 自动：先要有状态的（用户能看见它在干什么），再退到第一个可启动的。
+  const smart = cat.find((a) => opLaunchable(a) && a.caps && a.caps.status);
+  if (smart) return smart.id;
+  const any = cat.find(opLaunchable);
+  if (any) return any.id;
+  // 名单完全没到（老载荷 / 探测失败）：保持旧行为，至少能开一格。
+  return "claude";
+}
+// “新开一格”的完整 spec：默认 agent + DEFAULT_SPAWN_SPEC 的其余部分。
+// 单独抽出来是为了让启动兜底（40-chrome）和群组 +（newParallelTab）用**同一份**，
+// 而不是两处各自拼一个 agent 字段。
+function defaultSpawnSpec() {
+  return Object.assign({}, DEFAULT_SPAWN_SPEC, { agent: defaultAgentId() });
+}
+function opCapsText(a) {
+  const c = (a && a.caps) || {};
+  const parts = [];
+  if (c.status) parts.push("状态");
+  if (c.resume) parts.push("续接");
+  if (c.actions) parts.push("动作");
+  return parts.length ? parts.join(" · ") : "仅启动";
+}
+function opMechTitle(a) {
+  const m = ((a && a.caps && a.caps.mechanism) || "").trim();
+  return m && m !== "terminal" ? `状态来源：${m}` : "只启动，没有状态接入";
+}
+function opAgentIcon(name) {
+  // iconHTML 在 85-dash（和总览共用同一套图标规则）。运行期已求值；
+  // 万一不可用就留空，不影响行本身。
+  return typeof iconHTML === "function" ? iconHTML(name || "", " op-ag-icon") : "";
+}
+
+function paintOpAgentSelection() {
+  const listEl = $("op-aglist");
+  if (listEl) {
+    for (const b of listEl.querySelectorAll(".op-agent")) {
+      const on = b.dataset.agent === opAgent;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    }
+  }
+  // 必须是**可启动**的：catalog 里可能有这一位但没装/不能开（总览里灰着的那类），
+  // 不能因为“查得到”就把按钮点亮。
+  const a0 = opAgentById(opAgent);
+  const a = opLaunchable(a0) ? a0 : null;
+  const go = $("op-go");
+  if (go) {
+    go.textContent = a ? `+ 新开一个 ${a.name}` : "+ 新开一个 agent";
+    // 灰而不禁（用户定的规矩：禁用后 title 不弹）：点击时说清楚为什么。
+    const na = !a;
+    go.classList.toggle("na", na);
+    go.setAttribute("aria-disabled", na ? "true" : "false");
+    go.title = na ? "没有检测到已安装、能启动的 Agent —— 去总览 → Agent 安装" : "";
+  }
+  const defBtn = $("op-agdef");
+  if (defBtn) {
+    const pinned = opDefaultPinned();
+    const na = !a || pinned === opAgent;
+    defBtn.classList.toggle("na", na);
+    defBtn.setAttribute("aria-disabled", na ? "true" : "false");
+    defBtn.title = !a ? "先选一个 Agent"
+      : pinned === opAgent ? "这一位已经是默认 Agent"
+        : `把 ${a.name} 设为新建格子的默认 Agent`;
+  }
+  const tip = $("op-agtip");
+  if (tip) {
+    const def0 = opAgentById(defaultAgentId());
+    const def = opLaunchable(def0) ? def0 : null;
+    tip.textContent = def
+      ? `默认：${def.name}${opDefaultPinned() === def.id ? "" : "（自动）"}`
+      : "没有可启动的 Agent";
+    tip.title = tip.textContent;
+  }
+}
+
+function renderOpAgents() {
+  const listEl = $("op-aglist");
+  if (!listEl) return;
+  const cat = opCatalog();
+  const catalogMissing = OP_CATALOG_MISSING;
+  const list0 = cat.filter(opLaunchable);
+  const def = defaultAgentId();
+  if (!list0.some((a) => a.id === opAgent)) opAgent = def;
+  const pinned = opDefaultPinned();
+  // 默认项置顶；其余有状态的在前；同组保持目录顺序（sort 稳定）。
+  const list = list0.slice().sort((a, b) => {
+    const ad = a.id === def ? 0 : 1, bd = b.id === def ? 0 : 1;
+    if (ad !== bd) return ad - bd;
+    const as = a.caps && a.caps.status ? 0 : 1;
+    const bs = b.caps && b.caps.status ? 0 : 1;
+    return as - bs;
+  });
+  if (!list.length) {
+    listEl.innerHTML = `<div class="op-agempty">没有检测到已安装、能启动的 Agent。<br>` +
+      `去总览 → Agent 安装后再回来。</div>`;
+  } else {
+    listEl.innerHTML = list.map((a) => {
+      const on = a.id === opAgent;
+      const isDef = a.id === def;
+      return `<button type="button" class="op-agent${on ? " on" : ""}" ` +
+        `data-agent="${esc(a.id)}" role="option" aria-selected="${on ? "true" : "false"}" ` +
+        `title="${esc(a.name + " · " + opMechTitle(a))}">` +
+        `<span class="op-agico">${opAgentIcon(a.icon)}</span>` +
+        `<span class="op-agwho"><span class="op-agnm">${esc(a.name)}` +
+          (isDef ? `<span class="op-agpill">${pinned === a.id ? "默认" : "自动"}</span>` : "") +
+        `</span><span class="op-agsub">${esc(opCapsText(a))}</span></span>` +
+        `<span class="op-agck" aria-hidden="true">` +
+          `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" ` +
+          `stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">` +
+          `<path d="M20 6 9 17l-5-5"/></svg></span>` +
+        `</button>`;
+    }).join("");
+  }
+  paintOpAgentSelection();
+  if (catalogMissing) {
+    const tip = $("op-agtip");
+    if (tip) { tip.textContent = "Agent 名单没送到，暂用 Claude Code"; tip.title = tip.textContent; }
+  }
+}
+
+function selectOpAgent(id) {
+  const a = opAgentById(id);
+  if (!opLaunchable(a) || opAgent === id) return;
+  opAgent = id;
+  paintOpAgentSelection();
+  sendCtrl({ type: "log", msg: `选择面板 选 Agent=${id}（${a.name}）` });
+}
+
+function opSetDefaultAgent() {
+  const a = opAgentById(opAgent);
+  if (!opLaunchable(a)) {
+    sendCtrl({ type: "log", msg: "选择面板 设为默认：没有选中可启动的 Agent，不动" });
+    return;
+  }
+  if (opDefaultPinned() === a.id) {
+    sendCtrl({ type: "log", msg: `选择面板 设为默认：${a.id} 已经是默认，不动` });
+    return;
+  }
+  // settingsSend 在 84-settings（运行期已求值）：乐观写缓存 + settings.set；
+  // Go 拒绝时会推回旧值（见 05-prefs / 84-settings 的文件头）。
+  settingsSend({ defaultAgent: a.id }, `默认 Agent → ${a.id}`);
+  renderOpAgents();
+  showToast(`默认 Agent 已设为 ${a.name}`, "以后新建的格子默认用它。", "ok");
+}
 
 function currentWorkspacePath() {
   const projs = STATE?.projects || [];
@@ -535,6 +729,7 @@ function renderOpPanel() {
   allBtn.classList.toggle("on", opAllWs);
   renderOpWs();
   if (resume) $("op-list").innerHTML = opRowsHTML();
+  else renderOpAgents();
 }
 
 function closeAgentPanel(why) {
@@ -550,6 +745,8 @@ function openAgentPanel(why) {
   opTab = "new";
   opAllWs = false;
   opWSPath = currentWorkspacePath();
+  // 默认预选（用户定的形态）：每次打开都回到默认，不记上一次选过谁。
+  opAgent = defaultAgentId();
   $("op-search").value = "";
   renderOpPanel();
   // 先填内容再显示再量：显示前量到的是上一帧的尺寸，面板会先闪在错的位置
@@ -566,14 +763,22 @@ function openAgentPanel(why) {
   sendCtrl({ type: "log", msg: `选择面板 打开（${why || ""}）` +
     ` 锚=${Math.round(a.left)},${Math.round(a.bottom)} ` +
     `落=${Math.round(left)},${Math.round(top)} ${Math.round(r.width)}x${Math.round(r.height)} ` +
-    `页签=${opTab} 工作区=${opWSPath || "(默认)"} 历史=${opSessionCount()} 条` });
+    `页签=${opTab} 工作区=${opWSPath || "(默认)"} 历史=${opSessionCount()} 条 ` +
+    `Agent=${opAgent || "(无)"}（设置默认=${opDefaultPinned() || "自动"}）` });
 }
 
 async function opNewAgent() {
+  const a = opAgentById(opAgent);
+  if (!opLaunchable(a)) {
+    showToast("先选一个 Agent", "没有检测到已安装、能启动的 Agent。去总览 → Agent 安装。", "err");
+    sendCtrl({ type: "log", msg:
+      `选择面板 新会话：没有可启动的 Agent（opAgent=${opAgent || "空"}），不发建格` });
+    return;
+  }
   const dir = opWSPath;
   closeAgentPanel("新会话");
-  sendCtrl({ type: "log", msg: `选择面板 新会话 cwd=${dir || "(默认)"}` });
-  await newTabIn(dir, "选择面板 新会话");
+  sendCtrl({ type: "log", msg: `选择面板 新会话 agent=${a.id} cwd=${dir || "(默认)"}` });
+  await newTabIn(dir, "选择面板 新会话", a.id);
 }
 
 async function opPick(s) {
@@ -619,6 +824,26 @@ $("op-all").addEventListener("click", () => {
   sendCtrl({ type: "log", msg: `选择面板 全部工作区=${opAllWs} 历史=${opSessionCount()} 条` });
 });
 $("op-search").addEventListener("input", () => { $("op-list").innerHTML = opRowsHTML(); });
+$("op-aglist").addEventListener("click", (e) => {
+  const row = e.target.closest(".op-agent");
+  if (row) selectOpAgent(row.dataset.agent);
+});
+// 方向键在名单里走（行是按钮，Tab 也能到；方向键只是更快）。
+$("op-aglist").addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  e.preventDefault();
+  const rows = [...$("op-aglist").querySelectorAll(".op-agent")];
+  if (!rows.length) return;
+  const i = rows.indexOf(document.activeElement);
+  const n = e.key === "ArrowDown"
+    ? Math.min(rows.length - 1, i + 1)
+    : Math.max(0, i - 1);
+  const row = rows[n];
+  if (!row) return;
+  selectOpAgent(row.dataset.agent);
+  row.focus();
+});
+$("op-agdef").addEventListener("click", () => { opSetDefaultAgent(); });
 $("op-go").addEventListener("click", () => { opNewAgent(); });
 $("op-list").addEventListener("click", (e) => {
   const row = e.target.closest(".op-row");

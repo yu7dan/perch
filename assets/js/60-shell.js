@@ -757,14 +757,17 @@ function poolSend(obj) { sendCtrl(obj); }
 // 「在这个目录新开一格」。走的是**同一条**建格路（createTab + 默认启动意图）——
 // 不另开一条"按 cwd 建格"的路：那条路一旦和主路分叉，护栏、拒绝收尾、PTY 首帧
 // 尺寸这些东西就得各维护一份。
-async function newTabIn(dir, why) {
+async function newTabIn(dir, why, agent) {
   if (soloTab) backToGrid();
-  const t = await createTab({ agent: DEFAULT_SPAWN_SPEC.agent, cwd: dir || "",
+  // 第三参是选择面板选中的 agent；左栏/项目的一键入口不传，走设置里的默认。
+  const pick = agent || defaultAgentId();
+  const t = await createTab({ agent: pick, cwd: dir || "",
     resume: { kind: "new", id: "" } });
   if (!t || !TAB_LIST.includes(t)) return;
   if (collapsed) goToTab(t, why || "左栏 +");
   else setActive(t);
-  sendCtrl({ type: "log", msg: `左栏新开一格 cwd=${dir || "(默认)"} → tab=${t.id}（${why || "+"}）` });
+  sendCtrl({ type: "log", msg: `左栏新开一格 agent=${pick} cwd=${dir || "(默认)"} ` +
+    `→ tab=${t.id}（${why || "+"}）` });
 }
 
 /* 进入一个 agent：先把"群组看板"那一屏切回网格，再把右栏对话流的主语交回

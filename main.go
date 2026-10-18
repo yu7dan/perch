@@ -786,6 +786,31 @@ func poolReply(errMsg string) {
 		len(wire), len(assign), sum, nUn, sum+nUn, nMain, nAll, time.Since(t0).Round(time.Millisecond))
 }
 
+// bootAgentCards 是冷恢复应答里附带的本机 Agent 名单。
+//
+// 前端要在**建第一格之前**决定默认用哪个 agent，而那一刻 shell 载荷还没到
+// （它要扫会话库）；panes.query 是唯一更早的往返，所以名单跟着它走。
+// 和总览用的是同一份 scanAgentCatalog —— 两份探测规则迟早会漂。
+func bootAgentCards() []agentCard {
+	if s := magpieSnapshot(); s != nil && len(s.Catalog) > 0 {
+		return s.Catalog
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return []agentCard{}
+	}
+	return scanAgentCatalog(home)
+}
+
+// defaultAgentSetting 是设置里的显式默认（空 = 自动）。前端自己还会校验
+// “已安装 / 能启动”，这里只把落盘的事实带过去。
+func defaultAgentSetting() string {
+	if prefsStore == nil {
+		return ""
+	}
+	return prefsStore.snapshot().DefaultAgent
+}
+
 func handleCtl(c *application.StreamConn) {
 	defer c.Close()
 	setPushConn(c)
@@ -876,6 +901,7 @@ func handleCtl(c *application.StreamConn) {
 			if secondInstance {
 				reply, _ := json.Marshal(map[string]any{
 					"type": "panes.list", "panes": []any{},
+					"agents": bootAgentCards(), "defaultAgent": defaultAgentSetting(),
 					"err": "已经有一个我在跑（单实例闸）—— 这一轮不恢复任何会话",
 				})
 				_ = c.Send(reply)
@@ -884,6 +910,7 @@ func handleCtl(c *application.StreamConn) {
 			if panes == nil {
 				reply, _ := json.Marshal(map[string]any{
 					"type": "panes.list", "panes": []any{}, "err": "登记表不可用",
+					"agents": bootAgentCards(), "defaultAgent": defaultAgentSetting(),
 				})
 				_ = c.Send(reply)
 				continue
@@ -891,6 +918,7 @@ func handleCtl(c *application.StreamConn) {
 			plan := panes.restorePlan() // 这一行自己打计数 + 座位序（见 panes.go）
 			reply, err := json.Marshal(map[string]any{
 				"type": "panes.list", "panes": plan.Views,
+				"agents": bootAgentCards(), "defaultAgent": defaultAgentSetting(),
 			})
 			if err != nil {
 				log.Printf("[panes] 冷恢复清单序列化失败（前端会走无应答那条兜底）：%v", err)
@@ -1426,7 +1454,7 @@ func main() {
 	if exe := hookExePath(); exe == "" {
 		log.Printf("[hook] 未注入 hooks：%s 不在 exe 旁边（忙闲仍来自 sessions\\<pid>.json）", hookExeName)
 	} else {
-		log.Printf("[hook] 已备好：%d 个事件（exec 形式 / async / timeout=5s）接收器=%s 事件目录=%s",
+		log.Printf("[hook] 已备好：%d 个事件（exec 形式 / 交互点 sync、其余 async / timeout=5s）接收器=%s 事件目录=%s",
 			len(hookEventTypes), exe, hookDir())
 	}
 
