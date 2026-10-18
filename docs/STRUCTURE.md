@@ -19,7 +19,7 @@ term/
     fonts/                 等宽字体
     xterm.js, addon-*.js   xterm 与官方 addon（原样引入）
     magpie.svg             magpie 品牌图标（仅网关页标识使用）
-  docs/                    结构说明（本文件）
+  docs/                    结构说明（本文件）与 README 截图（images/）
   _tools/                  构建、截图、点击、按键等验证脚本
 ```
 
