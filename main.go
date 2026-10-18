@@ -202,6 +202,10 @@ type agentDef struct {
 	// 不碰用户的任何配置文件（第 0 步实测：--settings 是**合并**不是替换，
 	// 用户 settings.json 里的 env/model 照样生效）。
 	Args func(resumeIntent, string) []string
+	// Prepare 在每次开格前调用，用来做“这一格才有的”准备：分配端口、生成口令、
+	// 决定事件文件路径。返回的 env/args 只作用于这一次启动；observe 在 PTY
+	// 起来之后跑，ctx 一取消就退出。Claude 不用它（它的 hook 走 --settings）。
+	Prepare func(tag string, tabID int) (env map[string]string, args []string, observe func(context.Context), err error)
 }
 
 // resolveClaudeExe 找 agent 的可执行文件，顺序：
@@ -263,6 +267,9 @@ func init() {
 		}
 		agentDefs[d.ID] = genericAgentDef(d.Bin)
 	}
+	// 通用适配只负责“能开一格”；OpenCode 有自己的一套启动参数/状态观察，
+	// 覆盖掉通用那条。以后 Pi/Codex 同样在这里覆盖。
+	agentDefs["opencode"] = openCodeAgentDef()
 }
 
 func genericAgentDef(bin string) agentDef {
@@ -542,6 +549,12 @@ func (tm *tabManager) bindSession(id int, sid, name, source string) bool {
 	paneID, agent, cwd := h.paneID, h.spec.Agent, effectiveCWD(h.spec)
 	tm.mu.Unlock()
 
+	// 没有续接能力的 agent（OpenCode 现在就是）不要拿请求的 exact 去判落空：
+	// 它本来就会开一条新会话，判成 mismatch 只会给用户挂一条假横幅。
+	if !capsForAgent(agent).Resume {
+		intent = resumeIntent{Kind: "new"}
+	}
+
 	// 首次身份绑定**立即落盘**（配 ~250ms 合并窗，见 panes.go 的 paneFlushWindow）：
 	// 建格到绑上身份之间大约 1–3 秒，正是整条链最脆的窗口 —— 这段里被关掉，
 	// 记录里就只会有"这一格开着、不知道跑的是谁"。⚠️ 出了锁才写：那是磁盘 I/O。
@@ -571,6 +584,57 @@ func (tm *tabManager) bindSession(id int, sid, name, source string) bool {
 		panes.bind(paneID, agent, cwd, sid, "", fmt.Sprintf("首次绑上会话 tab=%d（证据对上）", id))
 	default:
 		panes.bind(paneID, agent, cwd, sid, "", fmt.Sprintf("首次绑上会话 tab=%d", id))
+	}
+	return true
+}
+
+// rebindSession 是“格内换了会话”的路径（OpenCode 的 active session 变了会走它）。
+// 和 bindSession 的区别只有一个：允许覆盖已有的 sessionID。
+//
+// 为什么要单独一条：bindSession 的“只在第一次生效”是 Claude 那条链子的护栏
+// （hook 和登记表会先后报同一个 id，不能让后到的把先到的改掉）。但格内 /new、
+// /clear 之后确实会换一条会话；前端靠 agent 消息里的 session 改写，Go 这边的
+// bySession 反查表也必须跟着改，否则后续事件会继续认旧格子。
+func (tm *tabManager) rebindSession(id int, sid, name, source string) bool {
+	tm.mu.Lock()
+	h := tm.tabs[id]
+	if h == nil || sid == "" || h.sessionID == sid {
+		tm.mu.Unlock()
+		return false
+	}
+	old := h.sessionID
+	if old != "" {
+		delete(tm.bySession, old)
+	}
+	h.sessionID = sid
+	if name != "" {
+		h.sessName = name
+	}
+	tm.bySession[sid] = h
+	intent := h.spec.Resume
+	paneID, agent, cwd := h.paneID, h.spec.Agent, effectiveCWD(h.spec)
+	tm.mu.Unlock()
+
+	log.Printf("[agent t%d] 会话改写 %s → %s（source=%s）",
+		id, short(old), short(sid), orNone(source))
+	if !capsForAgent(agent).Resume {
+		intent = resumeIntent{Kind: "new"}
+	}
+	if panes == nil {
+		return true
+	}
+	// 和 bindSession 用同一条判据：请求的是 exact X 却来了 Y，记录里那条 id
+	// 一个字都不改，只留 mismatch；格子的内存身份仍然跟着 Y（它才是现在跑的）。
+	switch judgeResume(intent, sid) {
+	case evMissed:
+		panes.markMismatch(paneID, intent.ID, sid, "格内换会话")
+	case evMatched:
+		if panes.clearMismatch(paneID, fmt.Sprintf("格内换会话对上 tab=%d", id)) {
+			log.Printf("[panes] 续接对上：格子 t%d pane=%d 请求的就是 %s（格内换会话）",
+				id, paneID, short(sid))
+		}
+	default:
+		panes.bind(paneID, agent, cwd, sid, "", fmt.Sprintf("格内换会话 tab=%d", id))
 	}
 	return true
 }
@@ -1769,20 +1833,46 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 		_ = c.Send([]byte("\r\n\x1b[31m[perch] 未知 agent: " + host.spec.Agent + "\x1b[0m\r\n"))
 		return
 	}
+	tag := fmt.Sprintf("t%d", host.id)
+	// Prepare 是“这一格才有的”启动准备（OpenCode 的端口/口令就是它给的）。
+	var prepEnv map[string]string
+	var prepArgs []string
+	var observe func(context.Context)
+	if def.Prepare != nil {
+		var perr error
+		prepEnv, prepArgs, observe, perr = def.Prepare(tag, host.id)
+		if perr != nil {
+			log.Printf("[perch] tab=%d 启动准备失败: %v", host.id, perr)
+			_ = c.Send([]byte("\r\n\x1b[31m[perch] 启动准备失败: " + perr.Error() + "\x1b[0m\r\n"))
+			return
+		}
+	}
 	// hooks 是**每格子一份**：事件文件路径写死进这一份 --settings 里，
 	// 于是"这条事件属于哪个格子"由文件名决定，不需要任何反查（见 hooks.go 末尾那段）。
-	settings := buildHookSettings(fmt.Sprintf("t%d", host.id))
+	// 只有 Claude 用这份 --settings；别的 agent 传空串。
+	settings := ""
+	if host.spec.Agent == "claude" {
+		settings = buildHookSettings(tag)
+	}
 	// 每次开格重新解析一次（见 agentDef.Bin 的注释）：装完/更新完不用重启 Perch。
 	exe, prefix := def.Exe, def.Prefix
 	if def.Bin != "" {
 		exe, prefix = resolveAgentExe(def.Bin)
 	}
 	args := append(append([]string{}, prefix...), def.Args(host.spec.Resume, settings)...)
+	args = append(args, prepArgs...)
 	// 「新格没指定目录时落在哪」只有这一个答案（见 effectiveCWD / defaultCWD）——
 	// 2026-10-16 起是默认工作区，不是 fallbackCWD。这也正是记进登记表的那个值。
 	cwd := effectiveCWD(host.spec)
 
-	sess, err := startPTY(exe, args, cwd, buildEnv(def.Env), cols, rows)
+	env := make(map[string]string, len(def.Env)+len(prepEnv))
+	for k, v := range def.Env {
+		env[k] = v
+	}
+	for k, v := range prepEnv {
+		env[k] = v
+	}
+	sess, err := startPTY(exe, args, cwd, buildEnv(env), cols, rows)
 	if err != nil {
 		log.Printf("[perch] tab=%d 启动失败: %v", host.id, err)
 		_ = c.Send([]byte("\r\n\x1b[31m[perch] 启动失败: " + err.Error() + "\x1b[0m\r\n"))
@@ -1791,6 +1881,15 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 	defer sess.Close()
 	// pid 是「格子 ↔ 会话」那条链子的起点（登记表按 pid 命名，见 status.go）。
 	tabs.setPID(host.id, sess.Pid())
+
+	// 状态观察者跟着这条 PTY 的生命周期走：流一断/进程一关，ctx 就取消。
+	// observe 自己负责“server 还没起来就等”，不阻塞这里的启动。
+	if observe != nil {
+		octx, ocancel := context.WithCancel(context.Background())
+		defer ocancel()
+		go func() { <-done; ocancel() }()
+		go observe(octx)
+	}
 
 	// 「这一格停了」的唯一可靠信号。
 	// 2026-10-17 实测：格内 /exit 之后 claude.exe 已经没了（Get-CimInstance 查不到），
@@ -1813,7 +1912,7 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 	// 注意日志里**打印参数**会把整份 --settings JSON 也打出来（几 KB）。
 	// 这里改打长度：那串东西对读日志的人是噪音，长度足够判断"注进去了没有"。
 	log.Printf("[perch] tab=%d 已启动 pid=%d exe=%s 参数%d个(settings=%d字节) cwd=%s resume=%s",
-		host.id, sess.Pid(), def.Exe, len(args), len(settings), cwd, host.spec.Resume.Kind)
+		host.id, sess.Pid(), exe, len(args), len(settings), cwd, host.spec.Resume.Kind)
 	// C3 的观察腿（格子起来这一端）：这一格的 claude 是靠**继承**进 job 的
 	// （我们从没单独 assign 过它）—— 这句话是不是真的，问内核拿清单看。
 	logJobInventory(fmt.Sprintf("tab=%d pid=%d 起来后", host.id, sess.Pid()))

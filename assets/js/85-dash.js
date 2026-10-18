@@ -570,15 +570,26 @@ function renderDashAgents() {
   const m = mg();
   const list = m && (m.catalog || []).length ? m.catalog : [];
   const sub = $("dash-agent-sub");
+  // caps 是权威；老 magpie 还没有这个字段时退回 adapter（只认结构化状态）。
+  const capsOf = (a) => a.caps || {
+    launch: !!a.adapter, status: !!a.adapter, waiting: !!a.adapter,
+  };
   const installed = list.filter((a) => a.installed);
-  const ready = installed.filter((a) => a.adapter);
-  const pending = installed.filter((a) => !a.adapter);
+  const full = installed.filter((a) => capsOf(a).waiting);
+  const basic = installed.filter((a) => capsOf(a).status && !capsOf(a).waiting);
+  const launchOnly = installed.filter((a) => capsOf(a).launch && !capsOf(a).status);
+  const noLaunch = installed.filter((a) => !capsOf(a).launch);
   const missing = list.filter((a) => !a.installed);
   const routed = list.filter((a) => (a.calls | 0) > 0);
   if (sub) {
+    const bits = [];
+    if (full.length) bits.push(`${full.length} 个完整`);
+    if (basic.length) bits.push(`${basic.length} 个基础`);
+    if (launchOnly.length) bits.push(`${launchOnly.length} 个仅启动`);
+    if (noLaunch.length) bits.push(`${noLaunch.length} 个未接入`);
+    bits.push(`${missing.length} 个未检测到`);
     sub.textContent = list.length
-      ? `${ready.length} 个已接入 · ${pending.length} 个待接入 · ${missing.length} 个未检测到` +
-        (routed.length ? ` · 今日经过网关 ${routed.length} 个` : "")
+      ? bits.join(" · ") + (routed.length ? ` · 今日经过网关 ${routed.length} 个` : "")
       : "正在探测本机安装情况…";
   }
   if (!list.length) {
@@ -587,12 +598,17 @@ function renderDashAgents() {
   }
 
   const row = (a, gid) => {
-    const ok = gid === "ready";
+    const c = capsOf(a);
+    const level = c.waiting ? "完整状态"
+      : c.status ? "基础状态"
+      : c.launch ? "仅启动"
+      : "未接入";
     // 没探测到 ≠ 没装：GUI 进程的 PATH 常常比终端里短，有的 agent 也把配置
     // 放在别处。所以写「未检测到」，不写「未安装」——前者说的是我们的证据。
-    const st = ok ? "已接入"
-      : gid === "pending" ? "未接入"
-      : a.windows === false ? "仅 macOS/Linux" : "未检测到";
+    const st = gid === "missing"
+      ? (a.windows === false ? "仅 macOS/Linux" : "未检测到")
+      : level;
+    const stClass = c.status ? " ok" : (gid === "missing" || !c.launch) ? " off" : "";
     // 这份名单只列 CLI agent：每行副标题都带 CLI，和网关层的桌面客户端分开。
     const detail = gid === "missing"
       ? `CLI · 官方安装 · ${a.vendor}`
@@ -612,15 +628,19 @@ function renderDashAgents() {
             ? `<button type="button" class="dl" data-docs="${esc(a.id)}"` +
               ` title="打开 ${esc(a.name)} 的官方安装说明">安装说明</button>`
             : "")
-      : (ok
-          ? `<button type="button" class="dl" data-launch="${esc(a.id)}"` +
-            ` title="在 Perch 里开一格 ${esc(a.name)}">打开</button>`
-          : "");
-    const stTitle = gid === "pending"
-      ? "本机已检测到；Perch 还没有这个 agent 的启动适配器"
-      : gid === "missing"
-        ? "本机配置目录与 PATH 里都没有找到 —— 不等于没装（GUI 的 PATH 可能更短）"
+      : c.launch
+        ? `<button type="button" class="dl" data-launch="${esc(a.id)}"` +
+          ` title="在 Perch 里开一格 ${esc(a.name)}">打开</button>`
         : "";
+    const stTitle = gid === "missing"
+      ? "本机配置目录与 PATH 里都没有找到 —— 不等于没装（GUI 的 PATH 可能更短）"
+      : c.waiting
+        ? "能看忙闲，也能看到它在等你回答/批准"
+        : c.status
+          ? "能看忙闲；还看不到它在等你回答/批准"
+          : c.launch
+            ? "能在 Perch 里开一格；还没有状态接入"
+            : "Perch 还没有这个 agent 的启动适配器";
     // 已检测到的行可以点开右侧配置抽屉（88-agent-cfg.js）。网关那个点只有
     // 读到 magpie 的 agent 列表之后才画 —— 没读到时不假装"未接入"。
     const cfg = gid !== "missing";
@@ -635,7 +655,7 @@ function renderDashAgents() {
       iconHTML(a.icon) +
       `<span class="who"><span class="nm">${esc(a.name)}${gdot}</span>` +
       `<span class="sub" title="${esc(detail + calls)}">${esc(detail + calls)}</span></span>` +
-      `<span class="st${ok ? " ok" : gid === "missing" ? " off" : ""}"` +
+      `<span class="st${stClass}"` +
       (stTitle ? ` title="${esc(stTitle)}"` : "") +
       `>${st}</span>` +
       action +
@@ -647,8 +667,10 @@ function renderDashAgents() {
     `<div class="roster">${items.map((a) => row(a, gid)).join("")}</div>`;
 
   let html = "";
-  if (ready.length) html += group("已接入", ready, "ready");
-  if (pending.length) html += group("未接入", pending, "pending");
+  if (full.length) html += group("完整状态", full, "full");
+  if (basic.length) html += group("基础状态", basic, "basic");
+  if (launchOnly.length) html += group("仅启动", launchOnly, "launch");
+  if (noLaunch.length) html += group("未接入", noLaunch, "nolaunch");
   if (!installed.length) {
     html += `<div class="gw-empty">还没有检测到本机安装的 Agent —— 展开下面的清单可以直接装。</div>`;
   }

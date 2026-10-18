@@ -425,8 +425,8 @@ svg{display:block;flex:none}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* Agent 接线台：三列，logo 30px 是主角。
-   2026-10-17 用户定的分界线是「有没有下载」：只展开本机检测到的，按
-   「已接入 / 未接入」分组；未检测到的收进下面那条 magpie 式的折叠栏。
+   2026-10-19 起按**能力**分组：完整状态 / 基础状态 / 仅启动 / 未接入；
+   未检测到的收进下面那条 magpie 式的折叠栏。
    行与行、列与列之间只用头发丝线分隔，和上面的操作台是同一层语言。 */
 #dash-agent-list{display:flex;flex-direction:column;min-width:0}
 .roster{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));min-width:0}

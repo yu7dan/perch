@@ -496,7 +496,11 @@ func findAgentExe(bin string) (string, bool) {
 	home, _ := os.UserHomeDir()
 	local := os.Getenv("LOCALAPPDATA")
 	appdata := os.Getenv("APPDATA")
-	names := []string{bin, bin + ".exe", bin + ".cmd"}
+	// ⚠️ 顺序必须是「真 Windows 可执行 → .cmd → 无扩展名」。
+	// npm 在 Windows 上会同时写三份 shim：opencode（Git Bash 用的 shell 脚本）、
+	// opencode.cmd、opencode.ps1。无扩展名那份**存在但不是 Win32 程序**，排在
+	// 前面会被选中，ConPTY 直接报 "%1 is not a valid Win32 application"。
+	names := []string{bin + ".exe", bin + ".cmd", bin}
 	var cands []string
 	for _, n := range names {
 		cands = append(cands,

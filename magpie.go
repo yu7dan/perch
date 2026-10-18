@@ -212,18 +212,19 @@ type magpiePlugins struct {
 // agentCard 是 Agent 名单的一行。数据一半来自本机探测（装没装、Perch 能不能跑），
 // 一半来自今天的网关流量（calls）—— 后者是"真的接上了"的唯一证据。
 type agentCard struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Icon      string `json:"icon"`
-	Vendor    string `json:"vendor"`
-	URL       string `json:"url"`
-	Path      string `json:"path,omitempty"`
-	Installed bool   `json:"installed"`
-	Adapter   bool   `json:"adapter"` // Perch 自己的 agentDefs 里有它
-	Install   bool   `json:"install"` // 有 Perch 能代跑的官方安装配方
-	Windows   bool   `json:"windows"` // 这个 agent 在 Windows 上有原生支持
-	Note      string `json:"note,omitempty"`
-	Calls     int    `json:"calls"`
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Icon      string    `json:"icon"`
+	Vendor    string    `json:"vendor"`
+	URL       string    `json:"url"`
+	Path      string    `json:"path,omitempty"`
+	Installed bool      `json:"installed"`
+	Adapter   bool      `json:"adapter"` // 有结构化状态/续接（兼容旧字段；新代码读 caps）
+	Caps      agentCaps `json:"caps"`    // 启动/忙闲/等用户/动作，到哪一层
+	Install   bool      `json:"install"` // 有 Perch 能代跑的官方安装配方
+	Windows   bool      `json:"windows"` // 这个 agent 在 Windows 上有原生支持
+	Note      string    `json:"note,omitempty"`
+	Calls     int       `json:"calls"`
 }
 
 type magpieSnap struct {
@@ -611,8 +612,9 @@ func scanMagpiePlugins(dir string) magpiePlugins {
 //
 // 探测规则抄 magpie 的 reference.md（第 88 行起那张表）：**看配置文件**，
 // 不看 PATH —— Windows 上装完不重开、PATH 没刷新的情况太常见了。
-// 只有 claude 有 Perch 自己的适配器（main.go 的 agentDefs）；其余的行
-// 如实写「已安装 · 未接入」，而不是假装能一键跑起来。
+// 能不能启动、有没有忙闲、能不能看到“在等你”是三件事，能力由 capsForAgent
+// （agent_status.go）决定。别再拿 agentDefs 里有没有它当“已接入”：通用启动
+// 会给所有有 Bin 的 agent 都注册一条，只代表能开一格。
 //
 // URL 一律是官方安装页/仓库：按钮的动作是"打开下载页"，不是静默安装 ——
 // 在别人机器上替人跑安装脚本，比少一个按钮危险得多。
@@ -661,11 +663,15 @@ var agentCatalogDefs = []agentCatalogDef{
 func scanAgentCatalog(home string) []agentCard {
 	out := make([]agentCard, 0, len(agentCatalogDefs))
 	for _, d := range agentCatalogDefs {
-		_, hasAdapter := agentDefs[d.ID]
+		caps := capsForAgent(d.ID)
 		_, canInstall := installRecipes[d.ID]
 		c := agentCard{
 			ID: d.ID, Name: d.Name, Icon: d.Icon, Vendor: d.Vendor, URL: d.URL,
-			Adapter: hasAdapter, Install: canInstall, Windows: d.Windows, Note: d.Note,
+			// ⚠️ Adapter 不能再从 agentDefs 里查：genericAgentDef 会给所有有 Bin
+			// 的 agent 注册一条“只开新会话”，那会把“能启动”写成“已接入”。
+			// 结构化能力只认 capsForAgent。
+			Adapter: caps.Status || caps.Resume || caps.Actions,
+			Caps:    caps, Install: canInstall, Windows: d.Windows, Note: d.Note,
 		}
 		for _, raw := range d.Paths {
 			p := expandHome(home, raw)

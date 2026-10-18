@@ -553,7 +553,8 @@ function applyLibrary(p) {
 function liveOf(tab) {
   let v = LIVE.get(tab);
   if (!v) {
-    v = { st: "", name: "", at: "", note: null, subs: [], files: [], acts: [] };
+    v = { st: "", name: "", at: "", note: null, wait: null,
+          subs: [], files: [], acts: [] };
     LIVE.set(tab, v);
   }
   return v;
@@ -639,6 +640,19 @@ function scheduleLive() {
   liveRaf = requestAnimationFrame(() => { liveRaf = 0; if (RSB_READY) renderLive(); });
 }
 
+/* 格↔会话的绑定/改写只有一个地方做。hook 那条腿先到，agent 状态那条腿
+   （OpenCode 等）也会带 session；两处各写一遍迟早漂移。 */
+function adoptSession(t, session, why) {
+  if (!session || t.sessionID === session) return;
+  sendCtrl({ type: "log", msg:
+    `格子会话 tab=${t.id} ${t.sessionID ? "改写" : "绑定"} session=` +
+    `${String(session).slice(0, 8)}（${why}）` });
+  t.sessionID = session;
+  // 身份刚到，名字也就有了主语：把名字表里的那份名字播到这一格的头上
+  // （重开之后"左栏改了名、格子头还是 agent 自己写的"就是漏了这一步）
+  seedTabTitles();
+}
+
 function applyHook(m) {
   const tab = m.tab | 0;
   if (tab <= 0) return;                     // 对比窗口（wt）不是格子，不进这一列
@@ -652,15 +666,7 @@ function applyHook(m) {
      但任何一条事件都带着 session）。
      会话**变了**（格内 /clear 换了一条）就改写：这里答的是"现在在跑谁"，旧那条
      已经不在这一格里了（Go 侧 panes.bind 同一时刻也把 Spoke 清掉）。 */
-  if (m.session && t.sessionID !== m.session) {
-    sendCtrl({ type: "log", msg:
-      `格子会话 tab=${t.id} ${t.sessionID ? "改写" : "绑定"} session=` +
-      `${String(m.session).slice(0, 8)}（${m.event}${m.source ? " " + m.source : ""}）` });
-    t.sessionID = m.session;
-    // 身份刚到，名字也就有了主语：把名字表里的那份名字播到这一格的头上
-    // （重开之后"左栏改了名、格子头还是 agent 自己写的"就是漏了这一步）
-    seedTabTitles();
-  }
+  adoptSession(t, m.session, `${m.event}${m.source ? " " + m.source : ""}`);
   const v = liveOf(tab);
   const at = new Date().toISOString();
   v.at = at;
@@ -702,9 +708,11 @@ function applyHook(m) {
     case "SessionStart":
       // 新会话（含 /clear、/compact）⇒ 之前那条"等你"作废。
       v.note = null;
+      v.wait = null;
       break;
     case "SessionEnd":
       v.note = null;
+      v.wait = null;
       break;
     case "SubagentStart": case "SubagentStop": {
       // 钩子给的是 agent_id + agent_type，转录那边给的 Agent 工具调用里有**描述**
@@ -725,10 +733,24 @@ function applyAgent(m) {
   if (tab <= 0) return;
   const t = liveTab(tab);
   if (!t) return;
+  // OpenCode 等外部状态源也会带 session；和 hook 走同一个绑定口。
+  adoptSession(t, m.session, `状态 ${m.agent || "agent"} ${m.status || ""}`.trim());
   const v = liveOf(tab);
   const prev = v.st;
   v.st = m.status || "";
   if (m.name) v.name = m.name;
+  // waiting 的 kind/text 单独留一份：note 只在“没看着它”的时候才写，
+  // 你正看着它时也需要它来决定那一行是“等回答”还是“等批准”。
+  // Claude 的 kind 优先从转录里的 tool 推断；外部状态源没有转录，用消息自带。
+  if (v.st === "waiting") {
+    const pt = pendingTool(v);
+    const k = m.kind ||
+      (pt ? (pt.tool === "AskUserQuestion" ? "ask" : "perm") : "") ||
+      (v.wait && v.wait.kind) || "ask";
+    v.wait = { kind: k, text: m.text || (v.wait && v.wait.text) || "" };
+  } else {
+    v.wait = null;
+  }
   // ⚠️ 从 busy 回到 idle **不**自动进「需要你」：idle 只说"它没在跑"，
   // 说不出"它刚说完了话"——那必须由 hook 说。这条界线是这一整段的地基：
   // 状态（忙/闲）和事件（说过话）是两回事，混起来就会出现
@@ -737,22 +759,28 @@ function applyAgent(m) {
   // ⚠️ 2026-10-16：`waiting` 的**跃迁**才是那个事件（用户定的规矩：记一次，且只记一次）。
   //   ① 进：从"不卡"变成"卡在等你"的那一刻记一条未读 —— 这就是唯一的记账点，
   //      比 hook 早 6 秒。后面到的那条通知被 alreadyBlocked 挡住（见 applyHook）。
-  //      note 里的 text 刻意留空：那一行的文字由 needModel 现取（转录里那句描述
-  //      比 hook 的泛化套话具体，见 needModel 里 text 那行）。
+  //      note 里的 text 由 needModel 现取；外部状态源直接带 text 时就存下来。
   //   ② 出：离开等待 = 这个问题有结局了（你答了/拒了/中断了），那条未读随之作废。
   //      走 ackNote 而不是直接置 null —— "未读自己没了"必须留一行原因，
   //      否则分不出"用户销的"和"代码误销的"（那条规矩见 ackNote）。
   if (prev !== "waiting" && v.st === "waiting") {
     if (!watchedNow(t)) {
-      const pt = pendingTool(v);
-      const k = (pt && pt.tool !== "AskUserQuestion") ? "perm" : "ask";
-      v.note = { kind: k, text: "", at: new Date().toISOString() };
+      v.note = { kind: v.wait.kind, text: v.wait.text, at: new Date().toISOString() };
       // 未读**出现**也要留一行：`[ui need]` 里那个"徽标=1"只说它在了，
       // 说不出是谁、因为什么把它记上的（对称于 ackNote 那条"消失必须留原因"）。
-      sendCtrl({ type: "log", msg: `记未读 tab=${t.id} 因=进入等待（${k}，登记表 waiting）` });
+      sendCtrl({ type: "log", msg:
+        `记未读 tab=${t.id} 因=进入等待（${v.wait.kind}，` +
+        `${m.kind ? (m.agent || "agent 状态") : "登记表 waiting"}）` });
     }
   } else if (prev === "waiting" && v.st !== "waiting") {
     if (v.note && (v.note.kind === "ask" || v.note.kind === "perm")) ackNote(t, "已从等待恢复");
+  } else if (prev === "waiting" && v.st === "waiting" && (m.kind || m.text)) {
+    // 还在等，但问题/权限换了：更新那一行。你正看着它时不补记未读。
+    if (v.note && (v.note.kind === "ask" || v.note.kind === "perm")) {
+      v.note.kind = v.wait.kind;
+      if (m.text) v.note.text = m.text;
+      scheduleLive();
+    }
   }
   if (prev !== v.st) scheduleLive();
 }
@@ -928,7 +956,11 @@ function needModel() {
     const pt = pendingTool(v);   // 挂着的那个工具调用：问题或权限框
     const ask = pendingAsk(v);
     let kind = "";
-    if (v.st === "waiting") kind = (pt && pt.tool !== "AskUserQuestion") ? "perm" : "ask";
+    if (v.st === "waiting") {
+      // 转录里的 tool 最具体（Claude）；没有转录的外部状态源用消息自带的 kind。
+      kind = (pt ? (pt.tool === "AskUserQuestion" ? "ask" : "perm") : "") ||
+        (v.wait && v.wait.kind) || "ask";
+    }
     else if (n) kind = n.kind;
     else if (ask) kind = "ask";
     else if (v.st === "idle") kind = "idle";
@@ -943,7 +975,7 @@ function needModel() {
     //   描述（实测 `Write permtest file`，和屏幕上的权限框一字不差），比 hook 的
     //   "Claude needs your permission" 有用得多。
     const at = (pt && pt.at) || (n && n.at) || (ask && ask.at) || v.at || "";
-    const text = (pt && pt.text) || (n && n.text) || "";
+    const text = (pt && pt.text) || (n && n.text) || (v.wait && v.wait.text) || "";
     rows.push({ t, kind, unread, at, text });
   }
   // 未读的在前（新的在上），没未读的那组按"最后听到它的时刻"排。
