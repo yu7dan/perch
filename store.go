@@ -27,15 +27,15 @@ import (
 // ---------------------------------------------------------------------------
 
 type Session struct {
-	ID         string `json:"id"`
-	Title      string `json:"title"`
-	Slug       string `json:"slug"`
-	Cwd        string `json:"cwd"`
-	Project    string `json:"project"` // 编码目录名：仅用于定位，不展示
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Slug    string `json:"slug"`
+	Cwd     string `json:"cwd"`
+	Project string `json:"project"` // 编码目录名：仅用于定位，不展示
 	// Path 是这份会话文件的绝对路径。C2 的卡片菜单要"打开会话文件 / 在文件夹中
 	// 显示"就得有它 —— 从前端拼不出来：项目目录名是有损 slug（见
 	// transcript.go 的说明），子代理还多一层 subagents\。
-	Path string `json:"path"`
+	Path       string `json:"path"`
 	Branch     string `json:"branch"`
 	Permission string `json:"permission"`
 	Preview    string `json:"preview"`
@@ -74,6 +74,20 @@ type Session struct {
 	// 用途，而它是每次刷新都要全量扫的热路径。
 	LastKind string `json:"lastKind"` // 末尾事件的 type（"assistant" / "user"）
 	LastTool bool   `json:"lastTool"` // 末尾那条事件是一次**没拿到结果**的工具调用
+
+	// days 是这一份文件里每个**本地日期**的用户轮次数（day → 轮次）。
+	// 它不落盘、也不发给前端 —— scanSessions 把它聚合进 ShellPayload.Activity，
+	// 总览的热力图读的是那一份聚合。放在 Session 上只是为了**同一次扫描**里
+	// 顺手算掉：为了日活再把这些 jsonl 读一遍是纯浪费（总量 140MB+）。
+	days map[string]int
+}
+
+// DayActivity 是总览热力图的一格：本地日期 + 当天的轮次 + 当天有几个会话写过东西。
+// 只包含**有轮次**的日期；前端按 53 周铺格子，查不到就是 0。
+type DayActivity struct {
+	Day      string `json:"day"`      // 本地日期 YYYY-MM-DD
+	Turns    int    `json:"turns"`    // 主会话 + 子代理的用户轮次
+	Sessions int    `json:"sessions"` // 当天有轮次的会话/子代理文件数
 }
 
 type HistoryItem struct {
@@ -83,9 +97,9 @@ type HistoryItem struct {
 }
 
 type ShellPayload struct {
-	Sessions []Session `json:"sessions"`
-	History    map[string][]HistoryItem `json:"history"` // key = sessionId
-	StateDir   string                  `json:"stateDir"`
+	Sessions []Session                `json:"sessions"`
+	History  map[string][]HistoryItem `json:"history"` // key = sessionId
+	StateDir string                   `json:"stateDir"`
 	// Cwd 是终端的工作目录。以前它是前端 HTML 里写死的一行文本（#p-path），
 	// 那个副本从来没被更新过；现在由后端给出唯一一份事实，前端渲染到状态栏。
 	Cwd string `json:"cwd"`
@@ -102,6 +116,14 @@ type ShellPayload struct {
 	Assign map[string]string `json:"assign"`
 	// Roots 是"去哪儿找项目"的根目录（发现/扫描的起点，见 projects.go）。
 	Roots []string `json:"roots"`
+	// Activity 是总览热力图的数据：每个有轮次的本地日期一格。
+	// 口径是**用户轮次**（不含压缩摘要、不含命令回显 —— 和「N 轮」同一套判据），
+	// 主会话与子代理都算。只发有活动的日期，前端按 53 周铺格子。
+	Activity []DayActivity `json:"activity"`
+	// Magpie 是本地 magpie 网关的只读读数（见 magpie.go）。它**不在这次扫描里
+	// 现算** —— watcher 在后台每 2.5s 更新一份快照，这里只是把最新那份带上，
+	// 否则 lib.reload 会被网关请求拖住。nil = watcher 还没起来（正常只在测试/首帧）。
+	Magpie *magpieSnap `json:"magpie,omitempty"`
 }
 
 // maxLine 是单行 JSON 的上限。attachment / file-history-snapshot 事件
@@ -110,7 +132,7 @@ type ShellPayload struct {
 const maxLine = 24 << 20
 
 func buildShellPayload(stateDir, cwd string, titles map[string]string) ShellPayload {
-	sessions := scanSessions(stateDir)
+	sessions, activity := scanSessions(stateDir)
 
 	p := ShellPayload{
 		StateDir: stateDir,
@@ -118,6 +140,15 @@ func buildShellPayload(stateDir, cwd string, titles map[string]string) ShellPayl
 		Sessions: sessions,
 		Titles:   titles,
 		History:  make(map[string][]HistoryItem, len(sessions)),
+		Activity: activity,
+		Magpie:   magpieSnapshot(),
+	}
+	if len(activity) > 0 {
+		last := activity[len(activity)-1]
+		log.Printf("[dash] 每日活动：%d 个活跃日，最近 %s 有 %d 轮（%d 个会话）",
+			len(activity), last.Day, last.Turns, last.Sessions)
+	} else {
+		log.Printf("[dash] 每日活动：没有带时间戳的轮次（热力图会是空的）")
 	}
 	// 每个会话都带上历史：点哪张卡就换哪条流。只带第一条的话，
 	// 界面看起来能点其实是死的 —— 那是演示，不是产品。
@@ -148,11 +179,11 @@ func buildShellPayload(stateDir, cwd string, titles map[string]string) ShellPayl
 	return p
 }
 
-func scanSessions(stateDir string) []Session {
+func scanSessions(stateDir string) ([]Session, []DayActivity) {
 	root := filepath.Join(stateDir, "projects")
 	projects, err := os.ReadDir(root)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	var out []Session
 	for _, proj := range projects {
@@ -226,7 +257,28 @@ func scanSessions(stateDir string) []Session {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Updated > out[j].Updated })
-	return out
+
+	/* 日活聚合：把每份文件自己的 day → 轮次 并成一张全局表。
+	   sessions 只在**这份文件当天确实有轮次**时 +1 —— 它是"这一天有几个
+	   会话/子代理写过东西"，不是"这一天启动过几个会话"。 */
+	byDay := make(map[string]*DayActivity, 366)
+	for _, s := range out {
+		for day, n := range s.days {
+			a := byDay[day]
+			if a == nil {
+				a = &DayActivity{Day: day}
+				byDay[day] = a
+			}
+			a.Turns += n
+			a.Sessions++
+		}
+	}
+	activity := make([]DayActivity, 0, len(byDay))
+	for _, a := range byDay {
+		activity = append(activity, *a)
+	}
+	sort.Slice(activity, func(i, j int) bool { return activity[i].Day < activity[j].Day })
+	return out, activity
 }
 
 // indexSession 读一份会话文件，填出一张卡的元信息。
@@ -265,6 +317,16 @@ func indexSession(path, project string, sidechain bool) (Session, bool) {
 	for sc.Scan() {
 		line := sc.Bytes()
 
+		// 这一行的时间戳只解析一次：下面日活聚合要用，lastEventTS 也要用。
+		// （stringField 会整行反序列化，同一行解两遍纯属浪费。）
+		var lineTS string
+		if bytes.Contains(line, []byte(`"timestamp":"`)) {
+			if v := stringField(line, "timestamp"); v != "" {
+				lineTS = v
+				lastEventTS = v
+			}
+		}
+
 		if bytes.Contains(line, []byte(`"type":"user"`)) {
 			/* ⚠️ 上下文压缩行**也是 `"type":"user"`**（它是被折成一页的摘要，
 			   不是你说的一轮）。不摘出来的话「N 轮」会被它一格一格地抬高，
@@ -298,6 +360,14 @@ func indexSession(path, project string, sidechain bool) (Session, bool) {
 				}
 				if !drop {
 					s.Turns++
+					// 日活按**本地日期**归天：UTC 的 23:30 在中国是第二天早上 7:30，
+					// 直接截字符串前 10 位会让跨时区用户的"今天"错一天。
+					if day := localDay(lineTS); day != "" {
+						if s.days == nil {
+							s.days = make(map[string]int, 32)
+						}
+						s.days[day]++
+					}
 					if firstUser == "" {
 						firstUser = extractText(line, "user")
 					}
@@ -324,11 +394,6 @@ func indexSession(path, project string, sidechain bool) (Session, bool) {
 		if bytes.Contains(line, []byte(`"gitBranch":"`)) {
 			if v := stringField(line, "gitBranch"); v != "" {
 				s.Branch = v
-			}
-		}
-		if bytes.Contains(line, []byte(`"timestamp":"`)) {
-			if v := stringField(line, "timestamp"); v != "" {
-				lastEventTS = v
 			}
 		}
 		if bytes.Contains(line, []byte(`"slug":"`)) {
@@ -522,6 +587,21 @@ func stringField(line []byte, key string) string {
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
 		return cleanText(s)
+	}
+	return ""
+}
+
+// localDay 把事件时间戳折成**本地**日期 YYYY-MM-DD。
+// 解析不了就退回字符串前 10 位（那是 UTC 的日期，只作为兜底 —— 别把它当口径）。
+func localDay(v string) string {
+	if v == "" {
+		return ""
+	}
+	if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
+		return t.Local().Format("2006-01-02")
+	}
+	if len(v) >= 10 {
+		return v[:10]
 	}
 	return ""
 }

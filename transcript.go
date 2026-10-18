@@ -484,21 +484,23 @@ func (tr *trace) consumePrompt(raw json.RawMessage, at string) *ActItem {
 	return tr.append(ActItem{Kind: "prompt", Text: ptxt, FullLen: pfull, At: at})
 }
 
-/* consumeCompact 吃一条**上下文压缩**行。
+/*
+consumeCompact 吃一条**上下文压缩**行。
 
-   这是 Claude Code 自带的机制，发生在**一个会话文件的内部**：把此前若干回合
-   折成一页摘要落进转录（`isCompactSummary:true`、`isVisibleInTranscriptOnly:true`，
-   `message.content` 是**字符串**而不是块数组）。它**不是**一次新的会话 ——
-   所以它在界面上是**会话内部的节点**，不是左边栏的一行、也不算一轮。
+	这是 Claude Code 自带的机制，发生在**一个会话文件的内部**：把此前若干回合
+	折成一页摘要落进转录（`isCompactSummary:true`、`isVisibleInTranscriptOnly:true`，
+	`message.content` 是**字符串**而不是块数组）。它**不是**一次新的会话 ——
+	所以它在界面上是**会话内部的节点**，不是左边栏的一行、也不算一轮。
 
-   为什么它非要单独一条 Kind：从前它走 consumePrompt，于是那 17–26KB 的摘要
-   以"你说的一大段话"的样子占满流水，还把 store.go 的「N 轮」抬高一格
-   （那一行同样是 `"type":"user"`）。界面上看着就是"用户打了 2 万字"。
+	为什么它非要单独一条 Kind：从前它走 consumePrompt，于是那 17–26KB 的摘要
+	以"你说的一大段话"的样子占满流水，还把 store.go 的「N 轮」抬高一格
+	（那一行同样是 `"type":"user"`）。界面上看着就是"用户打了 2 万字"。
 
-   ⚠️ **不画 token 数**。计划书里那张 `98k → 21k` 的图是照 Orca 的形态画的，
-   落地时按实测降级了：本机 42 条压缩行里 `compact_metadata` **一次都没出现**。
-   `summarizedTurnPromptUuids` 也不是"吞了几回合"的清单（1 个 / 没有）。
-   所以这里只报两个转录里真有的数：**第几回合**、**距上次压缩几个回合**。 */
+	⚠️ **不画 token 数**。计划书里那张 `98k → 21k` 的图是照 Orca 的形态画的，
+	落地时按实测降级了：本机 42 条压缩行里 `compact_metadata` **一次都没出现**。
+	`summarizedTurnPromptUuids` 也不是"吞了几回合"的清单（1 个 / 没有）。
+	所以这里只报两个转录里真有的数：**第几回合**、**距上次压缩几个回合**。
+*/
 func (tr *trace) consumeCompact(raw json.RawMessage, at string, turn int) *ActItem {
 	var msg struct {
 		Content json.RawMessage `json:"content"`
@@ -978,21 +980,23 @@ func cutRunes(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
-/* msgMax 是**进流水那条路**给单条正文的上限（字符）。
+/*
+msgMax 是**进流水那条路**给单条正文的上限（字符）。
 
-   原来两处写的是 `clip(x, 300)` —— 300 字，而且 clip 把换行压成空格。实测
-   （2026-10-16）：一条 1961 字、17 个换行的回答，到前端只剩 300 字、还并成了
-   一行 —— **85% 的内容根本没送出去**。那不是"没显示"，是"没有"。用户报的
-   "上面文字多的时候下面被吞掉"就是它（300 对正文来说低得离谱）。
+	原来两处写的是 `clip(x, 300)` —— 300 字，而且 clip 把换行压成空格。实测
+	（2026-10-16）：一条 1961 字、17 个换行的回答，到前端只剩 300 字、还并成了
+	一行 —— **85% 的内容根本没送出去**。那不是"没显示"，是"没有"。用户报的
+	"上面文字多的时候下面被吞掉"就是它（300 对正文来说低得离谱）。
 
-   为什么不干脆**不截**：每条新内容只推**新增的那一条**（见 poll 里 push 的是
-   newActs），所以实时那一路的成本只跟单条大小成正比；真正花钱的是**快照** ——
-   `acts.snapshot` 会把内存里**全部**流水序列化一遍（保留上限 maxActs=300），
-   而页面重载、以及"进群组时对每一格各要一份"都会走它 ⇒ 一条 5MB 的回答在那
-   一刻是 5MB × N 格，前端还会把它整段 md() 进 DOM。那不是慢，是界面卡死。
+	为什么不干脆**不截**：每条新内容只推**新增的那一条**（见 poll 里 push 的是
+	newActs），所以实时那一路的成本只跟单条大小成正比；真正花钱的是**快照** ——
+	`acts.snapshot` 会把内存里**全部**流水序列化一遍（保留上限 maxActs=300），
+	而页面重载、以及"进群组时对每一格各要一份"都会走它 ⇒ 一条 5MB 的回答在那
+	一刻是 5MB × N 格，前端还会把它整段 md() 进 DOM。那不是慢，是界面卡死。
 
-   8000 这个档：正常回答 500–3000 字，够装下；真超了也**不许静默** ——
-   带上 FullLen（原文总字数），前端照实说"这里只显示了前 8000"。 */
+	8000 这个档：正常回答 500–3000 字，够装下；真超了也**不许静默** ——
+	带上 FullLen（原文总字数），前端照实说"这里只显示了前 8000"。
+*/
 const msgMax = 8000
 
 // msgText 给正文（agent 的话 / 你的话）用：**保留换行**地截，并回报原文总字数

@@ -1,0 +1,2284 @@
+/* Perch 前端样式（2026-10-17 从 index.html 的 <style> 原样搬出，未改一行规则）。
+   放在独立文件里：改某个模块的样式时不必再在 1 万行的 HTML 里翻找；
+   图标/分隔线/滚动条这些全局规则在文件顶部的「外壳」「分隔条」两段。 */
+/* ===========================================================================
+   形态参照：Orca ADE（stablyai/orca，MIT）
+   三栏 = 导航栏 / 会话列表 / 主区；主区 = 标签条 + 分屏面板；底部 = 状态栏。
+   令牌与尺寸刻意收窄（12–13px、6px 圆角、紧凑行高）—— Orca 的观感来自
+   「信息密度高但呼吸感够」，不是来自大圆角和粗描边。
+   =========================================================================== */
+:root{
+  /* 令牌取自 Orca 深色主题实测值（src/renderer/src/assets/main.css 的 .dark 块）。
+     三处最容易做错的地方：
+       1. 深色下的边框是 **7% 白**，不是某个灰色实色 —— 实色边框会让整个界面发"脏"；
+       2. 应用背景是 #0a0a0a（近黑），而不是常见的 #1a1a1c 一类的"深灰"；
+       3. 终端画面底色 —— **这一条我们刻意偏离了 Orca，见下面的说明。** */
+  --bg:#0a0a0a; --rail:#171717; --side:#171717; --panel:#171717;
+  /* ⚠️ 2026-10-15：终端底色**不再**用 Orca 的 #282c34，改用与画布同一块的 #0a0a0a。
+     Orca 的规格里明确要"终端画面比应用背景亮一档，
+     终端是凸出来的一块面板"，#282c34 就是为这个层级选的 Ghostty Default Style Dark。
+     但用户两次提出「终端那块色和周围的 UI 不搭、有割裂感」：第一次我误判成"pane 被刷成
+     终端色、三块色板拼一起"，只改掉了 pane、没动底色本身，所以问题原样还在。
+     这一轮按用户明确选择**放弃那个层级**：终端直接融进画布，接缝消失。
+     代价（已知并接受）：侧栏 #171717 反而比内容区亮，层级反转 —— 这与 VS Code
+     "编辑器底色就是主区底色"的读法一致，读起来不违和。
+     ⚠️ 改这个值必须**四处同步**：本行、下面 xterm 的 theme.background、
+     theme.cursorAccent、以及 osc_color.go 里的 termBackground。
+     少一处，agent 就会按错误的底色去选自己的配色。 */
+  --term-bg:#0a0a0a; --term-fg:#ffffff;
+  --card:#262626; --card-hov:#353535; --card-sel:rgba(255,255,255,.08);
+  --line:rgba(255,255,255,.07); --line-soft:rgba(255,255,255,.045);
+  --fg:#fafafa; --fg2:#d4d4d4; --muted:#a1a1a1; --faint:#737373;
+  --accent:#1447e6; --green:#86efac; --amber:#eab308; --red:#ff6568; --claude:#e8833a;
+  /* 「等你」那一族橙（C6b 前一批）。**不是 --amber** —— 上面 .adot 那段注释已经把
+     这条界线立住了：黄 = 在干活，橙 = 在等你，混了就分不出"忙"和"该我了"。
+     取值直接照 Orca assets/main.css:344-345 的暗色档：
+       --agent-question      : var(--color-orange-500)   → #f97316
+       --agent-question-text : var(--color-orange-300)   → #fdba74
+     后者是它注释里写明的用法 ——「Tinted 橙底上还能读的正文重量」。 */
+  --ask:#f97316; --ask-text:#fdba74;
+  --ui:"Geist", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  /* 终端字体栈：Cascadia（WT 官方字体，方块/制表符字形齐全）优先，
+     JetBrains Mono 兜底，中文回退给雅黑（**不要用 MS Gothic** —— 它是日文字体，
+     简体字会显示成日文字形，中国用户一眼能看出来）。 */
+  --mono:"Cascadia Code WB","JetBrains Mono WB",Consolas,"Microsoft YaHei","MS Gothic",monospace;
+  --r:10px; --r-sm:4px;   /* Orca: --radius:0.625rem → lg=10px md=8px sm=6px */
+}
+/* 终端字体**随应用走**，不等系统装。
+   这台机器上 Cascadia / JetBrains Mono 一个都没有 —— 之前 fontFamily 里写的
+   Cascadia 一路静默回退到 Consolas（2004 年的字体），那才是"看着不原生"的
+   真凶：不是渲染管线不行，是字本身就不好看。
+   Orca 之所以在任何机器上都长一个样，也是因为它自带字体。 */
+/* 终端字体**随应用走**，不等系统装。
+   这台机器上 Cascadia / JetBrains Mono 一个都没有 —— 之前 fontFamily 里写的
+   Cascadia 一路静默回退到 Consolas（2004 年的字体），那才是"看着不原生"的
+   真凶：不是渲染管线不行，是字本身就不好看。
+   Orca 之所以在任何机器上都长一个样，也是因为它自带字体。
+
+   ⚠️ 必须用**完整字重文件**，不能用 fontsource 那种按 unicode-range 切好的子集：
+   方块元素 U+2580–259F 和制表符 U+2500–257F **不属于 latin/latin-ext/cyrillic
+   任何子集**，用子集字体时这些码位会回退到中文字体，而 CJK 字体把方块字符当
+   **全角**画 —— 宽度翻倍后相邻格子互相重叠，Claude Code 那个像素风 logo
+   就糊成一整块白砖（负空间全被填死了）。 */
+@font-face{font-family:"JetBrains Mono WB";font-style:normal;font-weight:400;
+           font-display:block;src:url("/fonts/jbm-full-400.woff2") format("woff2")}
+@font-face{font-family:"JetBrains Mono WB";font-style:normal;font-weight:700;
+           font-display:block;src:url("/fonts/jbm-full-700.woff2") format("woff2")}
+@font-face{font-family:"JetBrains Mono WB";font-style:italic;font-weight:400;
+           font-display:block;src:url("/fonts/jbm-full-400-it.woff2") format("woff2")}
+/* Cascadia Code —— Windows Terminal 的官方字体，也是 Orca 字体栈里点名的
+   "Cascadia Mono"。Windows 11 把它以**应用内字体**随 Windows Terminal 发布，
+   所以系统字体目录里查不到、别的程序也用不上（我们前面扫过了，确实没有）。
+   它的方块元素 U+2580–259F 与制表符是按终端格子设计的**半格**字形，
+   这正是 Claude Code 像素风 banner 能画出来的前提。 */
+@font-face{font-family:"Cascadia Code WB";font-style:normal;font-weight:200 700;
+           font-display:block;src:url("/fonts/CascadiaCode.woff2") format("woff2")}
+@font-face{font-family:"Cascadia Code WB";font-style:italic;font-weight:200 700;
+           font-display:block;src:url("/fonts/CascadiaCodeItalic.woff2") format("woff2")}
+/* 界面字体：Geist（Orca 的 --app-font-family 首选也是它）。
+   没有中文字形，中文会按老规矩回退到系统字体 —— Orca 在中文环境下同样如此。 */
+@font-face{font-family:"Geist";font-style:normal;font-weight:100 900;font-display:swap;
+           src:url("/fonts/geist-latin-wght-normal.woff2") format("woff2")}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
+          font:13px/1.45 var(--ui);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+/* 滚动条：用户 2026-10-17 的评审 —— 原来 10px/可见 4px 在终端里"太显眼"。
+   8px 槽 + 3px 透明边 = **2px 可见**，hover 才提亮；轨道始终透明。 */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:#2e2e35;border-radius:999px;border:3px solid transparent;
+                          background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:#484852;background-clip:content-box}
+::-webkit-scrollbar-track{background:transparent}
+svg{display:block;flex:none}
+.ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- 外壳 ---------- */
+/* grid 必须显式给行高：隐式行是 auto，会被侧栏内容撑高 ——
+   卡片一多，整行就长到 1960px，主区跟着变高，终端于是拿到一个
+   108 行的尺寸，而实际只有 33 行可见（TUI 按 108 行排版，
+   我们看到的是左上角一小块，字因此"变大"了）。
+   minmax(0,1fr) 把行钉死在容器高度上，内部再用 overflow 自己滚。
+
+   四列：`rail`（132px 导航栏）+ `list`（240px 会话列表）+ `main` + `rsb`。
+
+   ⚠️ 2026-10-16 的一条教训：我一度把 132px 那条导航栏整条删了（把它读成了
+   "层级错了、该并进列表"），用户当场纠正 —— **那是要的两层设计**。
+   该删的不是这一层，是它里面那个「全部会话」导航项和它对应的**平铺视图**
+   （会话在工作区行下面已经有了，同一份数据说两遍）。两层照旧：
+   左边一条窄栏管"去哪一区"，右边一列管"这一区里有什么"。
+
+   ⚠️ C6a：右栏是 grid 的**第四列**（`rsb`），不是中栏的子元素。
+   这一条就是"历史流会被挤扁"那个 bug 的修复本身 —— 它以前长在 #panes 里，
+   和终端抢同一块宽度（`.pane.a` flex-basis + `.pane.b` flex:1），
+   所以 agent 一多、主区一变，它就被切走一块。现在是兄弟列：谁都挤不到谁。
+   右栏宽度 = `--rsb-w`（可拖、可收起为 0，见「右栏」那段）。 */
+#app{position:fixed;left:0;right:0;bottom:24px;top:0;display:grid;
+     /* 2026-10-17：第二列从字面量 240px 换成 --list-w —— 它现在可拖
+        （#list-divider，见「列表↔主区的缝」那段）。**132 那一列仍是字面量**：
+        导航栏不给拖，用户点名的就是这一条。 */
+     /* 2026-10-17：第一列也换成变量 —— 总览里总览↔左栏那条缝可拖（#rail-divider）。
+        默认仍是 132，见 :root 的 --rail-w。 */
+     grid-template-columns:var(--rail-w) var(--list-w) minmax(0,1fr) var(--rsb-w);
+     grid-template-rows:var(--titlebar-h) minmax(0,1fr);
+     grid-template-areas:"tb tb tb tb" "rail list main rsb"}
+
+/* ===========================================================================
+   0. 自绘窗口标题栏（36px）
+   ===========================================================================
+   窗口已经是 Frameless（见 main.go），系统标题栏不再存在，这一条就是窗框。
+
+   尺寸与布局全部来自 Orca：
+     src/renderer/src/app-shell/app-window-chrome.ts
+       WINDOW_CONTROLS_WIDTH  = '138px'   // 3 × 46px 窗口按钮
+       WINDOW_CONTROLS_HEIGHT = '36px'    // 标题栏本身
+     src/main/window/main-window-visual-lifecycle.ts
+       TITLEBAR_CSS_CENTER = 18           // = 36 / 2，标题栏的垂直中心
+     src/renderer/src/assets/main.css `.titlebar` / `.titlebar-left` / `.window-controls*`
+
+   三处细节是照搬而不是自创的：
+     1) 左段用地面的颜色（Orca 用 `--worktree-sidebar`，我们用 --rail/--side），
+        让"标题栏左半 + 侧栏"读成**一个面板**，而不是两个色块拼在一起；
+     2) 右段的 138px 是**占位**，Orca 那边由 Electron 的原生 caption 按钮压在上面，
+        我们这边则由自己画的那三个按钮占据（见 .window-controls）；
+     3) `-webkit-app-region` 换成 Wails 的 `--wails-draggable`（属性继承，
+        所以交互子元素必须显式写 no-drag，否则点不动）。
+   =========================================================================== */
+:root{--titlebar-h:36px;--rail-w:132px}
+#titlebar{grid-area:tb;height:var(--titlebar-h);display:flex;align-items:stretch;
+          position:relative;/* #dash-tabs（绝对居中）的定位基准 */
+          background:var(--side);border-bottom:1px solid var(--line-soft);
+          user-select:none;--wails-draggable:drag}
+/* 左段宽度 = 导航栏 132px，地面同色，右缝与 #rail 的 border-right 对齐
+   （⚠️ 2026-10-16 我一度把这两段并为一段 —— logo 搬进了 .tb-list —— 用户纠正：
+   两层是要的。现在照原样两段，各自的底色和右缝都对得上下面那一列。） */
+.tb-rail{width:var(--rail-w);flex:none;display:flex;align-items:center;gap:8px;padding:0 10px;
+         background:var(--rail);border-right:1px solid var(--line-soft)}
+.tb-rail .mark{width:22px;height:22px;border-radius:999px;background:var(--fg);
+               display:grid;place-items:center;flex:none}
+.tb-rail .tb-name{font-weight:600;font-size:13px;letter-spacing:.2px}
+/* 中段宽度 = 会话列表 240px，地面同色 */
+.tb-list{width:240px;flex:none;background:var(--side);
+         border-right:1px solid var(--line-soft)}
+/* C6a：标题栏在右栏那一列上的切片。地面同色（--side），所以收起时它看起来
+   就是标题栏自己延长过去 —— 不会有"少了一格"的缝。 */
+.tb-rsb{width:var(--rsb-w);flex:none;background:var(--side)}
+/* 预留 3 个窗口按钮的宽度，免得标签条被那层 fixed 覆盖层压住。
+   ⚠️ C8：写死 138px 会让**中栏**的标题条右端短一截 —— 标题栏这条 flex 行是
+   `.tb-rail 132 | .tb-list 240 | #tabs flex:1 | .tb-rsb --rsb-w | 这个 spacer`，
+   于是 `#tabs` 的右沿 = W − rsb-w − 138，而 `#main` 的右沿 = W − rsb-w：
+   钉在 `.tabs-right`（= 面板右上角那颗收起键）上的东西**偏了 138px**，
+   加上 #tabs 自己的 8px 内边距正好是实测的 146px —— 用户说的"太突兀、偏中心"。
+
+   这 138px 该谁出，取决于右栏在不在：`.window-controls` 是 fixed 在**窗口右上**，
+   右栏开着时它落在右栏那一列里面（由 `.tb-rsb` 的宽度覆盖着），此时中栏的右沿
+   就该一直顶到右栏的左沿；只有右栏收起到 0，中栏自己的右端才真的要让出它。
+   一次说清两态：`max(0px, 138 − rsb-w)`。
+   （别把这个 max() 挪到 `.tb-rsb` 上试试 —— 那样右栏收起时会多出一条 --side 色的
+   138px，因为那一格是**画**背景的。） */
+.window-controls-titlebar-spacer{flex:none;width:max(0px, calc(138px - var(--rsb-w)))}
+
+/* 交互子元素必须显式 no-drag：`--wails-draggable` 是**继承**属性，
+   不写的话它们会跟着标题栏一起变成拖拽区，点不动。 */
+#titlebar .tab,#titlebar .tab-add,#titlebar .tabs-right,
+#titlebar .icon-btn,#titlebar .segs{--wails-draggable:no-drag}
+
+/* ---------------------------------------------------------------------------
+   三个窗口按钮 —— 复刻 Windows 11 原生 caption 按钮
+   ---------------------------------------------------------------------------
+   Orca 在 Windows 上**不画**这三个按钮：它用 Electron 的 titleBarStyle:'hidden'，
+   按钮由 Chromium 的 Window Controls Overlay 画，前端只留 138px 空位
+   （就是上面那个 .window-controls-titlebar-spacer）。
+
+   我们在 Wails 里没有 WCO，只能自己画 —— 那就画成同一样东西：
+     · 46 × 36：Orca 的 WINDOW_CONTROLS_WIDTH / HEIGHT 原值（3 × 46 = 138）
+     · 关闭键 hover #c42b1c —— 从 Orca 的 .window-controls-close:hover 抄来的，
+       它本身就是 Windows 11 的关闭键红
+     · 普通 hover 的 6% 白 = Windows 11 caption 按钮的提亮量
+     · 光标是箭头不是手型（原生 caption 按钮不用 pointer，Orca 那条是 Linux 分支的写法）
+
+   ---------------------------------------------------------------------------
+   字形为什么不用 Segoe Fluent Icons 的码位，而是照原生墨迹描线
+   ---------------------------------------------------------------------------
+   一开始这里写的是 `font:10px/1 "Segoe Fluent Icons"` + `&#xE921;/&#xE922;/&#xE8BB;`，
+   看上去是最"正统"的做法（那确实是 Windows 图标语料的码位）。实测下来不对：
+
+     量法：把自绘窗口和原生窗口都截图，在右上角按亮度阈值取**墨迹包围盒**
+     （逐像素量墨迹总量），再逐个字形切簇。
+     原生（记事本，Win11 26200 / 100% DPI）：
+         最小化 10 x 1    最大化 10 x 10    关闭 10 x 10   笔画 1px
+     字体渲染（WebView2）：
+         最小化 12 x 1    最大化 12 x 10    关闭 12 x 10   笔画 2px，纯白
+
+   宽度恒定多 2px、笔画粗一倍 —— 不是字号问题：把同一个字形交给 GDI+ 在
+   10px 下光栅化，得到的**就是** 10 x 10 / 10 x 1，和原生一致。也就是说
+   字体本身没错，是"把字形当文字排版"这条路会带上光栅化加粗。
+   （Windows 自己画 caption 按钮根本不走字体排版，它用 1px 描边的矢量几何。）
+
+   所以这里照着**原生的墨迹**描线：10x10 的方框、1px 的笔画、对角线走
+   geometricPrecision 保留抗锯齿（原生那两条对角线也是抗锯齿的，实测有 `:*:` 这种中间灰），
+   横平竖直的边则用 crispEdges 钉死在整像素上。这样在任何 DPI 下都不会再胖出来。
+   --------------------------------------------------------------------------- */
+.window-controls{position:fixed;top:0;right:0;z-index:9999;display:flex;flex-direction:row;
+                 height:var(--titlebar-h);--wails-draggable:no-drag}
+.wc-btn{width:46px;height:var(--titlebar-h);display:grid;place-items:center;
+        background:transparent;border:none;padding:0;color:#fff;cursor:default;
+        transition:background 100ms,color 100ms}
+.wc-btn:hover{background:rgb(255 255 255 / .06)}
+.wc-btn:active{background:rgb(255 255 255 / .10)}
+.wc-close:hover,.wc-close:active{background:#c42b1c;color:#fff}
+.wc-glyph{display:block;width:10px;height:10px;color:inherit}
+.wc-glyph.off{display:none}
+
+/* ---------- 1. 导航栏（132px，两层设计的左层）----------
+   ⚠️ 2026-10-16：我一度把这一整条删了，用户纠正「两层设计是要的」。
+   现在只少了「全部会话」这一项（和它那个平铺视图一起 —— 会话行已经缩在工作区
+   行下面了，同一份数据不再说两遍）：栏里剩「工作区」和灰着的「设置」。
+   整条栏仍然由 JS 按 NAV_ITEMS 那份清单渲染（见 renderNav）。 */
+#rail{grid-area:rail;background:var(--rail);border-right:1px solid var(--line-soft);
+      display:flex;flex-direction:column;padding:10px 8px;gap:2px;user-select:none}
+.nav{display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:var(--r);
+     color:var(--fg2);font-size:12.5px}
+.nav:hover{background:var(--card-hov);color:var(--fg)}
+.nav.on{background:var(--card);color:var(--fg);font-weight:500}
+.nav .cnt{margin-left:auto;font:11px/1 var(--mono);color:var(--faint)}
+.rail-sep{height:1px;background:var(--line-soft);margin:8px 2px}
+.rail-cap{font-size:10.5px;color:var(--faint);letter-spacing:.6px;text-transform:uppercase;
+          padding:4px 8px 2px;display:flex;align-items:center}
+.rail-cap .b{margin-left:auto;font:11px/1 var(--mono);color:var(--muted)}
+.rail-spacer{flex:1}
+
+/* ---------- 1b. 总览（Dashboard）----------
+   形态是用户 2026-10-17 定的：启动即总览；**除了左侧那条可拖的导航栏，
+   其他部分整块都是总览** —— 会话列表、终端网格、右栏一起退场。
+   做法是 grid 列**保持正常**，主区/列表/右栏 visibility:hidden，#dash 盖在上面；
+   不用 display:none，因为 PTY 的起始尺寸靠前端首帧 resize（见下段）。
+
+   模块切换在窗口顶栏里，照 magpie 的 .seg：
+     · 绝对居中在窗口上，没有灰底轨道，只有**活动项底下那一枚白片**（.thumb）；
+     · 白片用 Web Animations 从旧位置滑到新位置（280ms，magpie 的曲线原值）；
+     · 未活动项 hover 只提亮文字，按下缩到 .96 —— 都是它的原样。
+   =========================================================================== */
+/* dash 模式**不收缩 grid 列**：终端留在下面按真实尺寸布局，只是不可见。
+   为什么不能用 display:none（2026-10-17）：PTY 的起始尺寸来自前端首帧 resize
+   （pushSize/settle 在 0 尺寸时直接 return）；主区一 display:none，Go 只能等
+   1.5s 后按 80x24 兜底启动，切回工作区时 CLI 再重画一遍开场。
+   visibility:hidden 保留布局尺寸、去掉绘制/命中/焦点 —— 首屏是总览，agent
+   仍按真实列/行起来。 */
+#app.dash #list,
+#app.dash #main,
+#app.dash #rsb{visibility:hidden}
+#app.dash #tabs,
+#app.dash .tb-list,
+#app.dash .tb-rsb{display:none}
+#dash{grid-column:2 / -1;grid-row:2;display:none;flex-direction:column;
+      position:relative;z-index:5;min-width:0;min-height:0;background:var(--bg)}
+#app.dash #dash{display:flex}
+
+/* 模块切换在窗口顶栏里：不占 flex 空间，所以顶栏其余部分照旧可拖窗。
+   ⚠️ 水平基准是**总览版面**（左栏右沿 → 窗口右沿），不是整窗：左栏占着
+   132~320px，按 left:50% 居中的话会偏左 railW/2（用户 2026-10-17 明确纠正）。
+   (W + railW)/2 = railW + (W - railW)/2；--rail-w 是变量，拖左栏时同一帧
+   跟着走，thumb 坐标相对 .segs，不受盒子整体平移影响。
+   源码里它**没有灰色轨道**（magpie app.css:229 的注释），只有活动项底下那一枚
+   白片；网站截图里那种轨道是旧样式，以源码为准。 */
+.segs{position:absolute;left:calc((100% + var(--rail-w)) / 2);top:50%;
+      transform:translate(-50%,-50%);display:none;padding:2px;border-radius:8px}
+#app.dash .segs{display:inline-flex}
+.segs .opt{position:relative;z-index:1;white-space:nowrap;height:24px;padding:0 12px;
+           border-radius:6px;font-size:12.5px;color:var(--muted);
+           transition:color .18s cubic-bezier(.2,.8,.2,1),
+                      transform .14s cubic-bezier(.2,.8,.2,1)}
+.segs .opt.on{color:var(--fg)}
+.segs .opt:hover:not(.on){color:var(--fg2)}
+.segs .opt:active{transform:scale(.96)}
+/* 位移用 transform（magpie 的 thumbAt 同一套）：动画中途再点才能从"当前视觉
+   位置"重新定向；left/width 那种写法读不回来。 */
+.segs .thumb{position:absolute;top:2px;bottom:2px;left:0;width:0;border-radius:6px;
+             background:rgba(255,255,255,.15);
+             box-shadow:inset 0 .5px 0 rgba(255,255,255,.08),
+                        0 1px 2px rgba(0,0,0,.3);
+             transform:translateX(0);transition:opacity .15s;
+             pointer-events:none}
+.segs .thumb.still{transition:none}
+/* 刷新按钮跟 magpie 的 actions 一样贴在窗口按钮左侧，垂直居中。 */
+#dash-refresh{position:absolute;right:calc(138px + 8px);top:50%;
+              transform:translateY(-50%);display:none}
+#app.dash #dash-refresh{display:grid}
+@media (prefers-reduced-motion:reduce){
+  .segs .opt{transition:none}
+}
+
+/* 总览/网关是**页面**，不是页面里的一张卡：整块面直接贴到窗口内容区，
+   没有外层的 padding + max-width + 圆角边框（用户 2026-10-17 的评审：
+   "你在窗口里面又放一个窗口"）。分隔只靠 1px 头发丝线。 */
+.dash-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0}
+.dash-wrap{width:100%;max-width:none;margin:0;min-height:100%}
+/* 换页时整页淡入 + 挪 5px —— magpie 的 .view 动画原值（.24s）。 */
+.dash-pane{display:flex;flex-direction:column;gap:0;min-height:100%;
+           animation:dash-in .24s cubic-bezier(.2,.8,.2,1)}
+.dash-pane[hidden]{display:none}
+@keyframes dash-in{from{opacity:0;transform:translateY(5px)}}
+@media (prefers-reduced-motion:reduce){.dash-pane{animation:none}}
+
+/* ---------- 总览：操作台 ----------
+   用户 2026-10-17 的评审："卡片感太重，要有操作台的感觉"。
+   做法是**一整块面 + 头发丝分隔**，而不是一摞各自带边框的圆角卡：
+   所有模块共用同一层 --panel 背景，模块之间只画 1px 线，读数之间用竖线。
+   信息密度上来了，视觉噪音反而更低 —— 这是 magpie 的 .stats/.led 同一套语言。 */
+.console{background:var(--panel);border:0;border-radius:0;
+         flex:1;min-height:100%;display:flex;flex-direction:column;min-width:0}
+.console-bar{display:flex;align-items:center;gap:8px;padding:9px 20px;min-height:38px;
+             border-bottom:1px solid var(--line-soft);background:rgba(0,0,0,.14);
+             font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden}
+.console-bar .brand{display:flex;align-items:center;gap:6px;color:var(--fg2);flex:none}
+.console-bar .brand img,.console-bar .brand .logo{width:15px;height:15px;display:block}
+.console-bar .brand b{font-size:12px;color:var(--fg);font-weight:600}
+.console-bar .dot{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
+.console-bar .dot.on{background:var(--green);box-shadow:0 0 0 3px rgba(134,239,172,.14)}
+.console-bar .dot.warn{background:var(--ask)}
+.console-bar .sep{color:var(--line)}
+.console-bar .right{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--faint);
+                    font-variant-numeric:tabular-nums;overflow:hidden}
+.console-bar .right b{color:var(--fg2);font-weight:600}
+.console-bar .ws-stat{color:var(--faint);font-variant-numeric:tabular-nums}
+.console-bar .ws-stat b{color:var(--fg2);font-weight:600}
+/* 总览顶行的两个动作。做成按钮而不是链接：它们是这一页仅有的"离开/新建"手势。 */
+.ws-act{font-size:11.5px;color:var(--fg2);border:1px solid var(--line);border-radius:6px;
+        padding:4px 11px;background:var(--card);flex:none;cursor:pointer;white-space:nowrap}
+.ws-act:hover{border-color:var(--fg2);color:var(--fg)}
+.ws-act.primary{background:rgba(255,255,255,.10);color:var(--fg);border-color:var(--line)}
+.console-kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));
+              border-bottom:1px solid var(--line-soft)}
+.ck{padding:11px 16px 10px;border-left:1px solid var(--line-soft);min-width:0}
+.console-kpis .ck:first-child{padding-left:20px}
+.console-kpis .ck:last-child{padding-right:20px}
+.ck:first-child{border-left:0}
+.ck b{display:block;font-size:20px;font-weight:600;letter-spacing:-.01em;line-height:1.15;
+      font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ck span{display:block;font-size:10.5px;font-weight:600;letter-spacing:.06em;
+         text-transform:uppercase;color:var(--muted);margin-top:4px}
+.ck small{display:block;font-size:10.5px;color:var(--faint);margin-top:3px;
+          white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+          font-variant-numeric:tabular-nums}
+.ck .bad{color:var(--red)}
+.console-cols{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(300px,.85fr)}
+.console-main{position:relative;padding:14px 20px;min-width:0;
+              border-right:1px solid var(--line-soft)}
+.console-side{display:flex;flex-direction:column;min-width:0}
+.side-block{padding:12px 20px 13px;border-top:1px solid var(--line-soft);min-width:0}
+.side-block:first-child{border-top:0}
+.console-foot{padding:14px 20px 18px;border-top:1px solid var(--line-soft)}
+.mod-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;
+          margin-bottom:8px}
+.mod-head b{font-size:12px;font-weight:600;letter-spacing:.01em}
+.mod-head .sub{display:block;font-size:10.5px;color:var(--muted);margin-top:2px;
+               font-variant-numeric:tabular-nums}
+.mod-head .note{font-size:10.5px;color:var(--faint);align-self:center}
+.mini-segs{display:inline-flex;gap:1px;padding:1px;border-radius:6px;
+           background:rgba(255,255,255,.04);flex:none}
+.mini{padding:2px 8px;border-radius:5px;font-size:10.5px;color:var(--muted)}
+.mini:hover{color:var(--fg2)}
+.mini.on{background:rgba(255,255,255,.11);color:var(--fg)}
+@media (max-width:1100px){.console-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .ck:nth-child(4){border-left:0}.ck:nth-child(-n+3){border-bottom:1px solid var(--line-soft)}}
+@media (max-width:980px){.console-cols{grid-template-columns:1fr}
+  .console-main{border-right:0;border-bottom:1px solid var(--line-soft)}}
+@media (max-width:640px){.console-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ck:nth-child(odd){border-left:0}.ck{border-bottom:1px solid var(--line-soft)}}
+
+/* 实时请求：一条一行，绿/红点是结果；这是整页"在动"的那一块。 */
+.live-now{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--fg2);
+          padding:2px 0 7px}
+.live-now b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums}
+.live-now .spin{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--accent);
+                border-top-color:transparent;animation:spin .8s linear infinite;flex:none}
+.live-now .dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex:none}
+.live-now.idle{color:var(--faint)}
+.live-row{display:flex;align-items:center;gap:7px;padding:5px 0;
+          border-top:1px solid var(--line-soft);font-size:11px;min-width:0}
+.live-row .st{width:6px;height:6px;border-radius:50%;background:var(--green);flex:none}
+.live-row .st.bad{background:var(--red)}
+.live-row .who{display:flex;align-items:center;gap:5px;min-width:0;color:var(--fg2);flex:none;
+               max-width:44%}
+.live-row .who .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.live-row .to{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+              color:var(--muted)}
+.live-row .ms{margin-left:auto;font:10px var(--mono);color:var(--faint);flex:none;
+              font-variant-numeric:tabular-nums}
+.live-row .ms.bad{color:var(--red)}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Agent 接线台：三列，logo 30px 是主角。
+   2026-10-17 用户定的分界线是「有没有下载」：只展开本机检测到的，按
+   「已接入 / 未接入」分组；未检测到的收进下面那条 magpie 式的折叠栏。
+   行与行、列与列之间只用头发丝线分隔，和上面的操作台是同一层语言。 */
+#dash-agent-list{display:flex;flex-direction:column;min-width:0}
+.roster{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));min-width:0}
+.ag-group{display:flex;align-items:center;gap:8px;padding:13px 0 7px;
+          font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+          color:var(--muted)}
+.ag-group span{font-weight:500;letter-spacing:0;text-transform:none;color:var(--faint);
+               font-variant-numeric:tabular-nums}
+.ag{display:flex;align-items:center;gap:11px;height:56px;min-width:0;padding-right:12px;
+    border-bottom:1px solid var(--line-soft)}
+.ag:nth-child(3n+2),.ag:nth-child(3n+3){border-left:1px solid var(--line-soft);padding-left:13px}
+.ag .ico-img,.ag .ico-mask{width:30px;height:30px}
+.ag .who{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+.ag .nm{font-size:12.5px;font-weight:500;color:var(--fg);white-space:nowrap;
+        overflow:hidden;text-overflow:ellipsis}
+.ag .sub{font-size:10.5px;color:var(--faint);white-space:nowrap;overflow:hidden;
+         text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.ag .st{font-size:10.5px;color:var(--muted);white-space:nowrap;flex:none}
+.ag .st.ok{color:var(--green)}
+.ag .st.off{color:var(--faint)}
+.ag .dl{font-size:10.5px;color:var(--fg2);border:1px solid var(--line);
+        border-radius:6px;padding:3px 9px;background:var(--card);flex:none}
+.ag .dl:hover{border-color:var(--fg2);color:var(--fg)}
+/* 2026-10-18：已检测到的行 = 打开右侧配置抽屉的入口。
+   网关那个点只有拿到 magpie 的 agent 列表后才画（灰 = 未接入，绿 = 已接入）。 */
+.ag.cfg{cursor:pointer;border-radius:4px}
+.ag.cfg:hover{background:rgba(255,255,255,.035)}
+.ag.cfg:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
+.ag .gwdot{display:inline-block;width:5px;height:5px;margin-left:6px;border-radius:999px;
+           background:#4a4a52;vertical-align:1px}
+.ag .gwdot.on{background:var(--green);box-shadow:0 0 0 2px rgba(134,239,172,.14)}
+.ag .ag-cfg-chev{margin-left:6px;color:#4a4a52;font-size:14px;line-height:1;flex:none}
+.ag.cfg:hover .ag-cfg-chev{color:var(--muted)}
+
+/* "显示 N 个未检测到的" —— magpie agents 页那条 fold 的同一形态：
+   一行居中文字 + 会转的 chevron，展开用 grid-template-rows 0fr→1fr
+   （高度能动、不需要先量内容，也不会把上面的行挤跳）。 */
+.agent-more{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;
+            margin-top:12px;padding:9px 0 4px;border-top:1px solid var(--line-soft);
+            font-size:11px;color:var(--muted);background:transparent;cursor:pointer}
+.agent-more:hover{color:var(--fg2)}
+.agent-more .chev{font-size:9px;transition:transform .18s ease}
+.agent-more.open .chev{transform:rotate(180deg)}
+.agent-fold{display:grid;grid-template-rows:0fr;transition:grid-template-rows .22s ease;
+            overflow:hidden}
+.agent-fold>div{min-height:0;overflow:hidden}
+.agent-fold.open{grid-template-rows:1fr}
+@media (max-width:1100px){.roster{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ag:nth-child(3n+2),.ag:nth-child(3n+3){border-left:0;padding-left:0}
+  .ag:nth-child(2n){border-left:1px solid var(--line-soft);padding-left:13px}}
+@media (max-width:700px){.roster{grid-template-columns:1fr}
+  .ag:nth-child(2n){border-left:0;padding-left:0}}
+
+/* 行内安装控制台：点「安装」之后原地下沉一条日志，不弹窗、不跳浏览器。
+   它是一个终端（等宽、黑底、可滚），不是又一张圆角卡。 */
+.inst{margin-top:12px;padding-top:11px;border-top:1px solid var(--line-soft)}
+.inst[hidden]{display:none}
+.inst-head{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted)}
+.inst-head b{color:var(--fg);font-weight:600}
+.inst-head .dot{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
+.inst-head .dot.on{background:var(--green)}
+.inst-head .dot.bad{background:var(--red)}
+.inst-head .inst-btn{margin-left:auto;font-size:10.5px;color:var(--fg2);background:none;
+  border:1px solid var(--line);border-radius:6px;padding:2px 8px;cursor:pointer}
+.inst-head .inst-btn:hover{border-color:var(--fg2);color:var(--fg)}
+.inst-head .inst-btn[hidden]{display:none}
+.inst-log{margin:8px 0 0;max-height:220px;overflow:auto;padding:9px 11px;
+  background:#08080a;border:1px solid var(--line-soft);border-radius:6px;
+  font:11px/1.55 var(--mono);color:var(--fg2);white-space:pre-wrap;
+  word-break:break-all;tab-size:2}
+
+/* 图标：彩色图标走 <img>，单色图标走 CSS mask（跟着主题前景色走）。
+   这是 magpie 的 resolver 规则：文件名带 -color 或位图 = img，其余 = mask。 */
+.ico-img{width:17px;height:17px;object-fit:contain;flex:none;display:block}
+.ico-mask{width:17px;height:17px;flex:none;display:block;background:currentColor;
+          -webkit-mask-size:contain;mask-size:contain;-webkit-mask-repeat:no-repeat;
+          mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center}
+.ico-img.sm,.ico-mask.sm{width:14px;height:14px}
+.ico-img.xs,.ico-mask.xs{width:12px;height:12px}
+
+/* 53 周热力图（magpie 的 .led-heat / .heat-grid）：周一在最上、月份在顶行。
+   格子随卡片宽度长，太窄时在卡片里横向滚 —— 不把整页撑宽。 */
+.heat-scroll{overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;
+             padding-bottom:2px}
+.heat-grid{position:relative;display:grid;
+           grid-template-columns:auto repeat(53,minmax(10px,1fr));
+           grid-template-rows:auto repeat(7,auto);gap:3px;
+           min-width:min-content;max-width:calc(56px + 53 * 21px);
+           font-size:10px;color:var(--muted)}
+.heat-grid .mo{grid-row:1;white-space:nowrap;overflow:hidden;line-height:1.25;
+               padding-bottom:2px;font-size:10.5px}
+.heat-grid .wd{grid-column:1;display:flex;align-items:center;justify-content:flex-end;
+               padding-right:6px;line-height:1;white-space:nowrap}
+.heat-grid i{aspect-ratio:1;min-width:0;border-radius:3px;
+             background:rgba(255,255,255,.055)}
+.heat-grid i.fut{background:transparent}
+/* 四档强度：蓝，不是绿 —— 绿在这个界面里是"成功/正常"的语义（.pill.g、--green），
+   热力图说的是"有多忙"，两者不能混。 */
+.heat-grid i.lv1,.heat-foot .sw.lv1{background:#1b2a55}
+.heat-grid i.lv2,.heat-foot .sw.lv2{background:#24409b}
+.heat-grid i.lv3,.heat-foot .sw.lv3{background:#2e5cd8}
+.heat-grid i.lv4,.heat-foot .sw.lv4{background:#5b8bff}
+.heat-grid i:hover{outline:1px solid var(--fg2);outline-offset:-1px}
+.heat-foot{display:flex;align-items:center;justify-content:flex-end;gap:4px;
+           margin-top:6px;font-size:10.5px;color:var(--faint)}
+.heat-foot .sw{width:9px;height:9px;border-radius:2px;background:rgba(255,255,255,.055)}
+.heat-tip{position:absolute;z-index:20;display:flex;flex-direction:column;gap:2px;
+          padding:6px 9px;background:var(--card);border:1px solid rgba(255,255,255,.1);
+          border-radius:8px;box-shadow:0 12px 30px rgba(0,0,0,.5);font-size:11.5px;
+          white-space:nowrap;pointer-events:none;font-variant-numeric:tabular-nums}
+.heat-tip[hidden]{display:none}
+.heat-tip b{font-weight:600;color:var(--fg)}
+.heat-tip span{color:var(--muted)}
+
+/* 热力图下面那两块读数（token 构成 / 最近耗时）：同一块操作台上用头发丝分节，
+   不再长出新的圆角卡片。 */
+.console-sub{margin-top:12px;padding-top:10px;border-top:1px solid var(--line-soft)}
+.mix-bar{display:flex;height:10px;border-radius:3px;overflow:hidden;
+         background:rgba(255,255,255,.055)}
+.mix-bar i{display:block;height:100%;min-width:0}
+.mix-bar i.cache{background:#3b6ef5}
+.mix-bar i.input{background:#6e7a8c}
+.mix-bar i.output{background:#3fb950}
+.mix-bar i.write{background:#a371f7}
+.mix-legend{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:7px;
+            font-size:10.5px;color:var(--muted)}
+.mix-legend span{display:flex;align-items:center;gap:5px;white-space:nowrap}
+.mix-legend i{width:7px;height:7px;border-radius:2px;flex:none}
+.mix-legend b{color:var(--fg2);font-weight:600;font-variant-numeric:tabular-nums}
+.mix-legend em{font-style:normal;color:var(--faint);font-variant-numeric:tabular-nums}
+.lat-bars{display:flex;align-items:flex-end;gap:3px;height:44px}
+.lat-empty{font-size:11px;color:var(--faint);align-self:center}
+.lat-bars i{flex:1;min-width:2px;min-height:2px;border-radius:2px 2px 0 0;
+            background:#2f6fe0}
+.lat-bars i.bad{background:var(--red)}
+.lat-bars i:hover{outline:1px solid var(--fg2);outline-offset:1px}
+
+/* 「在等你」：读的是右栏「需要你」**同一个模型**（needModel），不是另算一份。
+   右栏在这个视图里是退场的，所以同一份数据不会在同一屏说两遍。 */
+#dash-need-card .vlist{max-height:300px;overflow-y:auto}
+#dash-need-card .empty{padding:16px 8px;font-size:12px;line-height:1.6;color:var(--faint)}
+
+.dash-note{margin:12px 0 0;font-size:11.5px;line-height:1.6;color:var(--faint)}
+.dash-empty{margin-top:12px;padding:22px 16px;border:1px dashed var(--line);
+            border-radius:10px;color:var(--faint);font-size:12px;line-height:1.65;
+            text-align:center}
+/* 网关页的手写样式随实现一起删除（用户 2026-10-18）：
+   页面现在是 magpie 自己的界面（同源反代的 iframe），样式在它自己的 app.css 里。
+   这里只留总览 Agent 名单仍在用的空态。 */
+.gw-empty{padding:26px 16px;text-align:center;color:var(--faint);font-size:12px;
+          line-height:1.7}
+
+/* 网关页的其余样式（控制面卡片、表单、表格）已随手写实现删除；
+   安装/接入卡自己的几条规则在 gw.css。 */
+
+/* ---------- 2. 会话列表 ---------- */
+#list{grid-area:list;background:var(--side);border-right:1px solid var(--line-soft);
+      display:flex;flex-direction:column;min-width:0}
+.list-head{display:flex;align-items:center;gap:6px;padding:12px 12px 8px}
+.list-head h1{margin:0;font-size:13px;font-weight:600;letter-spacing:.2px}
+.icon-btn{width:22px;height:22px;border-radius:var(--r-sm);display:grid;place-items:center;
+          color:var(--muted)}
+.icon-btn:hover{background:var(--card-hov);color:var(--fg)}
+.search{margin:0 10px 8px;display:flex;align-items:center;gap:7px;padding:5px 8px;
+        background:var(--card);border:1px solid var(--line-soft);border-radius:var(--r);
+        color:var(--muted);font-size:12.5px}
+.search input{flex:1;min-width:0;background:none;border:0;outline:none;color:var(--fg);
+              font:12.5px var(--ui)}
+.search input::placeholder{color:var(--faint)}
+.search .kbd{font:10.5px/1 var(--mono);color:var(--faint);border:1px solid var(--line);
+             border-radius:3px;padding:2px 4px}
+.grp{display:flex;align-items:center;gap:6px;padding:9px 12px 5px;
+     font-size:11.5px;color:var(--muted);user-select:none}
+.grp .b{margin-left:auto;font:11px/1 var(--mono);color:var(--faint)}
+.scroll{overflow-y:auto;overflow-x:hidden;padding:0 8px 12px;min-height:0}
+/* C2 起卡片是 <div role="button">，不再是 <button> —— 里面要塞按钮，
+   而 button 不能嵌套 button（HTML 解析器会当场把内层那颗吐到外面去）。
+   cursor:pointer 得自己写：鼠标指针那点手感就是"这卡能点"的全部提示。 */
+.card{width:100%;display:block;text-align:left;background:var(--card);
+      border:1px solid transparent;border-radius:var(--r);padding:8px 9px 8px;
+      margin-bottom:5px;cursor:pointer;transition:background .1s,border-color .1s}
+.card:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
+.card:hover{background:var(--card-hov)}
+.card.sel{background:var(--card-sel);border-color:#3d3d47}
+.card .t{font-size:12.5px;font-weight:500;color:var(--fg);display:flex;align-items:center;gap:6px}
+.card .t .nm{min-width:0;flex:1}
+.card .r2{display:flex;align-items:center;gap:6px;margin-top:5px;min-width:0;overflow:hidden}
+/* 列宽 240px 时「目录 + 分支 + 权限」三个 chip 一定会超；
+   min-width:0 + flex-shrink 让目录名先省略，而不是把右边的 chip 直接挤出去。 */
+.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:1px 6px;
+      border-radius:var(--r-sm);font:11px/1.5 var(--mono);color:var(--fg2);
+      background:#2c2c33;border:1px solid #33333b;flex:0 1 auto;min-width:0}
+.chip.br{color:var(--green);background:#1d2a20;border-color:#27402c}
+.chip.warn{color:var(--amber);background:#2b2418;border-color:#3d3320}
+.chip .x{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card .p{margin-top:6px;font-size:11.5px;color:var(--muted);line-height:1.4}
+.card .r3{display:flex;align-items:center;gap:6px;margin-top:6px;color:var(--faint);
+          font:10.5px/1 var(--mono)}
+.card .r3 .t2{margin-left:auto}
+/* ---------- 卡片行尾的动作（C2）----------
+   常驻一颗 ⋯，主动作「接上」在 hover / 键盘聚焦时才浮出来。
+   这一段照 Orca 的 SessionRowTrailingActions.tsx:27-40 搬，三个细节缺一不可：
+
+   · **收起时不只 opacity:0，还要 pointer-events:none** —— 不可见的按钮必须同时
+     不可点，否则它会吃掉标题右边那一片的点击。症状是"点卡片没反应"，这类最难查。
+   · 两个触发条件都要：`:hover` 给鼠标，`:focus-within` 给键盘（Tab 到它才看得见）。
+   · 触屏（@media hover:none）没有 hover 这回事 —— 那里必须常显，否则永远摸不到。
+
+   用 max-width 而不是 display 做收起：display 是阶跃的，过渡不起来，
+   那一下浮现会"啪"地跳出来。 */
+.cardacts{display:flex;align-items:center;gap:2px;flex:none}
+.cardacts .hgroup{display:flex;align-items:center;gap:2px;
+  max-width:0;margin-left:-1px;overflow:hidden;opacity:0;pointer-events:none;
+  transition:max-width .12s ease,margin .12s ease,opacity .12s ease}
+.card:hover .cardacts .hgroup,
+.card:focus-within .cardacts .hgroup{max-width:none;margin-left:0;
+  overflow:visible;opacity:1;pointer-events:auto}
+@media (hover:none){
+  .cardacts .hgroup{max-width:none;margin-left:0;overflow:visible;opacity:1;
+    pointer-events:auto}
+}
+.cardbtn{display:flex;align-items:center;justify-content:center;flex:none;
+  width:20px;height:20px;padding:0;border:0;border-radius:5px;background:transparent;
+  color:var(--faint);cursor:pointer}
+.cardbtn:hover{background:#3a3a42;color:var(--fg)}
+/* 「接不上」的灰态：**灰但仍然可点**，点一下把原因用 toast 说出来。
+   不用 disabled 属性 —— 禁用元素在 Chromium 里不显示 title（tooltip），
+   于是"为什么灰"这件事就没有出口了，用户只能看到一颗点不动的死按钮。 */
+.cardbtn.na{color:#4a4a52;cursor:default}
+.cardbtn.na:hover{background:transparent;color:#4a4a52}
+/* 卡片行尾那颗 `›` 没有了：它原来只是"这卡能点"的装饰，现在行尾是实打实的
+   动作按钮，再留一颗指示符会让两件事长得一样。功能没变（点卡身 = 下段切到这条
+   会话），见 cardHTML 的注释。 */
+
+
+/* ---------- 卡片动作菜单（C2）----------
+   一份数据、三个出口：hover 上的 ▶、常驻的 ⋯、右键卡片。Orca 是四个出口共用
+   同一份 SessionActionMenuItems（AiVaultSessionRow.tsx:145-282 等），
+   我们三处都调 openCardMenu()。 */
+#cardmenu{position:fixed;z-index:60;min-width:196px;padding:4px;display:none;
+  background:#232329;border:1px solid #33333c;border-radius:8px;
+  box-shadow:0 8px 24px rgba(0,0,0,.45)}
+#cardmenu.on{display:block}
+#cardmenu .mi{display:flex;align-items:center;gap:7px;width:100%;padding:5px 8px;
+  border:0;border-radius:5px;background:transparent;color:var(--fg);
+  font-size:12px;text-align:left;cursor:pointer}
+#cardmenu .mi:hover{background:#33333c}
+/* 同 .cardbtn.na：做灰不做禁（禁了 title 就不弹了）。 */
+#cardmenu .mi.na{color:#5a5a63}
+#cardmenu .mi.na:hover{background:#2b2b32;color:#8a8a93}
+#cardmenu .mi svg{flex:none;opacity:.8}
+#cardmenu .sep{height:1px;margin:4px 6px;background:#33333c}
+#cardmenu .mhead{padding:4px 8px 5px;color:var(--faint);font:10.5px/1.4 var(--mono);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- 「开一个 agent」选择面板（2026-10-17）----------
+   标签条那颗 + 原来是一按就起一个默认工作区的 claude —— 用户要的是**先选**
+   （新会话在哪开 / 接上哪条历史）。面板挂在 + 下面，表面照 #cardmenu：
+   同一套浮层语言，一眼看得出它是从 + 长出来的。 */
+/* Agent 配置抽屉（总览 → Agent 名单 → 点一行；2026-10-18）。
+   右侧 fixed：标题栏之下、状态栏之上，**不占主区布局** —— 终端尺寸不动。
+   内容由 88-agent-cfg.js 现填；壳只有头（图标/名字/配置路径/关闭）。 */
+#agentcfg{position:fixed;z-index:66;right:0;top:var(--titlebar-h);bottom:24px;width:420px;
+          display:none;flex-direction:column;background:var(--panel);
+          border-left:1px solid var(--line);box-shadow:-20px 0 48px rgba(0,0,0,.45);
+          animation:ac-in .18s cubic-bezier(.2,.8,.2,1)}
+#agentcfg.on{display:flex}
+@keyframes ac-in{from{transform:translateX(14px);opacity:0}to{transform:none;opacity:1}}
+#agentcfg .ac-head{display:flex;align-items:center;gap:10px;padding:12px 14px;flex:none;
+                   border-bottom:1px solid var(--line-soft)}
+#agentcfg .ac-ico{width:26px;height:26px;flex:none;display:grid;place-items:center}
+#agentcfg .ac-ico .ico-img,#agentcfg .ac-ico .ico-mask{width:26px;height:26px;display:block}
+#agentcfg .ac-id{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+#agentcfg .ac-id b{font-size:13px;font-weight:600}
+#agentcfg .ac-path{font:10px/1.4 var(--mono);color:var(--faint);white-space:nowrap;
+                   overflow:hidden;text-overflow:ellipsis}
+#agentcfg .ac-x{flex:none;width:24px;height:24px;display:grid;place-items:center;border:0;
+                border-radius:6px;background:transparent;color:var(--muted);cursor:pointer}
+#agentcfg .ac-x:hover{background:#33333c;color:var(--fg)}
+#agentcfg .ac-body{flex:1;overflow:auto;padding:12px 14px 18px;
+                   display:flex;flex-direction:column;gap:9px}
+#agentcfg .ac-status{display:flex;align-items:center;gap:7px;flex-wrap:wrap;
+                     font-size:11.5px;color:var(--muted)}
+#agentcfg .ac-status b{color:var(--fg);font-weight:500}
+#agentcfg .ac-sp{flex:1}
+#agentcfg .ac-chip{padding:1px 6px;border:1px solid var(--line);border-radius:999px;
+                   font-size:10px;color:var(--faint)}
+#agentcfg .ac-busy{display:inline-flex;align-items:center;gap:5px;color:var(--muted)}
+#agentcfg .spin,#agentcfg .ac-loading .spin{width:9px;height:9px;border-radius:50%;
+                    border:1.5px solid var(--accent);border-top-color:transparent;
+                    animation:spin .8s linear infinite}
+#agentcfg .ac-loading{display:flex;align-items:center;gap:7px;padding:14px 2px;
+                      font-size:11.5px;color:var(--muted)}
+#agentcfg .ac-empty{padding:12px 2px;font-size:11.5px;line-height:1.65;color:var(--muted)}
+#agentcfg .ac-empty span{font-size:10.5px;color:var(--faint)}
+#agentcfg .ac-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#agentcfg .ac-btn{font-size:11.5px;color:var(--fg2);border:1px solid var(--line);
+                  border-radius:6px;padding:4px 10px;background:var(--card);cursor:pointer}
+#agentcfg .ac-btn:hover:not(:disabled){border-color:var(--fg2);color:var(--fg)}
+#agentcfg .ac-btn:disabled{opacity:.45;cursor:default}
+#agentcfg .ac-btn.primary{background:var(--accent);border-color:transparent;color:#fff}
+#agentcfg .ac-btn.primary:hover:not(:disabled){filter:brightness(1.14)}
+#agentcfg .ac-btn.danger{color:var(--red);border-color:rgba(255,101,104,.35)}
+#agentcfg .ac-btn.danger:hover:not(:disabled){border-color:var(--red);color:var(--red)}
+#agentcfg .ac-btn.quiet{padding:2px 7px;background:transparent;border-color:transparent;
+                        color:var(--faint);font-size:10.5px}
+#agentcfg .ac-btn.quiet:hover{color:var(--fg);background:#2b2b32}
+#agentcfg .ac-hint{font-size:10.5px;line-height:1.6;color:var(--faint)}
+#agentcfg .ac-note{font-size:10.5px;line-height:1.6;color:var(--muted);padding:6px 9px;
+                   border-radius:6px;background:rgba(255,255,255,.04)}
+#agentcfg .ac-err{font-size:11px;line-height:1.6;color:var(--red);padding:6px 9px;
+                  border-radius:6px;background:rgba(255,101,104,.08)}
+#agentcfg .ac-drift{padding:7px 9px;border-radius:6px;background:rgba(234,179,8,.08);
+                    border:1px solid rgba(234,179,8,.22);display:flex;flex-direction:column;gap:3px}
+#agentcfg .ac-drift b{font-size:11px;font-weight:500;color:#f5d06a}
+#agentcfg .ac-drift span{font-size:10.5px;line-height:1.55;color:var(--muted)}
+/* 漂移条里的动作（保留现状）与说明同一行；按钮用琥珀色，和告警一个语气。 */
+#agentcfg .ac-drift-acts{display:flex;align-items:center;gap:8px;margin-top:3px;flex-wrap:wrap}
+#agentcfg .ac-drift-acts .ac-btn{padding:2px 8px;font-size:10.5px;color:#f5d06a;
+  background:rgba(234,179,8,.10);border-color:rgba(234,179,8,.35)}
+#agentcfg .ac-drift-acts .ac-btn:hover:not(:disabled){background:rgba(234,179,8,.18);
+  border-color:rgba(234,179,8,.55);color:#ffe08a}
+#agentcfg .ac-sec{display:flex;align-items:baseline;gap:8px;margin-top:6px;
+                  padding-top:10px;border-top:1px solid var(--line-soft)}
+#agentcfg .ac-sec-title{font-size:11px;font-weight:600;color:var(--muted);
+                        letter-spacing:.05em;text-transform:uppercase}
+#agentcfg .ac-sec-sub{font-size:10px;color:var(--faint)}
+#agentcfg .ac-fields{display:flex;flex-direction:column;gap:1px}
+#agentcfg .ac-field{display:flex;align-items:center;gap:10px;padding:4px 0}
+#agentcfg .ac-k{flex:none;width:106px;font-size:11px;color:var(--fg2);
+                overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#agentcfg .ac-field select{flex:1;min-width:0;font:11px/1.5 var(--ui);color:var(--fg);
+                           background:var(--card);border:1px solid var(--line);
+                           border-radius:6px;padding:4px 6px;cursor:pointer}
+#agentcfg .ac-field select:hover:not(:disabled){border-color:#4a4a52}
+#agentcfg .ac-field select:focus{outline:none;border-color:var(--accent)}
+#agentcfg .ac-field select:disabled{opacity:.55;cursor:default}
+
+/* 长列表选择器（模型类字段）：按钮 + 挂在 body 上的搜索弹层。 */
+#agentcfg .ac-pick{flex:1;min-width:0}
+#agentcfg .ac-pick-btn{display:flex;align-items:center;gap:6px;width:100%;min-width:0;
+  font:11px/1.5 var(--ui);color:var(--fg);background:var(--card);
+  border:1px solid var(--line);border-radius:6px;padding:4px 8px;cursor:pointer;text-align:left}
+#agentcfg .ac-pick-btn span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#agentcfg .ac-pick-btn i{flex:none;font-style:normal;font-size:9px;color:var(--faint)}
+#agentcfg .ac-pick-btn:hover:not(:disabled){border-color:#4a4a52}
+#agentcfg .ac-pick.open .ac-pick-btn{border-color:var(--accent)}
+#agentcfg .ac-pick-btn:disabled{opacity:.55;cursor:default}
+.ac-pop{position:fixed;z-index:80;width:320px;max-height:300px;display:flex;flex-direction:column;
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  box-shadow:0 14px 40px rgba(0,0,0,.5);overflow:hidden}
+.ac-pop-find{flex:none;height:26px;margin:7px 7px 5px;padding:0 8px;
+  font:11px/1.5 var(--ui);color:var(--fg);background:var(--card);
+  border:1px solid var(--line);border-radius:6px;outline:none}
+.ac-pop-find:focus{border-color:var(--accent)}
+.ac-pop-find::placeholder{color:var(--faint)}
+.ac-pop-list{flex:1;overflow:auto;padding:0 5px 6px}
+.ac-pop-grp{position:sticky;top:0;z-index:1;padding:6px 8px 3px;font-size:9.5px;
+  letter-spacing:.05em;text-transform:uppercase;color:var(--faint);background:var(--panel)}
+.ac-pop-opt{display:flex;align-items:center;gap:6px;width:100%;padding:3px 8px;
+  border:0;border-radius:5px;background:transparent;color:var(--fg2);
+  font:11px/1.6 var(--ui);cursor:pointer;text-align:left}
+.ac-pop-opt:hover,.ac-pop-opt:focus{outline:none;background:#2b2b32;color:var(--fg)}
+.ac-pop-opt.on{color:var(--fg)}
+.ac-pop-opt .tick{flex:none;width:10px;color:var(--accent)}
+.ac-pop-opt .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ac-pop-opt .grp{flex:none;font-size:9.5px;color:var(--faint)}
+.ac-pop-opt[hidden],.ac-pop-grp[hidden]{display:none}
+#agentcfg .ac-confirm{display:flex;flex-direction:column;gap:8px;padding:10px 11px;
+                      border:1px solid rgba(255,101,104,.28);border-radius:8px;
+                      background:rgba(255,101,104,.05)}
+#agentcfg .ac-confirm>b{font-size:12px;font-weight:600}
+#agentcfg .ac-confirm>p{margin:0;font-size:10.5px;line-height:1.6;color:var(--muted)}
+#agentcfg .ac-diff{display:flex;flex-direction:column;gap:8px}
+#agentcfg .ac-diff-file{border:1px solid var(--line-soft);border-radius:6px;
+                        background:rgba(0,0,0,.18);overflow:hidden}
+#agentcfg .ac-diff-path{display:flex;align-items:center;gap:6px;padding:4px 8px;
+                        font:10px/1.5 var(--mono);color:var(--muted);
+                        border-bottom:1px solid var(--line-soft);word-break:break-all}
+#agentcfg .ac-tag{margin-left:auto;flex:none;font:9.5px/1 var(--ui);color:var(--faint);
+                  border:1px solid var(--line);border-radius:999px;padding:2px 5px}
+#agentcfg .ac-tag.del{color:var(--red);border-color:rgba(255,101,104,.3)}
+#agentcfg .ac-diff-line{display:flex;gap:6px;padding:1px 8px;
+                        font:10px/1.6 var(--mono);word-break:break-all}
+#agentcfg .ac-diff-line .op{flex:none;color:var(--faint)}
+#agentcfg .ac-diff-line.del .op,#agentcfg .ac-diff-line.del code{color:#fca5a5}
+#agentcfg .ac-diff-line.back .op{color:var(--green)}
+#agentcfg .ac-diff-line code{font:inherit;color:var(--fg2);white-space:pre-wrap}
+
+#openpanel{position:fixed;z-index:70;width:432px;padding:0 0 4px;display:none;
+  flex-direction:column;max-height:min(560px,72vh);
+  background:#232329;border:1px solid #33333c;border-radius:10px;
+  box-shadow:0 12px 32px rgba(0,0,0,.5)}
+#openpanel.on{display:flex}
+#openpanel .op-head{display:flex;align-items:center;gap:8px;padding:9px 12px 6px}
+#openpanel .op-title{flex:1;font-size:12.5px;font-weight:600}
+#openpanel .op-x{flex:none;width:22px;height:22px;display:grid;place-items:center;
+  border:0;border-radius:5px;background:transparent;color:var(--faint);cursor:pointer}
+#openpanel .op-x:hover{background:#33333c;color:var(--fg)}
+#openpanel .op-tabs{display:flex;gap:2px;padding:0 10px;border-bottom:1px solid #33333c}
+#openpanel .op-tab{padding:6px 10px;border:0;border-bottom:2px solid transparent;
+  background:transparent;color:var(--muted);font-size:12px;cursor:pointer}
+#openpanel .op-tab:hover{color:var(--fg)}
+#openpanel .op-tab.on{color:var(--fg);border-bottom-color:var(--accent)}
+#openpanel .op-ws{display:flex;align-items:center;gap:8px;padding:8px 12px;
+  border-bottom:1px solid #2c2c34}
+#openpanel .op-wslab{flex:none;color:var(--faint);font:10.5px/1 var(--mono)}
+#op-ws{flex:1;min-width:0;padding:4px 6px;border:1px solid #3a3a44;border-radius:6px;
+  background:#2b2b32;color:var(--fg);font-size:11.5px}
+#op-ws:disabled{color:#6b6b74;border-color:#33333c;background:#26262c}
+#op-all{flex:none;padding:4px 8px;border:1px solid #3a3a44;border-radius:6px;
+  background:transparent;color:var(--muted);font-size:10.5px;cursor:pointer}
+#op-all:hover{color:var(--fg);border-color:#4a4a56}
+#op-all.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 55%,transparent);
+  background:color-mix(in srgb,var(--accent) 12%,transparent)}
+#openpanel .op-body{padding:10px 12px 6px;overflow:auto;min-height:96px}
+#openpanel .op-body.hide{display:none}
+#openpanel .op-newcard{display:flex;flex-direction:column;gap:8px}
+#openpanel .op-newtitle{font-size:12px;color:var(--fg)}
+#openpanel .op-newpath{font:10.5px/1.5 var(--mono);color:var(--faint);word-break:break-all}
+#openpanel .op-go{padding:7px 10px;border:0;border-radius:6px;background:var(--accent);
+  color:#fff;font-size:12px;font-weight:600;cursor:pointer}
+#openpanel .op-go:hover{filter:brightness(1.14)}
+#openpanel .op-search{width:100%;box-sizing:border-box;margin-bottom:6px;padding:5px 8px;
+  border:1px solid #3a3a44;border-radius:6px;background:#2b2b32;color:var(--fg);
+  font-size:11.5px;outline:none}
+#openpanel .op-search:focus{border-color:#5a5a68}
+#openpanel .op-row{display:block;width:100%;padding:6px 8px;border:0;border-radius:6px;
+  background:transparent;color:var(--fg);text-align:left;cursor:pointer}
+#openpanel .op-row:hover{background:#33333c}
+#openpanel .op-row.na:hover{background:#2b2b32}
+#openpanel .op-row.na{color:#5a5a63;cursor:default}
+#openpanel .op-row1{display:flex;align-items:baseline;gap:8px}
+#openpanel .op-rowtitle{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;font-size:12px}
+#openpanel .op-row.na .op-rowtitle{color:#5a5a63}
+#openpanel .op-tag{flex:none;padding:1px 6px;border:1px solid #3d5a44;border-radius:999px;
+  color:var(--green);font:10px/1.4 var(--mono)}
+#openpanel .op-row2{display:flex;gap:6px;margin-top:2px;color:var(--faint);
+  font:10.5px/1.3 var(--mono);overflow:hidden;white-space:nowrap}
+#openpanel .op-row2 .dir{overflow:hidden;text-overflow:ellipsis}
+#openpanel .op-empty{padding:16px 4px;color:var(--faint);font-size:11.5px;text-align:center}
+
+/* ---------- 提示卡（右上角；2026-10-17 第二版）----------
+   拒绝、结束、复制路径这类**事实**要有地方落地；而对话流是"会话的内容"，
+   往里塞一条系统消息等于伪造内容 —— 所以另起一个。
+
+   2026-10-17 第二版（用户：「出现在右上角，作为弹窗的那种形式」）：
+   · 落点从右下角搬到**窗口右上、标题栏下沿**，从右缘滑入 —— 弹出就该从边上出来，
+     原来那条压在主区右下角，和触发它的地方隔着整个终端，读起来"没有归属"；
+   · 做成**通知卡**：第一行 图标 + 标题，第二行次要色的正文，右上角一颗 ×。
+     一件事实有"是什么"和"为什么/在哪"，拆两行才读得清（原来一句 12px 全塞在一起）；
+   · 表面照 #cardmenu —— 同一套浮层语言（深一档的底、1px 边、8px 圆角、深投影）；
+   · 已知代价：它压住右栏顶部。这比压终端好 —— 右栏是记录，终端才是干活的地方。
+   行为：新的在上、最多同时 3 条；悬停停表；点卡片或 × 关闭。 */
+#toasts{position:fixed;top:calc(var(--titlebar-h) + 8px);right:12px;z-index:70;
+  width:330px;max-width:calc(100vw - 24px);display:flex;flex-direction:column;gap:10px;
+  pointer-events:none}
+/* 暗底上"浮起来"全靠三件事：顶面比周围亮一档的渐变、一条 1px 的亮边、
+   两层投影（近的一层压出轮廓，远的一层把卡从背景里抬起来）。
+   只写一层 8px 模糊的投影，在 #171717 的右栏上看不见 —— 那是第一版的毛病。 */
+.toast{pointer-events:auto;box-sizing:border-box;width:100%;
+  background:linear-gradient(180deg,#27272e,#212127);
+  border:1px solid rgba(255,255,255,.085);border-radius:10px;
+  box-shadow:0 18px 40px rgba(0,0,0,.55),0 3px 10px rgba(0,0,0,.45),
+             inset 0 1px 0 rgba(255,255,255,.05);
+  color:var(--fg);padding:11px 12px 12px 13px;cursor:pointer;
+  animation:toastIn .2s cubic-bezier(.16,1,.3,1)}
+.toast.out{animation:toastOut .14s ease-in forwards}
+.toast .thead{display:flex;align-items:flex-start;gap:9px}
+/* 图标不是一枚裸字形，是一颗 20px 的浅底圆章 —— 13px 的线稿直接浮在暗底上
+   太细，看着"廉价"；圆章给了它重量，也把三种语义（ok/err/info）用底色分开。 */
+.toast .tic{flex:none;display:grid;place-items:center;width:20px;height:20px;
+  margin-top:-1px;border-radius:50%;background:rgba(255,255,255,.06);
+  color:var(--muted)}
+.toast .ttl{flex:1;min-width:0;font-size:12.5px;font-weight:600;line-height:20px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.toast .tclose{flex:none;display:grid;place-items:center;width:20px;height:20px;
+  margin:-1px -3px 0 0;padding:0;border:0;border-radius:5px;background:transparent;
+  color:rgba(255,255,255,.42);cursor:pointer}
+.toast .tclose:hover{background:rgba(255,255,255,.08);color:var(--fg)}
+/* 悬停只亮一下边 —— 整张卡可点（点了就关），得让人知道它是可交互的 */
+.toast:hover{border-color:rgba(255,255,255,.14)}
+/* 正文缩进到标题文字的左沿（圆章 20 + 间距 9 = 29）——两行读起来是一条而不是两条。
+   字号比标题小半档、行高更松，正文是"读"的，标题是"扫"的。 */
+.toast .tbody{margin-top:3px;padding-left:29px;font-size:11.5px;line-height:1.6;
+  color:#adadb6;word-break:break-word}
+/* 复制出来的东西（路径、会话 id）走等宽 —— 和状态栏里的路径同一套语言，
+   而且一眼能看出"这是一段可以原样粘贴的值"，不是一句说明。 */
+.toast .tbody.mono{font:11px/1.7 var(--mono);color:#b4b4bd}
+.toast .tbody:empty{display:none}
+.toast.ok .tic{background:rgba(134,239,172,.14);color:var(--green)}
+.toast.err{border-color:rgba(255,101,104,.28)}
+.toast.err .tic{background:rgba(255,101,104,.15);color:var(--red)}
+@keyframes toastIn{from{opacity:0;transform:translateX(12px) scale(.98)}to{opacity:1;transform:none}}
+@keyframes toastOut{to{opacity:0;transform:translateX(10px) scale(.99)}}
+@media (prefers-reduced-motion:reduce){.toast,.toast.out{animation:none}}
+.pill{display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:999px;
+      background:#2c2c33;color:var(--muted);font:10.5px/1.6 var(--mono)}
+.pill.g{color:var(--green)} .pill.b{color:var(--accent)} .pill.a{color:var(--amber)}
+.ws{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:var(--r);
+    margin-bottom:4px}
+.ws:hover{background:var(--card-hov)}
+.ws .nm{font-size:12.5px;color:var(--fg);min-width:0}
+.ws .ct{margin-left:auto;font:10.5px/1 var(--mono);color:var(--faint)}
+.empty{padding:14px 12px;color:var(--faint);font-size:12px;line-height:1.6}
+.empty code{font:11.5px var(--mono);color:var(--muted)}
+
+/* ---------- 2b. 工作区行 / 缩进的会话行（左栏那一轮）----------
+   来历：第一版这里是"工作区列表 + 会话列表"两张**平铺**的表，两者之间没有从属
+   关系。用户把口径钉成「归属是自适应的 —— 它属于哪个工作区就是哪个工作区」，
+   于是左栏变成「一行工作区（项目）+ 它名下的会话缩进在下面」，没有手工归类动作。
+
+   量都是推出来的，不是配的：
+     · 行高跟原来那条 `.nav` 一条线（5px 上下内边距 + 12.5px 字）—— `.nav` 随
+     导航栏一起没了，但这个量留着，左栏的行高不该因为一个栏的消失而变
+     · 缩进 20px = Orca 表达子级那两个量的和（`ml-4` 16px + `border-l-2` 那条线
+       留出的 4px，见 activity-thread-presentation.ts:255-285 的子代理层级）
+     · `.pacts` 的浮现照抄 `.cardacts`（同一套 hover 预算，理由见那边） */
+.proj{display:flex;align-items:center;gap:7px;padding:5px 6px 5px 4px;
+      border-radius:var(--r-sm);cursor:pointer;user-select:none}
+.proj:hover{background:var(--card-hov)}
+.proj.sel{background:var(--card-sel)}
+.proj .tw{flex:none;width:12px;height:12px;display:grid;place-items:center;color:var(--faint)}
+/* 状态点的槽**永远占着那 12px**（没有点也占）：不然"有 agent 在跑"的行和
+   没有的行，名字会错开一格 —— 而"哪些项目有人干活"正是要一眼扫出来的东西。
+   `.adot` 自己就是 12px（见它那一段），这里只是给它一个位置。 */
+.adot-slot{flex:none;display:grid;place-items:center;width:12px;height:12px}
+/* ---- 行首图标 + 角标（左栏收成一列那一轮加的）----------------------------
+   目录行是一枚**文件夹**、会话行是一枚**对话气泡**：这两行只差 22px 缩进时，
+   "哪一行是地点、哪一行是发生在那里的事"要靠字形来分（用户原话"要不然用户
+   难以分清楚下方是什么"）。字形不自己画，用原来导航栏那两枚（LIST_ICON）。
+   角标 = 原来那颗状态点挪了个位置（详见 projRowHTML 里的长注释）：挂在图标
+   右下角，主语就落在"这个目录/这条会话"上，还省下名字前面一格。
+   ⚠️ 角标下面垫一圈**侧栏底色**（`--side`，`#list` 用的就是它）：文件夹是
+   1.6px 的描边线条，不垫的话那条线会**横穿**状态点 —— 8px 的实心点本来就小，
+   被一条线切一下就看不出是圆的了。 */
+.proj .ricon,.arow .ricon{position:relative;flex:none;
+  display:grid;place-items:center;color:var(--muted)}
+.proj .ricon{width:15px;height:15px}
+.arow .ricon{width:14px;height:14px}
+/* ⚠️ 角标的位置是**量着定的**，三版都栽过（每一版的错在截图里都只是一团糊）：
+   · 12px（原尺寸）挂在图标右下 —— 那颗点把文件夹盖掉了八成；
+   · 8px 槽 + 2px 晕圈 —— 晕圈撑成 12px 的圆盘，图标右半边还是被啃掉，
+     活下来的只有一条 1px 的左边（亮度 25/255，等于没画）；
+   · 6px 槽压在右下角 —— 终端图标的方框只剩左上两条边，看着像个"⌐"。
+   量法是放大 10 倍截图加逐像素采样 —— **像素比眼睛诚实**：
+   前两次我都以为"图标没画出来"，量完才知道是"画了、被角标啃掉了"。
+   现在的取舍：**角标一个像素都不压图标**，它贴在图标右侧、下沉到图标下沿，
+   占的是行里本来那 7px 的间距（绝对定位，不参与排版，所以名字不会跟着挪）。
+
+   ⚠️ 别给这个槽起名叫 `.badge`：**那个类名已经有了**（:1400，格子上"几件事在等你"
+   的计数角标，`min-width:14px;height:14px`）。我第一次就叫了它，于是这颗点
+   被撑成 `14px × 6px` 的**橙药丸**压在标题上 —— 类名撞车是静默的：CSS 全都在，
+   就是这几十个像素长错了。诊断靠的是探针读数（`左栏首行图标 … 角标槽=… 14x6`），
+   不是眼睛（同一个坑的另一种形态见 MEMORY 里 `borrowed-graphics-need-a-name-translation`）。 */
+.ricon .adot-slot{position:absolute;left:100%;bottom:-2px;width:6px;height:6px;
+  pointer-events:none}
+.ricon .adot-slot .adot{width:6px;height:6px;background:transparent;box-shadow:none}
+.ricon .adot-slot .adot svg{display:none}
+/* 点态那几条 `::before` 是 8px 的圆/环（见 .adot 那一段），缩到角标这一档要
+   跟着收尺寸 —— 但**颜色一律交还给那些规则**：这里只写宽高，不然「工作中」那颗
+   黄环会被 currentColor 染成灰的（选择器特异度够高，写什么就覆盖什么）。 */
+.ricon .adot-slot .adot::before{width:6px;height:6px}
+.ricon .adot-slot .adot[data-state="working"]::before{border-width:1.5px}
+/* 字形态（问号 / 铃铛 / 对勾）在 6px 上认不出来 —— 角标这一档只留**颜色**，
+   字形和措辞都还在 title/aria-label 里（paintDot 写的，一个字没删，
+   鼠标停上去照样能读到"在等你"）。 */
+.ricon .adot-slot .adot.glyph::before{display:block;background:currentColor}
+.proj .nm{font-size:12.5px;color:var(--fg);min-width:0;flex:1}
+.proj .sum{font:10.5px/1.4 var(--mono);color:var(--faint);flex:none;text-align:right}
+/* 行尾动作：**常驻一颗 ⋯，主动作（+ 新开一格 / 收编）在 hover 或键盘聚焦时浮出**
+   —— 这就是会话卡片那一套 `.cardacts` 的"常驻预算"，两个列表长得一样才不会
+   让人觉得"左栏有两种行"。
+   ⚠️ 收起时只 opacity:0 不够，必须连 pointer-events 一起关 —— 否则那颗隐形的
+   按钮会吃掉行尾那一下点击（`.cardacts` 那段注释里记的是同一个坑）。 */
+.proj .pacts,.arow .sacts{display:flex;align-items:center;gap:1px;flex:none}
+.proj .pg,.arow .pg{display:flex;align-items:center;gap:1px;max-width:0;margin-left:-1px;
+  overflow:hidden;opacity:0;pointer-events:none;
+  transition:max-width .12s ease,margin .12s ease,opacity .12s ease}
+.proj:hover .pg,.proj:focus-within .pg,
+.arow:hover .pg,.arow:focus-within .pg{max-width:24px;margin-left:0;
+  overflow:visible;opacity:1;pointer-events:auto}
+@media (hover:none){.proj .pg,.arow .pg{max-width:24px;margin-left:0;overflow:visible;
+  opacity:1;pointer-events:auto}}
+.pin{flex:none;display:grid;place-items:center;color:var(--ask);opacity:.9}
+/* 缩进的会话行：**一行一个**（标题 + 时间），不画卡片 ——
+   卡片那套（chips + 预览 + 动作）是「全部会话」视图的密度，塞进缩进之后
+   就只剩标题能看了，还白占三倍高度。
+   ⚠️ 层级用 **一条竖线 + 缩进** 表达（Orca 的 `border-l-2 pl-3 ml-4`，
+   activity-thread-presentation.ts:255-285），不是靠缩进量硬堆 —— 240px 的列宽里，
+   30px 的缩进会把标题挤到只剩十几个字，而"这些行属于上面那一行"这件事，
+   一条贴着的竖线说得比缩进清楚。 */
+/* 缩进的 **agent 行**（2026-10-17：这里原来画的是会话行，现在一行 = 一个
+   agent —— 见 projRowHTML 上面的长注释）。几何照旧：一条竖线 + 22px 缩进表达
+   "它属于上面那个工作区"。 */
+.arow{display:flex;align-items:center;gap:7px;padding:4px 6px 4px 12px;
+      margin-left:22px;border-left:2px solid var(--line-soft);
+      border-radius:0 var(--r-sm) var(--r-sm) 0;cursor:pointer;user-select:none}
+.arow:hover{background:var(--card-hov)}
+.arow.sel{background:var(--card-sel)}
+/* 「已关闭」的行（点过 ×、记录还在）：降一档亮度，但**仍然可点** ——
+   主手势就是"在原座位接上"，所以绝不做成 disabled。名字暗下来、图标压一点，
+   一眼能和"正在跑 / 已停止"分开，又不至于像一条不可用的残骸。 */
+.arow.closed .ricon{opacity:.55}
+.arow.closed .nm{color:var(--muted)}
+.arow.closed .sw{font-style:italic}
+.arow .nm{font-size:12px;color:var(--fg2);min-width:0;flex:1}
+.arow .tm{font:10.5px/1 var(--mono);color:var(--faint);flex:none}
+/* 行尾读数那一截状态词（在等你 / 已停止…）。它和时间分成两个元素：`.tm` 会被
+   那个 60s 定时器按 `data-at` 重写，两样挤在一个元素里就会被时间顶掉。 */
+.arow .sw{font-size:10.5px;line-height:1;color:var(--faint);flex:none}
+.arow .sw:not(:empty)+.tm::before{content:"·";margin:0 3px;color:var(--faint)}
+/* 视图切换那两条（`#proj-view.off` / `#sess-view.off`）2026-10-16 删了 ——
+   `#sess-view` 整个没了，`#proj-view` 也没有第二次视图可切，`off` 没人再挂上去。
+   ⚠️ 但**依旧不能**写一条通用的 `.off{display:none}`：`#rsb.off`
+   （宽度归零 + overflow:hidden，那样 `#hist` 的滚动位置才不丢）、`.gask .gopt.off`
+   和 `.wc-glyph.off` 用的都是 `off` 这个类名，一条通用规则会把右栏整块抹掉。 */
+
+/* 池子读不出来时的横幅。**不做隐** —— 那会让人以为"项目都没了"（不可用的动作
+   做灰、做说明，不做隐，见 MEMORY）。 */
+.poolerr{margin:0 10px 8px;padding:7px 9px;border-radius:var(--r-sm);
+  background:#2b2418;border:1px solid #3d3320;color:#e8c98a;font-size:11.5px;line-height:1.5}
+/* 空态里那颗带字的按钮（「添加项目」）。左栏里只有它一个文字按钮 ——
+   别的地方都是图标键，多一个文字按钮要能一眼认出是"可以按的"。 */
+.btn{display:inline-flex;align-items:center;gap:6px;margin-top:2px;padding:5px 10px;
+  border:1px solid var(--line);border-radius:var(--r);background:var(--card);
+  color:var(--fg);font-size:12px;cursor:pointer}
+.btn:hover{background:var(--card-hov)}
+.btn svg{flex:none;color:var(--muted)}
+
+/* ---------- 3. 主区 ---------- */
+/* position:relative —— #list-divider（2026-10-17 那条列表↔主区的缝）的定位基准。 */
+#main{grid-area:main;position:relative;display:flex;flex-direction:column;
+      min-width:0;background:var(--bg)}
+/* 标签条从主区顶部搬进了标题栏 —— 两边统一到同一条 36px 基线上，
+   原来"侧栏列表头 40px、主区标签 37px 各自为政"的错位就没了。
+   高度交给标题栏（100%），底部分隔线也交给标题栏，这里不再画。 */
+/* ⚠️ #tabs 本身**不能**标 no-drag。它是 flex:1，铺满标题栏中段 ——
+   一旦标上，从"最后一个标签右边到窗口按钮之间"那大片空白就全不可拖了，
+   而这块在原生窗口里恰恰是最常用的拖拽区（Orca 也是 .titlebar 整体 drag、
+   只有 .tab 这些交互元素 no-drag）。no-drag 必须落在**具体控件**上。 */
+/* C8：这 8px 内边距从 #tabs 挪到 #tablist。它的作用只是"最后一个标签别贴着右边
+   那几颗按钮"，那件事属于标签容器；挂在 #tabs 上则会让**贴在右沿的那颗收起键**
+   离边 8px —— 而用户要的是"顶格"。 */
+#tabs{flex:1;min-width:0;height:100%;display:flex;align-items:stretch;gap:0;
+      padding-right:0}
+/* 标签的容器。它自己是 flex 项，也要 min-width:0，否则标签一多就会把
+   .tabs-right（右侧那几个按钮）顶出可视区。标签之间仍可收缩 —— 见 .tab 的
+   min-width:72px。 */
+#tablist{display:flex;align-items:stretch;min-width:0;overflow:hidden;position:relative;
+         padding-right:8px}
+#tablist .tab{flex:0 1 180px}
+@media (min-width:1280px){#tablist .tab{flex-basis:220px}}
+/* 标签宽 180px，窗口 ≥1280px 时 220px，最小可压到 72px（Orca 的 tab-width-rules）
+   激活态**不是**蓝色底 —— 是「底部 2px 前景色条 + 一层 6% 前景色提亮」。 */
+.tab{display:flex;align-items:center;gap:7px;padding:0 6px 0 12px;width:180px;min-width:72px;
+     border-right:1px solid var(--line);color:var(--muted);font-size:12px;
+     position:relative;user-select:none}
+@media (min-width:1280px){.tab{width:220px}}
+.tab:hover{background:var(--card)}
+.tab.on{background:color-mix(in srgb,var(--fg) 6%,var(--card));color:var(--fg)}
+.tab.on::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--fg)}
+.tab .nm{min-width:0;flex:1}
+/* 「并行」那格右侧的 agent 计数。它自己带一个类而不是复用 .nav .cnt ——
+   那一条是挂在导航栏上的，字号/颜色都是侧栏的语义，搬到标签条上会串。 */
+.tn-cnt{flex:none;font:11px/1 var(--mono);color:var(--faint);
+        padding:1px 5px;border-radius:999px;background:rgba(255,255,255,.06)}
+.tab .caret{color:var(--faint);flex:none}
+/* 重命名输入框 —— **数值逐条取自 Orca 的 .pane-title-input**
+   （assets/terminal.css:479-504，token 见 main.css:257-263 的暗色那一组）。
+   Orca 在标签里用的也是同一个 Input 组件，所以这组数值对标签同样成立；
+   只把宽度从"撑满面板"改成"撑满标签剩余宽度"（flex:1;min-width:0）。
+   注意 `line-height:20px` 和 `padding:0 8px` 都别改 —— 改任何一个，
+   输入框里的字和标签上原来的字就**不在同一条基线上**，一进入编辑会跳一下。
+   （Orca 原注释：Input 与 .pane-title-text 的字号/基线必须一致。） */
+.tab-input{flex:1;min-width:0;width:100%;height:100%;box-sizing:border-box;
+  padding:0 8px;margin:0;border:1px solid transparent;border-radius:3px;
+  background:var(--pane-title-input-bg);outline:none;
+  font:inherit;font-size:12px;line-height:20px;
+  color:var(--pane-title-input-fg);caret-color:var(--pane-title-input-fg)}
+.tab-input::placeholder{color:var(--pane-title-placeholder)}
+/* 聚焦时只加一圈边框，不加外发光：标签条只有 36px 高，发光会溢到分隔线上。
+   ⚠️ 边框色**不是**我们的 --accent（饱和蓝）。Orca 的 `.pane-title-input:focus-visible`
+   用的是 `border-color: var(--ring)`，而它暗色主题的 --ring = **#737373**（中性灰，
+   main.css:341；亮色那组是 #a1a1a1，:224）。第一版我用 --accent 试了一下，
+   在 36px 的深色标签条上那圈蓝亮得像报错，和 Orca 的"只是把边界描一下"不是一个东西。 */
+.tab-input:focus-visible{border-color:var(--ring)}
+/* 同一个输入框用在**左栏 agent 行**里（⋯ 菜单 → 重命名）。
+   ⚠️ 字号必须留在 12px：`.arow .nm` 就是 12px（上面那行），一进编辑字变了大小
+   就是"跳一下"（同 .tab-input 那条注释的理由）。
+   要钉的只有高度：`.arow` 的 padding 是 4px + 12px 字 ≈ 20px 高，而
+   `.tab-input` 的 `height:100%` 在这里遇到"父元素高度 auto"会失效 ——
+   输入框按 line-height 自己长一圈，把整列往下推开。所以给它一个确定高度。 */
+.arow .tab-input,.card .tab-input{flex:1;height:20px;line-height:20px;padding:0 6px}
+/* 右栏那种卡片上的标题是 12.5px（`.card .t`），所以输入框也跟着 12.5 ——
+   同样为了"进去不跳"。两个落点的字号各对齐各的，不共用一个数值。 */
+.card .tab-input{font-size:12.5px}
+/* 标签上的 agent 图标：Orca 是 12px，非激活时 opacity-.7 */
+.tab .tab-ico{display:grid;place-items:center;flex:none;width:12px;height:12px;opacity:.7}
+.tab.on .tab-ico{opacity:1}
+.tab .x{width:16px;height:16px;border-radius:3px;display:grid;place-items:center;
+        color:transparent;font-size:14px;line-height:1;flex:none}
+.tab:hover .x{color:var(--faint)}
+.tab .x:hover{background:rgba(255,255,255,.12);color:var(--fg)}
+.tab-add{width:30px;display:grid;place-items:center;color:var(--faint)}
+.tab-add:hover{color:var(--fg)}
+
+/* ── 拎页（C5）：拖拽时的投放位 + 跟着指针走的幽灵片 ────────────────────────
+   投放位放在 #tablist 的**右端**（绝对定位、不占布局），因为页面标签就是往最后
+   追加的 —— 指示的位置必须和结果一致，否则这个提示等于骗人。 */
+.drop-slot{position:absolute;right:0;top:4px;bottom:4px;width:2px;border-radius:1px;
+           background:var(--fg);display:none}
+#tabs.drop .drop-slot{display:block}
+/* 幽灵片：**复用标签的外观**（同一套 12px 图标、同一个 .nm 省略号、同一个圆角），
+   因为它的作用是回答"我松手会得到什么"。做成别的形状就答不上来了。 */
+.drag-ghost{position:fixed;left:0;top:0;z-index:200;pointer-events:none;
+            display:flex;align-items:center;gap:7px;
+            width:180px;height:26px;box-sizing:border-box;padding:0 10px;
+            border-radius:var(--r);background:var(--card);border:1px solid var(--ring);
+            box-shadow:0 10px 26px rgba(0,0,0,.5);
+            color:var(--fg);font-size:12px;user-select:none;
+            opacity:.97;transition:opacity 90ms ease}
+.drag-ghost .nm{min-width:0;flex:1}
+.drag-ghost .tab-ico{display:grid;place-items:center;flex:none;width:12px;height:12px}
+/* 被拎的那一格：压下去（它是"正在被搬走"的那一个，不是当前格的重点） */
+.cellhead.dragging{opacity:.4}
+/* flex:none（C6a 补）：标签条变窄（右栏一宽，中栏就窄）之后，这一组按钮
+   是可以被压缩的，而压缩的默认结果是把带字的按钮**折成两行** —— 看上去像坏了。
+   该先让位的是标签（它能压到 72px，见 #tablist），不是这几个固定尺寸的按钮。
+   （C7：带字的按钮没了，这一条留着，理由对"这一组都不许被压缩"同样成立。）
+   间距 2px + 26px 的方钮：这一排现在只有图标，读起来是"工作区右上角的两颗开关"，
+   而不是一条工具条 —— 见 HTML 里那段（删掉的两颗按钮的去向）。 */
+.tabs-right{margin-left:auto;display:flex;align-items:center;gap:2px;color:var(--muted);
+            flex:none}
+.tabs-right .icon-btn{width:26px;height:26px}
+/* ⚠️ C7 实测出来的一个老 bug：`[hidden]` 在 .icon-btn 上**不生效** ——
+   `.icon-btn{display:grid}` 盖掉了 UA 那条 `[hidden]{display:none}`（同一个坑本文件
+   已经踩过两次：.badge 和 .rsb-mod，那两处都留了注释）。
+   证据：右栏**开着**的时候，顶部按钮组的实测几何是
+     `p-collapse(26 @878-904) rsb-open(26 @906-932 hidden)`
+   —— 它被标着 hidden，却实实在在地画在收起键右边（截图里并排两颗面板图标）。
+   后果不只是"多一颗"：它点下去是"展开右栏"，而右栏已经开着，所以它按不动，
+   看起来就像一颗坏掉的按钮。这条就是"顶部那一排看着突兀"的一部分。 */
+#titlebar .icon-btn[hidden]{display:none}
+.dot{width:6px;height:6px;border-radius:999px;background:var(--amber);flex:none}
+.dot.on{background:var(--green)} .dot.off{background:var(--red)}
+
+/* ---------------------------------------------------------------------------
+   Agent 状态点（标签条最左边那个）
+   **逐条从 Orca 搬过来**：图形与尺寸取自 components/AgentStateDot.tsx:93-171，
+   动画取自 assets/main.css:1787-1801。只保留我们目前用得到的态。
+   Orca 在标签上用 size="md"：外框 h-3 w-3 = 12px、实心点 size-2 = 8px、
+   spinner 也是 8px（border-2）。
+     idle    → bg-neutral-500/40 —— Tailwind neutral-500(#737373) 打四折
+     working → border-yellow-500(#eab308) 的环，**顶边透明**才像在转
+     off     → 我们自己的：连接断了。Orca 没这个态（它是 Electron 应用，
+               终端不存在"断开"，我们这条 stream 会断）。
+   ⚠️ working 的黄**不复用 --amber 令牌**：Orca 用的是 Tailwind 的 yellow-500
+   （数值恰好也是 #eab308），但语义是"在干活"，和"需要你注意"的橙
+   （Orca 的 --agent-question）是两个色，混了就分不出"忙"和"等你"。
+   --------------------------------------------------------------------------- */
+.adot{flex:none;display:grid;place-items:center;width:12px;height:12px}
+.adot::before{content:"";border-radius:999px}
+.adot[data-state="idle"]::before{width:8px;height:8px;background:rgba(115,115,115,.4)}
+.adot[data-state="working"]::before{width:8px;height:8px;box-sizing:border-box;
+  border:2px solid #eab308;border-top-color:transparent;
+  animation:agent-spinner-rotate 86400s steps(1036800,end) infinite}
+.adot[data-state="off"]::before{width:8px;height:8px;background:var(--red)}
+/* 非正常收尾（StopFailure：撞限额、鉴权失败…）—— Orca 的 blocked/failed 都是红点
+   （AgentStateDot.tsx:161-166），它「不信标题、只信 hook 报的枚举」。我们这条腿
+   是真的 hook（StopFailure），所以照它的图形用红点。 */
+.adot[data-state="failed"]::before{width:8px;height:8px;background:var(--red)}
+/* done / interrupted：C7（子代理三态）新加的两态。**图形、判词、连理由都从
+   Orca 的 AgentStateDot.tsx 搬**，不是自己配的：
+     done        → CircleCheck（它那边 emerald-500，:118-130）。原文理由：
+                   "仪表盘上要列很多 agent，一个对勾比一个点扫得快，而且能和
+                    idle 那几个点态一眼分开"。我们这套调色板里没有 emerald，
+                   用同一个 --green（和上面"不复用 --amber"是同一条理由：
+                   一个色只讲一件事）。
+     interrupted → bg-muted-foreground 的实心点（:163-166）。原文理由：
+                   "用户按了停不是新闻：别用故障那支红，也别用完成那支绿"。
+   两态眼下只给**子代理行**用（我们的「已完成 / 已关闭」），标签条上用不到。
+   ⚠️ 这里写的是 **Orca 的词**，而 C7 那套态叫 run/closed —— 两边靠
+   `adotEl` 上面的 ADOT_STATE 那张表翻译，别把这里的名字改成产品词。 */
+.adot[data-state="done"]{color:var(--green)}
+.adot[data-state="done"]::before{display:none}
+.adot[data-state="interrupted"]::before{width:8px;height:8px;background:var(--muted)}
+/* size="sm"：Orca 那两个尺码是 md(h-3 w-3 = 12px) / sm(h-2.5 w-2.5 = 10px)。
+   子代理那一行比标签条窄，用 sm。
+   ⚠️ 这两条必须写在**态**那几条**之后**：它和 `.adot[data-state="…"]::before`
+   是同特异度，胜负只看源码顺序（把 ::before 的宽高收小，环还是那个 border-2
+   —— Orca 的 sm spinner 也是这个组合）。 */
+.adot.sm{width:10px;height:10px}
+.adot.sm::before{width:6px;height:6px}
+/* ⚠️ 「需要你」的两个态**不是点，是字形** —— 这条也是从 Orca 学的，而且和我原来
+   的直觉相反。AgentStateDot.tsx:142-150：'waiting'（等你输入）和 'permission'
+   （要你批）渲染的是**同一个问号图标**（AgentQuestionIcon），不是实心点；
+   而"有未读"它压根不画点，是标签条上一枚**铃铛** ——
+   terminal-tab-activity-status.ts:186-194 的类型注释原话：
+     「Map a container activity status onto AgentStateDot's vocabulary
+       (no unread — that's a bell)」。
+   所以有字形的态由 JS 填 innerHTML（.glyph），::before 那个实心点让位 ——
+   两者是互斥的两种画法，不是叠加。盒子的尺寸关系照旧：Orca 的 size="md" 是
+   外框 12px、实心点 8px、字形 12px（AgentStateDot.tsx:93-95），我们的
+   .adot 就是那个 12px 外框。 */
+.adot.glyph::before{display:none}
+/* 字形态的颜色。两种"要你"共用那一族橙（问号 = 等你答，铃铛 = 有新消息，
+   图形本身就分得开，不必再用第二个色系）；出错用红，和上面那个红点同源。 */
+.adot[data-state="ask"],.adot[data-state="unread"]{color:var(--ask)}
+.adot[data-state="failed"]{color:var(--red)}
+/* 有未读的那一格：格子头底色染一层橙（不是加个图案）—— 网格里 N 格同屏时，
+   "哪一格在等你"要能一眼扫出来，而格子头是每一格唯一的固定落点。
+   9% 的分量是量着定的：再深就开始和 .cur 那条"当前格"竖条抢读数。 */
+.cell.unread .cellhead{background:color-mix(in srgb,var(--ask) 9%,transparent)}
+/* 跳过去时闪两下 = **整格一圈橙描边** + 格子头底色脉冲。
+   上一版只脉冲格子头那条 22px，实测在"注意力在别的模块/别的格子"时看不见 ——
+   而这条闪烁的用途恰恰是"你看向别处时把你叫回来"，所以这一版加了整圈描边。
+   描边为什么用 outline 而不是 box-shadow（上一版就是踩这个才只闪格子头的）：
+   canvas 是格子的子元素，而 box-shadow 画在**背景之上、子元素之下**，照样会被
+   它盖住；outline 画在**所有后代之后**，负 offset 又让它落在边框盒内侧 ——
+   格子有 overflow:hidden 也照样看得见。
+   两下 = 420ms×2：一下会被读成"闪了一下屏"，三下又太吵。 */
+@keyframes cell-flash{0%,100%{background-color:transparent}
+                      50%{background-color:color-mix(in srgb,var(--ask) 30%,transparent)}}
+@keyframes cell-ring{0%,100%{outline-color:transparent}50%{outline-color:var(--ask)}}
+.cell.flash{outline:2px solid transparent;outline-offset:-2px;
+            animation:cell-ring 420ms ease-in-out 2}
+.cell.flash .cellhead{animation:cell-flash 420ms ease-in-out 2}
+/* 降级动效：动画关掉，但**标记不能一起消失** —— 静态的一圈橙就是"这是刚才那一下"，
+   比什么都不显示强（和 .adot 那条 spinner 降级同一条理由）。 */
+@media (prefers-reduced-motion: reduce){
+  .cell.flash{animation:none;outline-color:color-mix(in srgb,var(--ask) 70%,transparent)}
+  .cell.flash .cellhead{animation:none;background:color-mix(in srgb,var(--ask) 22%,transparent)}
+}
+/* Why（Orca 注释原文的语义）：降级动效下动画被关掉，此时**必须把顶边也补上** ——
+   顶边透明的静止圆环看起来像坏了，一个完整的环才是"有意为之的静态标记"。 */
+@media (prefers-reduced-motion: reduce){
+  .adot[data-state="working"]::before{animation:none;border-top-color:#eab308}
+}
+/* 86400turn / 86400s + 1036800 步 = 每秒正好 1 圈、每秒 12 帧。
+   为什么不用 rotate(360deg) + infinite：那样每圈都重置，相位浮点会漂；
+   拉长到 86400 圈再用 steps 量化，跑一整天也不漂。（Orca 原文如此，照搬。） */
+@keyframes agent-spinner-rotate{to{transform:rotate(86400turn)}}
+
+#panes{flex:1;display:flex;min-height:0}
+/* position:relative 是 .phead 那条 absolute overlay 的定位基准 ——
+   等价于 Orca 用 paneTitleOverlayRects 算出来的 rect（我们只有两个静态面板，
+   不需要算）。 */
+.pane{position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;
+      background:var(--bg)}
+/* Claude Code 的开场介绍框**最少需要 64 列**（吉祥物 10 列 + 间隔 2 +
+   最长那行 "DeepSeek-V4.1-Flash · DeepSeek · API Usage Billing" 共 52 字符）。
+   给不够它就折行重叠 —— 看起来像我们的渲染坏了，其实是我们没给它画的地方。
+   这个 64 就是下面 PANE_MIN_COLS 的由来（C6a 之后它只服务于状态栏那个读数）。
+   ⚠️ C6a：这里原来是 `flex:0 0 var(--split,63%)` —— 面板 A 按"用户拖出来的
+      列数"钉死宽度，剩下的全部给面板 B。右侧历史流会被挤扁的根因就在这里：
+      两个面板在同一个 flex 行里，宽度是此消彼长的关系。
+      右栏搬出去之后面板 B 不存在了，中栏独占剩下的全部宽度，所以是 flex:1。
+      （"我这一格有多少列"从"用户拖出来的偏好"变成"窗口给了多少" ——
+       状态栏那条读数本来量的就是这个，所以它一个字都不用改。） */
+.pane.a{flex:1}
+/* ⚠️ 2026-10-15 删掉了 .pane.a .pbody{background:var(--term-bg)}。
+   当初写它的理由是"否则终端四周会有一圈更暗的缝" —— 现在看，那个缝正是 Orca
+   要的：terminal.css:509 的 .xterm-container 只让**终端自己**内缩 4px，.pane
+   自己不留终端色，所以四周露出来的是应用底色。
+   我把 pane 也刷成终端色之后，那 4px 内缩就完全看不见了，终端变成一块顶着左边栏、
+   顶着标题栏的整块色板 —— 用户说的「终端这块色和周围的 UI 不搭、有割裂感」就是它。
+   现在终端底色只出现在它自己那块盒子里，四周是画布色，读起来是"嵌在画布上的一块
+   面板"，而不是"三块色板拼在一起"。 */
+/* pane 头部。**这一整块是从 Orca 的 assets/terminal.css 的 .pane-title-bar
+   和 main.css 的 token 逐条搬过来的**，只改了类名。
+   上一版我是「读到数值、自己写一遍」，写出来的东西看着像但不等于 ——
+   搬过来的好处是连它踩过的坑一起继承了（见文件末尾那几段补丁）。
+
+   原文件里的 token（main.css:257-263，暗色）：
+     --terminal-pane-title-on-dark-fg:              rgb(255 255 255 / .52)
+     --terminal-pane-title-on-dark-button-fg:       rgb(255 255 255 / 1)
+     --terminal-pane-title-on-dark-button-hover-fg: rgb(255 255 255 / 1)
+     --terminal-pane-title-on-dark-input-bg:        rgb(255 255 255 / .04)
+     --terminal-pane-title-on-dark-separator:       rgb(255 255 255 / .06)
+   注意 button-fg 是**纯白**，不是我以为的 85% —— 变暗靠的是 opacity，
+   不是颜色。这就是「质感」和「差不多」的区别。 */
+:root{
+  --pane-title-height:24px;
+  --pane-title-fg:rgb(255 255 255 / .52);
+  --pane-title-button-fg:rgb(255 255 255 / 1);
+  --pane-title-button-hover-fg:rgb(255 255 255 / 1);
+  --pane-title-separator:rgb(255 255 255 / .06);
+  /* 重命名输入框那三个（main.css:257-263 的暗色组，原样）：
+     input-fg 是 70% 白 —— 比 fg(52%) 亮，因为"正在编辑"的东西必须比
+     旁边只读的东西更实；placeholder 38% 是最淡的一档。 */
+  --pane-title-input-bg:rgb(255 255 255 / .04);
+  --pane-title-input-fg:rgb(255 255 255 / .7);
+  --pane-title-placeholder:rgb(255 255 255 / .38);
+  /* 聚焦环。Orca 暗色主题的 --ring = #737373（main.css:341）—— 中性灰，
+     不是饱和蓝。理由见下面 .tab-input 那条注释。 */
+  --ring:#737373;
+  /* 格子头的高度（C4）。**它必须是个令牌**，因为有两处要对齐：
+     .cellhead 自己，以及面板 A 那条浮出按钮 overlay（.phead）—— 那条 overlay
+     得**落在格子头下方**，否则它右端那颗按钮正好压在最右上那格的 × 上，
+     点 × 会打在 overlay 上（这就是它刚被发现的方式）。 */
+  --cellhead-h:22px;
+  /* ── C4.5：并行格之间的隔离线 ─────────────────────────────────────────
+     这三个是**唯一真相**，两处用它：面板 A/B 之间那条独立的 .divider（已有），
+     以及网格自己的缝（#termbody 的 gap）。以前只有前者，值是硬写的字面量；
+     现在格子之间也要同一条线，写两遍就会漂。
+     色值出处：Orca `lib/terminal-theme.ts:20`
+       DEFAULT_TERMINAL_DIVIDER_DARK = '#3f3f46'（暗色）
+       DEFAULT_TERMINAL_DIVIDER_LIGHT = '#d4d4d8'（亮色，我们只有暗色主题）
+     粗细出处：Orca `shared/default-global-settings.ts:91`
+       terminalDividerThicknessPx: 3
+     （CSS 里那个 4px 是它 `terminal.css:78` 的兜底值，真实默认是 3。） */
+  --divider-line:#3f3f46;
+  --divider-line-strong:#52525b;
+  --grid-gap:3px;
+  /* ── C6a：右栏（外壳级独立列）的宽度 ────────────────────────────────────
+     这里只放**首帧**的值；真正的值由 JS 写上来（它可以被用户拖、会被
+     窗口宽度夹取）。首帧必须有个非零值，否则右栏会先渲染成 0 宽再弹开。
+     数值出处见 assets/index.html 的「右栏」那段：默认 260、下限 220 取自
+     Orca components/right-sidebar/right-sidebar-width.ts:1-2。 */
+  --rsb-w:260px;
+  /* ── 2026-10-17：左栏**列表那一列**的宽度 ──────────────────────────────
+     和 --rsb-w 是同一种东西：首帧值放这儿，真值由 JS 写上来（用户可拖、
+     窗口变窄时被夹）。132 的导航栏**不是**变量 —— 它不可拖（用户点名：
+     最左侧没问题，有问题的是贴着终端面板那条缝）。 */
+  --list-w:240px;
+}
+/* ⚠️ 2026-10-15 重写：面板头不再是「占布局的一条」，而是 Orca 的 **absolute
+   overlay**，并且默认 **chromeless**。
+
+   用户的原话是「你这个终端是嵌进去的…上面和下面都是把它放在这个 UI 框里面」。
+   上面那条是这个 .phead，下面那条是面板尾 .pfoot（已删）。Orca 的答案在这三处，
+   逐条搬过来（src/renderer/src/assets/terminal.css）：
+     :267-293  .pane-title-overlay-layer{position:absolute;inset:0;z-index:20;
+                                          pointer-events:none}
+               .pane-title-bar{position:absolute;top:0;left:0;width:100%;
+                               height:var(--orca-pane-title-height)…}
+     :374-379  .pane-title-bar[data-chromeless]{background:transparent;
+                               border-bottom:none;padding:0 2px;pointer-events:none}
+     :526-529  .pane[data-has-title] .xterm-container{margin-top:24px;…}
+   最后一条是关键：**只有面板有标题时**终端才被下推 24px。而
+   TerminalPaneHeaderOverlay.tsx:122 的 isChromeless = showAlwaysOnHeaders &&
+   !title && !isEditing，这里的 title 是 paneTitles[pane.id] —— 用户**手动起的
+   名字**（use-terminal-pane-title-state.ts:26，初值是空对象）。agent 的 OSC
+   标题进的是另一个 store（runtimePaneTitlesByTabId），只喂状态判定和标签，
+   **不喂 pane 栏**。所以 Orca 的终端面板默认头顶什么都没有，终端铺满整个 pane。
+
+   我们照此办理：面板 A 头上再没有任何常驻横条、没有图标、没有文字；
+   终端占满整个 pane；只有鼠标移上来时才浮出动作按钮（见 .pbtn::before）。
+
+   （历史上这块里还删过 .ptitle 和 .phead .path —— 同一份 OSC 标题被写进
+   标签和面板头两处、外加 CLI 自己画的开场介绍框，同一个词刷三遍。
+   现在「这个面板里跑的是哪个 agent」只有标签那**一个**落点，
+   cwd 挪去了应用级状态栏 —— 那是 Orca 的 StatusBarSurface 的位置。） */
+/* ⚠️ C4：这一条从 top:0 挪到了**格子头下方**。面板 A 现在是个网格，顶上那一条
+   已经不是"面板的空白顶边"，而是第一排格子的头 —— overlay 压在那儿的话，它
+   右端那颗浮出按钮正好盖在最右上那格的 × 上（点 × 会打在 overlay 上，什么都不
+   发生）。挪下来之后它压在**终端的第一行**上，仍是 Orca 的设计意图：
+   chromeless 的按钮浮在终端内容上、靠 ::before 那个清底圆擦掉背后那点墨。 */
+.phead{position:absolute;top:var(--cellhead-h);left:0;right:0;z-index:20;
+       display:flex;align-items:center;justify-content:flex-end;
+       height:var(--pane-title-height);box-sizing:border-box;padding:0 2px;
+       background:transparent;border-bottom:none;
+       font-size:13px;font-family:var(--mono);line-height:var(--pane-title-height);
+       color:var(--pane-title-fg);
+       user-select:none;overflow:hidden;
+       /* 只有按钮能接指针 —— 否则这条看不见的 24px 会把终端第一行的
+          选中/点击吃掉（Orca 的注释：只有 .pane-title-actions 是 auto）。 */
+       pointer-events:none}
+/* ⚠️ 这里是 Orca 的「清底圆」：--pane-title-bg 在 Orca 里**就是终端自己的底色**
+   （use-terminal-pane-projection.ts:68-72 的
+    paneTitleBackground = resolveOpaqueTerminalBackground(terminalBackground, …)），
+   不是另一块 UI 色板 —— 这也是为什么有标题时那条栏读起来仍像终端的一部分。 */
+.phead{--pane-title-bg:var(--term-bg)}
+.phead .rt{display:flex;align-items:center;flex:none;pointer-events:auto}
+/* 按钮：18px 宽 × 整条高度、默认 opacity:0，hover/focus-within 才浮现。
+   Orca 的揭示规则有个容易抄漏的地方 —— split 按钮在「激活面板」时就显示，
+   而 close 按钮**只在 hover/focus 时**显示（见 terminal.css:446-457）。
+   不区分的话，任何时刻每个面板都挂着个 ×，噪音很大。 */
+.pbtn{position:relative;width:18px;min-width:18px;height:var(--pane-title-height);padding:0;
+      display:grid;place-items:center;
+      color:var(--pane-title-button-fg);background:transparent;border-radius:0;
+      opacity:0;transition:opacity 120ms ease,color 120ms ease}
+/* Why（Orca 的注释原文，terminal.css:440-441）：chromeless 的按钮**压在终端
+   第一行的文字上**，所以每颗按钮垫一个 23×23 的径向渐变圆，只清掉自己那一小块
+   字符背后的墨，而不是给整条加一层 toolbar 底色。 */
+.pbtn::before{content:"";position:absolute;top:50%;left:50%;
+              width:23px;height:23px;border-radius:999px;
+              transform:translate(-50%,-50%);
+              background:radial-gradient(circle,
+                var(--pane-title-bg) 0 44%,
+                color-mix(in srgb,var(--pane-title-bg) 74%,transparent) 62%,
+                transparent 100%)}
+.phead:hover .pbtn,.phead:focus-within .pbtn{opacity:1}
+.pbtn:hover{color:var(--pane-title-button-hover-fg)}
+/* Orca 在 chromeless 模式下不仅把描边加粗到 2.75px（压在终端文字上，默认
+   2px 在满屏字符里会糊），还把 svg 设成 position:relative —— 因为 ::before 是
+   定位盒，会把**非定位**的 svg 压住。这两条必须成对出现（terminal.css:438-444）。 */
+.pbtn svg{position:relative;stroke-width:2.75px}
+/* 右栏各模块的头（C6a 之前是"面板 B（历史流）的头"，东西没变，只是搬家了）
+   —— 它**不是终端**，是内容面板，所以保留一条占布局的 24px 条。底色透明
+   （= 面板自己的底色），不出现「和面板底色不同的另一块色板」，只留一条
+   头发丝分隔线。Orca 里对应物是它侧栏面板自己的那条 header（它高 36px，
+   我们沿用已有的 24px，不为搬家改尺寸）。 */
+.bhead{flex:none;display:flex;align-items:center;gap:7px;padding:0 8px;
+       height:var(--pane-title-height);box-sizing:border-box;
+       background:transparent;border-bottom:1px solid var(--line-soft);
+       user-select:none;overflow:hidden}
+.bhead .ico{display:grid;place-items:center;flex:none;color:var(--faint)}
+.bhead .nm2{font-size:12.5px;color:var(--fg2);flex:none}
+/* 标题是唯一**弹性**的元素（flex:1）—— 面板窄的时候该让位的是它（它还能在
+   侧栏卡片上看到），而右那串读数（轮数/大小）是 flex:none，永远完整。
+   反过来会像刚才那样把「1067 轮 · 27.1M」截成「会话 4cd810a7 · …」——
+   有用的部分先没了，剩下的是冗余的 id。 */
+.bhead .sub{min-width:0;flex:1 1 auto;font:11px var(--mono);color:var(--faint)}
+/* 正常宽度下它按内容占位（flex:0 1 auto + min-width:0）；面板窄到放不下时
+   它自己省略号收尾，而不是把计数胶囊挤出去。 */
+.bhead .rt .sub{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
+                white-space:nowrap}
+.bhead .rt{margin-left:auto;display:flex;align-items:center;gap:7px;flex:none}
+/* 分隔条 —— **整块照 Orca 的 pane-divider.ts 搬**（这次是把"抓取区"那半也搬全）。
+   原文件 lib/pane-manager/pane-divider.ts:9-40、:53-72：
+
+     getDividerHitSize() = dividerThicknessPx(4) + HIT_PADDING(3) * 2 = 10px
+     → 元素本身宽 **10px**、全透明（"Ghostty-style: the element itself is a
+       wide transparent hit area for easy grabbing"），
+     → 可见的线由 ::after 居中画（Orca 是 4px；我们从 2026-10-17 起是 1px）；
+     → --divider-extension = hitSize / 2 = 5px，让相交的线在视觉上连起来（├ 而不是 |-）。
+
+   ⚠️ 我们上一版把**元素本身**当成了那条线（flex:0 0 4px）：线一样粗，
+   但可抓区只有 4px —— **Orca 是 10px，我们只有它的一半**，
+   鼠标没正中就拖不到。这不是审美差异，是"能不能抓到"的差异。
+   （Orca 的注释点破了：给元素设 background 会把线盖掉，所以元素必须保持透明。） */
+/* 可见线 2026-10-17 从 4px 收到 1px（用户："要明显的分割，但不要这么粗"）：
+   抓取带仍是 10px，hover/拖动时才提亮 —— 鼠标形状本来就会提示可拖。 */
+.divider{--divider-thickness:1px;--divider-hit:10px;--divider-extension:5px;
+         /* C6a：它从"面板 A 和 B 之间的一个 flex 项"变成"右栏的左边界"。
+            抓取区（10px）跨在中栏/右栏的缝上：一半在中栏里，一半在右栏里 ——
+            拖拽的落点在哪儿都不影响能不能抓到，这正是上面"抓取区必须够宽"的
+            用意。右栏收起时它被 #rsb 的 overflow:hidden 裁掉，那时重新展开
+            走标题栏那颗按钮（和 Orca 一样：收起后它能拖的那条边自己也没了）。 */
+         position:absolute;left:calc(-1 * var(--divider-hit) / 2);top:0;bottom:0;
+         width:var(--divider-hit);cursor:col-resize;
+         background:transparent!important;z-index:3}
+.divider::after{content:"";position:absolute;top:calc(-1 * var(--divider-extension));
+                bottom:calc(-1 * var(--divider-extension));left:50%;
+                width:var(--divider-thickness);transform:translateX(-50%);
+                border-radius:1px;
+                /* 色值见 :root 的 --divider-line（= Orca 的 #3f3f46）。 */
+                background:var(--divider-line);
+                transition:background 100ms ease}
+.divider:hover::after,.divider.drag::after{background:var(--divider-line-strong)}
+/* 列表 ↔ 主区那条缝（2026-10-17）。整套几何照上面那条 .divider（4px 可见线
+   由 ::after 画、10px 透明抓取区、cursor:col-resize），只改两处：
+
+   ① **抓取区整条落在主区这一侧**（left:0、宽 12px），不是居中跨缝。
+      居中跨缝那版在**这一侧**是错的：缝左边就是会话行（点一下 = 切对话流，
+      而且行尾还有颗 ⋯），往左偏 1-2px 就从"想拖"变成"点了行"。
+      往主区一侧铺开则没有任何别的东西跟它抢那 12px（终端左边只有 4px 内边距，
+      字符从这里才开始）—— 这就是"看得见的线 = 抓得到的带"。
+
+   ② 线画在这个带的**左端**（::after 的 left:0、transform 取消），也就是缝上，
+      不在带的中心 —— 线上方/下方各外伸 5px（--divider-extension）与左栏那两条
+      横缝视觉上接起来。
+
+   ⚠️ 它住在 #main 里（#main 因此必须是 position:relative）。不能塞进 #list：
+   那样它在绘制顺序上排在 #main **下面**，会被终端盖住。 */
+#list-divider{left:0;width:12px;z-index:4}
+#list-divider::after{left:0;transform:none}
+/* 总览 ↔ 左栏那条缝（2026-10-17）：同一套几何 —— 可见线在缝上，12px 抓取带
+   落在总览这一侧。它住在 #dash 里（所以 #dash 必须 position:relative）。 */
+#rail-divider{left:0;width:12px;z-index:4}
+#rail-divider::after{left:0;transform:none}
+.pbody{flex:1;position:relative;min-height:0}
+/* Orca 的 .xterm-container：四边留 4px（可用 --pane-padding-x/y 覆盖），
+   并且 contain:paint —— 光标每次闪烁都会 invalidate paint，
+   不隔离的话会一路上溯到整个面板树，长会话下肉眼可见地卡。 */
+/* ===========================================================================
+   并行网格（C4）—— 这是这个产品的**默认形态**
+   ---------------------------------------------------------------------------
+   #termbody 从"一叠只显示一个的宿主"变成**网格**：每个 agent 一格，全部同屏。
+   并行是常态；"拎成独立页"（C5）才是出口。所以这里不再有
+   `.termhost:not(.on){display:none}` —— 那一条本来就是"一次只看一个"的产物，
+   而且它有个真实代价：在 display:none 的盒子上 FitAddon 会量出"2 列"这种
+   看着成立的假尺寸，xterm 自己的 canvas 也会在隐藏期间被量成 0×0。
+   现在每个格子都真实可见，各量各的盒子、各推各的尺寸，这一整类问题不存在。
+   =========================================================================== */
+/* ⚠️ C4.5：缝从 1px 的 --line-soft 换成 3px 的 --divider-line（= Orca 的
+   #3f3f46）。原来那条 `rgba(255,255,255,.045)` 在暗底上基本看不见 ——
+   用户的原话是「并行和并行之间要有明显的区分，现在就是区分不大，很容易
+   混为一谈」，这就是它。
+
+   为什么**用网格自己的 gap 画线**，而不是像 Orca 那样每个缝放一个
+   .divider 元素：网格的 gap 本来就是**整行整列连续**的，两处 gap 在交叉点
+   天然重叠成一个 3×3 的实心块 ⇒ 十字天然连成 ┼。Orca 得靠
+   `--divider-extension = hitSize/2 = 5px` 让 ::after 两端外伸才拼得上
+   （terminal.css:90-106 那两条注释），我们这条连补丁都不需要。
+   （代价：gap 是"空的"，抓不到 —— 可拖的分隔条留到 C6，那时要把 gap 换成
+     真的 divider 元素。这次只做"看得见的区分"。） */
+#termbody{display:grid;gap:var(--grid-gap);background:var(--divider-line);
+          /* 列数由 renderGrid() 写进 --gcols。 */
+          grid-template-columns:repeat(var(--gcols,1),minmax(0,1fr));
+          grid-auto-rows:minmax(0,1fr)}
+.cell{display:flex;flex-direction:column;min-width:0;min-height:0;
+      background:var(--bg);overflow:hidden;
+      /* 压暗那一下要跟着走（见下面 #termbody.multi 那条）。 */
+      transition:opacity 140ms ease}
+/* ⚠️ 非当前格压暗 —— **Orca 的第二件东西，不是我们的发明**。
+   `lib/pane-manager/pane-divider.ts:74-88 applyPaneOpacity`：激活 1、
+   非激活 0.9；0.9 出自 `src/shared/constants.ts` 的
+   DEFAULT_TERMINAL_INACTIVE_PANE_OPACITY，140ms 出自
+   `default-global-settings.ts` 的 terminalPaneOpacityTransitionMs: 140。
+   它解决的是"两个 agent 同时在干活，画面糊成一片"：**动的那几格彼此之间
+   没有主次**，压暗之后视线有一个自然的落点。
+
+   ⚠️ 只在 N≥2 时启用（.multi）。一格的时候没有"别的格"可比，压暗它自己
+   等于无端把终端变灰；而且建格的瞬间 activeTab 还没定，那时压暗会闪一下。
+
+   ⚠️ 0.9 是**混在网格底色（#3f3f46）上的**，不是混在黑上 —— 所以被压暗那几格的
+   纯黑底色会被抬到 #0F 左右（0.9×10 + 0.1×63），比当前格"亮"一点点。
+   实测过：以 claude 自己的橙 #D77757 为基准解 a·c+(1-a)·bg，
+   非当前格 = #C87255 ⇒ a = 0.896、bg ≈ (63,63,70)。**这是 Orca 的机制本身**
+   （pane-divider.ts:79-88 的 opacity 也是混在 splitBackground 上的），不是我们的
+   bug —— 别照着自己以为的"压暗 = 变黑"去改它，5/255 看不见。 */
+#termbody.multi .cell:not(.cur){opacity:.9}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   独立页（C5）—— 把一个 agent 拎成一张页
+   ---------------------------------------------------------------------------
+   **机制整段照 Orca 的 expand-collapse.ts:39-84**：把兄弟藏掉（display:none）、
+   被看的那一个铺满、rAF 之后再 fit。原文件三条要点，逐条对应到我们这里：
+     ① `child.style.display='none'` —— 其余格不参与布局；
+     ② **不搬 DOM**（Orca 的注释专门说明：连 display 都不能清成 ''，因为分屏
+        容器靠行内 display:flex 撑着）—— 我们连 display 都不碰，靠一个类切换；
+     ③ `requestAnimationFrame(() => safeFit(...))` —— 尺寸要等布局落地再量，
+        我们这边由 settle() 那套"两帧稳定 + boxOk"承担（见 showPage 的 refit）。
+   为什么不搬 DOM：格子里装着 xterm 的 canvas 和 PTY 那条流，搬一次就要面对
+   "canvas 上下文还在不在""量到 0 宽的盒子"这类问题；藏起来零成本 ——
+   而显示/隐藏对终端的唯一影响是 fit，我们的 settle()/pushSize() 头一行就挡掉了
+   0 宽的盒子（`if (!h.clientWidth) return`），回来时 ResizeObserver 自己会补量。 */
+#termbody.solo .cell:not(.solo){display:none}
+/* 被拎出去那一格的**头也藏掉**。理由不是省 22px：名字在同一屏上出现两次是
+   我们已经被否过一次的事（面板头 + 标签 + CLI 自己的框，同一个词刷三遍）。
+   页面上这个名字的落点只有一个 —— 标签条上那张页。
+   （Orca 同理：pane 头默认 chromeless，只有用户手动起过名字才下推终端。） */
+#termbody.solo .cell.solo > .cellhead{display:none}
+/* 头藏了 ⇒ 面板 A 那条浮出按钮 overlay 要跟着上移到顶。它平时故意压在
+   --cellhead-h 下面（否则右端那颗按钮正好盖住最右上那格的 ×）。 */
+#termbody.solo ~ .phead{top:0}
+
+/* 格子的头（22px）：状态点 + agent 图标 + 名字 + 关闭。
+   **它就是那个标签的 .tab 元素本体**，只是换了爹 —— 所以下面这几条是
+   「覆盖」，不是重写：宽度从 180/220px 变成撑满格子、底色跟格子走。 */
+.cellhead{width:auto;height:var(--cellhead-h);flex:none;padding:0 4px 0 8px;
+          border-right:none;border-bottom:1px solid var(--line-soft);
+          font-size:11.5px}
+/* "当前格"= 键盘焦点所在的那一格。激活标记用**左边 2px 竖条**而不是标签条上
+   那条底边横条：网格里每个头下面紧贴的就是终端，横条会被读成一条分隔线。 */
+.cell.cur .cellhead{background:color-mix(in srgb,var(--fg) 6%,transparent);color:var(--fg)}
+.cell.cur .cellhead::after{left:0;top:0;right:auto;bottom:0;width:2px;height:auto}
+.cellhead .nm{font-size:11.5px}
+
+/* 终端的地面。**boxOk() 断言的是"宿主 = 它的父容器内缩 4px"** —— 原来那个
+   父是 .pbody，现在下沉到这一层。这层必须真实存在且有确定尺寸，
+   否则那条断言就会拿错基准（它当初就是用来挡"量到整个窗口"的假值的）。 */
+.cellbody{flex:1;position:relative;min-height:0}
+
+/* 格内横幅（冷恢复步 6）：把"这一格为什么不是上次那条会话"摆在**这一格**里。
+   ⚠️ 它必须是一个**绝对定位的覆盖层**（父 .cellbody 已经是 relative），
+   **不能**插成 .termhost 的兄弟：那会让 .cellbody 的内容盒变矮 ——
+   而 boxOk() 断言的正是"宿主 = 父容器内缩 4px"，于是 ResizeObserver 醒 →
+   refit → term.resize → **恢复出来的 TUI 立刻重画一屏**（正是这一轮要避免的事，
+   也正好会毁掉我们刚说出口的那句话）。覆盖层对布局零影响，这是唯一安全的形状。
+   ⚠️ 底色**必须是不透明的一层**（不能用 color-mix 半透明）：终端会继续在下面
+   重画，半透明的话文字会跟着下面的字节一起抖。取 .cellhead 同族的深底 + 左侧
+   一道 2px 的kind色（和"当前格"那条竖条同一套笔法）。 */
+.cellbanner{position:absolute;left:0;right:0;top:0;z-index:3;
+            display:flex;align-items:center;gap:6px;height:24px;
+            padding:0 4px 0 8px;cursor:pointer;
+            background:var(--side);border-bottom:1px solid var(--line-soft);
+            box-shadow:0 6px 14px -8px rgba(0,0,0,.55);
+            font-size:11.5px;color:var(--muted)}
+.cellbanner::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;
+                    background:var(--amber)}
+.cellbanner.k-mismatch::before{background:var(--ask)}
+.cellbanner.k-conflict::before{background:var(--amber)}
+.cellbanner .ic{flex:none;display:flex;color:var(--amber);margin-left:2px}
+.cellbanner.k-mismatch .ic{color:var(--ask)}
+/* ⚠️ **一行，溢出打点**，几行固定 24px（和 .cellhead 一样高）。
+   为什么不做"长文本折行"：折行时这条横幅会吃掉两三行终端，而那几行正是
+   用户要看的东西；而且 flex 一折行，后面那一截细节会被挤成 0 宽（截图里就是
+   "下面那行字凭空消失"）。细节（会话 id、Go 的原话）进 title —— 悬停就有，
+   日志里也有一份，屏幕这一行只留**最该看见的那半句**（都写在句子开头）。 */
+.cellbanner .tx{flex:1;min-width:0;color:var(--fg);white-space:nowrap;
+                overflow:hidden;text-overflow:ellipsis}
+.cellbanner .x{flex:none;width:16px;height:16px;display:flex;align-items:center;justify-content:center;
+               color:var(--faint);background:none;border:0;cursor:pointer;font-size:13px;line-height:1;
+               font-family:inherit;padding:0;border-radius:3px}
+.cellbanner .x:hover{background:color-mix(in srgb,var(--fg) 10%,transparent);color:var(--fg)}
+/* 独立页（一个格子占满主区）时横幅一样要在 —— 它是这一格自己的话，与摆法无关。 */
+
+/* .termhost 是**每个 agent 一个**（原来叫 #termhost，全局只有一个）。
+   只有"当前格"的那个同时带上 id="termhost" —— 按 id 找宿主的老代码因此
+   天然只看得见当前格。（C6a 之前那个唯一读者是 cellWidthPx，已随列宽换算
+   一起退役；这条 id 约定留着，因为"谁是当前格"在 DOM 里读得出来仍然有用。） */
+.termhost{box-sizing:border-box;position:relative;contain:paint;
+          width:calc(100% - 4px);height:calc(100% - 4px);
+          margin:4px 0 0 4px}
+.termhost .xterm{height:100%;width:100%}
+/* ⚠️ 2026-10-15 删掉了 .pfoot（面板尾）。它是用户说的「下面也是把它放在这个 UI
+   框里面」的那一条，也是 Orca 里**根本不存在**的东西 —— Orca 的终端面板没有
+   per-pane 页脚，它的状态栏是应用级的 StatusBarSurface（24px），
+   我们已经有 #status。那六个读数各自的去向：
+     连接状态         → 与 #status 的 #s-dot/#s-st 完全重复，删掉
+     字体/连字/渲染/尺寸 → 并入 #status（那才是 Orca 的落点）
+     恢复上次输出      → 搬进 .phead 的浮出按钮组（面板级的动作留在面板上）
+   终端因此不再被上下各挤掉 24px。 */
+
+/* ===========================================================================
+   xterm 的渲染补丁 —— **整段从 Orca 的 assets/terminal.css 搬来**（含注释）。
+   这几条都不是审美，是它踩过的坑；我们跑在 WebView2/Chromium 上，
+   坑是同一条，所以补丁也应当是同一条。
+   =========================================================================== */
+
+/* xterm/VS Code 都保持滚动条槽位常驻。用 auto 的话，Linux 风格的 DOM
+   滚动条会随内容出现/消失，反复触发 resize/reflow 抖动。 */
+.xterm-viewport{overflow-y:scroll}
+/* xterm.css 把 viewport 背景写死成 #000（为了 macOS 的不透明滚动条）。
+   在分数像素位置上，这层黑会抗锯齿成上下各一条 1px 的暗线。
+   让主题背景透上来。 */
+.xterm:not(.allow-transparency) .xterm-viewport{background-color:transparent}
+/* xterm 没给滚动条滑块留圆角选项，默认是直角。 */
+.xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider{border-radius:4px}
+/* xterm.css 给 .xterm-helpers 设了 position:absolute;top:0 但**没设 left**，
+   于是 left:auto —— 在 Chromium 里可能解析成非 0 值，把输入法候选框
+   推离光标。显式钉到 0。 */
+.xterm .xterm-helpers{left:0}
+/* Chromium 在某些情况下仍会画出 xterm 那个隐藏 textarea 的原生光标，
+   表现为重绘时残留一个旧光标。 */
+.xterm .xterm-helper-textarea{caret-color:transparent}
+
+/* 对话流（C6a 之前叫"历史流"）—— 我们相对 Orca 的差异点：
+   把「续接」做成看得见的一条流。它是右栏「对话流」模块的正文。
+
+   ---------------------------------------------------------------------------
+   C7（2026-10-16）重做正文的视觉。改之前是"三列栅格 + 每行一条 hairline +
+   实心色块的行内代码"，用户的原话是"UI 有点丑"。Orca 那边**压根没有对话流这个
+   模块**，同类物是 native-chat 转录（NativeChatMessageRow.tsx:72-76），可搬的
+   纪律只有三条：
+
+     ① **单色**。你的话是一张"抬起来"的卡（bg-card）、agent 正文就是正文、
+        系统条目降一档。**角色的图标不带颜色** —— 原来"你=蓝、agent=绿、
+        系统=灰"是三套色在和正文抢注意力，而 Orca 的角色字形是
+        `text-chat-foreground-faint`（全部沉下去），让"卡 / 正文 / 沉一档"
+        本身把角色说清楚。角色词那一行保留，它同时是无障碍名。
+     ② **每条一个角色头行**（图标 + 角色词 + 时间）。时间从右边那一列挪进头行：
+        右对齐的等宽时间戳会在正文右侧拉出一条参差的灰边，而且它和"谁在说"
+        是同一件事的两个面，本来就该挨着。
+     ③ **行内代码不是色块**。原来是 #d8b98a 压 #22262e 的实心片，而 agent 正文
+        里满是路径 —— 满屏高亮记号笔，**这是"丑"的主因**。改成"等宽 + 极淡底 +
+        正文色"：它是同一个句子里的一个词，不该跳出来。
+
+   间距照它的数字体系（native-chat-appearance.css:12-13：间距跟字号走，
+   4px @ 14px）：正文 12.5px、条目之间 10px，**遇到"你"的那条之前 18px** ——
+   那是轮次的边界，而这个边界是数据里现成的（prompt 行就是一轮的开始）。
+   ⚠️ 每行的 padding 写在 .hit 上、不在 #hist 上：代码块要**通栏出血**
+   （下面 pre.code 的负 margin 就是靠这个算出来的），#hist 一旦自带左右内边距，
+   负 margin 就得跟着写死成一个和第二处一样的数。 */
+#hist{position:absolute;inset:0;overflow-y:auto;padding:10px 0 16px;
+      /* 关掉浏览器自带的滚动锚定：它和"我们自己的吸底"是两套补偿，会互相打架
+         （Orca 那条 MessageList 也是这么关的：浏览器锚定会在虚拟化锚点旁边
+         多出一份没人认领的位移）。 */
+      overflow-anchor:none}
+.hit{padding:10px 12px 0}
+.hit:first-child{padding-top:0}
+.hit.user{padding-top:18px}
+.hit .fh{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.hit .fh .who{display:grid;place-items:center;width:14px;height:14px;flex:none;
+              color:var(--faint)}
+.hit .rl{font:11px/1 var(--sans);color:var(--faint);white-space:nowrap}
+/* ⚠️ 下面这条 `min-width:0` + `overflow-wrap:anywhere` 是"下段有一条横向滚动条"
+   的**根因修法**，不是凑数的防御性写法：
+   ① `min-width:0` —— 代码块那条通栏的负 margin 之后，正文列必须允许缩到内容
+      宽度以下；不给 0 的话长 token 会把整行撑宽，而 #hist 只写了
+      `overflow-y:auto`，另一轴会被浏览器算成 auto —— 横向滚动条就是这么来的。
+   ② `overflow-wrap:anywhere`（不是 `break-word`）—— 两者的差别恰好在
+      **min-content 宽度**上：`break-word` 只在排版时断词、不改 min-content，
+      长 token（路径/URL/哈希）照样把列撑开；`anywhere` 才把它算得进来。
+      原来那条 `word-break:break-word` 是这类问题的常见"看着像修好了"的写法。 */
+.hit .tx{font:12.5px/1.6 var(--sans);color:var(--fg2);white-space:pre-wrap;
+         min-width:0;overflow-wrap:anywhere}
+/* 你的话 = 一张抬起来的卡（Orca 的 "user prompts read as a lifted card"）。
+   正文色从 --fg2 提到 --fg：它是一轮里最该被认出来的那一句。 */
+.hit.user .tx{color:var(--fg);background:var(--card);
+              border:1px solid var(--line-soft);border-radius:5px;padding:6px 9px}
+.hit.user .rl{color:var(--fg2)}
+/* 系统条目（子代理回报、跨会话消息…）比正文低一档：它们是**背景**，不是谁说的话。
+   ⚠️ 降档用**颜色和字号**，不用斜体 —— 中文没有真斜体，浏览器合成出来的是倾斜，
+   在 12.5px 下比正文更脏（原来那条 `font-style:italic` 就是这个坑）。 */
+.hit.sys .tx{color:var(--muted);font-size:12px}
+.hit .tm{margin-left:auto;font:10.5px/1 var(--mono);color:var(--faint);
+         white-space:nowrap;font-variant-numeric:tabular-nums}
+.hist-empty{padding:16px 12px;color:var(--faint);font-size:12px}
+/* 对话流里的 markdown 元素。原来是原样吐出 `**粗体**` 和反引号 ——
+   满屏符号，是这块区域质感最差的地方。 */
+.hit .tx code{font:11.5px/1.5 var(--mono);background:rgba(255,255,255,.055);
+              color:var(--fg);padding:1px 4px;border-radius:3px}
+/* 代码块：**通栏出血**，不要圆角描边盒 —— 盒子里再嵌一条自己的横向滚动条，
+   看起来就像正文里塞了第二个面板（原来是 border + radius + 自己的滚动条）。
+   左边一条 2px 的线代替盒子：它只说"这段是代码"，不制造第二个容器。 */
+.hit .tx pre.code{font:11.5px/1.6 var(--mono);color:var(--fg2);background:#131313;
+                  border-left:2px solid var(--line);border-radius:0;
+                  padding:6px 12px 6px 10px;margin:6px -12px;overflow-x:auto;
+                  white-space:pre;scrollbar-width:thin}
+.hit .tx pre.code code{background:none;padding:0;color:inherit;font-size:inherit}
+.hit .tx strong{color:var(--fg);font-weight:600}
+.hit .tx em{color:var(--fg2)}
+/* 被截断的正文：**明说**，不靠一个没头没尾的 `…`（见 flowRowHTML 的 truncNote）。
+   它是这条流的**元信息**，不是正文 ⇒ 比正文低一档、不占版面。 */
+.hit .trunc{margin-top:4px;font:11px/1.5 var(--sans);color:var(--faint)}
+/* ---------------------------------------------------------------------------
+   一条正文**默认只出一部分**（用户 2026-10-16 定的：这一栏是监视面，不是阅读面）
+   ---------------------------------------------------------------------------
+   超预算的部分收起来（`max-height`），末尾给一颗**明说**的按钮「… 其余 N 行 ▾」。
+   不收成一个没头没尾的 `…`：那分不清是作者写的还是我们砍的（这条流为同一个
+   理由已经踩过一次，见 truncNote）。
+   ⚠️ 按钮**只在鼠标移到这一条上时**才浮出来（用户定的：移上去才知道能点）；
+   收起来的那条**整块也算可点**。摊开着的时候点正文不动作 —— 那时的点击
+   几乎都是为了选字（本仓库立过的规矩：有选中文本时不动作）。
+   ⚠️ 用 max-height 而不是 `-webkit-line-clamp`：正文里嵌着 markdown 块，
+   而 `pre.code` 靠 -12px 负 margin 通栏出血，line-clamp 在块级子元素上行为
+   不确定。代价是**收起来那一条里的代码块会被裁掉这 12px 出血**（overflow:hidden
+   的必然结果），摊开后恢复原样 —— 这是刻意换来的确定性。
+   ⚠️ 预算只许有一个来源：下面的 `--flow-clamp` 由 JS 从 FLOW_CLAMP_PX 写出来，
+   别在这儿写第二个数（两处写同一个数 = 迟早分叉）。 */
+.hit{position:relative}
+.hit .tx{max-height:var(--flow-clamp,80px);overflow:hidden}
+.hit.open .tx{max-height:none}
+.hit.fold .tx{cursor:pointer}
+.hit.open .fh{cursor:pointer}   /* 摊开着的时候点头行 = 收起（按钮在末尾，850px 之外） */
+/* 收起来那一条的下沿**淡出**：切在半个字上不好看，而"还有下文"的明说
+   （那颗「… 其余 N 行」）只在鼠标移上来时才出。淡出是常驻的那半个信号。 */
+.hit.fold .tx{-webkit-mask-image:linear-gradient(#000 calc(100% - 16px), transparent);
+              mask-image:linear-gradient(#000 calc(100% - 16px), transparent)}
+.hit.fold .trunc{display:none}   /* 收着的时候"这里显示前 8000 字"是句错话 */
+.hit .more{display:none;justify-content:flex-end;margin-top:2px}
+.hit.fold .more,.hit.open .more{display:flex}
+.hit.fold .more{opacity:0;transition:opacity .12s}
+.hit.fold:hover .more,.hit.fold:focus-within .more{opacity:1}
+.hit .more .mo{display:inline-flex;align-items:center;gap:4px;font:11px/1 var(--sans);
+               color:var(--muted);background:none;border:0;padding:3px 6px;
+               border-radius:4px;cursor:pointer}
+.hit .more .mo:hover{color:var(--fg);background:var(--hover,#33333a)}
+@media (prefers-reduced-motion: reduce){ .hit.fold .more{transition:none} }
+
+/* ---------------------------------------------------------------------------
+   上下文压缩 = 会话**内部**折起来的一页（不是一轮对话、不是一次新会话）
+   ---------------------------------------------------------------------------
+   形态照 Orca 的 `Context compacted`：一条极淡的分隔线（它连正文都不画）。
+   左右两条 1px 的发丝线夹着那五个字 —— 这是这一栏里**唯一**的分节线，
+   所以它比 .hit.sys 再降一档（降档仍用颜色和字号，不用斜体：中文没有真斜体）。
+   ⚠️ 收起时**一个字的正文都不出、一行都不占**（`max-height:0`）—— 一屏 2 万字
+   的"用户发言"正是这一轮要修的东西。摊开后它恢复成一条普通正文（12px、淡一档）。
+   ⚠️ 它**没有**「… 其余 N 行 ▾」那颗按钮：开关就是整行（和"收起来的整块可点"
+   同一条规矩，见上面那段）。 */
+.hit.compact{padding-top:14px}
+.hit.compact .fh{gap:5px;margin-bottom:0;cursor:pointer}
+.hit.compact .fh .who{color:var(--faint)}
+.hit.compact .ln{flex:1;height:1px;min-width:10px;background:var(--line-soft)}
+.hit.compact .rl{color:var(--muted)}
+.hit.compact .cm{font:10.5px/1 var(--mono);color:var(--faint);white-space:nowrap;
+                 font-variant-numeric:tabular-nums}
+/* 时间戳照旧靠右，但那两条发丝线已经在吃剩余空间了 ⇒ 把 auto 外边距收回，
+   否则两条线的长度会随字数变（同一栏里两个读数不一样=看着像没对齐）。 */
+.hit.compact .tm{margin-left:0}
+.hit.compact .cv{color:var(--faint);font-size:10px;line-height:1}
+.hit.compact .cv::after{content:"▾"}
+.hit.compact.open .cv::after{content:"▴"}
+.hit.compact .tx{max-height:0;margin-top:0}
+.hit.compact.open .tx{max-height:none;margin-top:6px;font-size:12px;color:var(--faint)}
+.hit.compact:not(.open) .trunc{display:none}   /* 收着的时候"这里显示前 8000 字"是句错话 */
+.hit.compact .more{display:none}
+/* ⚠️ 摊开后缩进让给正文：这一条没有 `.rl` 之外的层级，但正文要和那五个字对齐
+   （不给缩进会被读成"另一条发言的开始"）。 */
+.hit.compact.open .tx{padding-left:18px}
+
+/* ===========================================================================
+   3b. 收起终端面板后的「群组」视图
+   ---------------------------------------------------------------------------
+   收起键点下去，中栏**换一块面**，不是挖空。原来那一版只把 `.pane.a` 设成
+   display:none，于是中栏一片黑 —— 空出来的宽度没有任何人接手（见 #p-collapse
+   上面那段"已知毛病"）。这块面接手它：`#panes` 藏掉、`#group` 顶上来。
+
+   为什么是"一行一个 agent"而不是一条时间线：N 个 agent 同时喷的时候，纯时间线
+   会退化成第二个终端。Orca 为这件事专门把它的 Activity 流做成**按 agent 聚合**
+   （AgentPaneThread 的注释原话："keyed per agent pane… the list shows one row
+   per agent"），事件全压在行内、行上只出最新那一条。这里照做。
+
+   几何靠的是现成的两件事，没有一条新算式：
+     · `#group{flex:1}` —— `#main` 本来就是 flex column，`#panes` 原本也是 flex:1；
+     · 右栏由 JS 收起（`--rsb-w` 写 0），中栏因此拿到全部宽度（见 setTermCollapsed）。
+   =========================================================================== */
+#group{flex:1;min-width:0;min-height:0;display:none;flex-direction:column}
+#app.term-collapsed #group{display:flex}
+#app.term-collapsed #panes{display:none}
+/* 标签条让位：群组自己就是这一屏的头。
+   ⚠️ 只藏 #tablist 和那颗 `+`，**不藏 .tabs-right** —— 收起键住在那里，把它
+   一起藏了这一屏就展不回去了。"收起键跟着面板一起消失、于是展不回来"这件事
+   这个文件已经发生过一次（见 #p-collapse 上面那段注释），别再犯第二次。 */
+#app.term-collapsed #tablist,#app.term-collapsed #tab-add{display:none}
+
+/* 收起期间右栏是被**我们**强制关着的，所以标题栏那颗「展开右栏」按不动 ——
+   灰掉它（+ 说清原因 + 点击 no-op）。本仓立过的规矩是**不可用的动作做灰、
+   不做禁、不做隐**：禁了 title 不弹，隐了布局会跳（那颗键一消失，
+   .tabs-right 整组右移，收起键的位置跟着变）。 */
+#titlebar .icon-btn.mute{color:var(--faint);opacity:.45;cursor:default}
+#titlebar .icon-btn.mute:hover{background:none;color:var(--faint)}
+
+/* 顶部 agent 条：每个 agent 一枚（序号 + logo + 状态点）。
+   顺序 = 网格里的座位顺序（TAB_LIST），**不按 attention 排** —— attention
+   排序是下面那份列表的活儿；条上这个位置表达的是"谁坐在哪"，跟着状态变来
+   变去反而找不到人。
+   ⚠️ 序号槽定宽：不定宽的话第 10 格起整列右移，"对齐"当场失效
+   （Orca 把状态点放在固定槽位、标题定宽截断，是同一条理由）。 */
+#group-head{flex:none;display:flex;align-items:center;gap:2px;height:32px;
+            padding:0 8px;border-bottom:1px solid var(--line-soft);
+            overflow-x:auto;scrollbar-width:none}
+#group-head::-webkit-scrollbar{display:none}
+.gchip{flex:none;display:flex;align-items:center;gap:5px;height:22px;padding:0 6px;
+       border-radius:5px;color:var(--fg2);cursor:pointer;user-select:none}
+.gchip:hover{background:var(--card)}
+.gchip.on{background:var(--card-sel);color:var(--fg)}
+.gchip .seq{font:10.5px/1 var(--mono);color:var(--faint);min-width:11px;text-align:right;
+            font-variant-numeric:tabular-nums}
+.gchip .tab-ico{display:grid;place-items:center;width:13px;height:13px;color:var(--muted)}
+.gchip.on .tab-ico{color:var(--fg2)}
+#group-add{flex:none;display:grid;place-items:center;width:22px;height:22px;margin-left:2px;
+           border:0;border-radius:5px;background:none;color:var(--muted);cursor:pointer}
+#group-add:hover{background:var(--card);color:var(--fg)}
+
+/* 主体：一行一个 agent 的**三行卡**（解剖照 Orca activity-thread-row.tsx:93-264）：
+   ① 状态点 + 标题 ② **只出最新那一条** ③ 身份 + 时间。
+   ⚠️ 2026-10-16 起这一屏**没有"点开就地展开的消息流"了**（用户定的形态，原话：
+   "这个群组，就相当于查看 Agent 的工作看板…不用呈现所有正文内容…用户把面板收起
+   来的目的就是为了简化"）。所以：**行高固定** —— 那个 agent 吐了多少字都不影响
+   它。看板不长高，就同时消掉了"下面的行被顶出去"和"内容在 340px 的小盒子里滚轮"
+   两件事（内层滚动窗和折叠条都是为此删掉的，别再搬回来）。
+   两个点击落点，语义不同：
+     ① 点这一行（标题/动态/身份）= **进那一格**（"点击气泡进入具体 agent 的终端
+        面板"这条用户早说过，现在整行都算气泡）；
+     ② 有待办的那一行里，那张卡自己是**动作区**（点选项 = 替它按一个键）。 */
+#group-list{flex:1;min-height:0;overflow-y:auto;padding:4px 0 14px}
+.grow{border-bottom:1px solid var(--line-soft)}
+.grow .g1{display:flex;align-items:center;gap:7px;padding:9px 12px 0;cursor:pointer;
+          user-select:none}
+.grow .g1 .nm{font:12.5px/1.4 var(--sans);color:var(--fg);min-width:0;
+              overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* ⚠️ 这里**不**放右对齐的状态词（我第一版放了，实测当场看见「空闲/空闲」同一行说
+   两遍）：状态已经有两个载体 —— 左边那颗 .adot（图形），以及第 ② 行在没别的话
+   可说时**回落到状态词**（Orca 那条优先级"正文预览→工具预览→状态词"的最后一级）。
+   再加一个右沿的词就是同一个事实在一行里说三遍。Orca 的一行解剖里也没有它。 */
+.grow .g2{margin:3px 12px 0 31px;font:12px/1.5 var(--sans);color:var(--fg2);
+          overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 有待办的那一行**没有第 ② 行** —— 那一行的"最该被看见的一句"是它要你答的那件事，
+   已经由下面那张卡的头一行（`在等你答 · 问题原文`）说了。两处都画就是同一句话
+   在一行里说两遍（这个文件为这条已经踩过一次：「空闲/空闲」，见上面那段注释）。 */
+.grow .g2:empty{display:none}
+.grow .g3{display:flex;align-items:center;gap:6px;margin:4px 12px 0 31px;padding-bottom:9px;
+          font:10.5px/1 var(--sans);color:var(--faint)}
+.grow .g3 .tab-ico{display:grid;place-items:center;width:12px;height:12px;color:var(--muted)}
+/* hover 动作**在流里**折出来（opacity 淡入 + 占着位），不是绝对定位的浮层 ——
+   和 Orca hairline 动作那一套（max-w-0 → max-w-none 的 in-flow fold）是同一个
+   选择：浮层会盖住它旁边那颗时间，而这两件事都在同一行。 */
+.grow .g3 .go{margin-left:auto;border:0;background:none;color:var(--faint);
+              font:10.5px/1 var(--sans);cursor:pointer;padding:2px 5px;border-radius:4px;
+              opacity:0;transition:opacity .12s}
+.grow:hover .g3 .go,.grow .g3 .go:focus{opacity:1}
+.grow .g3 .go:hover{background:var(--card);color:var(--fg)}
+
+/* 「它在等你答」——照 Orca 的 AwaitingInputRow：**两态同一行**，等待态和已答态
+   长在同一个位置，答完之后那句话还在（能选中复制）。
+   ⚠️ 选项**能点**，但点它 = 往那一格的 PTY 写一个按键（实测：数字键直选，见记忆
+   claude-code-ask-picker-keys），所以它长得**仍然像一份可读的清单**、不像一排按钮：
+   群里读的是"有哪些方案"，多一排按钮会把清单读成表单。可点这一件事由一个 hover
+   说，外加 title 里那句"替你在这一格里按下 3"。 */
+/* 这张卡现在长在**行里**（不再是展开出来的那段流里）⇒ 左边缩进与第 ②③ 行对齐
+   （31px = 状态点 + 标题那一栏），右边也收进来一点。 */
+.gask{margin:8px 12px 8px 31px;border:1px solid var(--line-soft);border-radius:6px;
+      background:var(--card);overflow:hidden}
+.gask .qh{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--line-soft);
+          font:10.5px/1 var(--sans);color:var(--ask-text)}
+.gask .qt{padding:8px 10px;font:12.5px/1.5 var(--sans);color:var(--fg)}
+.gopt{padding:7px 10px;border-top:1px solid var(--line-soft)}
+.gopt .lb{font:12px/1.5 var(--sans);color:var(--fg2)}
+.gopt .ds{font:11.5px/1.5 var(--sans);color:var(--muted);margin-top:2px}
+/* preview：**保留换行**的预排块（✓/✗ 对齐列表）。等宽、单色、只做横向自滚 ——
+   它是"影响面"的版面，压平或折行都不是它了（见 transcript.go 的 cutRunes）。 */
+.gask pre{font:11px/1.5 var(--mono);color:var(--muted);margin:5px 0 0;
+          white-space:pre;overflow-x:auto;scrollbar-width:none}
+.gask .gf{display:flex;align-items:center;gap:8px;padding:7px 10px;border-top:1px solid var(--line-soft);
+          font:10.5px/1 var(--sans);color:var(--faint)}
+/* 靠右那一摞：**只有最后那一颗**吃掉左边的余量（每颗都 auto 的话它们会被均匀摊开，
+   而这两颗是一组动作）。
+   ⚠️ 用 `:last-of-type` 不用 `:first-of-type`：收起来时「提交」被 display:none 藏掉，
+   而 `:first-of-type` **不认 display** —— 余量会落在那颗看不见的按钮上，剩下的
+   「去这一格」就贴在时间后面了。「去这一格」永远排在末尾，所以按末尾选一定对。 */
+.gask .gf .go{margin-left:0;border:0;background:none;color:var(--fg2);font:11px/1 var(--sans);
+              cursor:pointer;padding:3px 6px;border-radius:4px}
+.gask .gf .go:last-of-type{margin-left:auto}
+.gask .gf .go:hover{background:var(--card-hov);color:var(--fg)}
+/* 卡的**正身**（问题 + 选项 + 进度条）单独包一层 `.qb`：**默认整块收起**，只留表头
+   那一行 `在等你答 · 问题原文` + 一颗「作答」（用户 2026-10-16 定的：卡片一律先收着，
+   理由见 JS 里 askBlockSig 下面那段 —— 看板先要能一眼读完"谁在等你"）。 */
+.gask .qh .open{display:none;margin-left:auto;border:0;background:none;color:var(--fg2);
+                font:10.5px/1 var(--sans);cursor:pointer;padding:2px 5px;border-radius:4px}
+.gask.hd .qh .open,.gask.usr .qh .open{display:inline-flex;align-items:center}
+.gask .qh .open:hover{background:var(--card-hov);color:var(--fg)}
+/* 两个字的换态：收着（.hd）说「作答 ▾」，用户自己摊开的（.usr）说「收起 ▴」。
+   ⚠️ 这颗键是**纯本地**的（展开/收起不碰终端），所以不受"有选中文本时不动作"那条
+   约束 —— 那条是给"往活着的 agent 里写键"用的。 */
+.gask .open .t-col{display:none}
+.gask.usr .open .t-col{display:inline}
+.gask.usr .open .t-exp{display:none}
+.gask.hd .qb{display:none}
+/* 收起来的时候「提交」也跟着藏 —— 它的判据是**屏上走到哪一步了**，而那一步的现场
+   正藏在收起来的正身里，只留一颗"提交"在那儿等于让人闭着眼按。 */
+.gask.hd .gf .sub{display:none}
+/* 收起来时问题原文搬到表头（见 askHTML 里 hodQ 那段）—— 整张卡只剩一行也得说清
+   它在问什么。摊开时它在正身里，这里就不画（同一个事实一处说一遍）。 */
+.gask .hdq{display:none;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gask.hd .hdq{display:inline}
+/* 已答：整块降一档（背景收回画布色）。**不隐藏** —— 答完之后仍然要能把问题和
+   选项读回来，那是 Orca 那条"回答后仍可选中复制原文"的同一条。 */
+.gask.done{background:none}
+.gask.done .qh{color:var(--faint)}
+/* 你选的那一项：加一个实心标记（不用色块 —— 一个色只讲一件事）。 */
+.gask .gopt.picked .lb{color:var(--fg)}
+.gask .gopt.picked .lb::before{content:"✓ ";color:var(--green)}
+
+/* 可点的那一态：这一行能替你按一个键（见 answerFromGroup）。用一个 hover 说
+   "点得动"，**不改成按钮形状** —— 理由见上面那段（清单 vs 表单）。 */
+.gask .gopt.act{cursor:pointer}
+.gask .gopt.act:hover{background:var(--card-hov)}
+.gask .gopt.act:hover .lb{color:var(--fg)}
+/* 不可用的那一态：**做灰、不做禁、不做隐**（本仓库的规矩）—— 它还在清单里、
+   还能选中复制，只是点不动；为什么点不动写在 title 上（禁了 title 就不弹了）。 */
+.gask .gopt.off .lb{color:var(--faint)}
+.gask .gopt.off{cursor:default}
+/* 那一问里**只在终端存在**的两项合成项（`Type something.` / `Chat about this.`）：
+   必须画出来 —— 漏掉它们等于替用户删掉了两个可选项（用户 2026-10-16 指出的）。
+   但在这儿点不成（送那个编号的语义没实测过），所以点它 = 进那一格自己写。 */
+.gask .gopt.syn{cursor:pointer}
+.gask .gopt.syn:hover{background:var(--card-hov)}
+.gask .gopt.syn .lb{color:var(--fg2)}
+.gask .gopt.syn .en{margin-left:6px;font:10.5px/1.5 var(--mono);color:var(--faint)}
+.gask .gopt.syn .hint{margin-left:8px;font:10.5px/1.4 var(--sans);color:var(--faint)}
+/* 「没按成」那一行：写在这一块里、贴着选项。它有两种来源 —— 送键前的闸没过
+   （什么都没发生），和送键后 2.5 秒没等到回声（按了但不知道成没成）。两者必须
+   分得清：前者是"没动过"，后者是"动了、结果不明"。 */
+.gask .qerr{padding:6px 10px;border-top:1px solid var(--line-soft);
+             font:11.5px/1.5 var(--sans);color:var(--red)}
+
+/* 多选（multiSelect）：选项前面那个勾选框，画成 TUI 里 `[ ]`/`[✔]` 的样子 ——
+   群里读的是清单，清单上"哪几项勾着"必须一眼看得出（屏上的勾选态会变，见
+   syncAskScreens）。勾选框**不换色块**，勾中才用绿（一个色只讲一件事）。 */
+.gask .gcb{display:inline-block;width:12px;height:13px;margin-right:6px;border-radius:3px;
+           border:1px solid var(--faint);vertical-align:-2px;
+           font:10px/13px var(--sans);text-align:center;color:transparent}
+.gask .gopt.picked .gcb{color:var(--green);border-color:var(--green)}
+/* 多选的"选中"由勾选框说，别再叠一个 `✓ ` 前缀（同一件事说两遍） */
+.gask .gopt.multi.picked .lb::before{content:none}
+/* 多问的**进度条**：照终端那条 `← ☐ Color ☒ Size ✔ Submit →` 画一遍。
+   它说的是"现在问到第几问、哪几问答过了" —— 群组这边**一次只画当前一问**
+   （照终端：它也一次只问一屏），几问几选全摊开会又长又乱。
+   每一格**可以点**（跳问）：终端里换问的键实测是 `←`/`→`，两向都非破坏
+   （不碰答案，只把高亮带回第 1 项），所以这一步比"作答"安全得多 —— 见 jumpToQuestion。
+   ⚠️ 当前那一问**不留指针、不做灰**：那里没有动作可做（"不可用的动作做灰、
+      不做禁、不做隐"这条说的是"有个动作但此刻不行"，不是"这里本来就没有动作"）。 */
+.gask .gsteps{display:flex;flex-wrap:wrap;gap:3px 10px;padding:7px 10px;border-top:1px solid var(--line-soft);
+              font:10.5px/1.4 var(--mono);color:var(--faint)}
+.gask .gstep.cur{color:var(--fg)}
+.gask .gstep.ok{color:var(--fg2)}
+.gask .gstep.go{cursor:pointer}
+.gask .gstep.go:hover{color:var(--fg);text-decoration:underline}
+.gask .gstep.jmp{color:var(--fg2);opacity:.6}
+.gask .gnote{padding:6px 10px;border-top:1px solid var(--line-soft);
+             font:11px/1.4 var(--sans);color:var(--faint)}
+.gask .qt.off{color:var(--faint)}
+
+/* 已答之后：一问一行「问 → 答」（不再列选项 —— 那一屏已经过去了），
+   原文与选项收进一个 <details>（仍在、仍能选中复制，但不占高度）。 */
+.gask .qa{display:flex;gap:8px;padding:7px 10px;border-top:1px solid var(--line-soft);
+          font:12px/1.5 var(--sans)}
+.gask .qa .qi{flex:0 1 auto;min-width:0;color:var(--fg2)}
+.gask .qa .qv{flex:1 1 auto;min-width:0;color:var(--fg)}
+.gask details.grec{border-top:1px solid var(--line-soft)}
+.gask details.grec>summary{cursor:pointer;list-style:none;padding:6px 10px;
+                           font:11px/1.4 var(--sans);color:var(--fg2)}
+.gask details.grec>summary::-webkit-details-marker{display:none}
+.gask details.grec>summary::before{content:"▸ ";color:var(--faint)}
+.gask details.grec[open]>summary::before{content:"▾ "}
+.gask details.grec>summary:hover{background:var(--card-hov);color:var(--fg)}
+
+/* 行里那颗「提交」：多问/多选才有，而且**只在提交那一步真的能走时才点得动**。
+   不可用时做灰（不做禁、不做隐）—— 为什么不可用写在 title 上。 */
+.gask .gf .go.sub{font-weight:600}
+.gask .gf .go.mute{color:var(--faint);cursor:default}
+.gask .gf .go.mute:hover{background:none;color:var(--faint)}
+
+/* ===========================================================================
+   4. 右栏（C6a）—— 外壳级的独立区域
+   ---------------------------------------------------------------------------
+   它和左栏（#rail + #list）在结构上是对称的：都是"桌子边上的一列"，
+   谁都不是中栏的子元素。不同点是右边这一列的内容不是导航，而是
+   **关于当前工作的读数**，所以它内部有模块之分。
+
+   Orca 的对应物是 components/right-sidebar/index.tsx（:139-213）：
+     · 一个 flex-row 容器，面板内容 + 可选的 40px 侧边活动栏；
+     · 面板内容里从上到下 = 活动栏（'top' 布局，36px 高的一排图标）+ 面板正文；
+     · 最左那条 10px 的透明抓取区（:191-195）就是我们的 .divider。
+   我们照搬的是这一层的**关系**（独立列 + 模块切换 + 可拖边界 + 收起不卸载），
+   不是它的像素：它屏幕更宽、左栏更窄，右栏能从 y=0 通到底；我们左栏吃掉
+   372px，右栏若也从 y=0 通高，那 36px 的头会被窗口按钮（138px overlay）压住
+   —— Orca 用"40px 侧边活动栏吸收 40px"绕这个，我们要么图标放不下、要么得
+   让图标钻到关闭键底下。所以右栏从标题栏下沿开始，代价只是顶部多 36px 留白
+   （标题栏自己在那一列上的切片 .tb-rsb，同色，看不出接缝）。
+   =========================================================================== */
+#rsb{grid-area:rsb;position:relative;display:flex;flex-direction:column;
+     min-width:0;background:var(--side);
+     /* ── 2026-10-17：把最外那 10px 让给**窗口自己的缩放边** ────────────────
+        实测（真按真拖）：
+          · 拖**产品左框**（client x=2）→ 窗口缩放生效 292,66 1424x900 → 329,66 1387x900；
+          · 拖**产品右框**（client x=1422，距最右 2px）→ **什么都没发生**。
+        差别的来路：右栏两条滚动区（上段 .scroll、下段 #hist）的滚动条各 10px 宽，
+        正好落在 [W−10, W]，把窗口右框那 8px 的缩放边盖住了 —— DOM 先拿到按下，
+        于是"拖动最右侧的边框往往会被滚动条选中"（用户的原话）。
+        让出 10px 之后滚动条落到 [W−20, W−10]，最外这条竖带重新归窗口缩放，
+        左右两侧手感一致。
+        代价只有 10px 内容宽；背景色本来就铺满内边距，看不出少了一块。
+        附带修好一处：横着的 #rsb-split 右端以前被上下两条滚动条夹在 10px 里。
+        ⚠️ 标题栏右上角那颗关闭键（.window-controls，fixed 138x36、z-index 9999）
+        仍然盖着最外那条带的上 36px —— 窗口右上**角**的缩放要避开它，另议。 */
+     padding-right:10px}
+/* 收起 = 宽度 0 + overflow:hidden。**组件不卸载** —— Orca 的注释写得很清楚
+   （index.tsx:145-150：收起时切 overflow-hidden 是为了图标和内容不外溢，
+   而"组件保持挂载"是性能决定，见它 App.tsx 那边）。我们这边还有一条更硬的
+   理由：对话流那棵 DOM 是 JS 渲染出来的，卸载了就得重新渲染一遍，
+   而它记着的滚动位置（#hist.scrollTop）会一起没。 */
+#rsb.off{overflow:hidden}
+#rsb-head{flex:none;height:var(--titlebar-h);display:flex;align-items:stretch;
+          border-bottom:1px solid var(--line-soft);user-select:none}
+#rsb-bar{display:flex;align-items:stretch;flex:1;min-width:0;overflow:hidden}
+/* 模块按钮：**数值逐条取自 Orca components/right-sidebar/activity-bar-buttons.tsx:144-172
+   的 'top' 布局**（`h-[36px] w-9` = 36×36、图标 16px、活动态是底部 2px 前景色
+   短线 + 前景色，非活动态 text-muted-foreground/60）。它和窗口标题栏同高同基线，
+   所以这一排读起来是标题栏的延续，不是又一个工具条。 */
+.arbtn{position:relative;width:36px;flex:none;display:grid;place-items:center;
+       color:color-mix(in srgb,var(--muted) 60%,transparent);
+       transition:color 100ms ease}
+.arbtn:hover{color:var(--muted)}
+.arbtn.on{color:var(--fg)}
+.arbtn.on::after{content:"";position:absolute;left:25%;right:25%;bottom:0;height:2px;
+                 border-radius:2px 2px 0 0;background:var(--fg)}
+/* 「需要你」的数字徽标。**没有现成样式可抄** —— Orca 的活动条上只有 7px 圆点、
+   全库没有一个数字徽标（理由见 HTML 里那颗徽标的注释），所以这块是照它的**语言**
+   新画的：橙是它给"需要人"的色（--ask，AgentQuestionIcon 那支），圆角药丸、
+   等宽数字、深字压橙底。
+   ⚠️ 两条实测出来的：
+   (1) 位置必须**出流**（absolute）。`.arbtn` 是 grid，徽标留在流里会占掉一个
+       网格行、把图标顶上去一行 —— 徽标一出现图标就跳，比没徽标更难受。
+   (2) `display` 一写，`[hidden]` 那条 UA 规则就被盖掉了，`b.hidden = true`
+       再也藏不住（会一直挂着一个旧数字）。所以下面那条 [hidden] 是**必须**的，
+       不是补丁 —— 这文件里 `.rsb-mod[hidden]` 是同一个坑的另一处。 */
+.badge{position:absolute;top:2px;right:2px;min-width:14px;height:14px;
+       padding:0 4px;display:inline-flex;align-items:center;justify-content:center;
+       font-size:9px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums;
+       color:#2b1500;background:var(--ask);border-radius:7px;
+       box-shadow:0 0 0 1.5px var(--side);pointer-events:none}
+.badge[hidden]{display:none}
+#rsb-head .rt{display:flex;align-items:center;flex:none;gap:4px;padding-right:6px}
+/* 模块面板：一次只显示一个。用 [hidden] 而不是 display:none 的类 —— 它本来
+   就是给这个用的，而且"另一个模块的标记还在但不可见"这件事在 DOM 里读得出来。 */
+.rsb-mod{flex:1;display:flex;flex-direction:column;min-height:0;min-width:0}
+.rsb-mod[hidden]{display:none}
+#rsb .scroll{padding:0 8px 12px}
+
+/* —— 右栏分上下两段 ————————————————————————————————————————————————
+   上段 = 四个**格子级**模块，一次显示一个（逻辑和以前一字不差）；
+   下段 = 对话流，**常驻**（它不再是"一次一个"里的一员，所以切上段不再动它）。
+   为什么要分：对话流是"当前会话在说什么"的正文，跟那四个抢同一个按钮位、
+   同一段高度，谁被切走谁的阅读位置就丢（原来那条 rsbFlowScroll 就是为这个
+   打的补丁，现在整条删掉了 —— 不被隐藏就不需要记住位置）。
+   ⚠️ 下段**默认只占一行头部**，这不是省事，是学费：Orca 的右栏曾经有过一个
+   "底部常驻面板"，被它自己撤了（components/right-sidebar/index.tsx:89-93），
+   原话是 "competed with file Explorer/Search for vertical space"。上下两段
+   抢高度的代价它付过一次，所以这里默认折叠，要用再展开。 */
+#rsb-mods{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+#rsb-hist{flex:none;display:flex;flex-direction:column;min-height:0;
+          height:var(--rsb-hist-h, 24px);overflow:hidden}
+/* ⚠️ 这里**没有** border-top：上段和下段之间那条线由 #rsb-split 的 ::after 画。
+   两处都画就是紧挨着的两条线（10px 抓取带里一条 + 1px 边框），看着像画重了。 */
+/* 上段/下段之间那条可拖的边界。**几何整套照左边界那条 .divider**（可见线 1px
+   由 ::after 居中画、可抓区 10px、元素本身必须透明否则会把线盖掉），
+   差别只有方向：cursor 是 row-resize。10px 的抓取带就是它的高度 ——
+   够抓，又不显眼。 */
+#rsb-split{position:relative;flex:none;height:10px;cursor:row-resize;z-index:3}
+#rsb-split::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;
+                  transform:translateY(-50%);border-radius:1px;
+                  background:var(--divider-line);transition:background 100ms ease}
+#rsb-split:hover::after,#rsb-split.drag::after{background:var(--divider-line-strong)}
+/* 下段的折叠箭头：图标本体只有一个（朝上 = "往上长开"），展开时转 180°。 */
+#h-fold svg{transition:transform 120ms ease}
+#rsb-hist.open #h-fold svg{transform:rotate(180deg)}
+
+/* 下段头上的**来源**小签：下段有两种主语（当前格 / 会话库），而且长得一模一样。
+   不标出来，你没法知道看的这段对话到底属于哪一个 —— 它会是你排错时最贵的一类
+   误解（"这格怎么在说我没说过的话"）。点它 = 回到当前格。 */
+#h-src{font:10.5px/1 var(--mono);padding:3px 6px;border-radius:4px;white-space:nowrap;
+       color:var(--faint);background:transparent;border:1px solid transparent}
+#h-src.lib{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,transparent);
+           background:color-mix(in srgb,var(--accent) 12%,transparent);cursor:pointer}
+#h-src.lib:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)}
+
+/* 「跳回最新」——读者往上翻了之后回尾部的那条路。
+   ⚠️ **常挂载**，靠 opacity/translate 淡入淡出，不是 display:none：
+     · 淡出需要一个还活着的节点（display:none 会当场掐掉过渡）；
+     · 隐藏时用 inert + aria-hidden（在 JS 里设），所以它既点不到、也 Tab 不到、
+       读屏也读不到 —— 这是 Orca 的 NativeChatJumpToLatest 那套语义。
+   那几个数值都不是随手取的：48px 决定"要不要显形"（见 FLOW_BOTTOM_PX），
+   4px 才是"回到尾部"的重武装线，两个数管两件事，混用会变成"往上滚一点就被拽回去"。 */
+#h-jump{position:absolute;left:50%;bottom:10px;z-index:4;
+        display:flex;align-items:center;gap:5px;
+        height:26px;padding:0 10px;border-radius:13px;
+        font:11.5px/1 var(--sans);color:var(--fg);
+        background:var(--popover,#26262c);border:1px solid var(--divider-line-strong);
+        box-shadow:0 4px 14px rgba(0,0,0,.45);cursor:pointer;
+        opacity:0;pointer-events:none;transform:translate(-50%,6px);
+        transition:opacity 150ms ease,transform 150ms ease}
+#h-jump.on{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
+#h-jump:hover{background:var(--hover,#33333a)}
+@media (prefers-reduced-motion: reduce){ #h-jump{transition:none} }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   右栏的四个**格子级**模块（需要你 / 子代理 / 改动 / 流水）
+
+   为什么这一批模块全挂在"当前这一格"上：左栏是**会话库**（历史，点一个看一个），
+   右栏是**工作台**（现在正在跑的那几个 agent）。同一列里混两种主语，读数就会
+   互相打架 —— "改动"到底是左边选中那个会话改的，还是当前格改的？
+   所以这一列的主人只有一个：当前格（.cell.cur）。例外是「对话流」，它读的是
+   左栏选中的那个会话（那是会话库的读物），等 C6b 把左栏改成
+   工作台/历史/搜索/设置 之后它该搬去「历史」。
+
+   三个列表共用一套行骨架 —— 它们的差别只在列数，不在"行是什么"。
+   ═══════════════════════════════════════════════════════════════════════════ */
+.vlist{display:flex;flex-direction:column;min-height:0}
+.vrow{width:100%;text-align:left;background:none;border:1px solid transparent;
+      border-radius:var(--r);font:inherit;color:inherit}
+.vrow:hover{background:var(--card-hov)}
+/* 分组小标题 + 一条细线拉到右边。Orca 的右栏面板里分组是这样一个"小标题 + 分隔"
+   的节奏（它用 SidebarSectionHeader），而不是靠留白分层 —— 留白在滚动容器里
+   一滚就没了，标题会跟着内容跑，读不出"这下面是另一组"。 */
+.cap{display:flex;align-items:center;gap:7px;padding:10px 8px 4px;
+     font:10.5px var(--mono);color:var(--faint);letter-spacing:.3px}
+.cap::after{content:"";flex:1;height:1px;background:var(--line-soft)}
+.vlist > .cap:first-child{padding-top:4px}
+
+/* ---------- 子代理状态签（C7） ----------
+   一颗点 + 一个词：进行中 / 已完成 / 已关闭 / 失败。点和图形**复用标签条那颗
+   .adot 的同一套态**（Orca 的 AgentStateDot 就是"侧栏子行和聊天条共用同一颗点"
+   的那一个零件，AgentChildRowContent.tsx:21-24），只是尺寸收到 sm；
+   词色一律中性，只有失败用红 —— 状态靠图形分，不靠给每一行换一种字色。 */
+.subst{display:inline-flex;align-items:center;gap:4px;font:10.5px/1 var(--sans);
+       color:var(--muted);white-space:nowrap;flex:none}
+.subst.done{color:var(--fg2)}
+.subst.closed{color:var(--faint)}
+.subst.fail{color:var(--red)}
+
+/* ---------- ① 需要你 ----------
+   一行 = 一个在等你的格子。行里三件事：谁、为什么等你、它的最后一句。
+   排序由 JS 定（要人在前的排前面），这里只管长相。 */
+.need{display:grid;grid-template-columns:13px minmax(0,1fr) auto;gap:0 8px;
+      align-items:start;padding:7px 8px}
+.need .g{display:grid;place-items:center;margin-top:2px;color:var(--ask)}
+.need .m{min-width:0}
+.need .hd{display:flex;align-items:center;gap:6px;min-width:0}
+/* .who 是 flex 里那个**会被压**的：格子名长了要截它，不是截右边那个时间。
+   （flex:0 1 auto + min-width:0 才能真的缩下去；只写 min-width 它照样撑开。） */
+.need .who{font-size:12.5px;font-weight:500;color:var(--fg);flex:0 1 auto;min-width:0}
+.need .why{flex:none;font:10.5px var(--mono);color:var(--ask)}
+.need .tx{margin-top:3px;font-size:11.5px;line-height:1.45;color:var(--muted);
+          display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.need .tm{font:10.5px/1.7 var(--mono);color:var(--faint);white-space:nowrap}
+/* 「空闲」那一组：**同一件事，但已经看过了**。它的存在是为了回答"—格都没动，
+   它们在等我吗"（登记表里的 idle 原文就是 "Claude is waiting for your input"），
+   所以它不能被藏掉；但它不是新闻，所以整行压暗、字形退成灰、计数也不进徽标。 */
+.need.quiet .who{font-weight:400}
+.need.quiet .why{color:var(--faint)}
+.need.quiet .g{color:var(--faint)}
+/* 出错那一行的字形给红：它和"等你/有新消息"是不同的两件事，
+   染成同一族橙会被读成"它在等我"（它其实已经停在那儿不动了）。 */
+.need.k-fail .g{color:var(--red)}
+
+/* ---------- ③ 改动 ----------
+   列：op 字母 / 文件图标 / 名字（目录暗、文件名亮）/ ±N。
+   字母与配色照 git 那套（A 绿 M 橙）：Orca 的改动行就是这个读法 ——
+   状态给颜色、字母只留一个、±N 是两端对齐的一小串数字。 */
+.led{display:grid;grid-template-columns:13px 13px minmax(0,1fr) auto;gap:0 7px;
+     align-items:center;padding:5px 8px;font-size:12px}
+.led .op{font:700 10.5px/1 var(--mono);text-align:center}
+.led .op.A{color:var(--green)} .led .op.M{color:var(--ask)} .led .op.R{color:var(--faint)}
+.led .fi{display:grid;place-items:center;color:var(--faint)}
+.led .nm{min-width:0;display:flex;align-items:baseline}
+.led .nm i{font-style:normal;font:10.5px var(--mono);color:var(--faint);
+           min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.led .nm b{font-weight:500;color:var(--fg2);white-space:nowrap;flex:none}
+.led .d{flex:none;display:flex;gap:6px;justify-content:flex-end;font:10.5px var(--mono)}
+/* ±N 是**字面量**不是计数器：Orca 的改动行里 +/- 各是一段带色的文本，
+   两位都为 0 时整段不出现（读文件那种动作不该在"改动"里留一行空读数）。 */
+.d-add{color:var(--green)} .d-del{color:var(--red)}
+
+/* ---------- ④ 流水 ----------
+   列：种类字形 / 正文 / 时间。正文里的工具名与目标分开上色，让"这一步在干什么"
+   不用读完整行就看得出来。 */
+.fd{display:grid;grid-template-columns:13px minmax(0,1fr) auto;gap:0 7px;
+    align-items:start;padding:5px 8px;font-size:12px}
+.fd .k{display:grid;place-items:center;margin-top:2px;font:11px/1.3 var(--mono);
+       color:var(--faint);text-align:center}
+.fd .tx{min-width:0;line-height:1.45;color:var(--fg2);white-space:pre-wrap;
+        overflow-wrap:anywhere}
+/* ⚠️ inline-flex + gap 是 C7 加的：子代理那一行的状态签挪到了**时间左边**，
+   于是这一格里有"签 + 时间"两件东西，靠 nowrap 保证它们不折行（原来只有时间，
+   是个纯文本 span）。C7 之前它俩挤在正文里，长描述一折行，签就跟着掉到第二行，
+   截图里读出来是"…report ose | 进行中"这种断句。 */
+.fd .tm{font:10px/1.7 var(--mono);color:var(--faint);white-space:nowrap;
+        display:inline-flex;align-items:center;gap:6px}
+.fd .tool{color:var(--fg)}
+.fd .tgt{font:11px var(--mono);color:var(--muted);word-break:break-all}
+.fd .ok{color:var(--faint)} .fd .no{color:var(--red)}
+/* 你说的话是这一串流水里的"锚"，它该比 agent 那些步骤更亮一点 */
+.fd.p .k{color:var(--accent)} .fd.p .tx{color:var(--fg)}
+/* 失败的那一步整行的字形漂红（Orca 的失败态用 --red）。 */
+.fd.fail .k{color:var(--red)}
+/* 模块内的空状态：和 .empty 同一套排版，只是这里的容器自己有内边距 */
+#rsb .vlist .empty{padding:10px 8px}
+/* 子代理那两组的容器（第一组是"本格在跑的"，第二组是会话库里的卡片） */
+#side-live{display:flex;flex-direction:column}
+#side-live:empty{display:none}
+
+/* ---------- 5. 状态栏 ---------- */
+#status{position:fixed;left:0;right:0;bottom:0;height:24px;background:var(--rail);
+        border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:14px;
+        padding:0 12px;font:11.5px/1 var(--ui);color:var(--muted);user-select:none}
+#status .it{display:flex;align-items:center;gap:6px}
+#status .sp{margin-left:auto}
+/* 2026-10-15 从面板头/面板尾搬过来的读数。cwd 与终端字体/渲染后端本就是
+   会话级的环境事实 —— Orca 的 StatusBarSurface 就是放这些的地方，
+   放在每个终端的头顶/脚底反而是我们自造的（原来那条 .pfoot 已删）。 */
+/* 两条绝对路径并排放会分不清谁是谁（#s-store 是会话库、#s-cwd 是工作目录），
+   所以各给一个暗标签。路径本身用等宽。 */
+#status .cwd{min-width:0;max-width:320px}
+#status .lbl{color:var(--faint);flex:none}
+#s-dims,#s-font,#s-lig,#s-render,#s-grid{font:11px var(--mono);color:var(--faint)}
+/* 每格列数掉到 Claude Code 的下限（64）以下时**换色**，不是加个图案 ——
+   这是一条读数，不是一个状态：它和上面的字体回退用同一个 --red，
+   因为两者说的是同一件事（"有个东西没到位，但功能还在"）。 */
+#s-grid.warn{color:var(--red)}
+.meter{display:flex;align-items:center;gap:6px;font:11px/1 var(--mono);color:var(--faint)}
+.meter .bar{width:64px;height:4px;border-radius:999px;background:#2f2f35;overflow:hidden}
+.meter .bar i{display:block;height:100%;background:var(--muted);width:0}

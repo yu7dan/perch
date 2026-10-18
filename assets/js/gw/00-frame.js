@@ -1,0 +1,263 @@
+"use strict";
+/* gw/00-frame.js —— 网关页 = magpie 自己的界面（同源反代，见 gwui.go）。
+ *
+ * 用户 2026-10-18 的结论：供应商的陈列/添加（含订阅）/配置页、路由、用量、
+ * 插件、拖动排序，全都有现成实现，**不该由 Perch 再写一份**。只搬网关自己的
+ * 那几页：Agents / Sessions / Library 与 Perch 的总览、Agent 重复，由
+ * gwui.go 的 gwUIEmbed 从 magpie 的导航里拿掉，并把导航摆回顶部（用户明确
+ * 不要 magpie 的左侧栏）。所以本文件不再渲染任何业务页面，只做四件事：
+ *   1. 控制面自动接入（沿用原来的节奏：最多 3 次、间隔 15 秒）；
+ *   2. 接上之后把 iframe 指到 /gwui/?view=providers（地址里没有 key）；
+ *   3. 没接上时盖一张安装/接入卡（这是 Perch 的壳，不是 magpie 的页面）；
+ *   4. iframe 只建一次，切页只显示/隐藏 —— 它内部的编辑状态必须保住。
+ *
+ * 本文件是 index.html 里按序 defer 的一段 classic script；共享全局词法作用域。 */
+
+/* GW：控制面整份读数，由 87-gw-apply.js 的 applyGw 落进来。
+   GW_INSTALL：magpie 本体的行内安装器状态，由 86-install.js 更新。 */
+let GW = null;
+let GW_INSTALL = null;
+let GW_BUSY = "";
+let gwAutoAt = 0, gwAutoTries = 0;
+/* 已加载的连接标记（端口 + 是否 Perch 拉起）。变了才重新设 src；
+   断开时清空，重连后自然重载一次，避免看到断线期间的半截页面。 */
+let GW_FRAME_AT = "";
+/* 安装卡内容的指纹：magpie 快照 2.5s 推一次，不能每次都重建 DOM
+   （会把按钮的 hover 和安装日志的滚动位置冲掉）。 */
+let GW_COVER_SIG = "";
+
+/* 控制面的版本 / 更新（来自 magpie 自己的 GET /api/update）。
+   GW_UPD = null 表示还没读到；GW_UPD_BUSY 非空表示一条更新链路在跑
+   （checking / downloading / restarting）。 */
+let GW_UPD = null;
+let GW_UPD_BUSY = "";
+let GW_UPD_ERR = "";
+let GW_UPD_TRIES = 0;
+let GW_VER_SIG = "";
+
+function gwOn() {
+  return !!(GW && GW.connected);
+}
+
+/* embed=1 是稳定的标记，也让地址和旧缓存区分开（gwui.go 只在这个地址上裁剪
+   页面）；view=providers 是每轮启动进来的那一页。 */
+function gwFrameURL() {
+  return "/gwui/?view=providers&embed=1";
+}
+
+function renderGateway() {
+  if (NAV_HERE !== "dash" || dashTab !== "gateway") return;
+  const frame = $("gw-frame"), cover = $("gw-cover"), ver = $("gw-ver");
+  if (!frame || !cover) return;
+  const m = mg();
+  if (gwOn()) {
+    const tag = (GW.port || 0) + ":" + (GW.ours ? "ours" : "ext");
+    if (GW_FRAME_AT !== tag) {
+      GW_FRAME_AT = tag;
+      // 设 src 就是加载；断开时 GW_FRAME_AT 已清空，重连会重来一次。
+      frame.src = gwFrameURL();
+    }
+    frame.hidden = false;
+    cover.hidden = true;
+    if (GW_COVER_SIG) { cover.innerHTML = ""; GW_COVER_SIG = ""; }
+    if (ver) {
+      const html = gwUpdateHTML();
+      ver.hidden = !html;
+      if (html !== GW_VER_SIG) { GW_VER_SIG = html; ver.innerHTML = html; }
+    }
+    // 版本状态只在打开网关页后问一两次：控制面没应答时别每帧重试。
+    if (!GW_UPD && !GW_UPD_BUSY && GW_UPD_TRIES < 2) {
+      GW_UPD_TRIES++;
+      sendCtrl({ type: "magpie.update.get" });
+    }
+  } else {
+    GW_FRAME_AT = "";
+    frame.hidden = true;
+    cover.hidden = false;
+    if (ver) { ver.hidden = true; if (GW_VER_SIG) { ver.innerHTML = ""; GW_VER_SIG = ""; } }
+    const html = gwCoverHTML(m);
+    if (html !== GW_COVER_SIG) {
+      GW_COVER_SIG = html;
+      cover.innerHTML = html;
+      const log = $("gw-inst-log");
+      if (log) log.scrollTop = log.scrollHeight;
+    }
+    gwAutoAttach();
+  }
+}
+
+/* 控制面自动接入。打开网关页就自己接（必要时拉起 `magpie web`）：
+   · 没装 magpie → 什么都不做（卡片显示下载）；
+   · 已连接 / 正在连 → 什么都不做；
+   · 失败后最多重试 3 次、间隔 15 秒；之后留一个「重试接入」。 */
+function gwAutoAttach() {
+  if (NAV_HERE !== "dash" || dashTab !== "gateway") return;
+  if (gwOn() || GW_BUSY === "connect") return;
+  const m = mg();
+  if (!m || m.state === "absent") return;
+  if (gwAutoTries >= 3) return;
+  if (Date.now() - gwAutoAt < 15000) return;
+  gwAutoAt = Date.now();
+  gwAutoTries++;
+  GW_BUSY = "connect";
+  sendCtrl({ type: "gw.connect" });
+  bootFact(`网关 自动接入控制面（第 ${gwAutoTries} 次）`);
+}
+
+/* ---- 未接入时的那张卡 ------------------------------------------------- */
+
+function gwCoverHTML(m) {
+  const st = GW_INSTALL;
+  const running = !!(st && st.state === "running");
+  const installed = !!(m && m.state !== "absent");
+  const version = (GW && GW.version) || (m && m.version) || "";
+  const state = !m ? "读取中"
+    : !installed ? "未安装"
+    : GW_BUSY === "connect" ? "正在接入控制面…"
+    : "已安装 · 控制面未接入";
+  const dot = running ? " warn" : installed ? " warn" : "";
+  return `<div class="console-bar">` +
+      `<span class="brand">${magpieLogo()}<b>magpie</b></span>` +
+      (version ? `<span>${esc(version)}</span><span class="sep">·</span>` : "") +
+      `<span class="dot${dot}"></span><span>${esc(state)}</span>` +
+      `<span class="right gw-actions">` +
+        `<button type="button" class="gw-btn sm" data-gw-act="refresh">刷新</button>` +
+      `</span>` +
+    `</div>` +
+    gwInstallCard(m) +
+    (GW && GW.err ? `<div class="gw-msg bad">${esc(GW.err)}</div>` : "");
+}
+
+/* 两条用户定的规则：
+   · 没装 → 在 Perch 里**真的下载安装**官方 release（不跳浏览器）；
+   · 已装 → 自动接入，不出现「连接 magpie」这个手动动作。
+   安装日志原样摊出来，不藏进度、不假装成功。 */
+function gwInstallCard(m) {
+  const st = GW_INSTALL;
+  const running = !!(st && st.state === "running");
+  const absent = !m || m.state === "absent";
+  const failed = !!(st && st.state === "failed");
+  if (!absent && !running) {
+    return `<div class="gw-connect">` +
+      `<b>${GW_BUSY === "connect" ? "正在接入 magpie 控制面…" : "magpie 已安装，控制面还没接上"}</b>` +
+      `<p>${GW_BUSY === "connect"
+        ? "Perch 正在拉起一个独立的 <code>magpie web</code> 进程（只监听 127.0.0.1）—— 接上之后 magpie 的界面会出现在这一页里。"
+        : "Perch 会自动重试几次；如果一直不行，点「重试接入」。桌面 magpie 和网关都不受 Perch 开关影响。"}</p>` +
+      `<div class="row"><button type="button" class="gw-btn" data-gw-act="retry">重试接入</button></div>` +
+      (GW && GW.err ? `<p style="color:var(--red)">${esc(GW.err)}</p>` : ``) +
+      `</div>`;
+  }
+  return `<div class="gw-connect">` +
+    `<b>${running ? "正在安装 magpie…" : failed ? "上次安装没有完成" : "还没有安装 magpie"}</b>` +
+    `<p>${running
+      ? "从 GitHub 官方 release 下载到 <code>%LOCALAPPDATA%\\Perch\\magpie</code>，校验后落盘；装完自动接入。"
+      : "这一页就是 magpie 自己的界面（供应商 / 订阅 / 路由 / 用量 / 插件）。点下面的按钮会真的下载并安装官方 release —— 不弹浏览器。"}</p>` +
+    `<div class="row">` +
+      (running
+        ? `<button type="button" class="gw-btn" data-gw-act="install-magpie-cancel">取消</button>`
+        : `<button type="button" class="gw-btn primary" data-gw-act="install-magpie">` +
+          (failed ? "重新下载安装" : "下载并安装 magpie") + `</button>`) +
+    `</div>` +
+    (GW && GW.err && !GW_INSTALL ? `<p style="color:var(--red)">${esc(GW.err)}</p>` : ``) +
+    (st && st.lines && st.lines.length
+      ? `<pre class="gw-inst-log" id="gw-inst-log">${esc(st.lines.join("\n"))}</pre>` : ``) +
+    (failed ? `<p style="color:var(--red)">${esc(st.err || "安装失败")}</p>` : ``) +
+    `</div>`;
+}
+
+/* ---- 版本 / 更新条 ----------------------------------------------------
+   magpie 自己负责更新（/api/update）；这里只显示 current / latest，并把
+   用户那一下点击转成 magpie.update.install。进度由 Go 侧推回来。 */
+
+function gwUpdateHTML() {
+  const u = GW_UPD;
+  if (GW_UPD_ERR) return `<span class="err">magpie 版本读取失败：${esc(GW_UPD_ERR)}</span>`;
+  if (!u) return "";
+  const cur = u.current || "";
+  const latest = u.latest || "";
+  const upd = !!latest && latest !== cur;
+  const pct = u.total > 0 ? Math.min(99, Math.floor((u.done | 0) * 100 / u.total)) : 0;
+  if (GW_UPD_BUSY) {
+    const what = GW_UPD_BUSY === "restarting" ? "正在重启控制面…"
+      : GW_UPD_BUSY === "downloading"
+        ? (u.total > 0 ? `正在下载更新 ${pct}%…` : "正在下载更新…")
+        : "正在检查更新…";
+    return `<span>magpie${cur ? " " + esc(cur) : ""}</span>` +
+      `<span class="sep">·</span><span class="upd">${esc(what)}</span>`;
+  }
+  if (!cur) return "";
+  let html = `<span>magpie ${esc(cur)}</span>`;
+  if (upd) {
+    html += `<span class="sep">·</span><span class="upd">可更新 ${esc(latest)}</span>` +
+      `<button type="button" class="gw-btn sm" data-gw-act="update-magpie">更新</button>`;
+  } else if (latest) {
+    html += `<span class="sep">·</span><span>已是最新</span>`;
+  }
+  return html;
+}
+
+/* 更新状态的落点（magpie_update.go → {type:"magpie.update"}）。
+   updated=true 时控制面已经 re-exec 过：清掉 iframe 的地址标记并重接，
+   否则页面还停在旧进程加载的那一份。 */
+function applyGwUpdate(m) {
+  if (!m || typeof m !== "object") return;
+  if (m.update && typeof m.update === "object") GW_UPD = m.update;
+  GW_UPD_BUSY = typeof m.busy === "string" ? m.busy : "";
+  GW_UPD_ERR = m.err ? String(m.err) : "";
+  if (GW_UPD || m.err) GW_UPD_TRIES = 2; // 问过就不再自动问
+  if (m.updated) {
+    GW_FRAME_AT = "";
+    sendCtrl({ type: "gw.connect" });
+    sendCtrl({ type: "magpie.refresh" });
+  }
+  renderGateway();
+}
+
+$("gw-ver").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-gw-act]");
+  if (!b || b.dataset.gwAct !== "update-magpie") return;
+  GW_UPD_BUSY = "checking";
+  GW_UPD_ERR = "";
+  bootFact("网关 更新 magpie");
+  sendCtrl({ type: "magpie.update.install" });
+  renderGateway();
+});
+
+/* 卡片上的动作。只服务网关页自己的壳；provider/group/plugin 的写操作
+   全部由 magpie 的界面直接打它自己的 /api/*，Perch 不再中转。 */
+$("gw-cover").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-gw-act]");
+  if (!b) return;
+  const act = b.dataset.gwAct;
+  if (act === "retry") {
+    gwAutoTries = 0; gwAutoAt = 0;
+    GW_BUSY = "connect";
+    sendCtrl({ type: "gw.connect" });
+    renderGateway();
+    return;
+  }
+  if (act === "refresh") {
+    sendCtrl({ type: "gw.refresh" });
+    sendCtrl({ type: "magpie.refresh" });
+    return;
+  }
+  if (act === "install-magpie") {
+    GW_INSTALL = { state: "running", lines: [], err: "" };
+    sendCtrl({ type: "install.magpie" });
+    bootFact("网关 下载并安装 magpie");
+    renderGateway();
+    return;
+  }
+  if (act === "install-magpie-cancel") {
+    if (GW_INSTALL) GW_INSTALL.state = "cancelling";
+    sendCtrl({ type: "install.cancel", id: "magpie" });
+    renderGateway();
+  }
+});
+
+/* iframe 加载失败（Wails 的自定义 scheme 下同源反代没通）不会抛错，
+   只会是一张空白页；这里留一条事实，验证时先看日志再看像素。 */
+$("gw-frame").addEventListener("load", () => {
+  const f = $("gw-frame");
+  if (f && !f.hidden) bootFact("网关 内嵌界面已加载");
+});

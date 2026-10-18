@@ -111,6 +111,39 @@ type ctrlMsg struct {
 	// sessions\<pid>.json 反查 —— 理由见 titles.go 的 sessionIDForPID），
 	// 所以直接带 id 过来，少一次反查、也少一个"查不到"的失败模式。
 	ID string `json:"id"`
+	// open.url 用：在系统浏览器里打开一个 http(s) 地址（Agent 名单的下载页）。
+	// 只认 http/https —— 别的 scheme 会让"打开下载页"变成一条可执行动作。
+	URL string `json:"url"`
+	// gw.* 用：控制面的读写参数。
+	//   Period  today / 7d / 30d / all
+	//   Preset  供应商预设 id
+	//   Key     供应商 API key —— **只在内存里过一次**，不落日志、不回显
+	//   From    分组改名前的 id
+	//   Members 分组成员（provider/model）
+	//   Plugin  插件 npm 包名；Op 是 add/remove/update/upgrade/off
+	//   User    额度卡片的账号
+	Period  string   `json:"period,omitempty"`
+	Preset  string   `json:"preset,omitempty"`
+	Key     string   `json:"key,omitempty"`
+	From    string   `json:"from,omitempty"`
+	Members []string `json:"members,omitempty"`
+	Plugin  string   `json:"plugin,omitempty"`
+	Op      string   `json:"op,omitempty"`
+	User    string   `json:"user,omitempty"`
+	Offset  int      `json:"offset,omitempty"`
+	// 供应商编辑（gw.provider.save 且带 id、不带 preset）：三个接入点。
+	// 用指针是为了把「没发」和「发来空串（清空这个接入点）」分开 ——
+	// 值类型 + omitempty 会让"清空"变成静默无效。
+	Chat      *string `json:"chat,omitempty"`
+	Responses *string `json:"responses,omitempty"`
+	Anthropic *string `json:"anthropic,omitempty"`
+	// gw.provider.arrange：开关着的供应商的新顺序（id 列表，靠上的先用）。
+	Order []string `json:"order,omitempty"`
+	// gw.agent.set 用：Field 是 /api/state 里字段的 key，Value 是选项值。
+	// 空串是**有效值** —— magpie 用它把字段还原成 agent 自己的默认，所以
+	// Value 不套 omitempty：别让"清空"在编码这一层变成静默无效。
+	Field string `json:"field,omitempty"`
+	Value string `json:"value"`
 }
 
 // ---------------------------------------------------------------------------
@@ -147,10 +180,19 @@ type spawnSpec struct {
 // 新增第三个 agent = 在这张表里加一条，别处**零改动**。
 // 参数来源：计划书那张意图表，两个 agent 各自的 --help 都核实过。
 // （pi 先不登记 —— 它的 --session/--fork 要绝对 jsonl 路径，
-//  那要等索引器把 SourcePath 喂进来，C2 一起做。）
+//
+//	那要等索引器把 SourcePath 喂进来，C2 一起做。）
 type agentDef struct {
 	Exe string
-	Env map[string]string
+	// Bin 是没解析前的命令名（如 "codex"）。有它时，**每次开格都重新解析一次**
+	// 可执行文件位置 —— 用户可能在 Perch 开着的时候装了/更新了一个 agent，
+	// init() 里只解析一次会把这个新装的 exe 永远漏在外。claude 走自己的
+	// resolveClaudeExe，Bin 为空。
+	Bin string
+	// Prefix 只在 Windows 的 .cmd/.bat shim 上出现（npm 装出来的 CLI）：
+	// Exe 是 cmd.exe，Prefix 是 ["/c", <shim>]。ConPTY 不能直接启动 .cmd。
+	Prefix []string
+	Env    map[string]string
 	// Args 把「续接意图」翻译成命令行。settings 是我们注入的那份 --settings
 	// JSON 字符串（空 = 不注入）：它跟着**每一次启动**走、只对这一次生效，
 	// 不碰用户的任何配置文件（第 0 步实测：--settings 是**合并**不是替换，
@@ -159,9 +201,10 @@ type agentDef struct {
 }
 
 // resolveClaudeExe 找 agent 的可执行文件，顺序：
-//  ① 环境变量 CLAUDE_EXE（换安装位置的人用它）；
-//  ② <用户主目录>\.local\claude.exe（本机常见的用户级安装位置）；
-//  ③ 交给 PATH 解析 "claude"。
+//
+//	① 环境变量 CLAUDE_EXE（换安装位置的人用它）；
+//	② <用户主目录>\.local\claude.exe（本机常见的用户级安装位置）；
+//	③ 交给 PATH 解析 "claude"。
 //
 // ⚠️ 不写死任何人的绝对路径。
 func resolveClaudeExe() string {
@@ -204,6 +247,31 @@ var agentDefs = map[string]agentDef{
 			return args
 		},
 	},
+}
+
+// 通用适配：凡是有配置/CLI 探测的 agent，都给它一条“新会话”启动路。
+// 深度适配（续接、hook、转录）仍然只对 claude 做 —— 用户 2026-10-17 确认的
+// 第一阶段范围是“装完能在 Perch 里启动”。
+func init() {
+	for _, d := range agentCatalogDefs {
+		if d.ID == "claude" || d.ID == "zcode" || d.Bin == "" {
+			continue
+		}
+		agentDefs[d.ID] = genericAgentDef(d.Bin)
+	}
+}
+
+func genericAgentDef(bin string) agentDef {
+	exe, prefix := resolveAgentExe(bin)
+	return agentDef{
+		Exe:    exe,
+		Bin:    bin,
+		Prefix: prefix,
+		Args: func(resumeIntent, string) []string {
+			// 通用适配第一阶段只开新会话；续接要按 agent 逐个补。
+			return nil
+		},
+	}
 }
 
 type tabHost struct {
@@ -389,35 +457,38 @@ func transcriptStem(path string) string {
 	return strings.TrimSuffix(b, ".jsonl")
 }
 
-/* resumeEvidence 是**步 5 的唯一判据**：「这一次身份到达」能不能当成
-   "这一格接回了我们请求的那条会话"的证据。
+/*
+resumeEvidence 是**步 5 的唯一判据**：「这一次身份到达」能不能当成
 
-   ⚠️ 为什么需要一条规则，而不是"收到什么就是什么"：`--resume <id>` 的**意图**
-   与**结果**是两件事。claude 在某些条件下（会话文件不在它认得的项目目录里、
-   文件坏了、被改名了）可能找不到就**开一条新的**，而新会话的 id 会随 hook
-   事件到达 —— 我们要是照单全收写进记录，就等于把"接错的那条"固化成事实，
-   而且下一次重开会照着它再错一遍。冷恢复整个链条里，**这一步是唯一一次
-   "我们以为自己知道了、其实是别人说了算"**。
+	"这一格接回了我们请求的那条会话"的证据。
 
-   ✅ 实测（2026-10-16，见 [[resume-hook-source-evidence]]）：`--resume <id>`
-   成功时 hook 报 `source=resume` 且 **id 与请求的完全一致**；cwd 与会的所属
-   目录错配时 claude 也不会静默换会话（它照旧接住那一条，只把新行的 cwd
-   记成新目录）。所以"对不上"在今天是**观察不到**的 —— 这条规则防的是
-   "观察不到"变成"发生了也看不出来"。
+	⚠️ 为什么需要一条规则，而不是"收到什么就是什么"：`--resume <id>` 的**意图**
+	与**结果**是两件事。claude 在某些条件下（会话文件不在它认得的项目目录里、
+	文件坏了、被改名了）可能找不到就**开一条新的**，而新会话的 id 会随 hook
+	事件到达 —— 我们要是照单全收写进记录，就等于把"接错的那条"固化成事实，
+	而且下一次重开会照着它再错一遍。冷恢复整个链条里，**这一步是唯一一次
+	"我们以为自己知道了、其实是别人说了算"**。
 
-   三种情况（只有前两种允许改写记录）：
-     evNoPromise  这一格**没有对某条会话的承诺**（裸启动 / --fork-session 写的是
-                  新文件 / --continue 挑的是"最新那条"、我们手上没有 id 可比）。
-                  来的是谁就是谁 —— 记下来是对的。
-     evMatched    承诺的是 `exact X`，来的**正是** X。这就是 `source=resume`
-                  该有的样子；记录照写（同一 id，等价于确认），并撤掉上一次
-                  可能留下的那笔落空（panes.clearMismatch）。
-     evMissed     承诺的是 `exact X`，来的却是别人 —— **记录一个字都不改**，
-                  只留 mismatchAt（panes.markMismatch）+ 一条醒目日志 + 格内横幅。
+	✅ 实测（2026-10-16，见 [[resume-hook-source-evidence]]）：`--resume <id>`
+	成功时 hook 报 `source=resume` 且 **id 与请求的完全一致**；cwd 与会的所属
+	目录错配时 claude 也不会静默换会话（它照旧接住那一条，只把新行的 cwd
+	记成新目录）。所以"对不上"在今天是**观察不到**的 —— 这条规则防的是
+	"观察不到"变成"发生了也看不出来"。
 
-   ⚠️ `latest` 按"没有承诺"处理：`--continue` 的承诺是"这个目录里最新那条"，
-   我们手上**没有 id 可以去对**。判不了的事不判 —— 宁可少记一次落空，
-   也不要凭猜测去改记录（猜错的代价是"接错会话"，而那是不可逆的那一类）。 */
+	三种情况（只有前两种允许改写记录）：
+	  evNoPromise  这一格**没有对某条会话的承诺**（裸启动 / --fork-session 写的是
+	               新文件 / --continue 挑的是"最新那条"、我们手上没有 id 可比）。
+	               来的是谁就是谁 —— 记下来是对的。
+	  evMatched    承诺的是 `exact X`，来的**正是** X。这就是 `source=resume`
+	               该有的样子；记录照写（同一 id，等价于确认），并撤掉上一次
+	               可能留下的那笔落空（panes.clearMismatch）。
+	  evMissed     承诺的是 `exact X`，来的却是别人 —— **记录一个字都不改**，
+	               只留 mismatchAt（panes.markMismatch）+ 一条醒目日志 + 格内横幅。
+
+	⚠️ `latest` 按"没有承诺"处理：`--continue` 的承诺是"这个目录里最新那条"，
+	我们手上**没有 id 可以去对**。判不了的事不判 —— 宁可少记一次落空，
+	也不要凭猜测去改记录（猜错的代价是"接错会话"，而那是不可逆的那一类）。
+*/
 type resumeEvidence int
 
 const (
@@ -607,7 +678,7 @@ func poolReply(errMsg string) {
 	// 合成的默认工作区只并进这一份**内存列表**（归属计算和 wire 都吃它）——
 	// 池子本身照旧，落盘的还是用户自己攒的那些（见 withDefaultWorkspace）。
 	projects = withDefaultWorkspace(projects)
-	sessions := scanSessions(claudeStateDir)
+	sessions, _ := scanSessions(claudeStateDir)
 	assign, recent, count := projectStats(sessions, projects)
 	wire := wireProjects(projects, recent, count)
 	pushJSON(map[string]any{
@@ -790,6 +861,91 @@ func handleCtl(c *application.StreamConn) {
 			// 在系统里打开一个路径（卡片菜单里的"打开会话文件/在文件夹中显示/
 			// 打开工作目录"）。换协程：explorer 起进程不该拖住 ctl 收包。
 			go openPath(m.Mode, m.Path)
+		case "open.url":
+			// Agent 名单的「下载」= 打开官方安装页（**不是**替用户跑安装脚本）。
+			// 只放 http/https：别的 scheme 会把一个"看网页"的按钮变成可执行动作。
+			u := strings.TrimSpace(m.URL)
+			if !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
+				log.Printf("[web] 拒绝打开非 http(s) 地址：%q", u)
+				continue
+			}
+			go func(u string) {
+				if globalApp == nil {
+					return
+				}
+				if err := globalApp.Browser.OpenURL(u); err != nil {
+					log.Printf("[web] 打开下载页失败 %s：%v", u, err)
+				} else {
+					log.Printf("[web] 打开下载页 %s", u)
+				}
+			}(u)
+		case "install.agent":
+			// 用户点下「安装」之后才跑官方命令。换协程：npm/irm 可能跑几分钟。
+			id := strings.TrimSpace(m.ID)
+			if id == "" {
+				continue
+			}
+			log.Printf("[install] 用户请求安装 agent=%s", id)
+			go startAgentInstall(id)
+		case "install.magpie":
+			// 网关页的「下载并安装 magpie」。和 agent 安装共用同一条流式通道
+			// （install.start/log/done，id=magpie），装完 finishInstall 会自动
+			// gwConnect —— 用户不需要再点「连接」。
+			log.Printf("[install] 用户请求安装 magpie（官方 release）")
+			go startAgentInstall("magpie")
+		case "install.cancel":
+			id := strings.TrimSpace(m.ID)
+			log.Printf("[install] 用户取消安装 agent=%s", id)
+			go cancelAgentInstall(id)
+		case "magpie.refresh":
+			// 用户点刷新：立刻跑一轮（后台 watcher 仍在按自己的节奏走）。
+			// 换协程 —— HTTP 最长 5 × 1.8s，不能把 ctl 收包卡住。
+			go func() {
+				magpieWatchMu.RLock()
+				w := magpieWatch
+				magpieWatchMu.RUnlock()
+				if w != nil {
+					w.refresh()
+					log.Printf("[magpie] 手动刷新完成")
+				}
+			}()
+		case "magpie.update.get":
+			// 读控制面自己的更新状态（GET /api/update），只读。
+			go gwMagpieUpdateGet()
+		case "magpie.update.install":
+			// 用户点了「更新」：驱动 magpie 自己的 check → download → install。
+			go gwMagpieUpdateInstall()
+		case "gw.connect":
+			go gwConnect()
+		case "gw.disconnect":
+			gwStop()
+		case "gw.refresh":
+			go gwRefresh()
+		// Agent 接线（总览 → Agent 名单 → 右侧配置抽屉，见 agent_cfg.go）。
+		// 只读一次 /api/state 就能拿全部字段；写操作全是用户点出来的。
+		case "gw.agents":
+			go gwAgentState()
+		case "gw.agents.prefetch":
+			// 进总览时预取：只在用过网关的机器上接/拉起控制面（见 gwAgentPrefetch）。
+			go gwAgentPrefetch()
+		case "gw.agent.set":
+			go gwAgentSet(strings.TrimSpace(m.ID), strings.TrimSpace(m.Field), m.Value)
+		case "gw.agent.connect":
+			go gwAgentAction("connect", strings.TrimSpace(m.ID))
+		case "gw.agent.disconnect":
+			go gwAgentAction("disconnect", strings.TrimSpace(m.ID))
+		case "gw.agent.reapply":
+			go gwAgentAction("reapply", strings.TrimSpace(m.ID))
+		case "gw.agent.keep":
+			// 「保留现状」：magpie 删掉 applied 记录，把现在的配置认作它写的。
+			go gwAgentAction("keep", strings.TrimSpace(m.ID))
+		case "gw.agent.preview":
+			go gwAgentPreview(strings.TrimSpace(m.ID))
+		case "gw.agents.drift":
+			// 抽屉开着时的漂移轮询（15s 一次）：只读 /api/drift，不拉起控制面。
+			go gwAgentDrift()
+		// 供应商 / 分组 / 插件 / 用量的写操作不再经过 Perch：网关页内嵌的是
+		// magpie 自己的界面，它直接打自己的 /api/*（见 gwui.go）。
 		case "project.add":
 			// 加一个项目（左栏那一轮）。两种进法：
 			//   · 带 path —— 拖拽落进来的目录、或从「未归类」收编（source="adopted"）
@@ -825,12 +981,21 @@ func handleCtl(c *application.StreamConn) {
 					SetTitle("把哪个目录收进 Perch？").
 					PromptForSingleSelection()
 				if err != nil {
+					// 取消在这套对话框实现里是**一个 error**（go-common-file-dialog
+					// 的 ErrorCancelled 原文 "cancelled by user"），不是空路径。
+					// 早先只判了空字符串，于是用户按取消会收到一条「项目池出错了」
+					// 的 toast —— 取消是正常手势，不该报警。这里按语义判掉。
+					low := strings.ToLower(err.Error())
+					if strings.Contains(low, "cancel") {
+						log.Printf("[pool] 选择器被取消（没有加任何项目）")
+						return
+					}
 					log.Printf("[pool] 文件夹选择器失败：%v", err)
 					poolReply("选择器打不开：" + err.Error())
 					return
 				}
 				if strings.TrimSpace(sel) == "" {
-					// 用户按了取消。**这不是错误** —— 不弹任何提示，只落一条日志。
+					// 已经选了路径但返回空：按取消处理。**这不是错误** —— 不弹任何提示。
 					log.Printf("[pool] 选择器被取消（没有加任何项目）")
 					return
 				}
@@ -965,8 +1130,9 @@ var panes *paneStore
 
 // secondInstance = 这台机器上已经有一个我在跑（见 instance_windows.go 的步 7）。
 // 它的作用有两个，缺一不可：
-//   · panes.query 一律回"登记表不可用" ⇒ 前端**一个座位都不恢复**（它拿不到清单）；
-//   · 登记表按**只读**对待 ⇒ 它那一格的变动一个字节都不落盘。
+//
+//	· panes.query 一律回"登记表不可用" ⇒ 前端**一个座位都不恢复**（它拿不到清单）；
+//	· 登记表按**只读**对待 ⇒ 它那一格的变动一个字节都不落盘。
 //
 // 为什么第二条不能省：写盘是**整份重写**的，第二个实例手里那份清单天生残缺
 // ——它写一次就等于把第一个实例的座位表按残缺的那份覆盖掉（8 格变 1 格，不报错）。
@@ -1011,7 +1177,11 @@ func main() {
 		Name:        "Perch",
 		Description: "面向 agent 终端的 Windows 桌面网关",
 		Assets: application.AssetOptions{
-			Handler: application.BundledAssetFileServer(assets),
+			// /gwui/ 只做一次跳转：把网关页的 iframe 指到本地反代
+			// （见 gwui.go；真正的 /gwui/* 与 /api/* 在 127.0.0.1 的
+			// 随机端口上，因为 Wails 这一版交给 asset handler 的
+			// POST 请求没有请求体）。其余路径仍由嵌入的 assets 提供。
+			Handler: gwUIAssets{assets: application.BundledAssetFileServer(assets)},
 		},
 	})
 	// 标签是运行期创建的，创建时要 HandleStream —— 拿不到 app 就注册不了。
@@ -1087,6 +1257,12 @@ func main() {
 	// 第三条腿：跟着每个格子的转录文件走（「改动」和「流水」的数据源）。
 	// 它靠 SessionStart 给的 transcript_path 才知道该跟哪个文件，所以排在 hooks 之后。
 	startTranscriptFollower(pushJSON)
+	// 网关读数（只读）：本机那份立刻出，HTTP 那条腿在后台 2.5s 一次。
+	// 它不参与任何 PTY/会话逻辑 —— 网关关着时最坏也只是总览少几张读数。
+	startMagpieWatcher(pushJSON)
+	// 控制面只做**被动探测**：接已经存在的那个，不在这里拉起 magpie web ——
+	// 用户没点「连接」之前，Perch 不该多出一个后台进程。
+	go gwProbe()
 
 	/* 关窗那一刻**同步**把登记表写一遍（写的是内存里那份，见 panes.go 的 flushSync）。
 	   ⚠️ 为什么挂在**窗口事件**上而不是 app.OnShutdown —— 2026-10-16 实测：
@@ -1105,6 +1281,10 @@ func main() {
 		if panes != nil {
 			panes.flushSync("窗口正在关闭")
 		}
+		// Perch 自己拉起的 magpie web 随窗口一起收掉；外部控制面（桌面 magpie
+		// 或用户自己起的）只断开连接，不动进程。关窗这条路不经过 OnShutdown，
+		// 所以必须挂在这里（见上面那段实测）。
+		gwStop()
 	})
 	// 兜底（**留着，但它不是关窗那条路**）：App.Quit() / 信号那几条退出路会跑
 	// OnShutdown 那串任务，顺序照注册序 —— 里面最先跑的是 Wails 自己的
@@ -1112,10 +1292,15 @@ func main() {
 	// `defer tabs.drop` 都已经执行完了 ⇒ **只许写内存记录，不许从 tabs.live() 现取**
 	// （那时它是空的，取出来是一张空表，而且不报错）。
 	app.OnShutdown(func() {
+		gwStop()
 		if panes != nil {
 			panes.flushSync("应用收尾（Quit/信号）")
 		}
 	})
+
+	// 网关页内嵌 magpie 界面所需的本地反代（127.0.0.1，随机端口 + token）。
+	// 必须在 Run 之前起：页面首帧就可能落到网关页。
+	gwUIStart()
 
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
@@ -1208,7 +1393,8 @@ func openInWindowsTerminal(spec spawnSpec) {
 	}
 	// 参数翻译走**同一个** agentDefs.Args —— 对比窗口和嵌进来的窗口必须是同一个
 	// 会话意图，否则这个"对比"就成了两个不同的东西，没有可比性。
-	tail := append([]string{"-d", spec.CWD, def.Exe}, def.Args(spec.Resume, buildHookSettings("wt"))...)
+	agentArgs := append(append([]string{}, def.Prefix...), def.Args(spec.Resume, buildHookSettings("wt"))...)
+	tail := append([]string{"-d", spec.CWD, def.Exe}, agentArgs...)
 	cmd := exec.Command("wt.exe", tail...)
 	cmd.Env = buildEnv(def.Env)
 	// 「在 WT 里打开」是**交出去**的意思：那个窗口不是我们的子界面，不该随 Perch
@@ -1334,36 +1520,41 @@ const (
 	initialRows        = 24
 )
 
-/* 前端上报的一帧。data 与 err 二选一。
-   ⚠️ 读 conn 的**只能有一个 goroutine**（Receive 内部是 sync.Cond，两个读者会把帧
-   随机分走 —— 键盘字节被偷走那种错）。所以这里不是"再加一个读者"，而是把**读**
-   整个搬进这个 goroutine：这个 goroutine 是全程唯一的读家，处理逻辑只从通道拿帧。 */
+/*
+前端上报的一帧。data 与 err 二选一。
+
+	⚠️ 读 conn 的**只能有一个 goroutine**（Receive 内部是 sync.Cond，两个读者会把帧
+	随机分走 —— 键盘字节被偷走那种错）。所以这里不是"再加一个读者"，而是把**读**
+	整个搬进这个 goroutine：这个 goroutine 是全程唯一的读家，处理逻辑只从通道拿帧。
+*/
 type tabFrame struct {
 	data []byte
 	err  error
 }
 
-/* 读帧 goroutine。为什么非得把读挪出去（2026-10-16 实测的根因）：
+/*
+读帧 goroutine。为什么非得把读挪出去（2026-10-16 实测的根因）：
 
-   `StreamConn.Receive()` 是 sync.Cond 上的死等 —— **只有两件事叫得醒它**：来帧，
-   或者 Close（Close 会 cancel + Broadcast）。它没有 deadline、没有可用的 ctx。
-   而下面那句 1.5 秒兜底原来写在循环体里：
+	`StreamConn.Receive()` 是 sync.Cond 上的死等 —— **只有两件事叫得醒它**：来帧，
+	或者 Close（Close 会 cancel + Broadcast）。它没有 deadline、没有可用的 ctx。
+	而下面那句 1.5 秒兜底原来写在循环体里：
 
-       for { if time.Now().After(deadline) { 兜底启动 }; data, err := c.Receive() }
+	    for { if time.Now().After(deadline) { 兜底启动 }; data, err := c.Receive() }
 
-   —— 时间是**在 Receive 返回之后**才检查的。一帧都没有的时候它永远不返回，
-   于是"宁可难看也别卡死"那句兜底压根轮不到：**收起的群组里新建的那一格
-   45 秒都没有 PTY，展开的那一下才起来**（2026-10-16 实测）。
-   把读挪进这里，处理逻辑才第一次有可能"在没帧的时候被定时器叫醒"。
+	—— 时间是**在 Receive 返回之后**才检查的。一帧都没有的时候它永远不返回，
+	于是"宁可难看也别卡死"那句兜底压根轮不到：**收起的群组里新建的那一格
+	45 秒都没有 PTY，展开的那一下才起来**（2026-10-16 实测）。
+	把读挪进这里，处理逻辑才第一次有可能"在没帧的时候被定时器叫醒"。
 
-   代价是帧要过一次通道 —— 顺序由通道保证（单读、单消费、无重排、无丢失）。
+	代价是帧要过一次通道 —— 顺序由通道保证（单读、单消费、无重排、无丢失）。
 
-   ⚠️ 两个细节都是**防泄漏**的，不是顺手写的：
-   · 缓冲至少 1：读家从 Receive 拿到一帧就去塞通道，塞不进去就卡着；消费方那一瞬间
-     正好在跑 handle 的时候，有个槽位它才不用等。
-   · done：消费方提前 return 的时候（下面 PTY 写失败那条），读家可能**正卡在塞帧上**
-     —— 那时它不在 Receive 里，`c.Close()` 根本叫不醒它，这条 goroutine 就永远留下了。
-     所以塞帧要走 select，done 一关就撤。 */
+	⚠️ 两个细节都是**防泄漏**的，不是顺手写的：
+	· 缓冲至少 1：读家从 Receive 拿到一帧就去塞通道，塞不进去就卡着；消费方那一瞬间
+	  正好在跑 handle 的时候，有个槽位它才不用等。
+	· done：消费方提前 return 的时候（下面 PTY 写失败那条），读家可能**正卡在塞帧上**
+	  —— 那时它不在 Receive 里，`c.Close()` 根本叫不醒它，这条 goroutine 就永远留下了。
+	  所以塞帧要走 select，done 一关就撤。
+*/
 func readFrames(c *application.StreamConn, done <-chan struct{}) <-chan tabFrame {
 	frames := make(chan tabFrame, 1)
 	send := func(f tabFrame) bool {
@@ -1468,12 +1659,17 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 	// hooks 是**每格子一份**：事件文件路径写死进这一份 --settings 里，
 	// 于是"这条事件属于哪个格子"由文件名决定，不需要任何反查（见 hooks.go 末尾那段）。
 	settings := buildHookSettings(fmt.Sprintf("t%d", host.id))
-	args := def.Args(host.spec.Resume, settings)
+	// 每次开格重新解析一次（见 agentDef.Bin 的注释）：装完/更新完不用重启 Perch。
+	exe, prefix := def.Exe, def.Prefix
+	if def.Bin != "" {
+		exe, prefix = resolveAgentExe(def.Bin)
+	}
+	args := append(append([]string{}, prefix...), def.Args(host.spec.Resume, settings)...)
 	// 「新格没指定目录时落在哪」只有这一个答案（见 effectiveCWD / defaultCWD）——
 	// 2026-10-16 起是默认工作区，不是 fallbackCWD。这也正是记进登记表的那个值。
 	cwd := effectiveCWD(host.spec)
 
-	sess, err := startPTY(def.Exe, args, cwd, buildEnv(def.Env), cols, rows)
+	sess, err := startPTY(exe, args, cwd, buildEnv(def.Env), cols, rows)
 	if err != nil {
 		log.Printf("[perch] tab=%d 启动失败: %v", host.id, err)
 		_ = c.Send([]byte("\r\n\x1b[31m[perch] 启动失败: " + err.Error() + "\x1b[0m\r\n"))

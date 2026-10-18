@@ -1,0 +1,53 @@
+/* gw.css —— 网关页的外壳。
+   页面本身是 magpie 自己的界面：Go 在 /gwui/ 与 /api/ 上做同源反代（gwui.go），
+   这里只负责 iframe 的尺寸，以及控制面没接上时那张安装/接入卡。
+   Provider / 路由 / 用量 / 插件的一切样式都在 magpie 的 app.css 里，本文件不再
+   复制任何一份 —— 手写实现已于 2026-10-18 整体删除。 */
+
+/* iframe 自己滚（滚动发生在 magpie 页面内部），外层不许滚：
+   否则 iframe 会被内容撑高，Perch 的页面跟着滚。 */
+#dash:has(#dash-gateway:not([hidden])) .dash-scroll{overflow:hidden}
+#dash:has(#dash-gateway:not([hidden])) .dash-wrap{height:100%;display:flex;flex-direction:column}
+#dash-gateway{flex:1;min-height:0;min-width:0}
+#gw-frame{flex:1;min-height:0;width:100%;display:block;border:0;background:var(--bg)}
+#gw-frame[hidden]{display:none}
+
+/* ---- 已接入：版本 / 更新条 ---------------------------------------------
+   一行 Perch 自己的状态（不是 magpie 的页面）：当前版本、可更新的版本、
+   用户点出来的「更新」。更新由 magpie 自己的 /api/update 完成。 */
+.gw-ver{flex:none;display:flex;align-items:center;gap:8px;height:26px;padding:0 12px;
+        border-bottom:1px solid var(--line-soft);background:var(--bg);
+        font-size:10.5px;color:var(--faint);white-space:nowrap}
+.gw-ver[hidden]{display:none}
+.gw-ver .sep{color:var(--line)}
+.gw-ver .upd{color:#f5d06a}
+.gw-ver .err{color:var(--red)}
+.gw-ver .gw-btn{margin-left:2px}
+
+/* ---- 未接入：安装 / 接入卡 --------------------------------------------- */
+.gw-cover{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column}
+.gw-cover[hidden]{display:none}
+
+/* 卡里的状态行沿用总览的 .console-bar（细线、小字、可拖的那一套语言）。 */
+.gw-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.gw-actions.right{margin-left:auto}
+.gw-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:22px;
+        padding:0 8px;border:1px solid var(--line);border-radius:var(--r-sm);
+        background:rgba(255,255,255,.03);color:var(--fg2);font-size:11px;cursor:pointer;
+        white-space:nowrap;transition:background .12s,border-color .12s,color .12s}
+.gw-btn:hover{border-color:var(--faint);color:var(--fg);background:rgba(255,255,255,.07)}
+.gw-btn.primary{background:var(--accent);border-color:transparent;color:#fff}
+.gw-btn.primary:hover{background:#1d5cf0;color:#fff}
+.gw-btn:disabled{opacity:.4;cursor:default}
+.gw-btn.sm{height:19px;padding:0 6px;font-size:10.5px}
+.gw-connect{display:flex;flex-direction:column;align-items:flex-start;gap:10px;padding:24px 20px}
+.gw-connect b{font-size:13px}
+.gw-connect p{margin:0;font-size:12px;line-height:1.75;color:var(--muted);max-width:620px}
+.gw-connect .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+/* magpie 安装日志：和 Agent 的行内安装控制台同一种东西（等宽、黑底、可滚）。 */
+.gw-inst-log{margin:4px 0 0;padding:10px 12px;width:100%;max-height:220px;overflow:auto;
+             background:#0a0a0a;border:1px solid var(--line-soft);border-radius:6px;
+             font:11px/1.6 var(--mono);color:var(--muted);white-space:pre-wrap}
+.gw-msg{padding:7px 20px 0;font-size:11px;color:var(--muted);line-height:1.6}
+.gw-msg.ok{color:var(--green)}
+.gw-msg.bad{color:var(--red)}
