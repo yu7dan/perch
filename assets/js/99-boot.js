@@ -65,6 +65,18 @@ if (NAV_HERE === "dash") renderDashboard("启动");
 // 40-chrome 的 setActive 本来就会把焦点交给第一格。
 bootFact(`启动落点=${NAV_HERE === "dash" ? "总览" : "工作区"}（设置里选的是 ${SETTINGS.startView}）`);
 RSB_READY = true;
+/* 打开启动闸，把脚本求值期间到达的消息按原顺序放行（见 20-ctl.js 的 ctlInbox
+   与 80-live.js 的 pendingShell）。必须先置 RSB_READY：这些处理器里的重画
+   （renderLists / renderProjLive / …）都靠它判断"现在能不能画"。
+   ⚠️ 这一句是本文件**最后一条脚本**才有的特权：到这儿 87/88 的 applyMagpie /
+   applyGw* 都真的已经求值完了。别把它挪到前面的文件里。 */
+flushCtlBoot();
+if (pendingShell) {
+  const p = pendingShell;
+  pendingShell = null;
+  bootFact("壳层首帧在启动闸里到达：按启动顺序补画（applyShell）");
+  applyShell(p);
+}
 renderLive();
 // 首帧之后留一条**读数**（不是"应该没问题"）：四个模块各自拿到了什么、
 // 徽标几个。它同时也是一条"整段脚本跑到底了"的证据 ——

@@ -283,8 +283,49 @@ ctl.onopen = () => {
     else ctl.send({ type: "tab.new", spec: t.spec, req: t.spawnReq || 0 });
   }
 };
+/* ---------------------------------------------------------------------------
+   启动闸：ctl 消息在"整段脚本跑到底"之前**只收不发**（2026-10-19）
+   ---------------------------------------------------------------------------
+   红条 `applyMagpie is not defined` 的根因就在这里。两条事实拼在一起：
+
+     ① index.html 里那一串 defer 脚本是**按文档顺序、一块一块求值**的，而浏览器
+        在块与块之间可以让出事件循环 —— 网络消息会落在"后面的脚本还没求值"的缝里；
+     ② 这条 ctl 流在 20-ctl 求值时就建好了（`const ctl = JSONStream("ctl")`），
+        而分发要用到的处理函数散在后面的文件里：applyHook/applyAgent/applyActs/
+        applyFiles/applyLibrary 在 80-live，MAGPIE 在 85-dash，applyInstall 在
+        86-install，applyMagpie/applyGw* 在 87-gw-apply。
+
+   哪一条消息会先到不由我们决定：magpie watcher 每 2.5s 推整份读数（Go 的
+   `startMagpieWatcher` 在开窗之前就起了），沙盒里会话库很小的时候 shell 首帧
+   也会在几十毫秒内回来。于是一条 `magpie` 落在 87 求值之前，就是一条红条；
+   一条 `hook` 落在 80 之前，就是 `applyHook is not defined` —— 同一类病。
+
+   ⚠️ 修法**不是**在每个 case 里加 `typeof` 守卫：
+     · `MAGPIE` 是 85 才声明的 `let`，TDZ 里连 `typeof MAGPIE` 都会抛
+       （60-shell.js:462 那条注释记的就是这个教训）；
+     · 守卫会把消息**当场丢掉** —— 丢一条 `panes.list` 等于这一轮冷恢复不恢复，
+       丢一条 `magpie` 就要等下一次推送才画得出来。
+   所以按到达顺序攒着，等 99-boot（最后一条脚本）把闸打开，再原顺序分发。
+
+   ⚠️ 闸变量必须声明在**这条脚本**里：消息可能落在 40-chrome 求值之前，那时
+   它的 `RSB_READY` 自己还在 TDZ，借不得。 */
+let ctlBootReady = false;
+const ctlInbox = [];
+function flushCtlBoot() {
+  ctlBootReady = true;
+  if (ctlInbox.length) {
+    // 带上类型：这条日志是"闸真的拦到了东西"的唯一证据（哪一条都不该被静默丢掉）。
+    bootFact(`ctl 启动闸：放行 ${ctlInbox.length} 条在脚本求值期间到达的消息` +
+      `（${ctlInbox.map((m) => m.type || "?").join("、")}）`);
+  }
+  for (const m of ctlInbox.splice(0)) dispatchCtl(m);
+}
 ctl.onmessage = (ev) => {
   const m = ev.data || {};
+  if (!ctlBootReady) { ctlInbox.push(m); return; }
+  dispatchCtl(m);
+};
+function dispatchCtl(m) {
   // Go 推来的**观测**消息（hook / 会话登记表 / 转录）都走这条通道 ——
   // 它们和 tab.ok 是同一根流上的两类东西：一类是应答（tab.ok），
   // 一类是"它自己说它在干什么"（下面四种）。分发出去，各自归档。
@@ -453,7 +494,7 @@ ctl.onmessage = (ev) => {
       return;
     }
   }
-};
+}
 ctl.onerror = () => { ctlReady = false; };
 
 // 页面级日志走这条通道。它比任何标签流命都长 —— 页面刚起来、一个标签都还没有
