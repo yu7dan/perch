@@ -830,8 +830,18 @@ async function resumeAgentInSeat(t) {
 function stopAgent(t) {
   if (!t || t.connDown) return;
   if (!t.ready || !t.stream) { showToast("停不了", "这一格的终端还没连上。", "err"); return; }
-  try { t.stream.send(enc.encode("/exit\r")); }
+  /* ⚠️ 文字和回车**分两次写**。实测（Codex 0.163.0 TUI，2026-10-19）：同一次写入
+     里到达的 `/exit\r` 只被当成"输入 /exit，再换一行" —— composer 里留下一个
+     多行草稿，命令根本不提交；单独一次 Enter 才真的退出。Claude 两种写法都认，
+     所以统一按人的手势拆开，不在通用路径里按 agent 分叉。
+     300ms 是 live 测试里验证过能稳定提交的间隔（文字与回车分开写那一段）。 */
+  const st = t.stream;
+  try { st.send(enc.encode("/exit")); }
   catch (e) { jserr("stopAgent", e); showToast("停止失败", "终端通道断了。", "err"); return; }
+  setTimeout(() => {
+    try { st.send(enc.encode("\r")); }
+    catch (e) { jserr("stopAgent", e); }
+  }, 300);
   showToast("已让它退出", "正在跑的那一轮会先收尾。", "ok");
   sendCtrl({ type: "log", msg: `停止 agent tab=${t.id} pane=${t.paneID || 0}（发 /exit）` });
 }

@@ -203,9 +203,11 @@ type agentDef struct {
 	// 用户 settings.json 里的 env/model 照样生效）。
 	Args func(resumeIntent, string) []string
 	// Prepare 在每次开格前调用，用来做“这一格才有的”准备：分配端口、生成口令、
-	// 决定事件文件路径。返回的 env/args 只作用于这一次启动；observe 在 PTY
-	// 起来之后跑，ctx 一取消就退出。Claude 不用它（它的 hook 走 --settings）。
-	Prepare func(tag string, tabID int) (env map[string]string, args []string, observe func(context.Context), err error)
+	// 决定事件文件路径。cwd 是这一格将要启动的目录（Codex 的 app-server 要在
+	// 同一个目录里起来，thread/start 的默认 cwd 才和 TUI 一致）。
+	// 返回的 env/args 只作用于这一次启动；observe 在 PTY 起来之后跑，
+	// ctx 一取消就退出。Claude 不用它（它的 hook 走 --settings）。
+	Prepare func(tag string, tabID int, cwd string) (env map[string]string, args []string, observe func(context.Context), err error)
 }
 
 // resolveClaudeExe 找 agent 的可执行文件，顺序：
@@ -272,6 +274,8 @@ func init() {
 	agentDefs["opencode"] = openCodeAgentDef()
 	// Pi 也覆盖通用那条：续接参数 + -e 观察扩展。
 	agentDefs["pi"] = piAgentDef()
+	// Codex：每格一个 app-server + TUI --remote（见 agent_codex.go）。
+	agentDefs["codex"] = codexAgentDef()
 }
 
 func genericAgentDef(bin string) agentDef {
@@ -1836,13 +1840,18 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 		return
 	}
 	tag := fmt.Sprintf("t%d", host.id)
-	// Prepare 是“这一格才有的”启动准备（OpenCode 的端口/口令就是它给的）。
+	// 「新格没指定目录时落在哪」只有这一个答案（见 effectiveCWD / defaultCWD）——
+	// 2026-10-16 起是默认工作区，不是 fallbackCWD。这也正是记进登记表的那个值。
+	// Prepare 也要它：Codex 的 app-server 必须和 TUI 在同一个目录里起来。
+	cwd := effectiveCWD(host.spec)
+	// Prepare 是“这一格才有的”启动准备（OpenCode 的端口/口令、Codex 的
+	// app-server 都是它给的）。
 	var prepEnv map[string]string
 	var prepArgs []string
 	var observe func(context.Context)
 	if def.Prepare != nil {
 		var perr error
-		prepEnv, prepArgs, observe, perr = def.Prepare(tag, host.id)
+		prepEnv, prepArgs, observe, perr = def.Prepare(tag, host.id, cwd)
 		if perr != nil {
 			log.Printf("[perch] tab=%d 启动准备失败: %v", host.id, perr)
 			_ = c.Send([]byte("\r\n\x1b[31m[perch] 启动准备失败: " + perr.Error() + "\x1b[0m\r\n"))
@@ -1863,9 +1872,6 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 	}
 	args := append(append([]string{}, prefix...), def.Args(host.spec.Resume, settings)...)
 	args = append(args, prepArgs...)
-	// 「新格没指定目录时落在哪」只有这一个答案（见 effectiveCWD / defaultCWD）——
-	// 2026-10-16 起是默认工作区，不是 fallbackCWD。这也正是记进登记表的那个值。
-	cwd := effectiveCWD(host.spec)
 
 	env := make(map[string]string, len(def.Env)+len(prepEnv))
 	for k, v := range def.Env {
@@ -1876,6 +1882,14 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 	}
 	sess, err := startPTY(exe, args, cwd, buildEnv(env), cols, rows)
 	if err != nil {
+		// Prepare 可能已经在外面起了东西（Codex 的 app-server）。PTY 没起来
+		// 就没有“流的寿命”来取消观察者 —— 给它一个已取消的 ctx 让它自己收尾，
+		// 否则那个 server 会一直留到 Perch 退出。
+		if observe != nil {
+			octx, ocancel := context.WithCancel(context.Background())
+			ocancel()
+			go observe(octx)
+		}
 		log.Printf("[perch] tab=%d 启动失败: %v", host.id, err)
 		_ = c.Send([]byte("\r\n\x1b[31m[perch] 启动失败: " + err.Error() + "\x1b[0m\r\n"))
 		return

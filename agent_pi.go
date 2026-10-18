@@ -105,7 +105,7 @@ func ensurePiObserver() (string, error) {
 	return path, nil
 }
 
-func preparePi(tag string, tabID int) (map[string]string, []string, func(context.Context), error) {
+func preparePi(tag string, tabID int, _ string) (map[string]string, []string, func(context.Context), error) {
 	ext, err := ensurePiObserver()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("准备 Pi 观察扩展: %w", err)
@@ -314,8 +314,11 @@ func piSessionFileExists(cwd, id string) bool {
 // sessionFileExistsFor：冷恢复/续接护栏的 agent 分派口。
 // Claude 的判据原样保留（projects/<slug>/<id>.jsonl），别的 agent 各问各的盘。
 func sessionFileExistsFor(agent, cwd, id string) bool {
-	if agent == "pi" {
+	switch agent {
+	case "pi":
 		return piSessionFileExists(cwd, id)
+	case "codex":
+		return codexSessionFileExists(cwd, id)
 	}
 	return sessionFileExists(id)
 }

@@ -57,6 +57,14 @@ var agentAdapterCaps = map[string]agentCaps{
 		Launch: true, Resume: true, Status: true, Waiting: true,
 		Mechanism: "extension",
 	},
+	"codex": {
+		// 每格一个 app-server，TUI 通过 --remote 连它；状态取
+		// thread/status/changed 的 activeFlags（waitingOnApproval /
+		// waitingOnUserInput）。批准本身仍然在 TUI 里回答（Approvals=false）：
+		// 实测 0.163.0 的批准请求只发给 TUI，不发给旁路观察者。
+		Launch: true, Resume: true, Status: true, Waiting: true,
+		Mechanism: "app-server",
+	},
 }
 
 // capsForAgent 决定 Agent 名单上那一行该说什么。
@@ -167,7 +175,7 @@ func openCodeAgentDef() agentDef {
 }
 
 // prepareOpenCode 在 PTY 起来之前分配端口/口令，并返回 PTY 起来后要跑的观察者。
-func prepareOpenCode(tag string, tabID int) (map[string]string, []string, func(context.Context), error) {
+func prepareOpenCode(tag string, tabID int, _ string) (map[string]string, []string, func(context.Context), error) {
 	port, err := freeLoopbackPort()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("找空闲端口: %w", err)
