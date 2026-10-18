@@ -262,6 +262,7 @@ type magpieWatcher struct {
 	snap     *magpieSnap
 	lastJSON []byte
 	lastStat string // 只用来在状态变化时落一行日志
+	lastCat  string // 本地 Agent 名单的指纹：变了就先推，不等 HTTP
 	client   *http.Client
 	push     func(any)
 }
@@ -321,6 +322,14 @@ func (w *magpieWatcher) refresh() bool {
 	defer w.refreshM.Unlock()
 
 	s := w.scanLocal()
+	// 名单只碰本地磁盘：变了就先推一份，别让 fillRemote 的 HTTP
+	//（每个请求 1.8 秒超时）把「刚装好」的名单拖到下一轮。
+	catJSON, _ := json.Marshal(s.Catalog)
+	catChanged := string(catJSON) != w.lastCat
+	w.lastCat = string(catJSON)
+	if catChanged && w.push != nil {
+		w.push(map[string]any{"type": "catalog", "catalog": s.Catalog})
+	}
 	w.fillRemote(s)
 
 	b, err := json.Marshal(s)
@@ -594,6 +603,11 @@ func scanMagpiePlugins(dir string) magpiePlugins {
 // ---------------------------------------------------------------------------
 
 // agentCatalogDefs 是用户 2026-10-17 点名的那份清单（外加几枚同类里最该有的）。
+//
+// 这份清单是**使用层**：只收能在终端里跑的 CLI agent，不收桌面应用。
+// 桌面客户端（Claude Desktop 等）属于 magpie 的**网关层**，可以出现在
+// /api/state 里，但不从这里安装、启动或展示。没有安装配方也不等于桌面应用 ——
+// 那只是"Perch 还不能替它跑安装命令"，前端给官方安装说明的出口。
 //
 // 探测规则抄 magpie 的 reference.md（第 88 行起那张表）：**看配置文件**，
 // 不看 PATH —— Windows 上装完不重开、PATH 没刷新的情况太常见了。

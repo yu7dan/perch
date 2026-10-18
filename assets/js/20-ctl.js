@@ -410,12 +410,20 @@ ctl.onmessage = (ev) => {
     // 控制面：整份原生读数（网关页的 iframe 直接用 magpie 自己的界面，
     // 用量/账本/插件市场不再经过 Perch 中转）。
     case "gw": applyGw(m.gw); return;
-    // 安装器：start / log / done 三条；done 之后 Go 还会推一份重扫过的 catalog。
+    // 安装器：start / log / phase / done 四条；done 里也带一份重扫过的 catalog。
     case "install.start":
     case "install.log":
+    case "install.phase":
     case "install.done": applyInstall(m); return;
     case "catalog":
-      if (m.catalog && MAGPIE) applyMagpie(Object.assign({}, MAGPIE, { catalog: m.catalog }));
+      if (m.catalog) {
+        if (MAGPIE) applyMagpie(Object.assign({}, MAGPIE, { catalog: m.catalog }));
+        else {
+          // 首帧快照还没到也别把安装结果丢掉：先画名单，整份快照到了再覆盖。
+          MAGPIE = { catalog: m.catalog };
+          if (NAV_HERE === "dash") renderDashAgents();
+        }
+      }
       return;
     // Agent 接线（agent_cfg.go）：整份 /api/state 的 agents 快照；预览是
     // 断开前那次 dry run 的答案。两类都只落进状态，由 88-agent-cfg.js 画。
@@ -428,6 +436,22 @@ ctl.onmessage = (ev) => {
     // 这一条是"用户声明的项目池 + 归属"。分开发的理由和三条腿分开是同一条 ——
     // 池子只在动作时变（低频、全量），会话库每关一格就要重扫。
     case "pool":  applyPool(m);  return;
+    // 设置（Perch 自己的偏好）。shell 首帧里也带一份，之后每次改动 Go 都推整份；
+    // 默认目录选择器是协程里推的，所以它和 settings.set 的答复走同一条消息。
+    case "settings": {
+      // 默认目录的提交错误就地显示在输入框下面，不再弹 toast（84-settings.js）。
+      const inline = typeof settingsMessageArrived === "function" && settingsMessageArrived(m);
+      if (m.err && !inline) showToast("设置没保存", m.err, "err");
+      if (m.settings) {
+        applySettings(m.settings, {
+          fromGo: true,
+          effectiveCwd: m.cwd,
+          builtinCwd: m.builtinCwd,
+          defaultCwdMissing: m.defaultCwdMissing === true,
+        });
+      }
+      return;
+    }
   }
 };
 ctl.onerror = () => { ctlReady = false; };

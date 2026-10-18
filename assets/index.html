@@ -9,9 +9,21 @@
 </head>
 <body>
 
-<!-- 启动即总览：dash 类在 HTML 里就带上，第一帧就是总览（理由与 PTY 尺寸的关系
-     见 CSS「#app.dash」那段 —— 主区是 visibility:hidden，不是 display:none）。 -->
+<!-- 默认启动即总览：dash 类在 HTML 里就带上，第一帧就是总览（理由与 PTY 尺寸的
+     关系见 CSS「#app.dash」那段 —— 主区是 visibility:hidden，不是 display:none）。
+     设置里把启动落点改成「工作区」时，下面这段**解析期**的内联脚本会在首帧之前
+     把 dash 摘掉 —— 晚到 defer 脚本里再摘会先闪一下总览。 -->
 <div id="app" class="dash">
+<script>
+  // 必须在 #app 的起始标签之后、首帧之前跑。只读 localStorage 缓存（见
+  // 05-prefs.js）；Go 的 settings.json 要到 shell 载荷才下来，等不到首帧。
+  try {
+    var __perchPref = JSON.parse(localStorage.getItem("perch.settings.v1") || "{}");
+    if (__perchPref && __perchPref.startView === "workspace") {
+      document.getElementById("app").classList.remove("dash");
+    }
+  } catch (_) {}
+</script>
 
   <!-- 0. 自绘窗口标题栏（36px）。
        尺寸与分区的依据是 Orca —— 见 CSS 里 .titlebar 那一段的说明。
@@ -141,7 +153,7 @@
        用户纠正「两层设计是要的」。真正该删的只有「全部会话」那一项 ——
        它和右边那个平铺视图（#sess-view / renderSessionsView）一起退役了，
        因为会话行已经缩在工作区行下面，同一份数据不该说两遍。
-       本轮清单：工作区（真的）+ 底部一枚「设置」（还没做，灰态）。
+       本轮清单：总览 / 工作区 / 设置，三项都是真的；「设置」固定在栏底。
        原来那四项里「历史」「搜索」是真死的（点了什么都不发生），更早就撤了。 -->
   <aside id="rail"></aside>
 
@@ -476,26 +488,17 @@
               </aside>
             </div>
 
-            <!-- Agent 接线表：只展开本机检测到的（已接入 / 未接入两组）；
-                 未检测到的收进 magpie 式折叠栏，点「安装」在 Perch 里跑官方命令。
+            <!-- Agent CLI 接线表：只列本机能在终端里跑的 CLI agent（已接入 /
+                 未接入两组）；未检测到的收进 magpie 式折叠栏，点「安装」在 Perch
+                 里跑官方 CLI 命令。桌面端不在这里 —— 用户自己下载，在网关层配置。
                  点一行 = 右侧配置抽屉（88-agent-cfg.js）：接入网关、模型、
                  推理强度、分档、子代理、登录方式。 -->
             <section class="console-foot" id="dash-agent-card">
               <div class="mod-head">
-                <div><b>Agent</b><span class="sub" id="dash-agent-sub"></span></div>
-                <span class="note">点一行配置网关 · 图标来自 magpie / lobe-icons</span>
+                <div><b>Agent CLI</b><span class="sub" id="dash-agent-sub"></span></div>
+                <span class="note">只列本机 CLI agent · 点一行配置网关 · 图标来自 magpie / lobe-icons</span>
               </div>
               <div class="roster" id="dash-agent-list"></div>
-              <div class="inst" id="dash-install" hidden>
-                <div class="inst-head">
-                  <span class="dot" id="inst-dot"></span>
-                  <b id="inst-title">安装</b>
-                  <span id="inst-state"></span>
-                  <button type="button" class="inst-btn" id="inst-cancel" hidden>取消</button>
-                  <button type="button" class="inst-btn" id="inst-close" hidden>收起</button>
-                </div>
-                <pre class="inst-log" id="inst-log"></pre>
-              </div>
             </section>
           </section>
         </section>
@@ -515,6 +518,219 @@
           <div class="gw-cover" id="gw-cover"></div>
           <iframe id="gw-frame" title="magpie" hidden></iframe>
         </section>
+      </div>
+    </div>
+
+    <!-- 安装进度台：固定在总览底部（#dash 的 flex 子项），不随 Agent 名单滚动。
+         显示阶段、已用时间、进度条和最后一行日志；完整日志可展开。
+         装的是 CLI（配方只有官方 CLI 命令/包名），桌面端不在这里。 -->
+    <div class="inst" id="dash-install" hidden>
+      <div class="inst-card">
+        <div class="inst-head">
+          <span class="dot" id="inst-dot"></span>
+          <b id="inst-title">安装</b>
+          <span class="inst-kind">CLI</span>
+          <span id="inst-state"></span>
+          <span class="inst-src" id="inst-source"></span>
+          <span class="inst-time" id="inst-time"></span>
+          <button type="button" class="inst-btn" id="inst-log-toggle">查看日志</button>
+          <button type="button" class="inst-btn" id="inst-cancel" hidden>取消</button>
+          <button type="button" class="inst-btn" id="inst-close" hidden>收起</button>
+        </div>
+        <div class="inst-bar" id="inst-bar"><span class="inst-bar-fill"></span></div>
+        <div class="inst-last" id="inst-last"></div>
+        <pre class="inst-log" id="inst-log" hidden></pre>
+      </div>
+    </div>
+  </main>
+
+  <!-- 6. 设置（Perch 自己的偏好）。
+       `#app.settings` 时它和总览一样从第 2 列铺到最后一列，会话列表/终端/右栏
+       一起退场（visibility:hidden，理由同总览：PTY 的起始尺寸靠真实布局）。
+       形态照 Orca 的设置页：标题 + 说明 + 一张装行的卡片；行是「标签/说明 ←→ 控件」。
+       内容全部静态放在这里（单例、看得见、量得到），动态值由 84-settings.js
+       的 syncSettingsUI 填。 -->
+  <main id="settings">
+    <div class="settings-scroll">
+      <div class="settings-search" id="set-searchbar">
+        <div class="settings-search-in">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.8" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
+          <input id="set-search" type="text" placeholder="搜索设置…" autocomplete="off"
+                 spellcheck="false" aria-label="搜索设置">
+          <button type="button" class="set-search-clear" id="set-search-clear"
+                  aria-label="清空搜索" title="清空搜索" hidden>×</button>
+          <span class="set-search-kbd" id="set-search-kbd"><kbd>Ctrl</kbd><kbd>F</kbd></span>
+        </div>
+      </div>
+      <div class="settings-wrap">
+        <header class="settings-head">
+          <h1>设置</h1>
+          <p>这些选项属于 Perch 自己，不影响 agent 的模型、网关或权限配置。改动即时生效，并保存在本机。</p>
+        </header>
+
+        <div class="settings-empty" id="set-empty" hidden>
+          <p>没有找到「<span id="set-empty-q"></span>」相关的设置。</p>
+          <p class="sub">换个词试试，比如「字体」「目录」「确认」。</p>
+          <button type="button" class="set-btn" id="set-empty-clear">清空搜索</button>
+        </div>
+
+        <section class="settings-sec" data-search="工作区 目录 路径 workspace directory path cwd">
+          <div class="settings-sec-head">
+            <h2>工作区</h2>
+            <p>新开的格子和「默认工作区」落在哪个目录。已经跑着的格子不受影响。</p>
+          </div>
+          <div class="settings-card">
+            <div class="settings-row" data-set-row="defaultCwd"
+                 data-search="目录 工作区 路径 文件夹 项目 默认 cwd directory workspace path folder project">
+              <div class="settings-lab">
+                <b>默认目录</b>
+                <span>没指定项目时，新 agent 从这里开始。可以直接输入路径，留空 = 内置目录。</span>
+              </div>
+              <div class="settings-ctl set-cwd-ctl">
+                <div class="set-cwd-line">
+                  <span class="set-kind" id="set-cwd-kind">内置</span>
+                  <input class="set-path set-input" id="set-cwd-input" type="text"
+                         spellcheck="false" autocomplete="off" placeholder="内置目录"
+                         aria-label="默认工作目录">
+                </div>
+                <div class="set-btns">
+                  <button type="button" class="set-btn" id="set-cwd-pick" data-set="pick-cwd">选择目录…</button>
+                  <button type="button" class="set-btn quiet" id="set-cwd-reset" data-set="reset-cwd">恢复默认</button>
+                </div>
+              </div>
+            </div>
+            <div class="set-note" id="set-cwd-note" hidden></div>
+            <div class="set-err" id="set-cwd-err" role="alert" hidden></div>
+          </div>
+        </section>
+
+        <section class="settings-sec" data-search="外观 显示 appearance look display">
+          <div class="settings-sec-head">
+            <h2>外观</h2>
+            <p>终端和界面的显示方式。字体随应用分发，不依赖系统安装。</p>
+          </div>
+          <div class="settings-card">
+            <div class="settings-row" data-set-row="theme"
+                 data-search="主题 外观 深色 浅色 明暗 theme dark light appearance">
+              <div class="settings-lab">
+                <b>主题</b>
+                <span>界面的明暗。浅色主题还在做。</span>
+              </div>
+              <div class="settings-ctl">
+                <div class="set-seg" role="radiogroup" aria-label="主题">
+                  <button type="button" role="radio" data-set-theme="dark" aria-checked="true">深色</button>
+                  <button type="button" role="radio" data-set-theme="light" aria-checked="false"
+                          class="na" aria-disabled="true"
+                          aria-label="浅色（还没做，下一版提供）"
+                          title="浅色主题还没做，下一版提供">浅色</button>
+                </div>
+              </div>
+            </div>
+            <div class="settings-row" data-set-row="termFontFamily"
+                 data-search="字体 等宽 连字 字形 字型 font family typeface cascadia jetbrains mono ligature">
+              <div class="settings-lab">
+                <b>终端字体</b>
+                <span>两套都是随应用分发的等宽字体，方块和制表符字形齐全。<em class="set-def"
+                      data-set-default-hint="termFontFamily"></em></span>
+              </div>
+              <div class="settings-ctl">
+                <div class="set-fontcards" id="set-fonts" role="radiogroup" aria-label="终端字体">
+                  <button type="button" class="set-fontcard" role="radio" data-set-font="cascadia"
+                          aria-checked="true">
+                    <span class="set-fontsample" style="font-family:'Cascadia Code WB'">Aa 中文 0O1l</span>
+                    <span class="set-fontname">Cascadia Code</span>
+                  </button>
+                  <button type="button" class="set-fontcard" role="radio" data-set-font="jetbrains"
+                          aria-checked="false">
+                    <span class="set-fontsample" style="font-family:'JetBrains Mono WB'">Aa 中文 0O1l</span>
+                    <span class="set-fontname">JetBrains Mono</span>
+                  </button>
+                </div>
+                <button type="button" class="set-reset" data-set-reset="termFontFamily" hidden>恢复默认</button>
+              </div>
+            </div>
+            <div class="settings-row" data-set-row="termFontSize"
+                 data-search="字号 大小 字体尺寸 缩放 font size zoom text">
+              <div class="settings-lab">
+                <b>终端字号</b>
+                <span>格子多了也只是格子变小，字号保持不变。<em class="set-def"
+                      data-set-default-hint="termFontSize"></em></span>
+              </div>
+              <div class="settings-ctl">
+                <div class="set-size-ctl">
+                  <button type="button" class="set-step" data-set-size-step="-1"
+                          aria-label="缩小字号" title="缩小字号">−</button>
+                  <div class="set-seg" id="set-fontsize" role="radiogroup" aria-label="终端字号">
+                    <button type="button" role="radio" data-set-size="12" aria-checked="false">12</button>
+                    <button type="button" role="radio" data-set-size="13" aria-checked="false">13</button>
+                    <button type="button" role="radio" data-set-size="14" aria-checked="true">14</button>
+                    <button type="button" role="radio" data-set-size="15" aria-checked="false">15</button>
+                    <button type="button" role="radio" data-set-size="16" aria-checked="false">16</button>
+                    <button type="button" role="radio" data-set-size="18" aria-checked="false">18</button>
+                  </div>
+                  <button type="button" class="set-step" data-set-size-step="1"
+                          aria-label="放大字号" title="放大字号">+</button>
+                </div>
+                <button type="button" class="set-reset" data-set-reset="termFontSize" hidden>恢复默认</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-sec" data-search="行为 交互 behavior interaction">
+          <div class="settings-sec-head">
+            <h2>行为</h2>
+            <p>关窗和结束 agent 都是会带走正在运行的东西的动作，默认先问一句。</p>
+          </div>
+          <div class="settings-card">
+            <div class="settings-row" data-set-row="confirmClose"
+                 data-search="关闭 关窗 窗口 退出 确认 close window quit exit confirm">
+              <div class="settings-lab">
+                <b>关闭窗口前确认</b>
+                <span>点窗口右上角的 × 时先问一句。确认后所有正在跑的 agent 会随窗口结束。<em class="set-def"
+                      data-set-default-hint="confirmClose"></em></span>
+              </div>
+              <div class="settings-ctl">
+                <button type="button" class="set-switch" role="switch" data-set-flag="confirmClose"
+                        aria-checked="true" aria-label="关闭窗口前确认"><i></i></button>
+                <button type="button" class="set-reset" data-set-reset="confirmClose" hidden>恢复默认</button>
+              </div>
+            </div>
+            <div class="settings-row" data-set-row="confirmEndAgent"
+                 data-search="结束 agent 删除 记录 确认 end agent delete record confirm remove">
+              <div class="settings-lab">
+                <b>结束 agent 前确认</b>
+                <span>「结束这个 agent」会删掉它的座位记录（磁盘上的会话文件不动），动手前先问一句。<em class="set-def"
+                      data-set-default-hint="confirmEndAgent"></em></span>
+              </div>
+              <div class="settings-ctl">
+                <button type="button" class="set-switch" role="switch" data-set-flag="confirmEndAgent"
+                        aria-checked="true" aria-label="结束 agent 前确认"><i></i></button>
+                <button type="button" class="set-reset" data-set-reset="confirmEndAgent" hidden>恢复默认</button>
+              </div>
+            </div>
+            <div class="settings-row" data-set-row="startView"
+                 data-search="启动 打开 首页 落点 总览 工作区 start launch startup view home">
+              <div class="settings-lab">
+                <b>启动时打开</b>
+                <span>下次打开 Perch 先落在哪一页。这一次不会跳。<em class="set-def"
+                      data-set-default-hint="startView"></em></span>
+              </div>
+              <div class="settings-ctl">
+                <div class="set-seg" role="radiogroup" aria-label="启动时打开">
+                  <button type="button" role="radio" data-set-start="dash" aria-checked="true">总览</button>
+                  <button type="button" role="radio" data-set-start="workspace" aria-checked="false">工作区</button>
+                </div>
+                <button type="button" class="set-reset" data-set-reset="startView" hidden>恢复默认</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <p class="settings-foot">
+          设置保存在 <code>%APPDATA%\Perch\settings.json</code>。这里的选项只影响 Perch，不改 agent 自己的配置。
+        </p>
       </div>
     </div>
   </main>
@@ -590,6 +806,7 @@
       <b id="ac-name">Agent</b>
       <span class="ac-path" id="ac-path"></span>
     </div>
+    <span class="ac-chip" title="Perch 的使用层只安装/运行 CLI agent">CLI</span>
     <button type="button" class="ac-x" id="ac-x" title="关闭" aria-label="关闭">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
         stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
@@ -597,6 +814,25 @@
   </div>
   <div class="ac-body" id="ac-body"></div>
 </aside>
+<!-- 确认框（单例）。关窗确认、结束 agent 确认都走它 —— 一处语义、一处键盘行为。
+     盖住整个窗口（包括自绘标题栏）：确认没答复之前，点 × 也只会把焦点送回卡片，
+     不会在背后偷偷把窗口关掉。内容由 84-settings.js 的 askConfirm 填。 -->
+<div id="confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title"
+     aria-describedby="confirm-body" hidden>
+  <div class="cf-card" role="document">
+    <div class="cf-head">
+      <span class="cf-ico" id="confirm-ico" aria-hidden="true"></span>
+      <div class="cf-id">
+        <b id="confirm-title">确认</b>
+        <p id="confirm-body"></p>
+      </div>
+    </div>
+    <div class="cf-actions">
+      <button type="button" class="cf-btn" id="confirm-cancel">取消</button>
+      <button type="button" class="cf-btn cf-ok" id="confirm-ok">确定</button>
+    </div>
+  </div>
+</div>
 <div id="toasts" role="status" aria-live="polite"></div>
 
 <script src="/xterm.js"></script>
@@ -649,6 +885,7 @@ window.__facts = [];
   import { Stream, JSONStream, Window, Events } from "/wails/runtime.js";
   window.__wails = { Stream, JSONStream, Window, Events };
 </script>
+<script defer src="/js/05-prefs.js"></script>
 <script defer src="/js/10-term.js"></script>
 <script defer src="/js/20-ctl.js"></script>
 <script defer src="/js/30-pages.js"></script>
@@ -657,6 +894,8 @@ window.__facts = [];
 <script defer src="/js/60-shell.js"></script>
 <script defer src="/js/70-flow.js"></script>
 <script defer src="/js/80-live.js"></script>
+<script defer src="/js/83-settings-search.js"></script>
+<script defer src="/js/84-settings.js"></script>
 <script defer src="/js/85-dash.js"></script>
 <script defer src="/js/gw/00-frame.js"></script>
 <script defer src="/js/86-install.js"></script>

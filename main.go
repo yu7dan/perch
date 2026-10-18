@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -114,6 +115,9 @@ type ctrlMsg struct {
 	// open.url 用：在系统浏览器里打开一个 http(s) 地址（Agent 名单的下载页）。
 	// 只认 http/https —— 别的 scheme 会让"打开下载页"变成一条可执行动作。
 	URL string `json:"url"`
+	// settings.set 用：只带用户真的改了的字段（指针 = 这条请求提没提到它）。
+	// false / 0 / 空串都是合法值，所以不能用零值判断缺省。
+	Settings *settingsPatch `json:"settings,omitempty"`
 	// gw.* 用：控制面的读写参数。
 	//   Period  today / 7d / 30d / all
 	//   Preset  供应商预设 id
@@ -638,6 +642,25 @@ func setPushConn(c *application.StreamConn) {
 	pushMu.Unlock()
 }
 
+// ctlConnected = 前端那条控制通道此刻在不在。
+// 关窗确认必须问它：页面还没连上（启动最初一两秒）或者已经崩了的时候，
+// 不能因为"要确认"把窗口卡死 —— 那种情况下放行才是对的。
+func ctlConnected() bool {
+	pushMu.Lock()
+	defer pushMu.Unlock()
+	return pushConn != nil
+}
+
+// 关窗确认的三个状态。零值 = 还没问过 / 刚被取消。
+//
+//	closeConfirmed  前端已确认，这次 WindowClosing 直接放行
+//	closeAskAt      上一次问前端的时刻（UnixNano）。30s 没有答复就放行，
+//	                避免一个卡死的前端把窗口锁住
+var (
+	closeConfirmed atomic.Bool
+	closeAskAt     atomic.Int64
+)
+
 func pushJSON(v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -946,6 +969,58 @@ func handleCtl(c *application.StreamConn) {
 			go gwAgentDrift()
 		// 供应商 / 分组 / 插件 / 用量的写操作不再经过 Perch：网关页内嵌的是
 		// magpie 自己的界面，它直接打自己的 /api/*（见 gwui.go）。
+		// -------------------------------------------------------------------
+		// 设置页（Perch 自己的偏好，见 settings.go）
+		// -------------------------------------------------------------------
+		case "settings.get":
+			// 进设置页时问一次权威值；也用于 shell 载荷没到时的补读。
+			pushSettings("")
+		case "settings.set":
+			if m.Settings == nil {
+				continue
+			}
+			applySettingsPatch(*m.Settings, "设置改动")
+		case "settings.pickDefaultCWD":
+			// 选默认工作目录。和 project.add 一样：系统选择器是**阻塞**的，
+			// 必须换协程，否则整条 ctl 在对话框开着的时候停止收包。
+			go func() {
+				if globalApp == nil {
+					pushSettings("窗口还没起来，选择器打不开")
+					return
+				}
+				sel, err := globalApp.Dialog.OpenFile().
+					CanChooseDirectories(true).
+					CanChooseFiles(false).
+					SetTitle("新 agent 默认落在哪个目录？").
+					PromptForSingleSelection()
+				if err != nil {
+					low := strings.ToLower(err.Error())
+					if strings.Contains(low, "cancel") {
+						log.Printf("[settings] 默认目录选择器被取消（没有改动）")
+						return
+					}
+					log.Printf("[settings] 默认目录选择器失败：%v", err)
+					pushSettings("选择器打不开：" + err.Error())
+					return
+				}
+				if strings.TrimSpace(sel) == "" {
+					log.Printf("[settings] 默认目录选择器被取消（没有改动）")
+					return
+				}
+				applySettingsPatch(settingsPatch{DefaultCWD: &sel}, "设置默认目录")
+			}()
+		case "window.close":
+			// 前端确认过了（设置页的「关闭窗口前确认」）。置位后 WindowClosing
+			// 那道 hook 直接放行，走 Wails 默认的关窗路。
+			closeConfirmed.Store(true)
+			closeAskAt.Store(0)
+			log.Printf("[settings] 关窗确认：用户确认关闭，放行")
+			if mainWindow != nil {
+				mainWindow.Close()
+			}
+		case "window.close.cancel":
+			closeAskAt.Store(0)
+			log.Printf("[settings] 关窗确认：用户取消，窗口留着")
 		case "project.add":
 			// 加一个项目（左栏那一轮）。两种进法：
 			//   · 带 path —— 拖拽落进来的目录、或从「未归类」收编（source="adopted"）
@@ -1124,6 +1199,10 @@ var titlesStore *titleStore
 // 日志里说清楚 —— 半死不活的池子（能读不能写）比明确的不可用更难查。
 var pool *projectPool
 
+// prefsStore 是 Perch 自己的偏好（见 settings.go）。必须在 pool 之前载入 ——
+// defaultWorkspacePath 会读它。nil = 还没初始化（只有测试路径会见到）。
+var prefsStore *settingsStore
+
 // panes 是格子登记表（冷恢复的输入）。nil = 没起来（拿不到用户配置目录），
 // 这时候所有记录动作都是 no-op —— 冷恢复这一轮退化成现状（一个默认格）。
 var panes *paneStore
@@ -1140,6 +1219,9 @@ var secondInstance bool
 
 func main() {
 	titlesStore = loadTitleStore(filepath.Join(claudeStateDir, "titles.json"))
+	// 设置要在池子**之前**载入：defaultWorkspacePath() 会读里面的「默认目录」，
+	// 而 ensureDefaultWorkspace / 合成的默认工作区都走它。
+	prefsStore = loadSettingsStore()
 	pool = loadProjectPool()
 	// 「安装即存在」那条要求落地的就是这一句：默认工作区那个目录**由我们建出来**，
 	// 因为新格没挑项目时会落在它里面（claude 起不来一个不存在的 cwd）。
@@ -1236,6 +1318,37 @@ func main() {
 		MinHeight: 560,
 
 		URL: "/",
+	})
+
+	/* 关窗确认（设置页「关闭窗口前确认」）。
+	   ⚠️ 必须用 **RegisterHook**，不是 OnWindowEvent：Wails 在构造窗口时先注册了一个
+	   默认的 WindowClosing 监听器（它无条件关窗），监听器按注册序执行；hook 则在
+	   它们**之前**同步跑，Cancel() 之后默认监听器和后面的监听器都不会执行 ——
+	   这才是"先问一句，再决定关不关"能成立的地方（2026-10-18 核过 webview_window.go
+	   的 handleWindowEvent：hooks → listeners）。
+	   前端确认后发 window.close：closeConfirmed 一置位，这条路就直接放行。
+	   前端不在（ctl 没连上/崩了）时放行 —— 确认是为了防手滑，不是为了锁死窗口。 */
+	mainWindow.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		if closeConfirmed.Load() {
+			return
+		}
+		if prefsStore == nil || !prefsStore.snapshot().ConfirmClose {
+			return
+		}
+		if !ctlConnected() {
+			log.Printf("[settings] 关窗确认：前端控制通道不在，直接放行（不能把窗口锁死）")
+			return
+		}
+		now := time.Now()
+		if last := closeAskAt.Load(); last != 0 && now.Sub(time.Unix(0, last)) > 30*time.Second {
+			log.Printf("[settings] 关窗确认：问了 30s 没有答复，放行这一次关闭")
+			return
+		}
+		e.Cancel()
+		if closeAskAt.CompareAndSwap(0, now.UnixNano()) {
+			log.Printf("[settings] 关窗确认：窗口要关，先问前端（确认框）")
+		}
+		mainWindow.EmitEvent("perch:close-request")
 	})
 
 	// hooks：每个格子启动时现造一份**只对它生效**的 --settings（不碰用户的配置文件）。

@@ -15,7 +15,9 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,6 +39,8 @@ type installRecipe struct {
 	NeedsGit bool
 }
 
+// 所有配方都只装 CLI：官方 CLI 安装脚本，或 npm 包的 bin。
+// **桌面端安装器不许进这张表** —— 桌面端由用户自己下载，只在 magpie 网关层配置。
 var installRecipes = map[string]installRecipe{
 	"claude": {
 		Source: `irm https://claude.ai/install.ps1 | iex`,
@@ -175,8 +179,9 @@ func recipeScript(r installRecipe) string {
 }
 
 type installRun struct {
-	cancel context.CancelFunc
-	pid    int
+	cancel  context.CancelFunc
+	pid     int
+	started time.Time
 }
 
 var (
@@ -192,7 +197,7 @@ func installLog(id, line string) {
 func startAgentInstall(id string) {
 	r, ok := installRecipes[id]
 	if !ok || (r.Script == "" && !r.NPM) {
-		installLog(id, "这个 agent 没有可用的自动安装配方（桌面应用请在官网安装）。")
+		installLog(id, "这个 agent 没有可用的自动安装配方（请打开官方安装说明）。")
 		pushJSON(map[string]any{"type": "install.done", "id": id, "ok": false, "err": "no recipe"})
 		return
 	}
@@ -204,7 +209,7 @@ func startAgentInstall(id string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
-	run := &installRun{cancel: cancel}
+	run := &installRun{cancel: cancel, started: time.Now()}
 	installRuns[id] = run
 	installMu.Unlock()
 
@@ -212,6 +217,7 @@ func startAgentInstall(id string) {
 	script := recipeScript(r)
 	pushJSON(map[string]any{
 		"type": "install.start", "id": id, "source": r.Source,
+		"at": time.Now().UnixMilli(),
 	})
 	installLog(id, "$ "+r.Source)
 
@@ -219,6 +225,8 @@ func startAgentInstall(id string) {
 		"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
 	cmd.Dir = home
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+	// 进程退出后最多再等 2 秒输出流；孙进程占着管道时，Wait 会关掉它并返回。
+	cmd.WaitDelay = 2 * time.Second
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		finishInstall(id, false, 1, err.Error(), cancelled(ctx))
@@ -255,16 +263,27 @@ func startAgentInstall(id string) {
 			}
 		}
 	}
+	// Wait 必须在后台跑：它负责在进程退出后关掉管道。如果先等 wg.Wait()
+	// 再 Wait，孙进程（npm / 安装脚本常留）会让读取永远等不到 EOF，
+	// 界面就一直停在「安装中」。
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- cmd.Wait() }()
+
 	wg.Add(2)
 	go scan(stdout)
 	go scan(stderr)
 	wg.Wait()
-	werr := cmd.Wait()
+	werr := <-waitErr
 	code := 0
+	if cmd.ProcessState != nil {
+		code = cmd.ProcessState.ExitCode()
+	}
 	if werr != nil {
-		if ee, ok := werr.(*exec.ExitError); ok {
-			code = ee.ExitCode()
-		} else {
+		if errors.Is(werr, exec.ErrWaitDelay) {
+			// 进程已经退出，只是输出流没关干净；不把这次安装判成失败。
+			installLog(id, "（安装进程已退出，输出流仍未关闭，继续收尾）")
+			werr = nil
+		} else if _, ok := werr.(*exec.ExitError); !ok {
 			code = -1
 		}
 	}
@@ -287,39 +306,100 @@ func errText(err error) string {
 
 // finishInstall 收尾：重读 PATH（安装脚本改的是注册表里的用户 PATH，而本进程
 // 的环境变量是启动时快照）、重扫 Agent 名单、跑一次 --version 作为证据。
+//
+// 顺序很重要：**先推新名单，再推 done**。前端收到 done 时手里已经是新名单，
+// 行会在同一个事件里从「未检测到」翻成「已接入」，不用等下一次 2.5 秒轮询。
+// --version 只是证据，放后台跑，不挡收尾。
 func finishInstall(id string, ok bool, code int, msg string, wasCancelled bool) {
 	installMu.Lock()
+	run := installRuns[id]
 	delete(installRuns, id)
 	installMu.Unlock()
+
+	elapsed := time.Duration(0)
+	if run != nil && !run.started.IsZero() {
+		elapsed = time.Since(run.started)
+	}
 
 	if ok {
 		if id == "magpie" {
 			// 装完就**自动接入**控制面（用户 2026-10-17 定的：不再有「连接 magpie」
 			// 这个手动动作）。gwConnect 会自己找到刚装好的那个 exe。
-			pushJSON(map[string]any{"type": "install.done", "id": id, "ok": true, "code": code})
+			pushJSON(map[string]any{
+				"type": "install.done", "id": id, "ok": true, "code": code,
+				"elapsedMs": elapsed.Milliseconds(),
+			})
 			go gwConnect()
 			return
 		}
+
+		// 重读 PATH 可能要几秒；先告诉界面进入「重新检测」阶段，
+		// 别让行一直显示「安装中」。
+		pushJSON(map[string]any{"type": "install.phase", "id": id, "phase": "scanning"})
 		reloadPathFromRegistry()
 		home, _ := os.UserHomeDir()
 		cat := scanAgentCatalog(home)
 		mergeCatalogCalls(cat)
-		if d := agentCatalogDefsByID(id); d != nil && d.Bin != "" {
-			if line := probeAgentVersion(d.Bin); line != "" {
-				installLog(id, "版本："+line)
-			}
-		}
-		pushJSON(map[string]any{"type": "install.done", "id": id, "ok": true, "code": code})
+		detected, path := catalogAgentState(cat, id)
+
 		pushJSON(map[string]any{"type": "catalog", "catalog": cat})
-	} else {
-		if wasCancelled {
-			msg = "已取消"
+		pushJSON(map[string]any{
+			"type": "install.done", "id": id, "ok": true, "code": code,
+			"detected": detected, "path": path,
+			"elapsedMs": elapsed.Milliseconds(),
+		})
+		log.Printf("[install] %s 收尾 ok=true detected=%v 用时=%s", id, detected, elapsed)
+
+		if d := agentCatalogDefsByID(id); d != nil && d.Bin != "" {
+			go func(bin string) {
+				if line := probeAgentVersion(bin); line != "" {
+					installLog(id, "版本："+line)
+				}
+			}(d.Bin)
 		}
-		if msg == "" {
-			msg = fmt.Sprintf("退出码 %d", code)
+		// npm 写 shim 偶尔比进程退出晚；没探到就短重试几次，探到立刻推名单。
+		if !detected {
+			go retryCatalogAfterInstall(id)
 		}
-		installLog(id, "失败："+msg)
-		pushJSON(map[string]any{"type": "install.done", "id": id, "ok": false, "code": code, "err": msg})
+		return
+	}
+
+	if wasCancelled {
+		msg = "已取消"
+	}
+	if msg == "" {
+		msg = fmt.Sprintf("退出码 %d", code)
+	}
+	installLog(id, "失败："+msg)
+	pushJSON(map[string]any{
+		"type": "install.done", "id": id, "ok": false, "code": code, "err": msg,
+		"elapsedMs": elapsed.Milliseconds(),
+	})
+}
+
+// catalogAgentState 从刚扫出来的名单里取一个 agent 的检测结果。
+func catalogAgentState(cat []agentCard, id string) (bool, string) {
+	for _, a := range cat {
+		if a.ID == id {
+			return a.Installed, a.Path
+		}
+	}
+	return false, ""
+}
+
+// retryCatalogAfterInstall 给 npm 写 shim 留一点时间：400ms / 1.2s / 2.5s
+// 各扫一次，探到就推名单。最多三次，不无限轮询。
+func retryCatalogAfterInstall(id string) {
+	home, _ := os.UserHomeDir()
+	for _, wait := range []time.Duration{400 * time.Millisecond, 1200 * time.Millisecond, 2500 * time.Millisecond} {
+		time.Sleep(wait)
+		cat := scanAgentCatalog(home)
+		mergeCatalogCalls(cat)
+		if ok, _ := catalogAgentState(cat, id); ok {
+			pushJSON(map[string]any{"type": "catalog", "catalog": cat})
+			installLog(id, "已重新检测到 CLI。")
+			return
+		}
 	}
 }
 

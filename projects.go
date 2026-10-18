@@ -88,9 +88,29 @@ const (
 	defaultWSDir = "Perch"
 )
 
-// defaultWorkspacePath 给出默认工作区的绝对路径。
-// 第二返回值 false = 拿不到用户主目录（连合成都不做），调用方一律按"没有它"处理。
+// defaultWorkspacePath 给出默认工作区**当前生效**的绝对路径。
+//
+// 2026-10-18 起它先看设置页里的「默认目录」（%APPDATA%\Perch\settings.json）；
+// 用户没选、或者选的那个目录此刻不在盘上，才回到内置的
+// <用户主目录>\Documents\Perch。第二返回值 false = 连内置路径都拿不到
+// （用户主目录不可用），调用方一律按"没有它"处理。
 func defaultWorkspacePath() (string, bool) {
+	if prefsStore != nil {
+		if p := strings.TrimSpace(prefsStore.snapshot().DefaultCWD); p != "" {
+			if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+				return p, true
+			}
+			defaultWSPathWarnOnce.Do(func() {
+				log.Printf("[pool] 设置里的默认目录现在不可用（%s），这一轮回落到内置目录（设置本身保留）", p)
+			})
+		}
+	}
+	return builtinDefaultWorkspacePath()
+}
+
+// builtinDefaultWorkspacePath 是不带任何设置时的内置落点。
+// 设置页的「恢复默认」和自定义目录失效时的回落都读它。
+func builtinDefaultWorkspacePath() (string, bool) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		log.Printf("[pool] 默认工作区：拿不到用户主目录（err=%v），这一轮不合成", err)
@@ -98,6 +118,10 @@ func defaultWorkspacePath() (string, bool) {
 	}
 	return filepath.Join(home, "Documents", defaultWSDir), true
 }
+
+// 自定义默认目录不可用这件事会出现在每次 defaultCWD/poolReply 里，
+// 只记一次 —— 它可能在挂上山网络盘之后自己恢复，别把日志刷满。
+var defaultWSPathWarnOnce sync.Once
 
 // defaultWorkspaceCWD 是「新格没指定目录时落在哪」。空串 = 拿不到，调用方退回原来的
 // 默认目录（那种情况下少一个默认落点，不能连格都起不来）。

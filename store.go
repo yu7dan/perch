@@ -124,6 +124,9 @@ type ShellPayload struct {
 	// 现算** —— watcher 在后台每 2.5s 更新一份快照，这里只是把最新那份带上，
 	// 否则 lib.reload 会被网关请求拖住。nil = watcher 还没起来（正常只在测试/首帧）。
 	Magpie *magpieSnap `json:"magpie,omitempty"`
+	// Settings 是 Perch 自己的偏好（见 settings.go）。跟着首份载荷一起下来，
+	// 前端就不用为了"终端用什么字号"再发一次请求；之后的改动走 ctl 的 settings 消息。
+	Settings appSettings `json:"settings"`
 }
 
 // maxLine 是单行 JSON 的上限。attachment / file-history-snapshot 事件
@@ -142,6 +145,13 @@ func buildShellPayload(stateDir, cwd string, titles map[string]string) ShellPayl
 		History:  make(map[string][]HistoryItem, len(sessions)),
 		Activity: activity,
 		Magpie:   magpieSnapshot(),
+	}
+	// prefsStore 在 main() 里先于第一次 buildShellPayload 初始化；
+	// 万一某条测试路径没初始化，给默认值而不是零值（零值会让确认默认变成关）。
+	if prefsStore != nil {
+		p.Settings = prefsStore.snapshot()
+	} else {
+		p.Settings = settingsDefaults()
 	}
 	if len(activity) > 0 {
 		last := activity[len(activity)-1]

@@ -60,6 +60,10 @@ $("dash-heat").addEventListener("mouseleave", () => {
    （热力图/读数那时才有数据）。左栏也一起画，否则首屏左侧会空一阵。 */
 renderNav();
 if (NAV_HERE === "dash") renderDashboard("启动");
+// 启动落点（设置里的「启动时打开」）：这里只说事实。落在工作区时**不**主动
+// 调 setNavView —— 那会走一遍"切视图"的收尾（refit/focus），而启动末尾
+// 40-chrome 的 setActive 本来就会把焦点交给第一格。
+bootFact(`启动落点=${NAV_HERE === "dash" ? "总览" : "工作区"}（设置里选的是 ${SETTINGS.startView}）`);
 RSB_READY = true;
 renderLive();
 // 首帧之后留一条**读数**（不是"应该没问题"）：四个模块各自拿到了什么、

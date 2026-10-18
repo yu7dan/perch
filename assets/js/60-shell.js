@@ -118,21 +118,28 @@ const NAV_ICON = {
    （#sess-view / renderSessionsView）一起退役了：会话行已经缩在工作区行下面，
    同一份数据说两遍。⚠️ 但**整条栏留着** —— 我一度连栏一起删了，用户纠正
    「两层设计是要的」：左层管"去哪一区"，右层管"这一区里有什么"。
-   下面那枚「设置」还没做，做灰 + title 说为什么（做灰不做隐，见 MEMORY）。 */
+   「设置」曾经是灰项；2026-10-18 设置页落地后，三项都是真区。以后再有
+   没做完的项，仍按「做灰不做隐」处理：灰态 + title 说原因（见 MEMORY）。 */
 const NAV_ITEMS = [
   /* 2026-10-17 用户定的：左栏 = **总览 / 工作区 / 设置**。
-     总览置顶、最显眼，而且启动就落在它上面 —— 用户要的是"一进来先看全局状态"。
-     总览**不是一个格子**，是一整块主区视图（见 CSS 1b 段）。设置仍然灰着、最后做。 */
+     总览置顶、最显眼，而且默认启动就落在它上面 —— 用户要的是"一进来先看全局状态"。
+     总览**不是一个格子**，是一整块主区视图（见 CSS 1b 段）。
+     2026-10-18：设置页有了（默认目录 / 外观 / 行为），不再是灰项。 */
   { view: "dash", label: "总览", icon: "dash" },
   { view: "workspace", label: "工作区", icon: "folder", cnt: "nav-cnt-ws" },
-  { label: "设置", icon: "gear", bottom: true, soon: true,
-    why: "设置面板还没做（工作区根目录、外观、删除确认这些会落在那里）" },
+  { view: "settings", label: "设置", icon: "gear", bottom: true },
 ];
 
-/* 哪一项亮着。从"只有一个区"变成了真的两项（工作区 / 总览）——
+/* 哪一项亮着。从"只有一个区"变成了真的三项（工作区 / 总览 / 设置）——
    所以它不再是常量，而是 setNavView 写的当前值。
-   初始值是 dash：启动即总览（#app 的 class="dash" 也写在 HTML 里）。 */
-let NAV_HERE = "dash";
+   初始值读设置里的启动落点（05-prefs.js 的缓存；Go 的权威值到了也不会
+   把人从当前视图拽走 —— "启动落点"只对下一次启动生效）。
+   ⚠️ HTML 那个提前跑的脚本已经把 #app.dash 摘掉了（startView=workspace 时），
+   这里只负责让导航高亮和类名一致。 */
+let NAV_HERE = SETTINGS.startView === "workspace" ? "workspace" : "dash";
+// 设置页按 Esc 要回到"来之前那个视图"；只在离开非设置视图时记录。
+let NAV_PREV = NAV_HERE;
+$("app").classList.toggle("dash", NAV_HERE === "dash");
 
 function renderNav() {
   const rail = $("rail");
@@ -832,8 +839,21 @@ function stopAgent(t) {
 /* 「结束这个 agent」= 用户明确不要它了：**座位和记录一起删**（forget）。
    磁盘上的对话文件一个字节都不动 —— 这句话要同时出现在菜单的 title 里和
    结果提示里（动手前说一次、动完之后再说一次，理由同 removeProj）。 */
-function endAgent(t) {
+async function endAgent(t) {
   if (!t) return;
+  if (SETTINGS.confirmEndAgent) {
+    const ok = await askConfirm({
+      title: "结束这个 agent？",
+      body: `「${currentTabTitle(t)}」这一格会关掉，它的座位记录也会删掉。\n` +
+            "磁盘上的对话文件一个字节都不动，以后还能从会话库里接回来。",
+      ok: "结束",
+      danger: true,
+    });
+    if (!ok) {
+      sendCtrl({ type: "log", msg: `结束 agent tab=${t.id}：用户在确认框里取消了` });
+      return;
+    }
+  }
   const pane = t.paneID | 0;
   closeTab(t, { forget: true, why: "左栏「结束这个 agent」" });
   armRailRebuild();
@@ -904,8 +924,21 @@ async function resumeClosedPane(r) {
 
 /* 「结束这个 agent」（已关闭那一行）= 真正不要它了：发 forget，记录和行一起没。
    和 endAgent 分开写，因为这里没有格子可关 —— 只有那份薄快照。 */
-function endClosedPane(r) {
+async function endClosedPane(r) {
   if (!r) return;
+  if (SETTINGS.confirmEndAgent) {
+    const ok = await askConfirm({
+      title: "结束这个 agent？",
+      body: `「${closedRowName(r)}」的记录会删掉，` +
+            "左栏这一行也会消失。\n磁盘上的对话文件一个字节都不动。",
+      ok: "结束",
+      danger: true,
+    });
+    if (!ok) {
+      sendCtrl({ type: "log", msg: `结束已关闭的 agent pane=${r.paneId}：用户在确认框里取消了` });
+      return;
+    }
+  }
   CLOSED_PANES.delete(r.paneId | 0);
   sendCtrl({ type: "pane.forget", pane: r.paneId | 0 });
   armRailRebuild();
@@ -1403,14 +1436,14 @@ function onLeftKey(e) {
   toggleProj(el.closest(".proj")?.dataset.path || "");
 }
 
-/* 导航栏的点击。两个真区（工作区 / 总览）走 setNavView；还没做的项把原因说出来。
-   ⚠️ 不做"点了没反应" —— 那正是原来那四项死按钮的毛病。
+/* 导航栏的点击。三个真区（总览 / 工作区 / 设置）走 setNavView；以后若有还没做的项，
+   把原因说出来。⚠️ 不做"点了没反应" —— 那正是原来那四项死按钮的毛病。
    重复点「总览」不是空操作：重画一次 = 手动刷新（热力图/读数都是现算的）。 */
 $("rail").addEventListener("click", (e) => {
   const el = e.target.closest(".nav");
   if (!el) return;
   if (el.dataset.soon) {
-    /* title 的写法是「设置面板还没做（后面会有什么）」—— 正好拆成标题和正文。
+    /* title 的写法是「还没做的面板（后面会有什么）」—— 正好拆成标题和正文。
        括号前那半句是"是什么"，括号里是"还会有什么"，一卡两行，别让标题只剩「还没做」。 */
     const t = el.title || "";
     const i = t.indexOf("（");
@@ -1419,11 +1452,14 @@ $("rail").addEventListener("click", (e) => {
     return;
   }
   const v = el.dataset.view;
-  if (v === "workspace" || v === "dash") {
-    // 同一区：工作区重画列表，总览重画读数（= 手动刷新）。
+  if (v === "workspace" || v === "dash" || v === "settings") {
+    // 同一区：工作区重画列表，总览重画读数（= 手动刷新），设置重读一次权威值。
     if (v === NAV_HERE) {
       if (v === "dash") renderDashboard("重复点总览");
-      else renderLists(searchKey());
+      else if (v === "settings") {
+        renderSettings("重复点设置");
+        sendCtrl({ type: "settings.get" });
+      } else renderLists(searchKey());
       return;
     }
     setNavView(v);
@@ -1501,6 +1537,8 @@ function renderShell() {
   renderLists(searchKey());
   // 载荷到得比用户点「总览」晚的时候（冷启动、会话库重扫），这一页要跟着补上。
   if (NAV_HERE === "dash") renderDashboard("壳层就绪");
+  // 设置页开着时，载荷里的 cwd/settings 到了也要把路径那一块同步一下。
+  if (NAV_HERE === "settings" && typeof syncSettingsUI === "function") syncSettingsUI();
   viewProbe("壳层就绪");
 
   // ⚠️ 这里**不再**自动选中第一个会话。以前启动时下段必须有个主语，所以只好

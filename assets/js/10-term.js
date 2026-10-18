@@ -323,12 +323,12 @@ async function createTab(spec) {
 const term = new Terminal({
   // 必须是**具体字体名**：xterm.js 把这一串原样交给 canvas 的 font，
   // 不经过 CSS 引擎 —— 写 var(--code) 会让整串解析失败并静默掉回默认字体。
-  // 第一位是自带的 webfont（见上面 @font-face），后面只是兜底。
-  fontFamily: MONO,
-  // ⚠️ 字号是**常数 14**，不是算出来的：格子多了就是格子变小，字号不动
-  // （2026-10-17 试过一版"先改摆法、超限降字号"，用户看过实际效果后否了 ——
-  // 见 gridShape 上面那段 ⚠️ 记录）。xterm 建的时候定，之后没人改它。
-  fontSize: 14,
+  // 首选字体来自设置页（05-prefs.js 的 termFontStack）；后面只是兜底。
+  fontFamily: termFontStack(),
+  // 字号来自设置页，默认 14。**不是按格数算出来的**：格子多了就是格子变小，
+  // 字号不动（2026-10-17 试过一版"先改摆法、超限降字号"，用户看过实际效果后否了）。
+  // 设置页改了之后走 applyAppearance 在运行时改 term.options（见下面 T 上那个方法）。
+  fontSize: SETTINGS.termFontSize,
   lineHeight: 1,                    // Orca 不设，xterm 默认就是 1
   // Orca 用 300/500（它默认字体是 macOS 的 SF Mono，有细体）。
   // 我们只带了 JetBrains Mono 的 400/700 —— 硬套 300 会被浏览器**合成**出假细体，
@@ -835,6 +835,23 @@ window.addEventListener("resize", refit);
   T.focus = () => term.focus();
   T.ctrl = sendCtrl;                  // 往本标签的字节流发控制帧（页面级按钮要用）
   T.resetGlyphAtlas = resetGlyphAtlas;
+  /* 设置页改了字体/字号：**每个格子**都要改，不只是当前格。
+     ⚠️ 顺序不能省：先改 options → 清 WebGL 字形图集（旧图集按旧字体度量，
+     不清会留下错位的字形）→ refit（单元格宽高变了，PTY 的列/行要重算）。
+     漏掉 refit 的表现是"字变了，但换行位置还按旧字号算"。 */
+  T.applyAppearance = () => {
+    try {
+      const stack = termFontStack();
+      const size = SETTINGS.termFontSize;
+      if (term.options.fontFamily !== stack) term.options.fontFamily = stack;
+      if (term.options.fontSize !== size) term.options.fontSize = size;
+      resetGlyphAtlas();
+      term.refresh(0, Math.max(0, term.rows - 1));
+    } catch (e) {
+      jserr("applyAppearance", e);
+    }
+    refit();
+  };
   /* ⚠️ 上面那三个空实现到此为止（refit / focus / ctrl 换成了真身）。但还有一件事
      要补：这个座位可能在真身装好之前就已经被认成了"当前格"（见文件开头 T.refit
      那三行下面的注释）—— 那一遍 setActive 是靠空实现撑过去的，`term`/尺寸/焦点
@@ -862,22 +879,37 @@ window.addEventListener("resize", refit);
 // --- 字体/渲染自检：静默回退是这类问题最难查的地方，直接摆出来 ---
 // 而且不能写死名字 —— 上一版就把 "JetBrains Mono" 硬编码在这里，
 // 后来字体栈改成 Cascadia 优先，标签还在说 JetBrains Mono，
-// 等于自检工具自己撒谎。改成**按 MONO 里的顺序逐个试**，
+// 等于自检工具自己撒谎。改成**按当前设置里字体栈的顺序逐个试**，
 // 报第一个真正可用的，和 CSS 的解析规则一致。
-const FONT_ORDER = [
-  ["Cascadia Code WB", "Cascadia Code"],
-  ["JetBrains Mono WB", "JetBrains Mono"],
-  ["Consolas", "Consolas"],
-];
-let usingFont = null;
-for (const [label, probe] of FONT_ORDER) {
-  if (document.fonts.check(`14px "${probe}"`)) { usingFont = label; break; }
+const FONT_ORDER = {
+  cascadia: [
+    ["Cascadia Code WB", "Cascadia Code"],
+    ["JetBrains Mono WB", "JetBrains Mono"],
+    ["Consolas", "Consolas"],
+  ],
+  jetbrains: [
+    ["JetBrains Mono WB", "JetBrains Mono"],
+    ["Cascadia Code WB", "Cascadia Code"],
+    ["Consolas", "Consolas"],
+  ],
+};
+/* 设置页改了字体之后要重画这一格：它报的是**实际**可用字体，
+   不是设置里选了哪个（两者在字体加载失败时会不一样 —— 那正是它存在的意义）。 */
+function paintFontStatus() {
+  const order = FONT_ORDER[SETTINGS.termFontFamily] || FONT_ORDER.cascadia;
+  let usingFont = null;
+  for (const [label, probe] of order) {
+    if (document.fonts.check(`14px "${probe}"`)) { usingFont = label; break; }
+  }
+  $("s-font").textContent = usingFont ? usingFont : "回退字体 ✗";
+  $("s-font").style.color = usingFont ? "" : "var(--red)";
+  $("s-font").title = "终端实际使用的等宽字体（按设置里的字体栈顺序第一个可用的）";
+  $("s-lig").textContent = (LigaturesAddon && usingFont) ? "· 连字" : "";
 }
-$("s-font").textContent = usingFont ? usingFont : "回退字体 ✗";
-$("s-font").style.color = usingFont ? "" : "var(--red)";
-$("s-font").title = "终端实际使用的等宽字体（按字体栈顺序第一个可用的）";
-$("s-lig").textContent = (LigaturesAddon && usingFont) ? "· 连字" : "";
+paintFontStatus();
 $("s-render").title = "xterm 的渲染后端（WebGL 优先，失败回退 DOM）";
+// 从这里起，applySettings 可以安全地改所有已存在格子的外观了。
+PERCH_TERM_READY = true;
 
 // 渲染后端这一格**跟着激活标签走**：每个标签自己可能不是同一个后端
 // （一个 WebGL 起来了一个没有），而状态栏只有一格。所以它是个函数，

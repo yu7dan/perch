@@ -5,46 +5,134 @@
    别在这一段里再塞别的域。源行 10743-10840（2026-10-17 从 app.js 原样切出，逻辑未改）。 */
 
 /* ---------------------------------------------------------------------------
-   行内安装控制台
-   点「安装」→ Go 跑写死的官方命令 → 输出逐行推回来，就地摊在名单下面。
-   不弹窗、不开浏览器；装完 Go 重扫名单，卡片自己从「未检测到」翻成「已检测到」。
+   安装进度台
+   点「安装」→ Go 跑写死的官方 CLI 命令 → 输出逐行推回来。
+   进度台固定在总览底部，不随 Agent 名单滚动：阶段、已用时间、进度条、
+   最后一行日志都在这里；完整日志可展开。
+   装完 Go 先推新名单、再推 done，所以行会在同一个事件里从「未检测到」
+   翻成「已接入」，不用等下一次 2.5 秒轮询。
    --------------------------------------------------------------------------- */
-function instLine(line) {
-  if (!INSTALL) return;
-  const log = $("inst-log");
-  if (!log) return;
-  const nearBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 24;
-  INSTALL.lines.push(line);
-  if (INSTALL.lines.length > 1500) INSTALL.lines.splice(0, INSTALL.lines.length - 1500);
-  log.textContent = INSTALL.lines.join("\n");
-  if (nearBottom) log.scrollTop = log.scrollHeight;
+let INSTALL_LOG_OPEN = false;
+let INSTALL_TICK = 0;
+
+function instElapsed() {
+  if (!INSTALL) return "";
+  const ms = INSTALL.elapsedMs || (Date.now() - (INSTALL.startedAt || Date.now()));
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return String(Math.floor(s / 60)).padStart(2, "0") + ":" +
+         String(s % 60).padStart(2, "0");
 }
 
-function instOpen(a) {
-  INSTALL = { id: a.id, name: a.name, state: "running", lines: [] };
+function instPhaseText() {
+  if (!INSTALL) return "";
+  if (INSTALL.state === "failed") {
+    return "失败" + (INSTALL.err ? " · " + INSTALL.err : "");
+  }
+  if (INSTALL.state === "done") {
+    if (INSTALL.detected === true) return "完成 · 已检测到";
+    if (INSTALL.detected === false) return "完成 · 暂未检测到";
+    return "完成 · 已重新扫描名单";
+  }
+  if (INSTALL.phase === "scanning") return "重新检测 CLI…";
+  if (INSTALL.phase === "cancelling") return "正在取消…";
+  if (INSTALL.phase === "preparing") return "准备中…";
+  return "安装中…";
+}
+
+function startInstTicker() {
+  if (INSTALL_TICK) clearInterval(INSTALL_TICK);
+  INSTALL_TICK = setInterval(() => {
+    if (!INSTALL) { clearInterval(INSTALL_TICK); INSTALL_TICK = 0; return; }
+    if (INSTALL.state === "running") instPaint();
+  }, 1000);
+}
+
+function stopInstTicker() {
+  if (INSTALL_TICK) { clearInterval(INSTALL_TICK); INSTALL_TICK = 0; }
+}
+
+/* 只画进度台，不动名单；名单由 instOpen/instDone 显式重画。 */
+function instPaint() {
+  if (!INSTALL) return;
   const box = $("dash-install");
   if (!box) return;
   box.hidden = false;
-  $("inst-title").textContent = "安装 " + a.name;
-  $("inst-state").textContent = "准备中…";
-  $("inst-dot").className = "dot";
+  $("inst-title").textContent = "安装 " + INSTALL.name;
+  $("inst-source").textContent = INSTALL.source || "CLI";
+  $("inst-state").textContent = instPhaseText();
+  $("inst-time").textContent = instElapsed();
+  $("inst-dot").className = "dot" +
+    (INSTALL.state === "done" ? " on" : INSTALL.state === "failed" ? " bad" : " running");
+  const bar = $("inst-bar");
+  if (bar) {
+    bar.className = "inst-bar" +
+      (INSTALL.state === "failed" ? " bad" : INSTALL.state === "done" ? " ok" : " running");
+  }
+  const last = $("inst-last");
+  if (last) {
+    last.textContent = INSTALL.lines.length
+      ? INSTALL.lines[INSTALL.lines.length - 1]
+      : "等待安装命令输出…";
+  }
+  const log = $("inst-log");
+  if (log) log.hidden = !INSTALL_LOG_OPEN;
+  const lt = $("inst-log-toggle");
+  if (lt) lt.textContent = INSTALL_LOG_OPEN ? "收起日志" : "查看日志";
+  $("inst-cancel").hidden = INSTALL.state !== "running";
+  $("inst-close").hidden = INSTALL.state === "running";
+}
+
+function instLine(line) {
+  if (!INSTALL) return;
+  const log = $("inst-log");
+  INSTALL.lines.push(line);
+  if (INSTALL.lines.length > 1500) INSTALL.lines.splice(0, INSTALL.lines.length - 1500);
+  if (log) {
+    const nearBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 24;
+    log.textContent = INSTALL.lines.join("\n");
+    if (nearBottom) log.scrollTop = log.scrollHeight;
+  }
+  if (INSTALL.phase === "preparing") {
+    INSTALL.phase = "running";
+    instPaint();
+  }
+  const last = $("inst-last");
+  if (last) last.textContent = line;
+}
+
+function instOpen(a) {
+  INSTALL = {
+    id: a.id, name: a.name, state: "running", phase: "preparing",
+    source: "", startedAt: Date.now(), lines: [],
+    detected: undefined, err: "", elapsedMs: 0,
+  };
+  INSTALL_LOG_OPEN = false;
   $("inst-log").textContent = "";
-  $("inst-cancel").hidden = false;
-  $("inst-close").hidden = true;
+  $("inst-log").hidden = true;
+  instPaint();
+  startInstTicker();
   renderDashAgents();
-  box.scrollIntoView({ block: "nearest" });
 }
 
 function instDone(m) {
   if (!INSTALL || INSTALL.id !== m.id) return;
+  // done 里带的新名单先应用：行和进度台在同一个事件里翻过来。
+  if (m.catalog && typeof applyMagpie === "function" && MAGPIE) {
+    applyMagpie(Object.assign({}, MAGPIE, { catalog: m.catalog }));
+  }
   INSTALL.state = m.ok ? "done" : "failed";
-  $("inst-state").textContent = m.ok
-    ? "完成 · 已重新扫描名单"
-    : ("失败" + (m.err ? " · " + m.err : ""));
-  $("inst-dot").className = "dot" + (m.ok ? " on" : " bad");
-  $("inst-cancel").hidden = true;
-  $("inst-close").hidden = false;
+  INSTALL.phase = INSTALL.state;
+  INSTALL.detected = m.detected;
+  INSTALL.err = m.ok ? "" : (m.err || "");
+  INSTALL.elapsedMs = m.elapsedMs || (Date.now() - INSTALL.startedAt);
+  if (!m.ok) INSTALL_LOG_OPEN = true;
+  stopInstTicker();
+  instPaint();
   renderDashAgents();
+  if (!m.ok) {
+    const log = $("inst-log");
+    if (log) log.scrollTop = log.scrollHeight;
+  }
 }
 
 function applyInstall(m) {
@@ -75,12 +163,21 @@ function applyInstall(m) {
   if (m.type === "install.start") {
     if (INSTALL && INSTALL.id === m.id) {
       INSTALL.state = "running";
-      $("inst-state").textContent = "运行中…";
+      INSTALL.phase = "preparing";
+      INSTALL.source = m.source || "";
+      instPaint();
     }
     return;
   }
   if (m.type === "install.log") {
-    instLine(m.line);
+    instLine(m.line || "");
+    return;
+  }
+  if (m.type === "install.phase") {
+    if (INSTALL && INSTALL.id === m.id) {
+      INSTALL.phase = m.phase || INSTALL.phase;
+      instPaint();
+    }
     return;
   }
   if (m.type === "install.done") instDone(m);
@@ -122,6 +219,18 @@ $("dash-agent-list").addEventListener("click", (e) => {
     bootFact(`Agent 安装 → ${id}`);
     return;
   }
+  const db = e.target.closest("[data-docs]");
+  if (db) {
+    const id = db.dataset.docs;
+    const m = mg();
+    const a = ((m && m.catalog) || []).find((x) => x.id === id);
+    const url = a && a.url;
+    // 后端 open.url 还会再拦一次；这里先挡掉空值和别的 scheme。
+    if (!url || !/^https?:\/\//i.test(url)) return;
+    sendCtrl({ type: "open.url", url });
+    bootFact(`Agent 安装说明 → ${id}`);
+    return;
+  }
   const lb = e.target.closest("[data-launch]");
   if (lb) {
     launchAgent(lb.dataset.launch);
@@ -143,15 +252,25 @@ $("dash-agent-list").addEventListener("keydown", (e) => {
   acOpen(cb.dataset.agentcfg);
 });
 
+$("inst-log-toggle").addEventListener("click", () => {
+  INSTALL_LOG_OPEN = !INSTALL_LOG_OPEN;
+  instPaint();
+  const log = $("inst-log");
+  if (INSTALL_LOG_OPEN && log) log.scrollTop = log.scrollHeight;
+});
+
 $("inst-cancel").addEventListener("click", () => {
   if (!INSTALL || INSTALL.state !== "running") return;
+  INSTALL.phase = "cancelling";
+  instPaint();
   sendCtrl({ type: "install.cancel", id: INSTALL.id });
-  $("inst-state").textContent = "正在取消…";
 });
 
 $("inst-close").addEventListener("click", () => {
+  stopInstTicker();
   $("dash-install").hidden = true;
   INSTALL = null;
+  INSTALL_LOG_OPEN = false;
   renderDashAgents();
 });
 

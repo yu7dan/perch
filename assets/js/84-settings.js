@@ -1,0 +1,711 @@
+"use strict";
+/* 84-settings.js —— 设置页的交互 + 通用确认框。
+   本文件在 80-live.js 之后、85-dash.js 之前求值：setNavView("settings") 要用
+   这里的 renderSettings；60-shell.js 的 endAgent 也会在**事件触发时**调
+   askConfirm（那时本文件早已求值完）。
+
+   设置的两份事实见 05-prefs.js 文件头：Go 的 settings.json 权威，localStorage
+   只是首帧缓存。这里的写路径大多是**乐观**的 —— 先 applySettings 让界面立刻变，
+   再发 settings.set；Go 拒绝时会把旧值整份推回来（20-ctl.js 的 settings 分支）。
+   例外是默认目录：路径是否有效只有 Go 知道，所以输入框保留草稿、等答复再收口。 */
+
+// ---------------------------------------------------------------------------
+// 设置页
+// ---------------------------------------------------------------------------
+
+function settingsCurrentPath() {
+  // Go 现算的生效目录优先；它还没到时退回本地缓存 / 状态栏那份。
+  return SETTINGS_EFFECTIVE_CWD || SETTINGS.defaultCwd || (STATE && STATE.cwd) || "";
+}
+
+/* 默认目录输入框的草稿状态。
+   · dirty：用户打了字、还没被后端确认 —— 这期间任何 settings 消息都不能把输入框
+     冲掉（Go 每次 settings.set 都会推回一整份权威值）。
+   · pending：已经发出去、等 Go 回话。Go 的校验（目录存在、转绝对路径）在那边，
+     成功会带着规范化的路径回来；失败只推 err + 旧值，错误就显示在输入框下面。
+   · skipBlur：点「选择目录…」/「恢复默认」时先触发的是 blur，那颗按钮的意思是
+     "丢掉草稿"，不能顺势把它提交一次。 */
+let CWD_DRAFT_DIRTY = false;
+let CWD_PENDING = false;
+let CWD_SKIP_BLUR = false;
+let CWD_ERR = "";
+let CWD_PENDING_TIMER = 0;
+
+const SETTINGS_SIZES = [12, 13, 14, 15, 16, 18];
+
+/* 单选组的「漫游 tabindex」：Tab 只停在当前选中项上，组内用方向键走。
+   不可用项（.na）仍保留在方向键的路径里 —— 灰而不禁，键盘也要能走到、
+   听到它为什么不可用（aria-disabled + title/aria-label）。 */
+function settingsSyncRadioTabStops() {
+  for (const group of document.querySelectorAll('#settings [role="radiogroup"]')) {
+    const radios = Array.from(group.querySelectorAll('[role="radio"]'));
+    if (!radios.length) continue;
+    let active = radios.findIndex(
+      (r) => r.getAttribute("aria-checked") === "true" && !r.classList.contains("na"));
+    if (active < 0) active = radios.findIndex((r) => !r.classList.contains("na"));
+    if (active < 0) active = 0;
+    radios.forEach((r, i) => { r.tabIndex = i === active ? 0 : -1; });
+  }
+}
+
+/* 默认目录那一行的「恢复默认」是灰而不禁的：属性、title、aria 说法一处算。 */
+function settingsCwdPaintReset() {
+  const reset = $("set-cwd-reset");
+  if (!reset) return;
+  const custom = !!SETTINGS.defaultCwd;
+  const na = !custom && !CWD_DRAFT_DIRTY;
+  reset.classList.toggle("na", na);
+  reset.setAttribute("aria-disabled", String(na));
+  reset.title = custom
+    ? "回到内置的 <用户主目录>\\Documents\\Perch"
+    : CWD_DRAFT_DIRTY
+      ? "丢掉草稿，继续用内置默认目录"
+      : "现在用的就是内置默认目录";
+  reset.setAttribute("aria-label", na
+    ? "恢复默认（现在用的就是内置默认目录）"
+    : "恢复默认");
+}
+
+function settingsDefaultLabel(key) {
+  const v = SETTINGS_DEFAULTS[key];
+  if (key === "termFontFamily") return v === "jetbrains" ? "JetBrains Mono" : "Cascadia Code";
+  if (key === "startView") return v === "workspace" ? "工作区" : "总览";
+  if (typeof v === "boolean") return v ? "开" : "关";
+  return String(v);
+}
+
+function settingsCwdPaintError() {
+  const err = $("set-cwd-err");
+  const line = document.querySelector(".set-cwd-line");
+  if (err) {
+    err.hidden = !CWD_ERR;
+    err.textContent = CWD_ERR;
+  }
+  if (line) line.classList.toggle("bad", !!CWD_ERR);
+}
+
+function settingsCwdSetInput(value) {
+  const input = $("set-cwd-input");
+  if (input && input.value !== value) input.value = value;
+}
+
+/* 丢掉还没提交的草稿，回到权威值（点选择器、按 Esc 时用）。 */
+function settingsCwdDiscardDraft() {
+  CWD_DRAFT_DIRTY = false;
+  CWD_ERR = "";
+  settingsCwdSetInput(SETTINGS.defaultCwd || "");
+  settingsCwdPaintError();
+  settingsCwdPaintReset();
+}
+
+/* 提交默认目录。v == null 时读输入框。
+   **不做乐观 applySettings**：目录是否存在只有 Go 知道；先让输入框保持用户写的
+   样子，等 settings 消息回来再以权威值收口（20-ctl.js 会先调 settingsMessageArrived）。 */
+function settingsCwdCommit(v) {
+  const input = $("set-cwd-input");
+  if (!input) return;
+  const value = String(v == null ? input.value : v).trim();
+  if (value === SETTINGS.defaultCwd) {
+    CWD_DRAFT_DIRTY = false;
+    CWD_ERR = "";
+    settingsCwdSetInput(SETTINGS.defaultCwd || "");
+    settingsCwdPaintError();
+    settingsCwdPaintReset();
+    return;
+  }
+  CWD_DRAFT_DIRTY = false;
+  CWD_PENDING = true;
+  CWD_ERR = "";
+  settingsCwdPaintError();
+  if (CWD_PENDING_TIMER) clearTimeout(CWD_PENDING_TIMER);
+  CWD_PENDING_TIMER = setTimeout(() => {
+    if (!CWD_PENDING) return;
+    CWD_PENDING = false;
+    CWD_DRAFT_DIRTY = true;
+    CWD_ERR = "后端没有回应，目录没有改动。";
+    if (NAV_HERE === "settings") { syncSettingsUI(); settingsCwdPaintError(); }
+  }, 5000);
+  sendCtrl({ type: "settings.set", settings: { defaultCwd: value } });
+  sendCtrl({ type: "log", msg: `设置：默认目录改成「${value || "(内置)"}」（等后端校验）` });
+}
+
+/* 20-ctl.js 的 settings 分支先调这里。返回 true = 这条错误已经就地显示，
+   不要再弹 toast。成功时清掉 pending，让紧接着的 applySettings 同步输入框。 */
+function settingsMessageArrived(m) {
+  if (!CWD_PENDING) return false;
+  const failed = !!m.err;
+  const typedSinceSend = CWD_DRAFT_DIRTY;
+  CWD_PENDING = false;
+  if (CWD_PENDING_TIMER) { clearTimeout(CWD_PENDING_TIMER); CWD_PENDING_TIMER = 0; }
+  if (failed) {
+    CWD_DRAFT_DIRTY = true;
+    CWD_ERR = m.err;
+    sendCtrl({ type: "log", msg: `设置：默认目录没改 —— ${m.err}` });
+    return true;
+  }
+  CWD_ERR = "";
+  // 请求发出后用户又改了字：保留新草稿，别被这次回来的旧值冲掉。
+  if (!typedSinceSend) CWD_DRAFT_DIRTY = false;
+  return false;
+}
+
+// 把 SETTINGS 里的值画到静态 DOM 上。只改状态，不重建节点 ——
+// 重建会把键盘焦点连同按钮一起摘掉（设置页全是键盘可达的控件）。
+function syncSettingsUI() {
+  if (!$("settings")) return;
+  const path = settingsCurrentPath();
+  const custom = !!SETTINGS.defaultCwd;
+  const kind = $("set-cwd-kind");
+  const input = $("set-cwd-input");
+  if (kind) kind.textContent = custom ? "自定义" : "内置";
+  if (input) {
+    // 草稿/在途期间不覆盖用户写的字；其余时候显示"配置值"（空 = 内置）。
+    if (!CWD_DRAFT_DIRTY && !CWD_PENDING) input.value = SETTINGS.defaultCwd || "";
+    input.title = path || "";
+    input.placeholder = SETTINGS_BUILTIN_CWD || "内置目录";
+  }
+  settingsCwdPaintReset();
+  settingsCwdPaintError();
+  const note = $("set-cwd-note");
+  if (note) {
+    note.classList.remove("info");
+    if (SETTINGS_CWD_MISSING) {
+      note.hidden = false;
+      note.textContent = "设置里的目录现在不在盘上；新格子会回落到内置目录" +
+        (SETTINGS_BUILTIN_CWD ? `：${SETTINGS_BUILTIN_CWD}` : "。");
+    } else if (custom && SETTINGS_BUILTIN_CWD) {
+      note.hidden = false;
+      note.classList.add("info");
+      note.textContent = `内置默认目录是 ${SETTINGS_BUILTIN_CWD}（点「恢复默认」可以回去）。`;
+    } else {
+      note.hidden = true;
+      note.textContent = "";
+    }
+  }
+
+  // 分段控件 / 字体卡：状态只有一个来源 —— SETTINGS。
+  for (const b of document.querySelectorAll("#settings [data-set-size]")) {
+    const on = Number(b.dataset.setSize) === SETTINGS.termFontSize;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-checked", String(on));
+  }
+  for (const b of document.querySelectorAll("#settings [data-set-font]")) {
+    const on = b.dataset.setFont === SETTINGS.termFontFamily;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-checked", String(on));
+  }
+  for (const b of document.querySelectorAll("#settings [data-set-start]")) {
+    const on = b.dataset.setStart === SETTINGS.startView;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-checked", String(on));
+  }
+  // 主题目前只有深色。浅色是灰的、**不是 disabled** —— 点它会给一句解释。
+  for (const b of document.querySelectorAll("#settings [data-set-theme]")) {
+    const on = b.dataset.setTheme === "dark";
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-checked", String(on));
+  }
+  for (const b of document.querySelectorAll("#settings [data-set-flag]")) {
+    b.setAttribute("aria-checked", String(!!SETTINGS[b.dataset.setFlag]));
+  }
+
+  // 默认值提示、「恢复默认」只在有偏差时出现、标签旁的小圆点同理。
+  for (const el of document.querySelectorAll("#settings [data-set-default-hint]")) {
+    const key = el.dataset.setDefaultHint;
+    if (key && Object.prototype.hasOwnProperty.call(SETTINGS_DEFAULTS, key)) {
+      el.textContent = `默认：${settingsDefaultLabel(key)}`;
+    }
+  }
+  for (const b of document.querySelectorAll("#settings [data-set-reset]")) {
+    const key = b.dataset.setReset;
+    const known = Object.prototype.hasOwnProperty.call(SETTINGS_DEFAULTS, key);
+    b.hidden = !known || SETTINGS[key] === SETTINGS_DEFAULTS[key];
+  }
+  for (const row of document.querySelectorAll("#settings .settings-row[data-set-row]")) {
+    const key = row.dataset.setRow;
+    const known = Object.prototype.hasOwnProperty.call(SETTINGS_DEFAULTS, key);
+    row.classList.toggle("modified", known && SETTINGS[key] !== SETTINGS_DEFAULTS[key]);
+  }
+
+  // 字号步进：到头的那颗做灰（仍可点，点下去说明原因）。
+  const idx = SETTINGS_SIZES.indexOf(SETTINGS.termFontSize);
+  for (const b of document.querySelectorAll("#settings [data-set-size-step]")) {
+    const d = Number(b.dataset.setSizeStep);
+    const atBound = idx < 0 || (d < 0 ? idx === 0 : idx === SETTINGS_SIZES.length - 1);
+    const label = d < 0 ? "缩小字号" : "放大字号";
+    b.classList.toggle("na", atBound);
+    b.setAttribute("aria-disabled", String(atBound));
+    b.setAttribute("aria-label", atBound
+      ? `${label}（${d < 0 ? "已经是最小字号" : "已经是最大字号"}）`
+      : label);
+    b.title = atBound
+      ? (d < 0 ? "已经是最小字号" : "已经是最大字号")
+      : label;
+  }
+
+  settingsSyncRadioTabStops();
+}
+
+/* ---------------------------------------------------------------------------
+   搜索（评分在 83-settings-search.js，这里只负责把 DOM 读成条目 + 显隐）
+   ---------------------------------------------------------------------------
+   命中规则和 Orca 一致：先看这个区，区内逐行打分；**区标题命中 = 整区都留下**，
+   否则只留下命中的行。查询为空时不扫描，全部显示。输入停 150ms 才扫一遍
+   （逐字扫会让长页面每敲一下都掉帧）。 */
+let SETTINGS_SEARCH_TIMER = 0;
+let SETTINGS_SEARCH_LOGGED = "";
+
+function settingsKeywords(el) {
+  return String(el.dataset.search || "").split(/\s+/).filter(Boolean);
+}
+
+function settingsRowText(row) {
+  const span = row.querySelector(".settings-lab span");
+  if (!span) return "";
+  // 只拼文本节点：默认值提示（<em class="set-def">）不参与搜索，
+  // 否则搜「默认」会把每一行都命中。
+  let t = "";
+  for (const n of span.childNodes) {
+    if (n.nodeType === 3) t += n.textContent;
+  }
+  return t.trim();
+}
+
+function settingsRowEntry(row) {
+  const b = row.querySelector(".settings-lab b");
+  return {
+    title: b ? b.textContent.trim() : "",
+    description: settingsRowText(row),
+    keywords: settingsKeywords(row),
+  };
+}
+
+function settingsSectionEntry(sec) {
+  const h = sec.querySelector(".settings-sec-head h2");
+  // 节这一层只认标题和关键词：节的说明写得泛（"字体随应用分发…"），
+  // 拿它当命中依据会让搜「字体」把整个「外观」区都留下，行级筛选就失效了。
+  return {
+    title: h ? h.textContent.trim() : "",
+    description: "",
+    keywords: settingsKeywords(sec),
+  };
+}
+
+function settingsSearchInput() {
+  return $("set-search");
+}
+
+function applySettingsSearch() {
+  const input = settingsSearchInput();
+  if (!input) return;
+  const query = input.value;
+  const nq = settingsSearchNorm(query);
+  let hits = 0;
+  let firstVisible = null;
+  const sections = document.querySelectorAll("#settings .settings-sec");
+  for (const sec of sections) {
+    const secHit = settingsSearchScoreEntry(query, settingsSectionEntry(sec), true) > 0;
+    let secVisible = false;
+    for (const row of sec.querySelectorAll(".settings-row")) {
+      const rowHit = settingsSearchScoreEntry(query, settingsRowEntry(row), false) > 0;
+      const show = !nq || secHit || rowHit;
+      row.classList.toggle("is-hidden", !show);
+      if (show) {
+        secVisible = true;
+        hits++;
+      }
+    }
+    sec.classList.toggle("is-hidden", !secVisible);
+    if (secVisible && !firstVisible) firstVisible = sec;
+  }
+  for (const sec of sections) {
+    sec.classList.toggle("is-first", !!nq && sec === firstVisible);
+  }
+
+  const empty = $("set-empty");
+  if (empty) empty.hidden = !(nq && hits === 0);
+  const emptyQ = $("set-empty-q");
+  if (emptyQ) {
+    const trimmed = query.trim();
+    emptyQ.textContent = trimmed.length > 40 ? trimmed.slice(0, 40) + "…" : trimmed;
+  }
+  const clear = $("set-search-clear");
+  if (clear) clear.hidden = !query;
+
+  if (SETTINGS_SEARCH_LOGGED !== nq) {
+    if (nq) {
+      sendCtrl({ type: "log", msg: `设置搜索：「${nq}」命中 ${hits} 行` });
+    } else if (SETTINGS_SEARCH_LOGGED) {
+      sendCtrl({ type: "log", msg: "设置搜索：清空，显示全部" });
+    }
+    SETTINGS_SEARCH_LOGGED = nq;
+  }
+}
+
+function scheduleSettingsSearch() {
+  if (SETTINGS_SEARCH_TIMER) clearTimeout(SETTINGS_SEARCH_TIMER);
+  SETTINGS_SEARCH_TIMER = setTimeout(() => {
+    SETTINGS_SEARCH_TIMER = 0;
+    applySettingsSearch();
+  }, 150);
+}
+
+function clearSettingsSearch(keepFocus) {
+  const input = settingsSearchInput();
+  if (SETTINGS_SEARCH_TIMER) { clearTimeout(SETTINGS_SEARCH_TIMER); SETTINGS_SEARCH_TIMER = 0; }
+  if (input) input.value = "";
+  applySettingsSearch();
+  if (keepFocus && input) input.focus();
+}
+
+function focusSettingsSearch(selectAll) {
+  const input = settingsSearchInput();
+  if (!input) return;
+  input.focus();
+  if (selectAll) input.select();
+  else input.setSelectionRange(input.value.length, input.value.length);
+}
+
+function renderSettings(reason) {
+  syncSettingsUI();
+  if (reason) sendCtrl({ type: "log", msg: `设置页：${reason}` });
+}
+
+// 乐观写入：先让界面变，再落盘。Go 拒绝时会把旧值整份推回来（见文件头）。
+function settingsSend(patch, why) {
+  applySettings(patch);
+  sendCtrl({ type: "settings.set", settings: patch });
+  sendCtrl({ type: "log", msg: `设置：${why} ${JSON.stringify(patch)}` });
+}
+
+function settingsStepSize(delta) {
+  const idx = SETTINGS_SIZES.indexOf(SETTINGS.termFontSize);
+  const cur = idx < 0 ? SETTINGS_SIZES.indexOf(SETTINGS_DEFAULTS.termFontSize) : idx;
+  const next = Math.min(SETTINGS_SIZES.length - 1, Math.max(0, cur + delta));
+  if (next === cur) {
+    showToast("字号到头了", delta < 0 ? "已经是最小字号 12。" : "已经是最大字号 18。", "info");
+    return;
+  }
+  settingsSend({ termFontSize: SETTINGS_SIZES[next] }, "终端字号");
+}
+
+// 搜索框：输入防抖 150ms；清空按钮两颗（搜索框内 + 空状态里）。
+const SET_SEARCH_INPUT = $("set-search");
+if (SET_SEARCH_INPUT) {
+  SET_SEARCH_INPUT.addEventListener("input", () => {
+    const clear = $("set-search-clear");
+    if (clear) clear.hidden = !SET_SEARCH_INPUT.value;
+    scheduleSettingsSearch();
+  });
+}
+if ($("set-search-clear")) {
+  $("set-search-clear").addEventListener("click", () => clearSettingsSearch(true));
+}
+if ($("set-empty-clear")) {
+  $("set-empty-clear").addEventListener("click", () => clearSettingsSearch(true));
+}
+
+// 默认目录输入框：输入 = 草稿；Enter/blur = 提交；Esc = 撤回草稿。
+const CWD_INPUT = $("set-cwd-input");
+if (CWD_INPUT) {
+  CWD_INPUT.addEventListener("input", () => {
+    CWD_DRAFT_DIRTY = true;
+    if (CWD_ERR) CWD_ERR = "";
+    settingsCwdPaintError();
+    settingsCwdPaintReset();
+  });
+  CWD_INPUT.addEventListener("blur", () => {
+    // 「选择目录…」/「恢复默认」的 pointerdown 已经声明"草稿作废"，不要再提交。
+    if (CWD_SKIP_BLUR) { CWD_SKIP_BLUR = false; return; }
+    if (!CWD_DRAFT_DIRTY) return;
+    settingsCwdCommit();
+  });
+  CWD_INPUT.addEventListener("keydown", (e) => {
+    // 输入法组字时的回车是选词，不是提交（和 Orca 的 path input 同一条守卫）。
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (CWD_DRAFT_DIRTY) settingsCwdCommit();
+      return;
+    }
+    if (e.key === "Escape") {
+      if (!CWD_DRAFT_DIRTY) return; // 干净时交给全局 Esc（清搜索 / 回上一视图）
+      e.preventDefault();
+      e.stopPropagation();
+      settingsCwdDiscardDraft();
+    }
+  });
+}
+
+$("settings").addEventListener("pointerdown", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  const discardsDraft = b.dataset.set === "pick-cwd" || b.dataset.set === "reset-cwd";
+  if (discardsDraft && CWD_INPUT && document.activeElement === CWD_INPUT) {
+    CWD_SKIP_BLUR = true;
+  }
+}, true);
+
+$("settings").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+
+  if (b.dataset.set === "pick-cwd") {
+    // 选择器的结果是权威值，半截草稿没有保留的意义（取消选择也不会误提交）。
+    settingsCwdDiscardDraft();
+    sendCtrl({ type: "settings.pickDefaultCWD" });
+    sendCtrl({ type: "log", msg: "设置：打开系统文件夹选择器选默认目录" });
+    return;
+  }
+  if (b.dataset.set === "reset-cwd") {
+    if (!SETTINGS.defaultCwd) {
+      if (CWD_DRAFT_DIRTY) {
+        settingsCwdDiscardDraft();
+        sendCtrl({ type: "log", msg: "设置：丢掉默认目录草稿（本来就用内置目录）" });
+        return;
+      }
+      showToast("已经是默认目录", "现在用的就是内置默认目录。", "info");
+      return;
+    }
+    // 也走"等后端确认"那条路：目录为空的校验在 Go 那边（它会清掉自定义目录）。
+    settingsCwdCommit("");
+    return;
+  }
+
+  if (b.dataset.setReset !== undefined) {
+    const key = b.dataset.setReset;
+    if (!Object.prototype.hasOwnProperty.call(SETTINGS_DEFAULTS, key)) return;
+    if (SETTINGS[key] === SETTINGS_DEFAULTS[key]) return;
+    settingsSend({ [key]: SETTINGS_DEFAULTS[key] }, `恢复默认：${key}`);
+    return;
+  }
+  if (b.dataset.setSizeStep !== undefined) {
+    settingsStepSize(Number(b.dataset.setSizeStep));
+    return;
+  }
+  if (b.dataset.setSize !== undefined) {
+    const n = Number(b.dataset.setSize);
+    if (n === SETTINGS.termFontSize) return;
+    settingsSend({ termFontSize: n }, "终端字号");
+    return;
+  }
+  if (b.dataset.setFont !== undefined) {
+    if (b.dataset.setFont === SETTINGS.termFontFamily) return;
+    settingsSend({ termFontFamily: b.dataset.setFont }, "终端字体");
+    return;
+  }
+  if (b.dataset.setTheme !== undefined) {
+    if (b.dataset.setTheme === "light") {
+      // 界面主题不是终端主题：应用里还有一百多处写死的深色值，
+      // 做浅色要整份换令牌，不在这一版的范围（灰着但可点，点一下说明原因）。
+      showToast("浅色主题还没做", "现在只有深色主题；浅色会在下一版提供。", "info");
+      sendCtrl({ type: "log", msg: "设置：点了浅色主题（未实现）" });
+    }
+    return;
+  }
+  if (b.dataset.setStart !== undefined) {
+    if (b.dataset.setStart === SETTINGS.startView) return;
+    settingsSend({ startView: b.dataset.setStart }, "启动落点");
+    return;
+  }
+  const flag = b.dataset.setFlag;
+  if (flag) {
+    settingsSend({ [flag]: !SETTINGS[flag] }, flag);
+  }
+});
+
+/* 单选组的方向键（ARIA radio 语义）：←/↑ 上一个，→/↓ 下一个，Home/End 两端。
+   焦点移动即选中；不可用项只聚焦、不选中 —— 灰而不禁，键盘也要走得到。 */
+$("settings").addEventListener("keydown", (e) => {
+  const radio = e.target.closest && e.target.closest('[role="radio"]');
+  if (!radio) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const key = e.key;
+  const isArrow = key === "ArrowLeft" || key === "ArrowRight" ||
+                  key === "ArrowUp" || key === "ArrowDown";
+  if (!isArrow && key !== "Home" && key !== "End") return;
+  const group = radio.closest('[role="radiogroup"]');
+  if (!group) return;
+  const radios = Array.from(group.querySelectorAll('[role="radio"]'));
+  if (!radios.length) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (radios.length < 2) return;
+  let i = radios.indexOf(radio);
+  if (i < 0) {
+    i = radios.findIndex((r) => r.getAttribute("aria-checked") === "true");
+    if (i < 0) i = 0;
+  }
+  if (key === "Home") i = 0;
+  else if (key === "End") i = radios.length - 1;
+  else {
+    const dir = (key === "ArrowRight" || key === "ArrowDown") ? 1 : -1;
+    i = (i + dir + radios.length) % radios.length;
+  }
+  const next = radios[i];
+  next.focus();
+  if (!next.classList.contains("na") && next.getAttribute("aria-checked") !== "true") {
+    next.click();
+  }
+}, true);
+
+/* 设置页的键盘：
+   · Ctrl+F 从任何地方聚焦搜索框（Orca 的 settings.search = Mod+F）；
+   · Esc 依次处理：草稿由输入框自己撤回 → 清搜索 → 回上一个非设置视图。
+   用 capture，终端/输入框抢键之前先判断；确认框开着时一律让给确认框。 */
+document.addEventListener("keydown", (e) => {
+  if (CONFIRM.open) return;
+  const app = $("app");
+  if (!app || !app.classList.contains("settings")) return;
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && !e.altKey && !e.shiftKey && (e.key === "f" || e.key === "F")) {
+    e.preventDefault();
+    e.stopPropagation();
+    focusSettingsSearch(true);
+    return;
+  }
+  if (e.key !== "Escape") return;
+  if (document.activeElement === CWD_INPUT && (CWD_DRAFT_DIRTY || CWD_PENDING)) {
+    return; // 输入框自己的 keydown 负责撤回
+  }
+  const search = settingsSearchInput();
+  if (search && search.value.trim()) {
+    e.preventDefault();
+    e.stopPropagation();
+    clearSettingsSearch(document.activeElement === search);
+    return;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+  setNavView((typeof NAV_PREV !== "undefined" && NAV_PREV) || "workspace");
+}, true);
+
+/* ---------------------------------------------------------------------------
+   确认框
+   ---------------------------------------------------------------------------
+   单例（#confirm 静态在 index.html 里）。Promise 语义：
+     askConfirm(...) → true = 确认，false = 取消 / 已经有一个在问。
+   ⚠️ **已经在问的时候不叠加第二个 Promise**：关窗请求可能连发（用户连点 ×），
+   叠加会让上一个 Promise 永远不 resolve，发起方（关窗那条路）就一直悬着。
+   ------------------------------------------------------------------------- */
+const CONFIRM = { open: false, resolve: null, prev: null, danger: false };
+
+function confirmFocusables() {
+  return [$("confirm-cancel"), $("confirm-ok")].filter(Boolean);
+}
+
+function focusConfirm() {
+  const list = confirmFocusables();
+  if (!list.length) return;
+  const target = CONFIRM.danger ? $("confirm-cancel") : $("confirm-ok");
+  (target || list[0]).focus();
+}
+
+function askConfirm(opts) {
+  const el = $("confirm");
+  if (!el) return Promise.resolve(false);
+  if (CONFIRM.open) {
+    focusConfirm();
+    return Promise.resolve(false);
+  }
+  const o = opts || {};
+  CONFIRM.open = true;
+  CONFIRM.danger = !!o.danger;
+  CONFIRM.prev = document.activeElement;
+
+  $("confirm-title").textContent = o.title || "确认";
+  $("confirm-body").textContent = o.body || "";
+  const ico = $("confirm-ico");
+  ico.innerHTML = lucide(o.danger ? LUCIDE_TRIANGLE_ALERT : LUCIDE_INFO, 16);
+  ico.classList.toggle("warn", !!o.danger);
+  const ok = $("confirm-ok");
+  ok.textContent = o.ok || "确定";
+  ok.classList.toggle("danger", !!o.danger);
+  // 破坏性动作默认把焦点放在「取消」上（回车不会顺手把记录删掉）。
+  el.hidden = false;
+  focusConfirm();
+  return new Promise((resolve) => { CONFIRM.resolve = resolve; });
+}
+
+function settleConfirm(ok) {
+  if (!CONFIRM.open) return;
+  const resolve = CONFIRM.resolve;
+  const prev = CONFIRM.prev;
+  CONFIRM.open = false;
+  CONFIRM.resolve = null;
+  CONFIRM.prev = null;
+  CONFIRM.danger = false;
+  $("confirm").hidden = true;
+  // 取消/完成后回到原来那个控件（通常是终端）。确认后窗口马上关，无所谓。
+  if (prev && prev.isConnected && typeof prev.focus === "function") {
+    try { prev.focus(); } catch (_) {}
+  }
+  if (resolve) resolve(!!ok);
+}
+
+$("confirm-cancel").addEventListener("click", () => settleConfirm(false));
+$("confirm-ok").addEventListener("click", () => settleConfirm(true));
+$("confirm").addEventListener("mousedown", (e) => {
+  // 点卡片外面 = 取消。卡片内部的 mousedown 不冒到这里。
+  if (e.target === $("confirm")) settleConfirm(false);
+});
+document.addEventListener("keydown", (e) => {
+  if (!CONFIRM.open) return;
+  if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    settleConfirm(false);
+    return;
+  }
+  if (e.key === "Enter") {
+    // 回车 = 当前聚焦的那个按钮；默认焦点在「取消」上时不会误确认。
+    e.preventDefault();
+    e.stopPropagation();
+    settleConfirm(document.activeElement === $("confirm-cancel") ? false : true);
+    return;
+  }
+  if (e.key === "Tab") {
+    // 焦点锁在卡片里：两个按钮之间循环。
+    const list = confirmFocusables();
+    if (!list.length) return;
+    e.preventDefault();
+    const i = list.indexOf(document.activeElement);
+    const next = e.shiftKey
+      ? (i <= 0 ? list.length - 1 : i - 1)
+      : (i < 0 || i === list.length - 1 ? 0 : i + 1);
+    list[next].focus();
+  }
+}, true);
+
+/* ---------------------------------------------------------------------------
+   关窗确认
+   ---------------------------------------------------------------------------
+   Go 的 WindowClosing hook 会 Cancel 掉原生关闭并 EmitEvent("perch:close-request")，
+   这里弹确认框；确认后发 window.close，Go 置 closeConfirmed 再真正关窗。
+   取消时发 window.close.cancel，让 Go 把"问过一次"的计时清掉 —— 否则 30 秒内
+   再点 ×，它还会以为这次询问还没答复。 */
+function onCloseRequest() {
+  if (CONFIRM.open) {
+    focusConfirm();
+    sendCtrl({ type: "log", msg: "关窗确认：确认框已经开着，把焦点送回卡片" });
+    return;
+  }
+  sendCtrl({ type: "log", msg: "关窗确认：收到 Go 的请求，弹确认框" });
+  askConfirm({
+    title: "关闭 Perch？",
+    body: "所有正在跑的 agent 会随窗口结束。\n" +
+          "座位记录会保留，下次打开还能接上；agent 自己盘上的对话文件不受影响。",
+    ok: "关闭窗口",
+  }).then((ok) => {
+    if (ok) {
+      sendCtrl({ type: "window.close" });
+    } else {
+      sendCtrl({ type: "window.close.cancel" });
+      sendCtrl({ type: "log", msg: "关窗确认：用户取消，窗口留着" });
+    }
+  });
+}
+
+if (Events && typeof Events.On === "function") {
+  Events.On("perch:close-request", onCloseRequest);
+}

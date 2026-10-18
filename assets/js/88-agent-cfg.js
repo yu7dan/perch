@@ -334,11 +334,20 @@ function acChangesHTML(p) {
 function acFieldsHTML(a, busy) {
   const fields = Array.isArray(a.fields) ? a.fields : [];
   if (!fields.length) return `<div class="ac-hint">magpie 没有这个 agent 的可调字段。</div>`;
-  return `<div class="ac-sec"><span class="ac-sec-title">配置</span>` +
+  let html = `<div class="ac-sec"><span class="ac-sec-title">配置</span>` +
     `<span class="ac-sec-sub">${fields.length} 项 · 空值 = agent 自己的默认</span></div>` +
-    `<div class="ac-fields">` + fields.map((f) => acFieldHTML(a, f, busy)).join("") + `</div>` +
-    `<div class="ac-hint">改动写进 agent 自己的配置文件，由 magpie 完成；` +
+    `<div class="ac-fields">` + fields.map((f) => acFieldHTML(a, f, busy)).join("") + `</div>`;
+  // OpenCode 的推理档位叫 variant，选在它自己的 TUI 里（默认 Ctrl+T，
+  // 实测 1.19.3 的 keybind 就是它）。magpie 接线时只把每个模型的 variants
+  // 写进配置，没有把“默认档位”暴露成字段；这里给一条只读说明，不去直写
+  // opencode.json —— 配置归 magpie。
+  if (a.id === "opencode") {
+    html += `<div class="ac-hint">OpenCode 的推理档位叫 variant，在它自己的 TUI 里按 ` +
+      `<kbd>Ctrl+T</kbd> 循环切换；可选哪几档由当前模型决定。Perch 这里不另设默认值。</div>`;
+  }
+  html += `<div class="ac-hint">改动写进 agent 自己的配置文件，由 magpie 完成；` +
     `已打开的会话重开后生效。</div>`;
+  return html;
 }
 
 function acFieldHTML(a, f, busy) {

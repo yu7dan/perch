@@ -196,23 +196,39 @@ function dashNum(n) {
   return Math.round(Number(n) || 0).toLocaleString("zh-CN");
 }
 
-/* 视图切换：工作区 ⇄ 总览。
-   ⚠️ 总览打开时主区是 visibility:hidden（不是 display:none）：布局尺寸还在，
+/* 视图切换：工作区 ⇄ 总览 ⇄ 设置。
+   ⚠️ 总览/设置打开时主区是 visibility:hidden（不是 display:none）：布局尺寸还在，
    这样 PTY 的起始 resize 拿的是**真实列/行**，不会走 Go 的 80x24 兜底、
    也不会在切回来时让 CLI 重画开场（见 CSS「#app.dash」那段）。
    visibility:hidden 已经让格子不可聚焦，但焦点还停在 xterm 的 textarea 上时
    键盘会继续往那里送 —— 所以照样先 blur 一次。
    回来时再 refit/focus 一次（和收起/展开同一个理由）。 */
 function setNavView(view) {
-  if (view !== "workspace" && view !== "dash") return;
+  if (view !== "workspace" && view !== "dash" && view !== "settings") return;
+  // 记下"来设置页之前在哪"（Esc 回退用），离开设置页时把搜索清干净。
+  if (view !== NAV_HERE && NAV_HERE !== "settings") NAV_PREV = NAV_HERE;
+  if (view !== "settings" && NAV_HERE === "settings" &&
+      typeof clearSettingsSearch === "function") clearSettingsSearch(false);
   NAV_HERE = view;
-  $("app").classList.toggle("dash", view === "dash");
+  const app = $("app");
+  app.classList.toggle("dash", view === "dash");
+  app.classList.toggle("settings", view === "settings");
   renderNav();
   if (view === "dash") {
+    if (typeof acClose === "function") acClose();
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     renderDashboard("进入总览");
-  } else {
+  } else if (view === "settings") {
     // 配置抽屉属于总览的 Agent 名单；离开总览就收起（见 88-agent-cfg.js）。
+    if (typeof acClose === "function") acClose();
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    // 先按缓存画（第一帧不空），同时问 Go 要权威值（默认目录是不是还在盘上
+    // 只有 Go 知道）。settings 消息回来时 syncSettingsUI 会再刷一遍。
+    renderSettings("进入设置");
+    sendCtrl({ type: "settings.get" });
+    // 进来就能直接打字搜索（Orca 的设置页同样把焦点交给搜索框）。
+    if (typeof focusSettingsSearch === "function") focusSettingsSearch(false);
+  } else {
     if (typeof acClose === "function") acClose();
     requestAnimationFrame(() => {
       if (!activeTab) return;
@@ -577,18 +593,25 @@ function renderDashAgents() {
     const st = ok ? "已接入"
       : gid === "pending" ? "未接入"
       : a.windows === false ? "仅 macOS/Linux" : "未检测到";
+    // 这份名单只列 CLI agent：每行副标题都带 CLI，和网关层的桌面客户端分开。
     const detail = gid === "missing"
-      ? `官方安装 · ${a.vendor}`
-      : (a.path || a.vendor || "");
+      ? `CLI · 官方安装 · ${a.vendor}`
+      : `CLI · ${a.path || a.vendor || ""}`;
     const calls = (a.calls | 0) > 0 ? ` · 今日 ${dashNum(a.calls)} 次` : "";
     const busy = INSTALL && INSTALL.id === a.id && INSTALL.state === "running";
+    // 没有安装配方 ≠ 桌面应用：这份名单是**使用层**，只认 CLI 能不能装。
+    // 没配方就给官方安装说明的出口；桌面客户端属于网关层，由 magpie 管，
+    // 不在这份名单里（见 magpie.go 的 agentCatalogDefs 注释）。
     const action = gid === "missing"
       ? (a.install
           ? (busy
-              ? `<span class="st">安装中…</span>`
+              ? `<span class="st">${typeof INSTALL !== "undefined" && INSTALL && INSTALL.phase === "scanning" ? "检测中…" : "安装中…"}</span>`
               : `<button type="button" class="dl" data-install="${esc(a.id)}"` +
                 ` title="在 Perch 里运行 ${esc(a.name)} 的官方安装命令">安装</button>`)
-          : `<span class="st off" title="桌面应用：请从官网安装">桌面应用</span>`)
+          : a.url
+            ? `<button type="button" class="dl" data-docs="${esc(a.id)}"` +
+              ` title="打开 ${esc(a.name)} 的官方安装说明">安装说明</button>`
+            : "")
       : (ok
           ? `<button type="button" class="dl" data-launch="${esc(a.id)}"` +
             ` title="在 Perch 里开一格 ${esc(a.name)}">打开</button>`

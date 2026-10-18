@@ -461,6 +461,11 @@ shell.onmessage = (ev) => {
     STATE = typeof ev.data === "string" ? JSON.parse(ev.data) : JSON.parse(new TextDecoder().decode(ev.data));
   } catch (e) { console.error("[perch] 壳层数据解析失败:", e); return; }
   $("s-index").textContent = `索引：${STATE.sessions?.length ?? 0} 会话 / ${(STATE.projects || []).length} 项目`;
+  // 设置随首份载荷一起到（settings.go）。权威值一到就覆盖 localStorage 那份缓存；
+  // 终端已经按缓存里的字体/字号建好了，这里再把它们校正到盘上的值。
+  if (STATE.settings) {
+    applySettings(STATE.settings, { fromGo: true, effectiveCwd: STATE.cwd });
+  }
   // 网关首份读数随壳层一起到（watcher 在 main 里先扫了本机那份）。
   // 之后的更新走 ctl 的 "magpie" 消息 —— 两条路都进 applyMagpie。
   if (STATE.magpie) applyMagpie(STATE.magpie);
@@ -494,6 +499,9 @@ function applyLibrary(p) {
   // 总览的每日活动也在这份载荷里（同一次扫描算的，见 store.go 的 scanSessions）——
   // 不跟着换的话，"重扫会话库"之后热力图还是旧的。
   if (Array.isArray(p.activity)) STATE.activity = p.activity;
+  // 设置也在这份载荷里（同一次 buildShellPayload）。重扫不该改设置，但
+  // 手改过 settings.json 的人点一次「重扫」就能看到盘上的值 —— 顺手对齐。
+  if (p.settings) applySettings(p.settings, { fromGo: true, effectiveCwd: p.cwd });
   if (p.magpie) applyMagpie(p.magpie);
   // 名字表变了，正在跑的那几格的格子头也得跟着换（谁后到都得对得上，见 seedTabTitles）
   seedTabTitles();
