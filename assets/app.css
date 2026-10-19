@@ -2134,6 +2134,17 @@ svg{display:block;flex:none}
 /* 靠右那一摞只有「去这一格」一颗（时间跟着它）—— 同 .gask 的理由：只有最后一颗
    吃余量，否则这一组会被均匀摊开。 */
 .gperm .pf .go:last-of-type{margin-left:auto}
+/* 附加选项超过 3 个时展开的清单（卡内、按编号一行一个；点行 = 按那一项）。
+   收起时整块不渲染，动作区只有「更多 N 项 ▾」。 */
+.gperm .pmore{padding:4px 8px;border-top:1px solid var(--line-soft);
+              display:flex;flex-direction:column;gap:2px}
+.gperm .pmore .gopt{display:flex;align-items:baseline;gap:8px;border:0;background:none;
+                    text-align:left;padding:4px 6px;border-radius:4px;cursor:pointer;
+                    font:11.5px/1.4 var(--sans);color:var(--fg2)}
+.gperm .pmore .gopt:hover{background:var(--card-hov);color:var(--fg)}
+.gperm .pmore .gopt .n{color:var(--faint);font:10px/1 var(--mono);min-width:10px}
+.gperm .pmore .gopt.mute{color:var(--faint);cursor:default}
+.gperm .pmore .gopt.mute:hover{background:none;color:var(--faint)}
 .gperm .perr{padding:6px 10px;border-top:1px solid var(--line-soft);
              font:11.5px/1.5 var(--sans);color:var(--red)}
 

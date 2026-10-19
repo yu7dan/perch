@@ -811,6 +811,14 @@ $("group").addEventListener("click", (e) => {
   if (!t) return;
   // 「进入 →」和「去这一格回答 →」都是同一个动作
   if (e.target.closest("[data-go],[data-go-ask]")) { goToTab(t, "点动作"); return; }
+  /* 「要你批权限」的「更多 N 项 ▾」= 只展开/收起选项清单，不往 PTY 写任何字节。
+     ⚠️ 和作答同一条规矩：**有选中文本时不动作**。 */
+  const pm = e.target.closest("[data-perm-more]");
+  if (pm) {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.toString().trim()) togglePermOpen(pm.dataset.permMore || "");
+    return;
+  }
   /* 「要你批权限」的动作键 = 往那一格的 PTY 写一个键（数字 / Esc，见 55-perm.js）。
      允许、带条件的选项、拒绝各是各的键；具体是哪一颗从 data-perm 读。
      ⚠️ 和作答同一条规矩：**有选中文本时不动作** —— 这张卡也要能读、能选中复制。 */

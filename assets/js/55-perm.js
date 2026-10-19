@@ -59,9 +59,11 @@ function readPermDialog(t) {
   if (foot < 0) return null;
   if (at(foot).indexOf("Tab to amend") < 0) return { amend: true, foot };
 
-  /* 选项行：页脚上方 20 行内的 `N. 文本`。编号必须**恰好是 1..N、每号一次** ——
-     这是挡"把屏上别的编号列表当成选项"的那道闸。高亮 `❯` 只记下来（数字键与它无关）。 */
-  const lim = Math.max(lo, foot - 20);
+  /* 选项行：页脚上方 32 行内的 `N. 文本`。编号必须**恰好是 1..N、每号一次** ——
+     这是挡"把屏上别的编号列表当成选项"的那道闸。高亮 `❯` 只记下来（数字键与它无关）。
+     窗口取 32 而不是 20：实测 3 项 + 折行已经用掉 5 行，选项更多时 20 行会读不全
+     （读不全 ⇒ 编号对不上 ⇒ 整张卡做灰，属于"安全但没用"）。 */
+  const lim = Math.max(lo, foot - 32);
   const opt = {};
   const rowOf = {};              // 选项首行的行号（接折行用）
   let firstOpt = -1, hiN = 0;
@@ -168,15 +170,39 @@ function permState(a, t) {
   };
 }
 
-/* 选项在卡片上只露一句短的：去掉括号里的解释和 "for this session" 之类的尾注，
-   超长再截断。**完整原文放在 title 上**；发键只认编号（数字键与高亮无关）。 */
-function permShort(label) {
-  let s = String(label == null ? "" : label);
-  s = s.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
-  s = s.replace(/\s+for this session\b.*$/i, "").trim();
-  s = s.replace(/\s+(from|in) this project\b.*$/i, "").trim();
-  if (s.length > 40) s = s.slice(0, 39).trimEnd() + "…";
-  return s || String(label || "");
+/* 选项在卡片上一律说中文。常见模板给准确短标签；认不出的不硬翻，
+   退成「允许（附加条件）/拒绝（附加条件）」—— 完整英文原文只放 title（hover）
+   和日志里，卡片上不出现半句中文半句英文。发键只认编号（数字键与高亮无关）。 */
+function permZh(label) {
+  const s = String(label == null ? "" : label).trim();
+  const t = s.toLowerCase();
+  if (t.indexOf("yes, and switch to accept edits") === 0) return "切到自动接受编辑";
+  if (t.indexOf("yes, auto-accept edits") === 0) return "自动接受编辑";
+  if (t.indexOf("yes, manually approve edits") === 0) return "手动确认编辑";
+  if (t.indexOf("no, keep planning") === 0) return "继续规划";
+  if (t.indexOf("no, and tell claude") === 0) return "换一种做法";
+  if (t.indexOf("yes, and always allow access to ") === 0) {
+    let x = s.slice("Yes, and always allow access to ".length);
+    x = x.replace(/\s+from this project\s*$/i, "").trim();
+    return x ? `始终允许访问 ${x}` : "始终允许访问";
+  }
+  if (t.indexOf("yes, and always allow") === 0) return "始终允许";
+  if (t.indexOf("yes, and don't ask again") === 0) return "不再询问";
+  if (t.indexOf("yes, and don’t ask again") === 0) return "不再询问";
+  if (t.indexOf("no, and don't ask again") === 0) return "不再询问（拒绝）";
+  if (t.indexOf("yes") === 0) return "允许（附加条件）";
+  if (t.indexOf("no") === 0) return "拒绝（附加条件）";
+  return "选项";
+}
+
+/* 附加选项超过 3 个时收起成「更多 N 项 ▾」，展开状态按 act id 记 ——
+   看板每 400ms 重画一次，不记的话点开就会马上被下一次重画收回。 */
+const permOpen = new Set();
+
+function togglePermOpen(id) {
+  if (!id) return;
+  if (permOpen.has(id)) permOpen.delete(id); else permOpen.add(id);
+  scheduleGroup();
 }
 
 /* 选项的指纹：点击那一刻拿屏上**重新读**的同一项再算一遍，对不上就不发键。
@@ -193,14 +219,15 @@ function permBlockSig(a, ps) {
     ":" + String(a.tool || "") + ":" + String(a.text || "") +
     ":" + (ps ? [ps.ok ? 1 : 0, ps.deny ? 1 : 0, ps.yesN | 0,
                  ps.q || "", ps.why || "", ps.busy ? 1 : 0,
-                 (ps.opts || []).map((o) => o.n + ":" + o.label).join("\u0002")]
+                 (ps.opts || []).map((o) => o.n + ":" + o.label).join("\u0002"),
+                 permOpen.has(a.id) ? 1 : 0]
                 .join("\u0001") : "") +
     ":" + JSON.stringify(permErr.get(a.id) || null);
 }
 
-/* 卡片。和待办卡同一个位置/同一套边距。三个动作位：
+/* 卡片。和待办卡同一个位置/同一套边距。三组动作：
      允许 = 按屏上那个单独的 Yes（它自己的编号，不写死 1）
-     带条件的选项 = 原样搬上来，按编号直发（Always allow / Accept edits / Keep planning…）
+     带条件的选项 = 中文短标签 + 编号；≤3 个直接排 pill，>3 个收进「更多 N 项 ▾」
      拒绝 = 按 Esc（与高亮/编号无关，等同选 No，这一轮继续）
    不可用时做灰、不做禁、不做隐 —— 为什么不可用写在 title 上（禁了 title 不弹）。 */
 function permHTML(a, t, ps) {
@@ -218,24 +245,44 @@ function permHTML(a, t, ps) {
   const denyTitle = denyOn
     ? "替你按 Esc（等同选 No：拒绝这一次，这一轮继续）"
     : (why || "现在按不了");
-  /* 纯 Yes/No 不上 pills：Yes 就是「允许」，No 由「拒绝」(Esc) 覆盖。
-     其余（带条件的）全部原样搬上来，点了发它自己的编号。 */
+  /* 纯 Yes/No 不上动作位：Yes 就是「允许」，No 由「拒绝」(Esc) 覆盖。
+     其余（带条件的）排成 pill；太多就收起来，行里不会堆成一面墙。 */
   const extras = ((ps && ps.opts) || []).filter((o) => o.label !== "Yes" && o.label !== "No");
+  const many = extras.length > 3;
+  const open = many && permOpen.has(a.id);
+  const optTitle = (o) => ok
+    ? `按第 ${o.n} 项：${permZh(o.label)}\n原文：${o.label}`
+    : (why || "现在按不了");
   let extraHTML = "";
-  for (const o of extras) {
-    const title = ok ? `按第 ${o.n} 项：${o.label}` : (why || "现在按不了");
-    extraHTML += `<button class="go extra${ok ? "" : " mute"}" data-perm="opt"` +
-      ` data-n="${o.n}" data-h="${permHash(o.label)}"` +
-      ` title="${esc(title)}">${o.n} · ${esc(permShort(o.label))}</button>`;
+  let listHTML = "";
+  if (!many) {
+    for (const o of extras) {
+      extraHTML += `<button class="go extra${ok ? "" : " mute"}" data-perm="opt"` +
+        ` data-n="${o.n}" data-h="${permHash(o.label)}"` +
+        ` title="${esc(optTitle(o))}">${o.n} · ${esc(permZh(o.label))}</button>`;
+    }
+  } else if (open) {
+    listHTML = `<div class="pmore">` + extras.map((o) =>
+      `<button class="gopt${ok ? "" : " mute"}" data-perm="opt" data-n="${o.n}"` +
+      ` data-h="${permHash(o.label)}" title="${esc(optTitle(o))}">` +
+      `<span class="n">${o.n}</span><span>${esc(permZh(o.label))}</span></button>`).join("") +
+      `</div>`;
   }
+  const moreHTML = many
+    ? `<button class="go more" data-perm-more="${esc(a.id || "")}"` +
+      ` title="${open ? "收起附加选项" : `展开 ${extras.length} 个带条件的选项`}">` +
+      `${open ? "收起选项 ▴" : `更多 ${extras.length} 项 ▾`}</button>`
+    : "";
   return `<div class="gperm" data-pi="${esc(a.id || "")}">` +
     `<div class="ph"><span>要你批权限</span>` +
       `<span class="px" title="${esc(a.text || a.tool || "")}">· ${esc(clamp(a.text || a.tool || "", 90))}</span>` +
     `</div>` +
     `<div class="pq">${esc(clamp(q, 300))}</div>` +
+    listHTML +
     `<div class="pf">` +
       `<button class="go allow${yesOn ? "" : " mute"}" data-perm="allow"` +
         ` title="${esc(yesTitle)}">允许</button>` +
+      moreHTML +
       extraHTML +
       `<button class="go deny${denyOn ? "" : " mute"}" data-perm="deny"` +
         ` title="${esc(denyTitle)}">拒绝</button>` +
@@ -268,12 +315,14 @@ function watchPermEcho(t, id, el, act, label) {
     const it = v && (v.acts || []).find((x) => x.id === id);
     if (it && it.ok != null) {
       permBusy.delete(t.id);
+      permOpen.delete(id);
       sendCtrl({ type: "log", msg: `批权限 回声 tab=${t.id} 按=${label} 转录有结果 用时=${Date.now() - t0}ms` });
       scheduleGroup();
       return;
     }
     if (v && v.st !== "waiting") {
       permBusy.delete(t.id);
+      permOpen.delete(id);
       sendCtrl({ type: "log", msg: `批权限 回声 tab=${t.id} 按=${label} 已离开等待 用时=${Date.now() - t0}ms` });
       scheduleGroup();
       return;
