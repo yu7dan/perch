@@ -229,6 +229,8 @@ function permBlockSig(a, ps) {
      允许 = 按屏上那个单独的 Yes（它自己的编号，不写死 1）
      带条件的选项 = 中文短标签 + 编号；≤3 个直接排 pill，>3 个收进「更多 N 项 ▾」
      拒绝 = 按 Esc（与高亮/编号无关，等同选 No，这一轮继续）
+   动作区一律不显示编号：只有中间一项带「2 ·」会读成一排割裂的东西；
+   编号是给发键用的（title 里写着「第 N 项」，日志里有），不占这一行的版面。
    不可用时做灰、不做禁、不做隐 —— 为什么不可用写在 title 上（禁了 title 不弹）。 */
 function permHTML(a, t, ps) {
   const err = permErr.get(a.id) || null;
@@ -259,13 +261,13 @@ function permHTML(a, t, ps) {
     for (const o of extras) {
       extraHTML += `<button class="go extra${ok ? "" : " mute"}" data-perm="opt"` +
         ` data-n="${o.n}" data-h="${permHash(o.label)}"` +
-        ` title="${esc(optTitle(o))}">${o.n} · ${esc(permZh(o.label))}</button>`;
+        ` title="${esc(optTitle(o))}">${esc(permZh(o.label))}</button>`;
     }
   } else if (open) {
     listHTML = `<div class="pmore">` + extras.map((o) =>
       `<button class="gopt${ok ? "" : " mute"}" data-perm="opt" data-n="${o.n}"` +
       ` data-h="${permHash(o.label)}" title="${esc(optTitle(o))}">` +
-      `<span class="n">${o.n}</span><span>${esc(permZh(o.label))}</span></button>`).join("") +
+      `${esc(permZh(o.label))}</button>`).join("") +
       `</div>`;
   }
   const moreHTML = many

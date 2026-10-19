@@ -2111,10 +2111,16 @@ svg{display:block;flex:none}
 
 /* 「要你批权限」—— 批准框那一张卡。和待办卡同一个位置、同一套边距。
    动作：允许（按屏上那个单独的 Yes）、带条件选项（按各自编号直发）、拒绝（Esc）——
-   见 55-perm.js。选项多/文字长时这一行允许折行（卡片在行里，不能横向溢出）。
+   动作区不显示编号、只留中文短标签（编号在 title 与日志里）——
+   只有中间一项带「2 ·」会读成一排割裂的东西；见 55-perm.js。
+   选项多/文字长时这一行允许折行（卡片在行里，不能横向溢出）。
    不可用时做灰、不做禁、不做隐 —— 为什么不可用写在 title 上（禁了 title 不弹）。 */
 .gperm{margin:8px 12px 8px 31px;border:1px solid var(--line-soft);border-radius:6px;
-       background:var(--card);overflow:hidden}
+       background:var(--card);overflow:hidden;
+       /* app.css 里没有定义过 --sans（29 处 var(--sans) 全因此失效，字号退回继承的
+          13px）。卡片这里先补上别名：作者按 10.5/12.5/11px 写的字号才真正生效，
+          否则正体中文会按 13px 的回退字体渲染，跟加粗的「允许」不是同一张脸。 */
+       --sans:var(--ui)}
 .gperm .ph{display:flex;align-items:center;gap:6px;padding:7px 10px;
            border-bottom:1px solid var(--line-soft);font:10.5px/1 var(--sans);
            color:var(--ask-text)}
@@ -2134,15 +2140,14 @@ svg{display:block;flex:none}
 /* 靠右那一摞只有「去这一格」一颗（时间跟着它）—— 同 .gask 的理由：只有最后一颗
    吃余量，否则这一组会被均匀摊开。 */
 .gperm .pf .go:last-of-type{margin-left:auto}
-/* 附加选项超过 3 个时展开的清单（卡内、按编号一行一个；点行 = 按那一项）。
+/* 附加选项超过 3 个时展开的清单（卡内、一行一个；点行 = 按那一项，编号在 title 里）。
    收起时整块不渲染，动作区只有「更多 N 项 ▾」。 */
 .gperm .pmore{padding:4px 8px;border-top:1px solid var(--line-soft);
               display:flex;flex-direction:column;gap:2px}
-.gperm .pmore .gopt{display:flex;align-items:baseline;gap:8px;border:0;background:none;
-                    text-align:left;padding:4px 6px;border-radius:4px;cursor:pointer;
-                    font:11.5px/1.4 var(--sans);color:var(--fg2)}
+.gperm .pmore .gopt{border:0;background:none;text-align:left;padding:4px 6px;
+                    border-radius:4px;cursor:pointer;
+                    font:11px/1.4 var(--sans);color:var(--fg2)}
 .gperm .pmore .gopt:hover{background:var(--card-hov);color:var(--fg)}
-.gperm .pmore .gopt .n{color:var(--faint);font:10px/1 var(--mono);min-width:10px}
 .gperm .pmore .gopt.mute{color:var(--faint);cursor:default}
 .gperm .pmore .gopt.mute:hover{background:none;color:var(--faint)}
 .gperm .perr{padding:6px 10px;border-top:1px solid var(--line-soft);
