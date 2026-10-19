@@ -2109,8 +2109,9 @@ svg{display:block;flex:none}
 .gask .gf .go.mute{color:var(--faint);cursor:default}
 .gask .gf .go.mute:hover{background:none;color:var(--faint)}
 
-/* 「要你批权限」—— 批准框那一张卡。和待办卡同一个位置、同一套边距，但它**真的是
-   两颗按钮**（允许 = 按屏上那个单独的 Yes，拒绝 = Esc；见 55-perm.js）。
+/* 「要你批权限」—— 批准框那一张卡。和待办卡同一个位置、同一套边距。
+   动作：允许（按屏上那个单独的 Yes）、带条件选项（按各自编号直发）、拒绝（Esc）——
+   见 55-perm.js。选项多/文字长时这一行允许折行（卡片在行里，不能横向溢出）。
    不可用时做灰、不做禁、不做隐 —— 为什么不可用写在 title 上（禁了 title 不弹）。 */
 .gperm{margin:8px 12px 8px 31px;border:1px solid var(--line-soft);border-radius:6px;
        background:var(--card);overflow:hidden}
@@ -2121,7 +2122,7 @@ svg{display:block;flex:none}
                color:var(--fg2)}
 .gperm .pq{padding:8px 10px;font:12.5px/1.5 var(--sans);color:var(--fg);
            overflow-wrap:anywhere}
-.gperm .pf{display:flex;align-items:center;gap:6px;padding:7px 10px;
+.gperm .pf{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:7px 10px;
            border-top:1px solid var(--line-soft);font:10.5px/1 var(--sans);color:var(--faint)}
 .gperm .pf .go{margin-left:0;border:0;background:none;color:var(--fg2);font:11px/1 var(--sans);
                cursor:pointer;padding:3px 6px;border-radius:4px}

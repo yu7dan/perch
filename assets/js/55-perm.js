@@ -1,5 +1,6 @@
 "use strict";
-/* 55-perm.js —— 权限框就地答：读 Claude Code 的批准框、点「允许 / 拒绝」。
+/* 55-perm.js —— 权限框就地答：读 Claude Code 的批准框，点「允许 / 拒绝」，
+   或者点框里带条件的选项（Accept edits、Always allow、Keep planning…）。
    本文件是 index.html 里按序 defer 的一段 classic script；所有文件共享同一个全局词法作用域。
 
    为什么要读屏：转录里只有那条工具调用挂着（ok==null），**选项和顺序一概没有** ——
@@ -17,6 +18,9 @@
    · **选项顺序不固定**：`permissionResult.defaultToNo` 时 No 会排第一，还可能夹带
      `Yes, and …` 变体 ⇒ **绝不能固定发 `1`**（Orca 对 Claude 就是固定 `1`，这里不能照抄）。
      必须认出标签**恰好是 `Yes`** 的那一行，发它自己的编号。
+   · **带条件的选项也是数字直选**：卡片把它们原样搬上来（2 · Yes, and switch to accept
+     edits…），点哪项发哪项的编号。点击时按屏上**重读**的同一项再核一次指纹（permHash），
+     防止卡片画完之后那格已经换成了另一件事。
    · 页脚出现 `Tab to amend` 时不在补充说明的输入态；那一行提示消失就说明 Tab 进了输入框
      （那时数字会被当打字吃掉）⇒ 拿它当闸。
 
@@ -59,6 +63,7 @@ function readPermDialog(t) {
      这是挡"把屏上别的编号列表当成选项"的那道闸。高亮 `❯` 只记下来（数字键与它无关）。 */
   const lim = Math.max(lo, foot - 20);
   const opt = {};
+  const rowOf = {};              // 选项首行的行号（接折行用）
   let firstOpt = -1, hiN = 0;
   for (let i = foot - 1; i >= lim; i--) {
     const s = at(i);
@@ -68,12 +73,30 @@ function readPermDialog(t) {
     const n = +m[2];
     if (!(n in opt)) {
       opt[n] = m[3].trim();
+      rowOf[n] = i;
       firstOpt = i;              // 往上扫 ⇒ 最后赋值的是最上面那一行
     }
     if (m[1] && !hiN) hiN = n;
   }
   const nums = Object.keys(opt).map(Number).sort((x, y) => x - y);
   const seq = nums.length >= 2 && nums.length <= 9 && nums.every((n, i) => n === i + 1);
+  /* 选项文字会折行（实测第 2 项太长时折到下一行，且续行是缩进的）。
+     把"这个选项下面、下一个选项之前"的缩进非空行接回它的标签 ——
+     卡片上显示完整选项、tooltip 也才是真的全文。只认缩进行：
+     选项块之外的问题行/空行都不以空白开头。 */
+  if (seq) {
+    for (let k = 0; k < nums.length; k++) {
+      const n = nums[k];
+      const end = k + 1 < nums.length ? rowOf[nums[k + 1]] - 1 : foot - 1;
+      const extra = [];
+      for (let i = rowOf[n] + 1; i <= end; i++) {
+        const s = at(i);
+        if (!s.trim() || !/^\s+\S/.test(s)) break;
+        extra.push(s.trim());
+      }
+      if (extra.length) opt[n] = (opt[n] + " " + extra.join(" ")).trim();
+    }
+  }
   const yes = seq ? nums.filter((n) => opt[n] === "Yes") : [];
 
   // 屏上那一句问题：选项块上方最近的一行非空（给卡片显示用）
@@ -125,58 +148,95 @@ function permScreenMatches(region, a) {
   return tool.length >= 3 && hay.indexOf(tool) >= 0;
 }
 
-/* 渲染那一刻的可用性：两颗键**分开**判 —— 拒绝（Esc）不依赖"屏上有没有单独的 Yes"。
+/* 渲染那一刻的可用性：`ok` 是"这一屏读到了、且确实是转录里那一件事"；
+   允许（单独的 Yes）、其他选项（按编号）、拒绝（Esc）各自再判一次。
    读屏本身是便宜的（视口 60 行），每 400ms 跟着行重画读一遍没问题。 */
 function permState(a, t) {
   if (!a) return null;
   const busy = !!permBusy.get(t && t.id);
-  const deny0 = (why) => ({ allow: false, deny: false, yesN: 0, q: "", why, busy });
+  const deny0 = (why) => ({ ok: false, deny: false, yesN: 0, opts: [], q: "", why, busy });
   if (!t || !t.stream || !t.ready) return deny0("那一格的终端没连着");
   const p = readPermDialog(t);
   if (!p) return deny0("那一格屏上没有权限框（可能已经答过了）");
   if (p.amend) return deny0("那一格的权限框在「Tab 补充说明」的输入态 —— 去这一格退出后再点");
   if (!permScreenMatches(p.region, a))
     return deny0("屏上这一屏和转录对不上（可能已经换成另一件事了）—— 去这一格看看");
+  const opts = [];
+  for (let n = 1; n <= p.n; n++) opts.push({ n, label: p.opts[n] || "" });
   return {
-    allow: !!p.yesN, deny: true, yesN: p.yesN | 0, q: p.q || "",
-    why: p.yesN ? "" : "这一屏上没有单独的「Yes」（只有带条件的是）—— 去这一格选",
-    busy,
+    ok: true, deny: true, yesN: p.yesN | 0, opts, q: p.q || "", why: "", busy,
   };
+}
+
+/* 选项在卡片上只露一句短的：去掉括号里的解释和 "for this session" 之类的尾注，
+   超长再截断。**完整原文放在 title 上**；发键只认编号（数字键与高亮无关）。 */
+function permShort(label) {
+  let s = String(label == null ? "" : label);
+  s = s.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  s = s.replace(/\s+for this session\b.*$/i, "").trim();
+  s = s.replace(/\s+(from|in) this project\b.*$/i, "").trim();
+  if (s.length > 40) s = s.slice(0, 39).trimEnd() + "…";
+  return s || String(label || "");
+}
+
+/* 选项的指纹：点击那一刻拿屏上**重新读**的同一项再算一遍，对不上就不发键。
+   防的是"卡片画完之后，那格已经换成另一件事、恰好那个编号还存在"。 */
+function permHash(label) {
+  const t = permNorm(label);
+  let h = 0;
+  for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0;
+  return h.toString(36);
 }
 
 function permBlockSig(a, ps) {
   return "perm:" + (a.id || "") + ":" + (a.ok == null ? "pending" : "done") +
     ":" + String(a.tool || "") + ":" + String(a.text || "") +
-    ":" + (ps ? [ps.allow ? 1 : 0, ps.deny ? 1 : 0, ps.yesN | 0,
-                 ps.q || "", ps.why || "", ps.busy ? 1 : 0].join("\u0001") : "") +
+    ":" + (ps ? [ps.ok ? 1 : 0, ps.deny ? 1 : 0, ps.yesN | 0,
+                 ps.q || "", ps.why || "", ps.busy ? 1 : 0,
+                 (ps.opts || []).map((o) => o.n + ":" + o.label).join("\u0002")]
+                .join("\u0001") : "") +
     ":" + JSON.stringify(permErr.get(a.id) || null);
 }
 
-/* 卡片。和待办卡同一个位置/同一套边距，但它**真的是两颗按钮**（不是一份清单）：
-   允许 = 按屏上那个单独的 Yes，拒绝 = 按 Esc。不可用时做灰、不做禁、不做隐 ——
-   为什么不可用写在 title 上（禁了 title 不弹）。 */
+/* 卡片。和待办卡同一个位置/同一套边距。三个动作位：
+     允许 = 按屏上那个单独的 Yes（它自己的编号，不写死 1）
+     带条件的选项 = 原样搬上来，按编号直发（Always allow / Accept edits / Keep planning…）
+     拒绝 = 按 Esc（与高亮/编号无关，等同选 No，这一轮继续）
+   不可用时做灰、不做禁、不做隐 —— 为什么不可用写在 title 上（禁了 title 不弹）。 */
 function permHTML(a, t, ps) {
   const err = permErr.get(a.id) || null;
   const busy = !!(ps && ps.busy);
+  const ok = !!(ps && ps.ok) && !busy;
   const why = busy ? "已经替你在这一格里按了一下，正在等那一格的反应" : ((ps && ps.why) || "");
-  const allowOn = !!(ps && ps.allow) && !busy;
+  const yesOn = ok && !!(ps && ps.yesN);
   const denyOn = !!(ps && ps.deny) && !busy;
   // 屏上那句问题最具体；读不到就退回转录里那句描述
   const q = (ps && ps.q) || a.text || a.tool || "它有一件事要你批准";
-  const allowTitle = allowOn
+  const yesTitle = yesOn
     ? `替你按「Yes」（屏上第 ${ps.yesN} 项 —— 只在它确实是单独的 Yes 时才按）`
-    : (why || "现在按不了");
+    : (why || "这一屏上没有单独的「Yes」—— 用旁边带条件的选项，或去这一格选");
   const denyTitle = denyOn
     ? "替你按 Esc（等同选 No：拒绝这一次，这一轮继续）"
     : (why || "现在按不了");
+  /* 纯 Yes/No 不上 pills：Yes 就是「允许」，No 由「拒绝」(Esc) 覆盖。
+     其余（带条件的）全部原样搬上来，点了发它自己的编号。 */
+  const extras = ((ps && ps.opts) || []).filter((o) => o.label !== "Yes" && o.label !== "No");
+  let extraHTML = "";
+  for (const o of extras) {
+    const title = ok ? `按第 ${o.n} 项：${o.label}` : (why || "现在按不了");
+    extraHTML += `<button class="go extra${ok ? "" : " mute"}" data-perm="opt"` +
+      ` data-n="${o.n}" data-h="${permHash(o.label)}"` +
+      ` title="${esc(title)}">${o.n} · ${esc(permShort(o.label))}</button>`;
+  }
   return `<div class="gperm" data-pi="${esc(a.id || "")}">` +
     `<div class="ph"><span>要你批权限</span>` +
       `<span class="px" title="${esc(a.text || a.tool || "")}">· ${esc(clamp(a.text || a.tool || "", 90))}</span>` +
     `</div>` +
     `<div class="pq">${esc(clamp(q, 300))}</div>` +
     `<div class="pf">` +
-      `<button class="go allow${allowOn ? "" : " mute"}" data-perm="allow"` +
-        ` title="${esc(allowTitle)}">允许</button>` +
+      `<button class="go allow${yesOn ? "" : " mute"}" data-perm="allow"` +
+        ` title="${esc(yesTitle)}">允许</button>` +
+      extraHTML +
       `<button class="go deny${denyOn ? "" : " mute"}" data-perm="deny"` +
         ` title="${esc(denyTitle)}">拒绝</button>` +
       `<span class="tm" data-at="${esc(a.at || "")}" title="${esc(absTime(a.at))}">${esc(rel(a.at))}</span>` +
@@ -227,12 +287,14 @@ function watchPermEcho(t, id, el, act, label) {
   setTimeout(tick, 300);
 }
 
-/* 点「允许 / 拒绝」。闸全过才写字节；任何一条不过就什么都不送。 */
-function permFromGroup(t, el, allow) {
+/* 点「允许 / 拒绝 / 带条件的选项」。闸全过才写字节；任何一条不过就什么都不送。 */
+function permFromGroup(t, el) {
   const box = el.closest ? el.closest(".gperm") : null;
   const id = (box && box.dataset.pi) || "";
-  const act = allow ? "allow" : "deny";
-  const label = allow ? "允许" : "拒绝";
+  const how = (el && el.dataset && el.dataset.perm) || "";
+  const act = how === "deny" ? "deny" : how === "opt" ? "opt" : "allow";
+  const wantN = +((el && el.dataset && el.dataset.n) || 0);
+  const label = act === "deny" ? "拒绝" : act === "opt" ? `选项${wantN}` : "允许";
   const v = LIVE.get(t.id);
   const it = v && (v.acts || []).find((x) => x.id === id);
   // 闸①：那条工具调用还挂着（结构化判据，比屏幕硬）
@@ -251,26 +313,38 @@ function permFromGroup(t, el, allow) {
   if (!permScreenMatches(p.region, it))
     return permNote(el, id, act, "屏上这一屏和转录对不上（可能已经换成另一件事了），没按");
 
-  let send, k;
-  if (allow) {
+  let send, k, pick = "";
+  if (act === "deny") {
+    // Esc 与高亮/编号无关（实测等同选 No，这一轮继续）
+    k = "Esc";
+    send = "\x1b";
+  } else if (act === "opt") {
+    // 闸⑥：这一项**现在**还在屏上，而且文字和卡片上那颗一致（见 permHash）
+    if (!(wantN >= 1) || !p.opts[wantN])
+      return permNote(el, id, act, "屏上已经没有这一项了（可能换了件事），没按");
+    if (permHash(p.opts[wantN]) !== String((el.dataset && el.dataset.h) || ""))
+      return permNote(el, id, act, "屏上的选项和刚才看到的不一样了（可能换了件事），没按");
+    k = String(wantN);
+    send = k;
+    pick = p.opts[wantN];
+  } else {
     // 闸⑥：屏上必须**恰好**有一行标签是 `Yes`（`Yes, and …` 变体不算）
     if (!p.yesN) return permNote(el, id, act,
       p.yesCount ? "屏上有不止一个「Yes」，认不准，没按"
                  : "这一屏上没有单独的「Yes」（只有带条件的是）—— 去这一格选，没按");
     k = String(p.yesN);
     send = k;
-  } else {
-    // Esc 与高亮/编号无关（实测等同选 No，这一轮继续）
-    k = "Esc";
-    send = "\x1b";
+    pick = p.opts[p.yesN] || "";
   }
   permErr.delete(id);
   permBusy.set(t.id, { id, act });
   t.stream.send(enc.encode(send));
-  scheduleGroup();                      // 立刻把两颗键做灰（连点的第一道挡）
+  scheduleGroup();                      // 立刻把动作做灰（连点的第一道挡）
   sendCtrl({ type: "log", msg:
     `批权限 按=${label} tab=${t.id} 送=${k}` +
-    `${allow ? ` 屏上第${p.yesN}行=「${(p.opts[p.yesN] || "").slice(0, 24)}」高亮第${p.hiN || 0}行` : ""}` +
+    `${act === "deny" ? "" :
+      ` 屏上第${act === "opt" ? wantN : p.yesN}行=「${String(pick).slice(0, 28)}」` +
+      (act === "allow" ? `高亮第${p.hiN || 0}行` : "")}` +
     ` 「${String(it.text || it.tool || "").slice(0, 40)}」` });
   watchPermEcho(t, id, el, act, label);
 }
