@@ -2111,9 +2111,14 @@ svg{display:block;flex:none}
 
 /* 「要你批权限」—— 批准框那一张卡。和待办卡同一个位置、同一套边距。
    动作：允许（按屏上那个单独的 Yes）、带条件选项（按各自编号直发）、拒绝（Esc）——
-   动作区不显示编号、只留中文短标签（编号在 title 与日志里）——
-   只有中间一项带「2 ·」会读成一排割裂的东西；见 55-perm.js。
-   选项多/文字长时这一行允许折行（卡片在行里，不能横向溢出）。
+   **三种形态一眼分开**（2026-10-19 用户确认的方案 A）：
+     允许   = 唯一一颗实心主按钮（--accent 蓝底白字）
+     条件项 = 描边 chip（透明底 + 1px 边），多个并排也有各自边界
+     拒绝   = 无边框红字，推到右侧，与「允许这一族」隔开
+     更多   = 更弱的 disclosure，不跟选项同形；时间/去这一格也是导航类
+   全部 11px / 500 字重 —— 层级只靠底色、描边、颜色，不靠字重
+   （600 的「允许」在同族同字号下会被读成另一种字体）。动作区不显示编号，
+   编号在 title 与日志里；见 55-perm.js。选项多/文字长时这一行允许折行，
    不可用时做灰、不做禁、不做隐 —— 为什么不可用写在 title 上（禁了 title 不弹）。 */
 .gperm{margin:8px 12px 8px 31px;border:1px solid var(--line-soft);border-radius:6px;
        background:var(--card);overflow:hidden;
@@ -2130,25 +2135,39 @@ svg{display:block;flex:none}
            overflow-wrap:anywhere}
 .gperm .pf{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:7px 10px;
            border-top:1px solid var(--line-soft);font:10.5px/1 var(--sans);color:var(--faint)}
-.gperm .pf .go{margin-left:0;border:0;background:none;color:var(--fg2);font:11px/1 var(--sans);
-               cursor:pointer;padding:3px 6px;border-radius:4px}
-/* 「允许」是这一行的主张（照 Orca 的第一项主样式）；「拒绝」保持普通权重。 */
-.gperm .pf .go.allow{color:var(--fg);font-weight:600}
-.gperm .pf .go:hover{background:var(--card-hov);color:var(--fg)}
+.gperm .pf .go{margin-left:0;border:0;background:none;color:var(--fg2);
+               font:500 11px/1 var(--sans);cursor:pointer;padding:3px 6px;border-radius:5px}
+/* 允许：只此一颗实心，主按钮。 */
+.gperm .pf .go.allow{background:var(--accent);color:#fff;padding:4px 10px}
+.gperm .pf .go.allow:hover{background:#1b52f0;color:#fff}
+/* 条件项：描边 chip，每一项都有清楚的边界。 */
+.gperm .pf .go.extra{border:1px solid var(--line);padding:3px 8px}
+.gperm .pf .go.extra:hover{background:var(--card-hov);border-color:rgba(255,255,255,.14);color:var(--fg)}
+/* 展开器：比选项弱，是一枚 disclosure，不是第三类选择。 */
+.gperm .pf .go.more{color:var(--faint);font-weight:400;padding:3px 4px}
+.gperm .pf .go.more:hover{background:none;color:var(--fg2)}
+/* 拒绝：负向、无边框、吃余量推到右侧，与允许左右分开。 */
+.gperm .pf .go.deny{margin-left:auto;color:var(--red);padding:4px 8px}
+.gperm .pf .go.deny:hover{background:rgba(255,101,104,.08);color:var(--red)}
+/* 时间与「去这一格」是导航，不是选择：一道竖线与拒绝隔开，颜色再压一档。 */
+.gperm .pf .tm{border-left:1px solid var(--line-soft);padding-left:8px;margin-left:2px}
+.gperm .pf .go[data-go]{color:var(--faint)}
+.gperm .pf .go[data-go]:hover{color:var(--fg2)}
+/* 不可用：灰（颜色/底色），不做禁。 */
 .gperm .pf .go.mute{color:var(--faint);cursor:default;font-weight:400}
-.gperm .pf .go.mute:hover{background:none;color:var(--faint)}
-/* 靠右那一摞只有「去这一格」一颗（时间跟着它）—— 同 .gask 的理由：只有最后一颗
-   吃余量，否则这一组会被均匀摊开。 */
-.gperm .pf .go:last-of-type{margin-left:auto}
+.gperm .pf .go.allow.mute,.gperm .pf .go.allow.mute:hover{background:rgba(255,255,255,.06);color:var(--faint)}
+.gperm .pf .go.extra.mute,.gperm .pf .go.extra.mute:hover{background:none;border-color:var(--line-soft);color:var(--faint)}
+.gperm .pf .go.deny.mute,.gperm .pf .go.deny.mute:hover{background:none;color:var(--faint)}
+.gperm .pf .go.mute:hover{background:none}
 /* 附加选项超过 3 个时展开的清单（卡内、一行一个；点行 = 按那一项，编号在 title 里）。
    收起时整块不渲染，动作区只有「更多 N 项 ▾」。 */
 .gperm .pmore{padding:4px 8px;border-top:1px solid var(--line-soft);
               display:flex;flex-direction:column;gap:2px}
 .gperm .pmore .gopt{border:0;background:none;text-align:left;padding:4px 6px;
                     border-radius:4px;cursor:pointer;
-                    font:11px/1.4 var(--sans);color:var(--fg2)}
+                    font:500 11px/1.4 var(--sans);color:var(--fg2)}
 .gperm .pmore .gopt:hover{background:var(--card-hov);color:var(--fg)}
-.gperm .pmore .gopt.mute{color:var(--faint);cursor:default}
+.gperm .pmore .gopt.mute{color:var(--faint);cursor:default;font-weight:400}
 .gperm .pmore .gopt.mute:hover{background:none;color:var(--faint)}
 .gperm .perr{padding:6px 10px;border-top:1px solid var(--line-soft);
              font:11.5px/1.5 var(--sans);color:var(--red)}
