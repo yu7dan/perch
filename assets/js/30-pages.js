@@ -760,11 +760,18 @@ function openAgentPanel(why) {
   if (top + r.height > window.innerHeight - 6) top = Math.max(6, a.top - r.height - 8);
   panel.style.left = Math.round(left) + "px";
   panel.style.top = Math.round(top) + "px";
+  /* 焦点一打开就落在**当前 Agent 行**上：名单的方向键拿
+     document.activeElement 当起点找“现在在哪一行”（见 #op-aglist 的 keydown）。
+     焦点留在面板外时它算 -1，第一次按 ↓ 会跳到第一行而不是选中行的下一行
+     —— 用户报的“方向键不跟手”就是这一条。 */
+  const selRow = panel.querySelector(".op-agent.on") || panel.querySelector(".op-agent");
+  if (selRow) selRow.focus({ preventScroll: true });
   sendCtrl({ type: "log", msg: `选择面板 打开（${why || ""}）` +
     ` 锚=${Math.round(a.left)},${Math.round(a.bottom)} ` +
     `落=${Math.round(left)},${Math.round(top)} ${Math.round(r.width)}x${Math.round(r.height)} ` +
     `页签=${opTab} 工作区=${opWSPath || "(默认)"} 历史=${opSessionCount()} 条 ` +
-    `Agent=${opAgent || "(无)"}（设置默认=${opDefaultPinned() || "自动"}）` });
+    `Agent=${opAgent || "(无)"}（设置默认=${opDefaultPinned() || "自动"}）` +
+    ` 焦点=${selRow && document.activeElement === selRow ? selRow.dataset.agent : "未落上"}` });
 }
 
 async function opNewAgent() {

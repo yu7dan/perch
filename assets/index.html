@@ -681,9 +681,21 @@
         <section class="settings-sec" data-search="行为 交互 behavior interaction">
           <div class="settings-sec-head">
             <h2>行为</h2>
-            <p>关窗和结束 agent 都是会带走正在运行的东西的动作，默认先问一句。</p>
+            <p>新建格子时预选哪个 Agent；关窗和结束 agent 都是会带走正在运行的东西的动作，默认先问一句。</p>
           </div>
           <div class="settings-card">
+            <div class="settings-row" data-set-row="defaultAgent"
+                 data-search="默认 agent 新建 新开 default spawn choose agent">
+              <div class="settings-lab">
+                <b>默认 Agent</b>
+                <span>点 + 新建格子时预选谁。自动 = 优先挑有状态能力的已安装 Agent。<em class="set-def"
+                      data-set-default-hint="defaultAgent"></em></span>
+              </div>
+              <div class="settings-ctl">
+                <select id="set-agent" class="set-select" aria-label="默认 Agent"></select>
+                <button type="button" class="set-reset" data-set-reset="defaultAgent" hidden>恢复默认</button>
+              </div>
+            </div>
             <div class="settings-row" data-set-row="confirmClose"
                  data-search="关闭 关窗 窗口 退出 确认 close window quit exit confirm">
               <div class="settings-lab">

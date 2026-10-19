@@ -240,9 +240,10 @@ async function createTab(spec) {
     // C2：Go 护栏拒绝这次启动时，原因记在这儿（见 ctl 的 tab.ok 处理）。
     resumeRefused: null,
     // 冷恢复出来的格子：重连第一帧（evidence=resync）里的 waiting 可能来自
-    // 重启前的旧状态，先不认。任何活证据到了就清除（见 80-live.js）。
+    // 重启前的旧状态。**照常显示，但先不算未读**（Orca 的 restoredUnconfirmed）；
+    // 任何活证据到了就确认，见 80-live.js 的 confirmRestored / needModel。
     restoredUnconfirmed: !!(spec && spec.restored),
-    resyncWaitIgnored: false,
+    waitUnconfirmed: false,
     // —— WebGL：装在一个**容器**里而不是两个散变量。上下文丢失时 addon 会被
     //    置回 null，那份改动必须被外面（状态栏那格读数）看见。
     gfx: { addon: null, on: false },

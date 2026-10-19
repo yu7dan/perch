@@ -615,6 +615,8 @@ function watchedNow(t) {
 function confirmRestored(t, why) {
   if (!t || !t.restoredUnconfirmed) return;
   t.restoredUnconfirmed = false;
+  // resync 报上来的那条 waiting 也随确认转为“真等待”（之后按正常规则算未读）。
+  t.waitUnconfirmed = false;
   sendCtrl({ type: "log", msg: `冷恢复 tab=${t.id} 已确认（${why}）：之后的状态按活事件算` });
 }
 
@@ -624,15 +626,20 @@ function confirmRestored(t, why) {
    它比登记表（≤700ms）和 Notification（实测晚 6 秒）都早，而且知道具体是
    哪一种。登记表随后到的 waiting 只会走 applyAgent 的“已在等待”分支，
    不会重复记未读（alreadyBlocked / prev 判断）。 */
-function enterWaitingFromHook(t, v, kind, text, why) {
+function enterWaitingFromHook(t, v, kind, text, why, tid, agent) {
   const at = new Date().toISOString();
   const was = v.st === "waiting";
   v.st = "waiting";
   // 四态：提问工具 = blocked（有具体卡片），批准框 = waiting（泛化等待）。
   // wire 上两者都是 waiting，UI 现有判据不分叉。
-  v.state = why === "PreToolUse" ? "blocked" : "waiting";
+  // ⚠️ 判据是 **kind** 而不是事件名：新版 Claude 会把 AskUserQuestion 报成
+  // PermissionRequest（Orca claude-events.ts:112-118 实测过），那也是一张提问卡。
+  v.state = kind === "ask" ? "blocked" : "waiting";
   v.evidence = "hook";
-  v.wait = { kind, text: text || "", at };
+  /* id/agent 是**销账的钥匙**（Wave 2）：PostToolUse 到达时要认出“返回的正是
+     在等的那个调用”。Orca 用 waitingToolUseId 判这件事，并专门挡掉“平行兄弟
+     调用先返回、把还在挂着的问题销掉”（claude-events.ts:156-166）。 */
+  v.wait = { kind, text: text || "", at, id: tid || "", agent: agent || "" };
   v.at = at;
   if (!was) {
     if (!watchedNow(t)) {
@@ -663,6 +670,22 @@ function leaveWaitingFromHook(t, v, why) {
   v.evidence = "hook";
   v.wait = null;
   scheduleLive();
+}
+
+/* 这条 PostToolUse/PostToolUseFailure 能不能销掉当前的等待？
+   判据照 Orca 的 claude-events.ts:112-166：
+     · **工具调用 id 优先**（waitingToolUseId）—— 平行兄弟调用（比如同时跑了
+       两个 Bash，其中一个返回）不许把另一个还挂着的等待销掉；
+     · 没有 id 的旧 payload 退回“工具名 + 谁在等”；
+     · agent 必须一致：子代理自己的工具返回销不了主线程的等待（反过来也一样）。
+   子代理自己被批准的那一次是个**正当例外** —— 它的等待里记着同一个 agent_id，
+   所以这里天然放行。 */
+function postToolClosesWait(v, m) {
+  if (!v || v.st !== "waiting" || !v.wait) return false;
+  if ((v.wait.agent || "") !== (m.agent || "")) return false;
+  const wid = v.wait.id || "", mid = m.tid || "";
+  if (wid && mid) return wid === mid;
+  return !!v.wait.text && v.wait.text === (m.tool || "");
 }
 
 // 「这一格**已经**处于卡在等你」—— 由两条**比 hook 更早、更具体**的腿判断：
@@ -739,6 +762,8 @@ function applyHook(m) {
      会话**变了**（格内 /clear 换了一条）就改写：这里答的是"现在在跑谁"，旧那条
      已经不在这一格里了（Go 侧 panes.bind 同一时刻也把 Spoke 清掉）。 */
   adoptSession(t, m.session, `${m.event}${m.source ? " " + m.source : ""}`);
+  // 这条事件是不是“来确认冷恢复那条未确认等待”的（确认前先记下来，见 switch 之后）。
+  const coldWait = !!t.waitUnconfirmed;
   // 任何一条 hook 都是活证据：冷恢复的 resync 静音到此为止。
   confirmRestored(t, `hook ${m.event || "?"}`);
   const v = liveOf(tab);
@@ -782,17 +807,61 @@ function applyHook(m) {
       // 它有自己的数据源（转录里的 Agent 工具调用带描述），不在这里重复记账。
       break;
     }
-    case "PermissionRequest":
+    case "PermissionRequest": {
       // 批准框出现。这是 perm 等待的第一手证据（比 Notification 早得多），
-      // 带 tool_name；state 是 waiting（不是 blocked —— 没有提问卡片）。
-      enterWaitingFromHook(t, v, "perm", m.tool || "", "PermissionRequest");
+      // 带 tool_name。新版 Claude 也可能用它报 AskUserQuestion —— 那要算提问
+      // （blocked + “在等你回答”），不能一律按批准框算。
+      const kind = m.tool === "AskUserQuestion" ? "ask" : "perm";
+      enterWaitingFromHook(t, v, kind, m.tool || "", "PermissionRequest", m.tid, m.agent);
       break;
+    }
     case "PreToolUse":
       // 只订阅了 AskUserQuestion（matcher 写死在 --settings 里）。这里再判一次
       // 工具名：旧 --settings（订阅表是启动时写死的）万一送来别的工具，不能
       // 把一次普通工具调用记成“在等你提问”。
       if (!m.tool || m.tool === "AskUserQuestion") {
-        enterWaitingFromHook(t, v, "ask", m.tool || "", "PreToolUse");
+        enterWaitingFromHook(t, v, "ask", m.tool || "", "PreToolUse", m.tid, m.agent);
+      }
+      break;
+    /* —— Wave 2 的收尾信号（Orca managed hook 同一组，见 hooks.go 文件头）——
+       没有它们，「在等你」只能等 Stop 才销：用户答完批准后这一轮可能还要跑
+       好几分钟，期间右栏一直挂着一条已经解决了的等待。 */
+    case "UserPromptSubmit":
+      // 用户又发了提示 ⇒ 之前那条等待一定已经是旧账。
+      // 不在这里置 busy：/compact 的续跑提示也会走这个事件（Orca 直接忽略它），
+      // 而登记表 700ms 内会报出真实的 busy。
+      leaveWaitingFromHook(t, v, "hook UserPromptSubmit：用户发了新提示");
+      break;
+    case "PostToolUse":
+    case "PostToolUseFailure": {
+      const wasWaiting = v.st === "waiting";
+      const closed = postToolClosesWait(v, m);
+      if (closed) {
+        leaveWaitingFromHook(t, v, `hook ${m.event}：${m.tool || "工具"} 已返回`);
+      }
+      /* 工具返回 ≠ 这一轮结束：模型通常还要接着说，Orca 把这两条映射成
+         working。只有**主线程**的工具事件能改格子状态；子代理的工具活动不
+         代表主线程在干什么。⚠️ 还在等（平行兄弟调用返回）时绝不覆盖 waiting
+         —— 那会把一个真的还挂着的问题销掉（Orca 的
+         isParallelSiblingCompletionDuringQuestion 就是挡这件事）。 */
+      if (!m.agent && (!wasWaiting || closed)) {
+        v.st = "busy";
+        v.state = "working";
+        v.evidence = "hook";
+        v.wait = null;
+      }
+      break;
+    }
+    case "PostCompact":
+      /* 只有**手动** /compact 落在空闲提示符上（手动的唯一收尾信号，Orca
+         STA-2915）；auto compact 发生在一轮内部，随后还有自己的 Stop ——
+         那时什么都不该声明（Orca claude-compact-completion.ts:1-12）。 */
+      if ((m.trigger || "") === "manual") {
+        leaveWaitingFromHook(t, v, "hook PostCompact：手动压缩完成");
+        v.st = "idle";
+        v.state = "done";
+        v.evidence = "hook";
+        v.wait = null;
       }
       break;
     case "SessionStart":
@@ -819,6 +888,14 @@ function applyHook(m) {
       break;
     }
   }
+  /* 冷恢复那条“只显示、不算未读”的等待，被这条活证据确认之后就是普通等待了
+     —— 补记一次（规矩不变：只记一次，且只在没看着它的时候）。 */
+  if (coldWait && !t.waitUnconfirmed && v.st === "waiting" && !v.note && !watchedNow(t)) {
+    v.note = { kind: (v.wait && v.wait.kind) || "ask",
+               text: (v.wait && v.wait.text) || "", at };
+    sendCtrl({ type: "log", msg:
+      `记未读 tab=${t.id} 因=冷恢复的等待被活证据确认（hook ${m.event}）` });
+  }
   scheduleLive();
 }
 
@@ -831,17 +908,21 @@ function applyAgent(m) {
   adoptSession(t, m.session, `状态 ${m.agent || "agent"} ${m.status || ""}`.trim());
   const evidence = m.evidence || "";
   /* 冷恢复的 resync：这是 app-server 补齐的**快照**，不是新事件。waiting 可能
-     是重启前留下的（用户可能早就回答过了），先不认 —— 等一条活事件。busy/idle
-     照常应用：它们不会凭空记一条“需要你”。 */
-  if (t.restoredUnconfirmed && evidence === "resync" && m.status === "waiting") {
-    if (!t.resyncWaitIgnored) {
-      t.resyncWaitIgnored = true;
-      sendCtrl({ type: "log", msg:
-        `冷恢复 tab=${t.id} 忽略 resync 的 waiting（state=${m.state || "?"} ` +
-        `kind=${m.kind || "?"}）：等一条活事件再认` });
-    }
-    return;
+     是重启前留下的（用户可能早就回答过了）。Orca 对水合上来的非终态就是这么
+     处理的：**照常显示，但标成 restoredUnconfirmed —— 不算新鲜、不产生未读**，
+     等一条活证据再确认（server-hydration.ts:105-108 +
+     terminal-tab-activity-status.ts:67-70）。我们之前是整帧丢掉：界面在“它真的
+     还卡着”时反而漏掉了一次该看见的等待。 */
+  const coldWait = !!(t.restoredUnconfirmed && evidence === "resync" && m.status === "waiting");
+  if (coldWait && !t.waitUnconfirmed) {
+    t.waitUnconfirmed = true;
+    sendCtrl({ type: "log", msg:
+      `冷恢复 tab=${t.id} resync 报 waiting（state=${m.state || "?"} ` +
+      `kind=${m.kind || "?"}）：可见但不算未读，等活证据确认` });
   }
+  /* 这条帧到来**之前**那条等待是不是未确认的 —— 确认之后要补记一次未读，
+     所以必须在 confirmRestored 清旗之前取下来。 */
+  const wasUnconfirmed = !!t.waitUnconfirmed;
   if (evidence && evidence !== "resync") confirmRestored(t, `活证据 ${evidence}`);
   const v = liveOf(tab);
   const prev = v.st;
@@ -857,7 +938,13 @@ function applyAgent(m) {
     const k = m.kind ||
       (pt ? (pt.tool === "AskUserQuestion" ? "ask" : "perm") : "") ||
       (v.wait && v.wait.kind) || "ask";
-    v.wait = { kind: k, text: m.text || (v.wait && v.wait.text) || "" };
+    /* 登记表/外部状态源说的是“同一件事还在等”时，把 hook 留下的销账钥匙
+       （tool_use_id / agent_id）带过去 —— 否则 PostToolUse 只能退回按工具名认。
+       外部源自带 kind（它在说一件新的等待）时则不继承。 */
+    const old = v.wait;
+    const keep = (!m.kind && old) ? { id: old.id || "", agent: old.agent || "" }
+                                   : { id: "", agent: "" };
+    v.wait = { kind: k, text: m.text || (old && old.text) || "", ...keep };
   } else {
     v.wait = null;
   }
@@ -874,7 +961,8 @@ function applyAgent(m) {
   //      走 ackNote 而不是直接置 null —— "未读自己没了"必须留一行原因，
   //      否则分不出"用户销的"和"代码误销的"（那条规矩见 ackNote）。
   if (prev !== "waiting" && v.st === "waiting") {
-    if (!watchedNow(t)) {
+    // 冷恢复的 resync 那一帧只说“显示”，不说“未读”（见上面 coldWait）。
+    if (!watchedNow(t) && !t.waitUnconfirmed) {
       v.note = { kind: v.wait.kind, text: v.wait.text, at: new Date().toISOString() };
       // 未读**出现**也要留一行：`[ui need]` 里那个"徽标=1"只说它在了，
       // 说不出是谁、因为什么把它记上的（对称于 ackNote 那条"消失必须留原因"）。
@@ -884,6 +972,14 @@ function applyAgent(m) {
     }
   } else if (prev === "waiting" && v.st !== "waiting") {
     if (v.note && (v.note.kind === "ask" || v.note.kind === "perm")) ackNote(t, "已从等待恢复");
+    t.waitUnconfirmed = false;
+  } else if (prev === "waiting" && v.st === "waiting" && wasUnconfirmed && !t.waitUnconfirmed) {
+    /* 冷恢复的那条等待刚刚被活证据确认：现在它才是“真的在等你”。 */
+    if (!watchedNow(t) && !v.note) {
+      v.note = { kind: v.wait.kind, text: v.wait.text, at: new Date().toISOString() };
+      sendCtrl({ type: "log", msg:
+        `记未读 tab=${t.id} 因=冷恢复的等待被活证据确认（${v.wait.kind}，${m.agent || "agent 状态"}）` });
+    }
   } else if (prev === "waiting" && v.st === "waiting" && (m.kind || m.text)) {
     // 还在等，但问题/权限换了：更新那一行。你正看着它时不补记未读。
     if (v.note && (v.note.kind === "ask" || v.note.kind === "perm")) {
@@ -1080,7 +1176,11 @@ function needModel() {
     // **只在你不看它的时候**算未读 —— 你正看着它，那一行就在你眼前，不必再报一次。
     // ⚠️ 这一条原来是 `kind === "ask"`，2026-10-16 补上 perm：waiting 现在两种都算，
     //    只留 ask 就会变成"同一种等待，问题算未读、权限框不算"这种没有道理的区别。
-    const unread = !!n || ((kind === "ask" || kind === "perm") && t !== activeTab);
+    // ⚠️ 2026-10-19（Wave 2）：冷恢复的 resync waiting 先**可见但不算未读**
+    //    （Orca 的 restoredUnconfirmed）。否则重开一次就凭空多一条“需要你”，
+    //    而那条等待可能在你关掉 Perch 之前就已经答过了。
+    const unread = !t.waitUnconfirmed &&
+      (!!n || ((kind === "ask" || kind === "perm") && t !== activeTab));
     // ⚠️ 文字和时间**取最具体那条腿**：转录里那条 tool 的 text 就是权限框自己那句
     //   描述（实测 `Write permtest file`，和屏幕上的权限框一字不差），比 hook 的
     //   "Claude needs your permission" 有用得多。

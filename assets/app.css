@@ -2522,6 +2522,18 @@ svg{display:block;flex:none}
 .set-seg button.na{color:rgba(161,161,161,.42)}
 .set-seg button.na:hover{color:rgba(161,161,161,.42)}
 
+/* 下拉（默认 Agent）：和分段控件同一块控制面材质。原生 select 在深色主题里
+   会带系统白底，必须 appearance:none 再自己画箭标（和窗口控件的笔法一致）。 */
+.set-select{height:30px;min-width:158px;max-width:220px;padding:0 26px 0 10px;
+            border:1px solid var(--line);border-radius:8px;background:#0d0d0f;
+            color:var(--fg2);font-size:12px;appearance:none;cursor:pointer;
+            background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23a1a1a1' stroke-width='2.4'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat:no-repeat;background-position:right 8px center;
+            transition:border-color .14s,color .14s}
+.set-select:hover{border-color:rgba(255,255,255,.18);color:var(--fg)}
+.set-select:focus-visible{outline:2px solid rgba(115,115,115,.62);outline-offset:2px}
+.set-select option{background:#141416;color:var(--fg2)}
+
 /* 字体卡：用字体自己写样张，选中的那枚有描边和一颗小圆点。 */
 .set-fontcards{display:flex;gap:8px}
 .set-fontcard{position:relative;width:168px;padding:10px 12px;border:1px solid var(--line);

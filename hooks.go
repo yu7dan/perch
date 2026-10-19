@@ -33,19 +33,31 @@ import (
 //  4. `onFailure` 默认 `continue`，且在 async/Stop 上被忽略 —— "hook 挂了不影响
 //     agent" 是默认行为，不用额外声明。
 //
-// 订阅表刻意**不含** PostToolUse / 宽 matcher 的 PreToolUse：那是每次工具调用起一个
-// 进程，而这一层要的是「这一轮的状态」。要「改动」的细粒度走 jsonl（store.go），不走 hook。
+// 订阅表刻意**保持收敛**：PreToolUse 只收 AskUserQuestion（不是宽 matcher）；
+// 每次工具调用的事件只收 PostToolUse / PostToolUseFailure（只用来销账，见
+// 下面的 Wave 2）。要「改动」的细粒度走 jsonl（store.go），不走 hook。
 //
-// 2026-10-19 加了两个**窄**例外（Wave 1：低延迟的“卡在等你”信号）：
+// 2026-10-19 Wave 1 加了两个**窄**例外（低延迟的“卡在等你”信号）：
 //
 //	PermissionRequest        批准框一出现就到（比 Notification 早、还带 tool_name）
 //	PreToolUse(matcher=AskUserQuestion)  提问选择器一出现就到
 //
 // 这两个是交互点，不是背景观察，所以它们**同步**跑（不加 async）：观察进程只写
 // 一行就退出（毫秒级），同步不会拖慢用户；而 async 会把“它到底卡住了没有”变成
-// 一个事件到达前的猜测。matcher 是启动时写死的 —— 所以只订阅 AskUserQuestion，
-// 不是每次工具调用都起进程（Orca 的 managed hook 也是同一组事件，见
-// _ref\orca\fetched\src\main\claude\claude-managed-hook-events.ts:46-63）。
+// 一个事件到达前的猜测。
+//
+// 2026-10-19 Wave 2 又补了**收尾**的一组（Orca 的 managed hook 同一组事件，
+// _ref\orca\fetched\src\main\claude\claude-managed-hook-events.ts:9-72）：
+//
+//	PostToolUse / PostToolUseFailure（matcher=*，async）
+//	    工具返回 = 这次等待有结局。没有它，用户答完批准/提问后如果这一轮还
+//	    跑了几分钟，「在等你」会一直挂着，直到 Stop。
+//	UserPromptSubmit（async）    用户又发了提示 ⇒ 之前那条等待一定是旧账
+//	PostCompact（async）         手动 /compact 结束时不发 Stop（Orca STA-2915）
+//
+// PostToolUse 是**每次工具调用一个进程**，代价照实说：接收器是几 KB 的原生
+// exe（实测 16–25ms），且 async 不挡 agent。Orca 在同样规模上就是这么做的；
+// 真机上如果看到日志/CPU 噪音，退路是改用已经在 tail 的转录来销账。
 //
 // ⚠️ 一条从自己代码里踩出来的设计教训：**每个格子一个事件文件，归属由文件名定**。
 // 第一版所有格子共用一个文件、靠 session_id 反查格子，结果 SessionStart 比登记表
@@ -74,10 +86,14 @@ const (
 //	SubagentStart/Stop      —— 「子代理」那一栏的数据源
 //	PermissionRequest       —— 批准框出现（精确的 perm 等待）
 //	PreToolUse              —— 只订阅 AskUserQuestion（精确的 ask 等待）
+//	PostToolUse/PostToolUseFailure —— 工具返回：这次等待有结局（销账）
+//	UserPromptSubmit        —— 用户发了新提示：之前的等待是旧账（销账）
+//	PostCompact             —— 手动 /compact 结束，可能不发 Stop（销账）
 var hookEventTypes = []string{
 	"SessionStart", "SessionEnd", "Stop", "StopFailure",
-	"Notification", "SubagentStart", "SubagentStop",
-	"PermissionRequest", "PreToolUse",
+	"UserPromptSubmit", "Notification", "SubagentStart", "SubagentStop",
+	"PermissionRequest", "PreToolUse", "PostToolUse", "PostToolUseFailure",
+	"PostCompact",
 }
 
 // hookSyncEvents 是**交互点**：事件本身就是“人现在要做决定”，观察不能让
@@ -89,8 +105,14 @@ var hookSyncEvents = map[string]bool{
 
 // hookMatchers 给 PreToolUse 收窄到提问工具。PermissionRequest 不加 matcher：
 // 任何批准框都是“卡在等你”，都要看见。
+//
+// PostToolUse/PostToolUseFailure 用 "*"（Orca 同款，见其 managed-hook-events.ts:
+// 50-56）：它们的作用是「任何工具返回都来报告一声」，好让先前那条等待销账。
+// 这里不能只等 Stop —— 用户答完批准后这一轮可能还要跑好几分钟。
 var hookMatchers = map[string]string{
-	"PreToolUse": "AskUserQuestion",
+	"PreToolUse":         "AskUserQuestion",
+	"PostToolUse":        "*",
+	"PostToolUseFailure": "*",
 }
 
 func hookDir() string { return filepath.Join(claudeStateDir, hookDirName) }
@@ -168,7 +190,9 @@ type hookEvent struct {
 	AgentType            string `json:"agent_type"`             // 只有子代理里才有
 	AgentID              string `json:"agent_id"`               // 只有子代理里才有
 	Reason               string `json:"reason"`                 // StopFailure
-	ToolName             string `json:"tool_name"`              // PreToolUse / PermissionRequest
+	ToolName             string `json:"tool_name"`              // PreToolUse / PermissionRequest / PostToolUse
+	ToolUseID            string `json:"tool_use_id"`            // 工具调用的身份：销等待时靠它对准（不是靠工具名）
+	Trigger              string `json:"trigger"`                // PostCompact: manual / auto
 }
 
 // resetHookDir 启动时清空事件目录：这是**实时信号**不是历史，
@@ -316,6 +340,16 @@ func handleHookLine(line string, tabID int, push func(any)) {
 		// 只订阅了 AskUserQuestion（matcher 写死在 --settings 里）。这条就是
 		// “提问卡片刚画出来”的第一手证据；State 用 blocked（具体提问）。
 		log.Printf("[hook t%d] PreToolUse tool=%s session=%s", tab, orNone(ev.ToolName), short(ev.SessionID))
+	case "PostToolUse", "PostToolUseFailure":
+		// 一次工具调用一行。日志会变密 —— 但这是验证“等待真的销掉了”的唯一
+		// 字节证据（前端那行 销未读 靠它触发），先留着。
+		log.Printf("[hook t%d] %s tool=%s agent=%s session=%s",
+			tab, ev.HookEventName, orNone(ev.ToolName), orNone(ev.AgentID), short(ev.SessionID))
+	case "UserPromptSubmit":
+		// ⚠️ 不记 prompt 文本（用户定的隐私边界）：只记“用户发了一轮”。
+		log.Printf("[hook t%d] UserPromptSubmit session=%s", tab, short(ev.SessionID))
+	case "PostCompact":
+		log.Printf("[hook t%d] PostCompact trigger=%s session=%s", tab, orNone(ev.Trigger), short(ev.SessionID))
 	case "SubagentStart", "SubagentStop":
 		log.Printf("[hook t%d] %s agent_id=%s agent_type=%s", tab, ev.HookEventName, short(ev.AgentID), ev.AgentType)
 	default:
@@ -335,6 +369,8 @@ func handleHookLine(line string, tabID int, push func(any)) {
 		"reason":  ev.Reason,
 		"source":  ev.Source,
 		"tool":    ev.ToolName,
+		"tid":     ev.ToolUseID,
+		"trigger": ev.Trigger,
 		// 证据来源：前端拿它区分“活事件”和冷恢复时的重放（见 80-live.js
 		// 的 restoredUnconfirmed）。hook 永远算活事件。
 		"evidence": agentEvidenceHook,

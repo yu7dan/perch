@@ -70,8 +70,37 @@ function settingsDefaultLabel(key) {
   const v = SETTINGS_DEFAULTS[key];
   if (key === "termFontFamily") return v === "jetbrains" ? "JetBrains Mono" : "Cascadia Code";
   if (key === "startView") return v === "workspace" ? "工作区" : "总览";
+  if (key === "defaultAgent") return "自动";
   if (typeof v === "boolean") return v ? "开" : "关";
   return String(v);
+}
+
+/* 「默认 Agent」下拉的选项来自**当前探测到的名单**（opCatalog / opLaunchable，
+   30-pages.js），不是写死的枚举 —— 换台机器装了别的 Agent，这里跟着变。
+   持久值指向一个没装、不能启动的 Agent 时也要把它列出来（标「未安装」）并保持
+   选中：否则界面显示「自动」而盘上其实存着别的值，用户会被自己没做过的选择坑到。
+   只在选项集合变化时重建 <select>：重建会收起展开中的下拉、也会重置键盘焦点。 */
+function syncDefaultAgentSelect() {
+  const sel = $("set-agent");
+  if (!sel) return;
+  let cat = [];
+  try { cat = opCatalog(); } catch (_) { cat = []; }
+  const avail = cat.filter(opLaunchable);
+  const cur = SETTINGS.defaultAgent || "";
+  const rows = [{ id: "", name: "自动（按能力挑）" }]
+    .concat(avail.map((a) => ({ id: a.id, name: a.name || a.id })));
+  if (cur && !rows.some((r) => r.id === cur)) {
+    const a = cat.find((x) => x && x.id === cur);
+    rows.push({ id: cur, name: (a && a.name) || cur, missing: true });
+  }
+  const sig = rows.map((r) => `${r.id}:${r.name}${r.missing ? "!" : ""}`).join("|");
+  if (sel.dataset.sig !== sig) {
+    sel.dataset.sig = sig;
+    sel.innerHTML = rows.map((r) =>
+      `<option value="${esc(r.id)}">${esc(r.name)}${r.missing ? "（未安装）" : ""}</option>`)
+      .join("");
+  }
+  sel.value = cur;
 }
 
 function settingsCwdPaintError() {
@@ -243,6 +272,7 @@ function syncSettingsUI() {
       : label;
   }
 
+  syncDefaultAgentSelect();
   settingsSyncRadioTabStops();
 }
 
@@ -512,6 +542,13 @@ $("settings").addEventListener("click", (e) => {
   if (flag) {
     settingsSend({ [flag]: !SETTINGS[flag] }, flag);
   }
+});
+
+/* 默认 Agent 是 <select>：change 不走上面那个 button 点击出口。 */
+$("set-agent").addEventListener("change", (e) => {
+  const v = e.target.value || "";
+  if (v === SETTINGS.defaultAgent) return;
+  settingsSend({ defaultAgent: v }, `默认 Agent → ${v || "自动"}`);
 });
 
 /* 单选组的方向键（ARIA radio 语义）：←/↑ 上一个，→/↓ 下一个，Home/End 两端。
