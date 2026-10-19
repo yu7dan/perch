@@ -985,7 +985,7 @@ function groupRows() {
       }
       rank = 99;
     }
-    return { t, v, st, rank, ask: pendingAsk(v), latest: groupLatest(v) };
+    return { t, v, st, rank, ask: pendingAsk(v), perm: pendingPerm(v), latest: groupLatest(v) };
   }).sort((a, b) => (a.rank - b.rank) || (a.t.id - b.t.id));
 }
 
@@ -1076,11 +1076,11 @@ function renderGroupList(list) {
     }
 
     /* 第 ② 行：**只出最新那一条行动**。
-       有待办的行**没有这一行** —— 那一行最该被看见的一句是"它要你答什么"，已经由
-       下面那张卡的头一行说了（同一个事实在一行里说两遍，这个文件为它踩过一次：
+       有待办/待批的行**没有这一行** —— 那一行最该被看见的一句是"它要你答/批什么"，
+       已经由下面那张卡的头一行说了（同一个事实在一行里说两遍，这个文件为它踩过一次：
        「空闲/空闲」）。末级回落是**状态词**：那一级只在"这一格什么都还没说"时才走到
        （"不留空行"，Orca DashboardAgentRow.tsx:143-148 同判据）。 */
-    const line2 = r.ask ? ""
+    const line2 = (r.ask || r.perm) ? ""
       : (r.latest && r.latest.text) || (r.v && r.v.note && r.v.note.text) || stWord;
     const g2 = el.querySelector(".g2");
     if (g2.dataset.sig !== line2) {
@@ -1092,7 +1092,8 @@ function renderGroupList(list) {
       g2.innerHTML = line2 ? mdInline(esc(clamp(line2, 200))) : "";
     }
 
-    const at = (r.ask && r.ask.at) || (r.latest && r.latest.at) || (r.v && r.v.at) || "";
+    const at = (r.ask && r.ask.at) || (r.perm && r.perm.at) ||
+      (r.latest && r.latest.at) || (r.v && r.v.at) || "";
     const g3 = el.querySelector(".g3");
     const s3 = [at, t === activeTab ? "cur" : ""].join("\u0001");
     if (g3.dataset.sig !== s3) {
@@ -1122,6 +1123,23 @@ function renderGroupList(list) {
         const nu = el.querySelector(":scope > .gask");
         // ⚠️ 这一段里抛一个错，整个 renderGroupList 就断在这儿（这一页没有控制台，
         //    看到的现象是"群组不更新了"）—— 所以宁可少画一次也不赌它一定找得到。
+        if (nu) nu.dataset.sig = sig;
+      }
+    }
+
+    /* ④b 待批卡 —— 和待办卡同一个位置（g2 与 g3 之间）、同一条增量规矩。
+       ⚠️ 它的可用性**每帧现读屏**（permState）：权限框只在那格终端里，转录里没有；
+          屏一变（弹出来 / 被答掉 / 进了 Tab 输入态）按钮的活灰就得跟着变。 */
+    const pslot = el.querySelector(":scope > .gperm");
+    if (!r.perm) {
+      if (pslot) pslot.remove();
+    } else {
+      const ps = permState(r.perm, t);
+      const sig = permBlockSig(r.perm, ps);
+      if (!pslot || pslot.dataset.sig !== sig) {
+        const html = permHTML(r.perm, t, ps);
+        if (pslot) pslot.outerHTML = html; else g3.insertAdjacentHTML("beforebegin", html);
+        const nu = el.querySelector(":scope > .gperm");
         if (nu) nu.dataset.sig = sig;
       }
     }

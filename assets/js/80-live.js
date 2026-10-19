@@ -598,6 +598,17 @@ function pendingAsk(v) {
   const a = pendingTool(v);
   return a && a.tool === "AskUserQuestion" ? a : null;
 }
+/* 批准框那一类（2026-10-19）：挂着的工具调用**不是**提问，而且这一格确实在等批准。
+   为什么要 wait.kind 这道闸：`ok==null` 只说"这条工具还没结果"，工具正在跑的时候
+   也是它 —— 那是"在干活"，不是"在等你批"。PermissionRequest / 登记表的 waiting 都把
+   kind 填成 perm（见 enterWaitingFromHook / applyAgent）。 */
+function pendingPerm(v) {
+  if (!v || v.st !== "waiting") return null;
+  const a = pendingTool(v);
+  if (!a || a.tool === "AskUserQuestion") return null;
+  const k = (v.wait && v.wait.kind) || (v.note && v.note.kind) || "";
+  return k === "perm" ? a : null;
+}
 
 // 「你正看着这一格吗」= 它是当前格 **且** 窗口有焦点。两个条件缺一不可：
 // 只看"是不是当前格"，会把"切出去喝咖啡、回来发现跑完了"也当成看过了。

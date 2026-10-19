@@ -791,11 +791,12 @@ function groupFacts() {
   const rows = groupRows();
   const first = rows[0];
   const asked = rows.filter((r) => r.ask).length;
+  const perms = rows.filter((r) => r.perm).length;
   const hd = $("group-list") ? $("group-list").querySelectorAll(".gask.hd").length : 0;
   return `行=${rows.length}` +
     (first ? ` 排首=格${first.t.id}/${first.st}${first.ask ? "(挂着问题)" : ""}` : "") +
     // 待办卡是这一屏**唯一**会长高的东西 ⇒ 它几张、几张收着，是这块面最重要的读数
-    ` 待办=${asked}收着=${hd} 口开=${askOpen.size}` +
+    ` 待办=${asked}收着=${hd} 口开=${askOpen.size} 待批=${perms}` +
     ` 格宽=${Math.round($("group").getBoundingClientRect().width)}`;
 }
 
@@ -810,6 +811,17 @@ $("group").addEventListener("click", (e) => {
   if (!t) return;
   // 「进入 →」和「去这一格回答 →」都是同一个动作
   if (e.target.closest("[data-go],[data-go-ask]")) { goToTab(t, "点动作"); return; }
+  /* 「要你批权限」那两颗键 = 往那一格的 PTY 写一个键（数字 / Esc，见 55-perm.js）。
+     ⚠️ 和作答同一条规矩：**有选中文本时不动作** —— 这张卡也要能读、能选中复制。 */
+  const pb = e.target.closest("[data-perm]");
+  if (pb) {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim()) return;
+    permFromGroup(t, pb, pb.dataset.perm === "allow");
+    return;
+  }
+  /* 批权限卡里其余落点（表头、屏上那句问题、时间）= **什么都不做**（同待办卡）。 */
+  if (e.target.closest(".gperm")) return;
   /* 「点选项作答」：点的是选项行本身 ⇒ 往那一格的 PTY 写一个键（见 answerFromGroup）。
      ⚠️ 和下面点气泡同一条规矩：**有选中文本时不动作** —— 这份清单是用来读和选字
         复制的（Orca 那条"回答之后仍能选中原文"），一点就替人作答等于把"读"变成"改"。 */
