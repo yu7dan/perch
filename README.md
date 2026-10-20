@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/images/perch-mark.png" width="80" height="80" alt="Perch logo">
+
 # Perch
 
 **A desktop workspace for agent terminals.**<br>
