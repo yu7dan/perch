@@ -1,7 +1,7 @@
 package main
 
 import (
-	"perch/internal/agent"
+	"github.com/yu7dan/perch/internal/agent"
 )
 
 // 这一层只做两件事：把主程序的旧名字接到 internal/agent 的公开类型上，

@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"perch/internal/agent"
+	"github.com/yu7dan/perch/internal/agent"
 )
 
 /* ===========================================================================

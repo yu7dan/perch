@@ -1,4 +1,4 @@
-module perch
+module github.com/yu7dan/perch
 
 go 1.27.2
 

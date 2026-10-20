@@ -19,7 +19,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 
-	"perch/internal/agent"
+	"github.com/yu7dan/perch/internal/agent"
 )
 
 //go:embed assets
