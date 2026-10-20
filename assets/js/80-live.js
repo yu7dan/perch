@@ -1421,7 +1421,6 @@ function setNeedPop(open, why) {
 //   独立「改动」模块并进文件预览之后，这三个符号只剩文件树在用；
 //   ±N 仍是**字面量**（来自转录里 Edit 的 structuredPatch / Write 的 content）。
 const OP_LETTER = { write: "A", edit: "M", read: "R" };
-const OP_NAME = { write: "新建", edit: "改动", read: "读过" }; // 83-files 迁移前的旧表
 const OP_NAME_KEY = { write: "live.op.write", edit: "live.op.edit", read: "live.op.read" };
 function opName(op) {
   return OP_NAME_KEY[op] ? t(OP_NAME_KEY[op]) : op;

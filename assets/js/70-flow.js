@@ -114,7 +114,8 @@ const FLOW_REARM_PX = 4;
 // 工具调用和"思考…"**不进** —— 那是「流水」的活儿。同一栏里两处都画同一件事，
 // 那一栏就没有存在的必要了（子代理模块那条同理，见 renderSideLive）。
 const FLOW_ROLE = { prompt: "user", text: "agent", system: "sys", compact: "compact" };
-const FLOW_TAG = { user: "你", agent: "agent", sys: "系统", compact: "上下文已压缩" };
+// 文字在 i18n 的 flow.tag.* 里；这里只是个"这个角色认不认识"的集合。
+const FLOW_TAGS = new Set(["user", "agent", "sys", "compact"]);
 const FLOW_ICON = {
   user: '<circle cx="12" cy="8" r="3.4"/><path d="M5 20c1.6-3.6 4-5.4 7-5.4s5.4 1.8 7 5.4"/>',
   agent: '<path d="M12 3l2.2 6.1L20.5 11l-6.3 1.9L12 19l-2.2-6.1L3.5 11l6.3-1.9z"/>',
@@ -273,7 +274,7 @@ function flowRowHTML(it) {
   return `<div class="hit ${r}${open ? " open" : ""}"${it.id ? ` data-fid="${esc(it.id)}"` : ""}>
     <div class="fh">
       <span class="who"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">${FLOW_ICON[r] || FLOW_ICON.agent}</svg></span>
-      <span class="rl">${esc(FLOW_TAG[r] ? t("flow.tag." + r) : r)}</span>
+      <span class="rl">${esc(FLOW_TAGS.has(r) ? t("flow.tag." + r) : r)}</span>
       <span class="tm" data-at="${esc(it.at || "")}">${rel(it.at)}</span>
     </div>
     <div class="tx"><div>${md(it.text || "")}</div></div>
