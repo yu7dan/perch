@@ -18,6 +18,7 @@ const SETTINGS_DEFAULTS = Object.freeze({
   termFontSize: 14,
   termFontFamily: "cascadia",  // "cascadia" | "jetbrains"
   startView: "dash",           // "dash" | "workspace"
+  language: "auto",            // "auto"（跟随系统）| "en" | "zh"
   defaultAgent: "",            // 空 = 自动（优先有状态能力的已安装 agent）
   // 新建格快捷键：**应用内**、有焦点时生效。Ctrl/Alt 至少带一个，主键只认
   // A-Z / 0-9 / F1-F12；空串 = 关闭。这里存的是规范形状（Ctrl+Alt+N），
@@ -108,6 +109,8 @@ function normalizeSettings(raw) {
   s.startView = String(s.startView || "").toLowerCase() === "workspace"
     ? "workspace"
     : "dash";
+  const lang = String(s.language || "").toLowerCase();
+  s.language = (lang === "en" || lang === "zh") ? lang : "auto";
   // agent id 只做去空白；能不能用由 30-pages 的 defaultAgentId() 对着
   // **当前探测到的名单**判（设置里写着、但这台机器没装 = 回落到自动）。
   s.defaultAgent = typeof s.defaultAgent === "string" ? s.defaultAgent.trim().toLowerCase() : "";
@@ -151,6 +154,7 @@ function applySettings(next, meta) {
   const base = m.fromGo ? SETTINGS_DEFAULTS : SETTINGS;
   SETTINGS = normalizeSettings(Object.assign({}, base, next || {}));
   saveSettingsCache();
+  if (typeof setLocale === "function") setLocale(SETTINGS.language);
 
   if (typeof m.effectiveCwd === "string" && m.effectiveCwd) {
     SETTINGS_EFFECTIVE_CWD = m.effectiveCwd;

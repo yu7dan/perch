@@ -125,9 +125,9 @@ const NAV_ITEMS = [
      总览置顶、最显眼，而且默认启动就落在它上面 —— 用户要的是"一进来先看全局状态"。
      总览**不是一个格子**，是一整块主区视图（见 CSS 1b 段）。
      2026-10-18：设置页有了（默认目录 / 外观 / 行为），不再是灰项。 */
-  { view: "dash", label: "总览", icon: "dash" },
-  { view: "workspace", label: "工作区", icon: "folder", cnt: "nav-cnt-ws" },
-  { view: "settings", label: "设置", icon: "gear", bottom: true },
+  { view: "dash", labelKey: "nav.overview", icon: "dash" },
+  { view: "workspace", labelKey: "nav.workspace", icon: "folder", cnt: "nav-cnt-ws" },
+  { view: "settings", labelKey: "nav.settings", icon: "gear", bottom: true },
 ];
 
 /* 哪一项亮着。从"只有一个区"变成了真的三项（工作区 / 总览 / 设置）——
@@ -146,10 +146,11 @@ function renderNav() {
   if (!rail) return;
   const one = (n) => {
     const cls = "nav" + (n.view === NAV_HERE ? " on" : "") + (n.soon ? " soon" : "");
-    const extra = n.soon ? ` data-soon="1" title="${esc(n.why)}"` : "";
+    const extra = n.soon ? ` data-soon="1" title="${esc(t(n.whyKey || ""))}"` : "";
     const cnt = n.cnt ? `<span class="cnt" id="${n.cnt}">0</span>` : "";
-    return `<div class="${cls}" data-nav="${esc(n.label)}" data-view="${esc(n.view || "")}"${extra}>`
-      + svg(NAV_ICON[n.icon], 15, 1.7) + `<span>${esc(n.label)}</span>${cnt}</div>`;
+    const label = t(n.labelKey);
+    return `<div class="${cls}" data-nav="${esc(n.view || "")}" data-view="${esc(n.view || "")}"${extra}>`
+      + svg(NAV_ICON[n.icon], 15, 1.7) + `<span>${esc(label)}</span>${cnt}</div>`;
   };
   rail.innerHTML =
     NAV_ITEMS.filter((n) => !n.bottom).map(one).join("") +

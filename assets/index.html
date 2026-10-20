@@ -46,15 +46,15 @@
       <!-- 产品标：直接用设计稿 perch-logo.png（透明 PNG，形状与比例未改）。
            CSS 只裁掉四周的透明留白，让 22px 的槽里图形仍然看得清。 -->
       <span class="mark"><img src="/icons/perch-logo.png" alt="" draggable="false"></span>
-      <span class="tb-name" title="Perch（栖枝）">Perch</span>
+      <span class="tb-name" title="Perch（栖枝）" data-i18n-title="app.nameTitle">Perch</span>
     </div>
     <div class="tb-list"></div>
 
     <!-- 总览的模块切换：搬进窗口顶栏，形态照 magpie 的 .seg ——
          绝对居中在窗口上（left:50%），**没有轨道**，只有活动项底下那枚白片。
          只在 #app.dash 下显示（CSS），顶栏其余部分仍可拖动窗口。 -->
-    <div class="segs" id="dash-tabs" role="tablist" aria-label="总览分区"></div>
-    <button class="icon-btn" id="dash-refresh" title="重扫会话库（轮次、活跃天数随之刷新）">
+    <div class="segs" id="dash-tabs" role="tablist" aria-label="总览分区" data-i18n-aria-label="dash.tabs.aria"></div>
+    <button class="icon-btn" id="dash-refresh" title="重扫会话库（轮次、活跃天数随之刷新）" data-i18n-title="dash.refresh.title">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></svg>
     </button>
 
@@ -69,11 +69,11 @@
       <div id="tablist">
         <!-- 图标是 Lucide 的 layout-grid 原始 path（不是手绘）：并行 = 网格，
              而且和下面 .cellhead 上的 agent 图标在同一个视觉系统里。 -->
-        <div class="tab on" id="tab-parallel" title="并行视图：所有 agent 同屏">
+        <div class="tab on" id="tab-parallel" title="并行视图：所有 agent 同屏" data-i18n-title="chrome.parallel.title">
           <span class="tab-ico"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             ><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg></span>
-          <span class="nm ell">并行</span>
+          <span class="nm ell" data-i18n="chrome.parallel">并行</span>
           <span class="tn-cnt" id="pn-cnt">1</span>
         </div>
         <!-- 拎页时的投放位：一条 2px 竖线，告诉用户"会插到这里"。
@@ -81,7 +81,7 @@
              而"拖到一半布局自己动了"正是最容易被读成"卡了"的那种反馈。 -->
         <span class="drop-slot"></span>
       </div>
-      <button class="tab-add" id="tab-add" title="新开一个并行 agent">
+      <button class="tab-add" id="tab-add" title="新开一个并行 agent" data-i18n-title="chrome.newAgent.title">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>
       </button>
       <div class="tabs-right">
@@ -90,6 +90,7 @@
              右栏那个位置让给文件树。徽标/提示的更新仍走 needModel 那一处，
              不另算一份。 -->
         <button class="icon-btn bell" id="need-bell" title="需要你" aria-label="需要你"
+                data-i18n-title="chrome.needYou" data-i18n-aria-label="chrome.needYou"
                 aria-haspopup="dialog" aria-expanded="false">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg>
@@ -119,7 +120,7 @@
              就有一颗收起按钮，两处同时摆两颗只会让人分不清"这颗是开还是关"。
              位置放在 .tabs-right 的最右（= 紧挨右栏那条边），和 Orca 把
              RightSidebarToggle 钉在 `right: var(--window-controls-width)` 是同一个位置。 -->
-        <button class="icon-btn" id="rsb-open" title="展开右栏 (Ctrl+Shift+B)" hidden>
+        <button class="icon-btn" id="rsb-open" title="展开右栏 (Ctrl+Shift+B)" data-i18n-title="chrome.expandRight.title" hidden>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg>
         </button>
       </div>
@@ -135,12 +136,14 @@
          字形是照原生墨迹描的 1px 矢量线，不是图标字体的码位 —— 原因见上面
          .wc-glyph 那段注释（字体渲染会胖 2px、笔画粗一倍）。 -->
     <div class="window-controls" id="wc">
-      <button class="wc-btn" id="wc-min" title="最小化" aria-label="最小化">
+      <button class="wc-btn" id="wc-min" title="最小化" aria-label="最小化"
+              data-i18n-title="chrome.minimize" data-i18n-aria-label="chrome.minimize">
         <svg class="wc-glyph" viewBox="0 0 10 10" aria-hidden="true">
           <rect x="0" y="5" width="10" height="1" fill="currentColor" shape-rendering="crispEdges"/>
         </svg>
       </button>
-      <button class="wc-btn" id="wc-max" title="最大化" aria-label="最大化">
+      <button class="wc-btn" id="wc-max" title="最大化" aria-label="最大化"
+              data-i18n-title="chrome.maximize" data-i18n-aria-label="chrome.maximize">
         <svg class="wc-glyph" id="wc-ico-max" viewBox="0 0 10 10" aria-hidden="true">
           <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor"
                 stroke-width="1" shape-rendering="crispEdges"/>
@@ -153,7 +156,8 @@
                 stroke-width="1" shape-rendering="crispEdges"/>
         </svg>
       </button>
-      <button class="wc-btn wc-close" id="wc-close" title="关闭" aria-label="关闭">
+      <button class="wc-btn wc-close" id="wc-close" title="关闭" aria-label="关闭"
+              data-i18n-title="chrome.close" data-i18n-aria-label="chrome.close">
         <svg class="wc-glyph" viewBox="0 0 10 10" aria-hidden="true">
           <path d="M0.5 0.5 L9.5 9.5 M9.5 0.5 L0.5 9.5" fill="none" stroke="currentColor"
                 stroke-width="1"/>
@@ -184,21 +188,21 @@
       <!-- 「工作区」这个数**只出现一次**：导航栏那一项上（syncCounts 写它）。
            两层设计里，右层这个标题只是"你正在哪一层的哪一栏"的落款，
            把同一个数再写一遍就是同一句话在同一个屏幕上说两遍。 -->
-      <h1 id="list-title">工作区</h1>
+      <h1 id="list-title" data-i18n="list.title">工作区</h1>
       <div class="list-actions">
-        <button class="icon-btn" id="add-proj" title="添加项目（选一个目录）">
+        <button class="icon-btn" id="add-proj" title="添加项目（选一个目录）" data-i18n-title="list.addProject.title">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>
         </button>
         <!-- C2 那颗「刷新索引」原来写的是 location.reload()（整页重载 —— 它会把
             终端、网格、滚动位置全推倒重来），现在走真的 lib.reload：只重扫会话库。 -->
-        <button class="icon-btn" title="重扫会话库" id="reload">
+        <button class="icon-btn" title="重扫会话库" data-i18n-title="list.reload.title" id="reload">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></svg>
         </button>
       </div>
     </div>
     <label class="search">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
-      <input id="q" placeholder="搜索项目、agent…" spellcheck="false">
+      <input id="q" placeholder="搜索项目、agent…" data-i18n-placeholder="list.search.placeholder" spellcheck="false">
       <!-- ⌘ 是 Mac 的印子：Windows 上那颗键叫 Ctrl（Win 键 + K 不是这个功能）。 -->
       <span class="kbd">Ctrl K</span>
     </label>
@@ -558,46 +562,51 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                stroke-width="1.8" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
           <input id="set-search" type="text" placeholder="搜索设置…" autocomplete="off"
-                 spellcheck="false" aria-label="搜索设置">
+                 spellcheck="false" aria-label="搜索设置"
+                 data-i18n-placeholder="settings.search.placeholder"
+                 data-i18n-aria-label="settings.search.aria">
           <button type="button" class="set-search-clear" id="set-search-clear"
-                  aria-label="清空搜索" title="清空搜索" hidden>×</button>
+                  aria-label="清空搜索" title="清空搜索"
+                  data-i18n-aria-label="settings.search.clear"
+                  data-i18n-title="settings.search.clear" hidden>×</button>
           <span class="set-search-kbd" id="set-search-kbd"><kbd>Ctrl</kbd><kbd>F</kbd></span>
         </div>
       </div>
       <div class="settings-wrap">
         <header class="settings-head">
-          <h1>设置</h1>
-          <p>这些选项属于 Perch 自己，不影响 agent 的模型、网关或权限配置。改动即时生效，并保存在本机。</p>
+          <h1 data-i18n="settings.title">设置</h1>
+          <p data-i18n="settings.intro">这些选项属于 Perch 自己，不影响 agent 的模型、网关或权限配置。改动即时生效，并保存在本机。</p>
         </header>
 
         <div class="settings-empty" id="set-empty" hidden>
           <p>没有找到「<span id="set-empty-q"></span>」相关的设置。</p>
-          <p class="sub">换个词试试，比如「字体」「目录」「确认」。</p>
-          <button type="button" class="set-btn" id="set-empty-clear">清空搜索</button>
+          <p class="sub" data-i18n="settings.empty.sub">换个词试试，比如「字体」「目录」「确认」。</p>
+          <button type="button" class="set-btn" id="set-empty-clear" data-i18n="settings.empty.clear">清空搜索</button>
         </div>
 
         <section class="settings-sec" data-search="工作区 目录 路径 workspace directory path cwd">
           <div class="settings-sec-head">
-            <h2>工作区</h2>
-            <p>新开的格子和「默认工作区」落在哪个目录。已经跑着的格子不受影响。</p>
+            <h2 data-i18n="settings.section.workspace">工作区</h2>
+            <p data-i18n="settings.section.workspace.note">新开的格子和「默认工作区」落在哪个目录。已经跑着的格子不受影响。</p>
           </div>
           <div class="settings-card">
             <div class="settings-row" data-set-row="defaultCwd"
                  data-search="目录 工作区 路径 文件夹 项目 默认 cwd directory workspace path folder project">
               <div class="settings-lab">
-                <b>默认目录</b>
-                <span>没指定项目时，新 agent 从这里开始。可以直接输入路径，留空 = 内置目录。</span>
+                <b data-i18n="settings.defaultCwd.label">默认目录</b>
+                <span data-i18n-text="settings.defaultCwd.note">没指定项目时，新 agent 从这里开始。可以直接输入路径，留空 = 内置目录。</span>
               </div>
               <div class="settings-ctl set-cwd-ctl">
                 <div class="set-cwd-line">
                   <span class="set-kind" id="set-cwd-kind">内置</span>
                   <input class="set-path set-input" id="set-cwd-input" type="text"
                          spellcheck="false" autocomplete="off" placeholder="内置目录"
-                         aria-label="默认工作目录">
+                         aria-label="默认工作目录" data-i18n-aria-label="settings.defaultCwd.label"
+                         data-i18n-placeholder="settings.defaultCwd.placeholder">
                 </div>
                 <div class="set-btns">
-                  <button type="button" class="set-btn" id="set-cwd-pick" data-set="pick-cwd">选择目录…</button>
-                  <button type="button" class="set-btn quiet" id="set-cwd-reset" data-set="reset-cwd">恢复默认</button>
+                  <button type="button" class="set-btn" id="set-cwd-pick" data-set="pick-cwd" data-i18n="settings.defaultCwd.pick">选择目录…</button>
+                  <button type="button" class="set-btn quiet" id="set-cwd-reset" data-set="reset-cwd" data-i18n="settings.resetDefault">恢复默认</button>
                 </div>
               </div>
             </div>
@@ -606,37 +615,55 @@
           </div>
         </section>
 
-        <section class="settings-sec" data-search="外观 显示 appearance look display">
+        <section class="settings-sec" data-search="外观 显示 语言 language locale appearance look display">
           <div class="settings-sec-head">
-            <h2>外观</h2>
-            <p>终端和界面的显示方式。字体随应用分发，不依赖系统安装。</p>
+            <h2 data-i18n="settings.section.appearance">外观</h2>
+            <p data-i18n="settings.section.appearance.note">终端和界面的显示方式。字体随应用分发，不依赖系统安装。</p>
           </div>
           <div class="settings-card">
+            <div class="settings-row" data-set-row="language"
+                 data-search="语言 界面 中文 english language locale">
+              <div class="settings-lab">
+                <b data-i18n="settings.language.label">语言</b>
+                <span data-i18n-text="settings.language.note">界面语言。自动 = 跟随 Windows。</span>
+              </div>
+              <div class="settings-ctl">
+                <select id="set-language" class="set-select"
+                        aria-label="语言" data-i18n-aria-label="settings.language.label">
+                  <option value="auto" data-i18n="settings.language.auto">自动（跟随系统）</option>
+                  <option value="en" data-i18n="settings.language.en">English</option>
+                  <option value="zh" data-i18n="settings.language.zh">中文</option>
+                </select>
+              </div>
+            </div>
             <div class="settings-row" data-set-row="theme"
                  data-search="主题 外观 深色 浅色 明暗 theme dark light appearance">
               <div class="settings-lab">
-                <b>主题</b>
-                <span>界面的明暗。浅色主题还在做。</span>
+                <b data-i18n="settings.theme.label">主题</b>
+                <span data-i18n-text="settings.theme.note">界面的明暗。浅色主题还在做。</span>
               </div>
               <div class="settings-ctl">
-                <div class="set-seg" role="radiogroup" aria-label="主题">
-                  <button type="button" role="radio" data-set-theme="dark" aria-checked="true">深色</button>
+                <div class="set-seg" role="radiogroup" aria-label="主题" data-i18n-aria-label="settings.theme.label">
+                  <button type="button" role="radio" data-set-theme="dark" aria-checked="true" data-i18n="settings.theme.dark">深色</button>
                   <button type="button" role="radio" data-set-theme="light" aria-checked="false"
                           class="na" aria-disabled="true"
                           aria-label="浅色（还没做，下一版提供）"
-                          title="浅色主题还没做，下一版提供">浅色</button>
+                          data-i18n-aria-label="settings.theme.lightAria"
+                          title="浅色主题还没做，下一版提供"
+                          data-i18n-title="settings.theme.lightTitle"
+                          data-i18n="settings.theme.light">浅色</button>
                 </div>
               </div>
             </div>
             <div class="settings-row" data-set-row="termFontFamily"
                  data-search="字体 等宽 连字 字形 字型 font family typeface cascadia jetbrains mono ligature">
               <div class="settings-lab">
-                <b>终端字体</b>
-                <span>两套都是随应用分发的等宽字体，方块和制表符字形齐全。<em class="set-def"
+                <b data-i18n="settings.fontFamily.label">终端字体</b>
+                <span data-i18n-text="settings.fontFamily.note">两套都是随应用分发的等宽字体，方块和制表符字形齐全。<em class="set-def"
                       data-set-default-hint="termFontFamily"></em></span>
               </div>
               <div class="settings-ctl">
-                <div class="set-fontcards" id="set-fonts" role="radiogroup" aria-label="终端字体">
+                <div class="set-fontcards" id="set-fonts" role="radiogroup" aria-label="终端字体" data-i18n-aria-label="settings.fontFamily.label">
                   <button type="button" class="set-fontcard" role="radio" data-set-font="cascadia"
                           aria-checked="true">
                     <span class="set-fontsample font-cascadia">Aa 中文 0O1l</span>
@@ -648,21 +675,21 @@
                     <span class="set-fontname">JetBrains Mono</span>
                   </button>
                 </div>
-                <button type="button" class="set-reset" data-set-reset="termFontFamily" hidden>恢复默认</button>
+                <button type="button" class="set-reset" data-set-reset="termFontFamily" hidden data-i18n="settings.resetDefault">恢复默认</button>
               </div>
             </div>
             <div class="settings-row" data-set-row="termFontSize"
                  data-search="字号 大小 字体尺寸 缩放 font size zoom text">
               <div class="settings-lab">
-                <b>终端字号</b>
-                <span>格子多了也只是格子变小，字号保持不变。<em class="set-def"
+                <b data-i18n="settings.fontSize.label">终端字号</b>
+                <span data-i18n-text="settings.fontSize.note">格子多了也只是格子变小，字号保持不变。<em class="set-def"
                       data-set-default-hint="termFontSize"></em></span>
               </div>
               <div class="settings-ctl">
                 <div class="set-size-ctl">
                   <button type="button" class="set-step" data-set-size-step="-1"
                           aria-label="缩小字号" title="缩小字号">−</button>
-                  <div class="set-seg" id="set-fontsize" role="radiogroup" aria-label="终端字号">
+                  <div class="set-seg" id="set-fontsize" role="radiogroup" aria-label="终端字号" data-i18n-aria-label="settings.fontSize.label">
                     <button type="button" role="radio" data-set-size="12" aria-checked="false">12</button>
                     <button type="button" role="radio" data-set-size="13" aria-checked="false">13</button>
                     <button type="button" role="radio" data-set-size="14" aria-checked="true">14</button>
@@ -673,7 +700,7 @@
                   <button type="button" class="set-step" data-set-size-step="1"
                           aria-label="放大字号" title="放大字号">+</button>
                 </div>
-                <button type="button" class="set-reset" data-set-reset="termFontSize" hidden>恢复默认</button>
+                <button type="button" class="set-reset" data-set-reset="termFontSize" hidden data-i18n="settings.resetDefault">恢复默认</button>
               </div>
             </div>
           </div>
@@ -681,80 +708,80 @@
 
         <section class="settings-sec" data-search="行为 交互 behavior interaction">
           <div class="settings-sec-head">
-            <h2>行为</h2>
-            <p>新建格子时预选哪个 Agent；关窗和结束 agent 都是会带走正在运行的东西的动作，默认先问一句。</p>
+            <h2 data-i18n="settings.section.behavior">行为</h2>
+            <p data-i18n="settings.section.behavior.note">新建格子时预选哪个 Agent；关窗和结束 agent 都是会带走正在运行的东西的动作，默认先问一句。</p>
           </div>
           <div class="settings-card">
             <div class="settings-row" data-set-row="defaultAgent"
                  data-search="默认 agent 新建 新开 default spawn choose agent">
               <div class="settings-lab">
-                <b>默认 Agent</b>
-                <span>点 + 新建格子时预选谁。自动 = 优先挑有状态能力的已安装 Agent。<em class="set-def"
+                <b data-i18n="settings.defaultAgent.label">默认 Agent</b>
+                <span data-i18n-text="settings.defaultAgent.note">点 + 新建格子时预选谁。自动 = 优先挑有状态能力的已安装 Agent。<em class="set-def"
                       data-set-default-hint="defaultAgent"></em></span>
               </div>
               <div class="settings-ctl">
-                <select id="set-agent" class="set-select" aria-label="默认 Agent"></select>
-                <button type="button" class="set-reset" data-set-reset="defaultAgent" hidden>恢复默认</button>
+                <select id="set-agent" class="set-select" aria-label="默认 Agent" data-i18n-aria-label="settings.defaultAgent.label"></select>
+                <button type="button" class="set-reset" data-set-reset="defaultAgent" hidden data-i18n="settings.resetDefault">恢复默认</button>
               </div>
             </div>
             <div class="settings-row" data-set-row="newAgentShortcut"
                  data-search="快捷键 新建 新开 格 agent 默认 shortcut hotkey keybind new key">
               <div class="settings-lab">
-                <b>新建格快捷键</b>
-                <span>按下后直接在当前文件夹用上次的 Agent 新开一格，不弹选择；没有记忆时用上面的默认 Agent。留空 = 关闭。<em class="set-def"
+                <b data-i18n="settings.shortcut.label">新建格快捷键</b>
+                <span data-i18n-text="settings.shortcut.note">按下后直接在当前文件夹用上次的 Agent 新开一格，不弹选择；没有记忆时用上面的默认 Agent。留空 = 关闭。<em class="set-def"
                       data-set-default-hint="newAgentShortcut"></em></span>
               </div>
               <div class="settings-ctl">
                 <button type="button" class="set-btn set-key" id="set-newkey"
-                        data-set="record-newkey" aria-label="新建格快捷键">Ctrl+Alt+N</button>
-                <button type="button" class="set-reset" data-set-reset="newAgentShortcut" hidden>恢复默认</button>
+                        data-set="record-newkey" aria-label="新建格快捷键" data-i18n-aria-label="settings.shortcut.label">Ctrl+Alt+N</button>
+                <button type="button" class="set-reset" data-set-reset="newAgentShortcut" hidden data-i18n="settings.resetDefault">恢复默认</button>
               </div>
             </div>
             <div class="settings-row" data-set-row="confirmClose"
                  data-search="关闭 关窗 窗口 退出 确认 close window quit exit confirm">
               <div class="settings-lab">
-                <b>关闭窗口前确认</b>
-                <span>点窗口右上角的 × 时先问一句。确认后所有正在跑的 agent 会随窗口结束。<em class="set-def"
+                <b data-i18n="settings.confirmClose.label">关闭窗口前确认</b>
+                <span data-i18n-text="settings.confirmClose.note">点窗口右上角的 × 时先问一句。确认后所有正在跑的 agent 会随窗口结束。<em class="set-def"
                       data-set-default-hint="confirmClose"></em></span>
               </div>
               <div class="settings-ctl">
                 <button type="button" class="set-switch" role="switch" data-set-flag="confirmClose"
-                        aria-checked="true" aria-label="关闭窗口前确认"><i></i></button>
-                <button type="button" class="set-reset" data-set-reset="confirmClose" hidden>恢复默认</button>
+                        aria-checked="true" aria-label="关闭窗口前确认" data-i18n-aria-label="settings.confirmClose.label"><i></i></button>
+                <button type="button" class="set-reset" data-set-reset="confirmClose" hidden data-i18n="settings.resetDefault">恢复默认</button>
               </div>
             </div>
             <div class="settings-row" data-set-row="confirmEndAgent"
                  data-search="结束 agent 删除 记录 确认 end agent delete record confirm remove">
               <div class="settings-lab">
-                <b>结束 agent 前确认</b>
-                <span>「结束这个 agent」会删掉它的座位记录（磁盘上的会话文件不动），动手前先问一句。<em class="set-def"
+                <b data-i18n="settings.confirmEndAgent.label">结束 agent 前确认</b>
+                <span data-i18n-text="settings.confirmEndAgent.note">「结束这个 agent」会删掉它的座位记录（磁盘上的会话文件不动），动手前先问一句。<em class="set-def"
                       data-set-default-hint="confirmEndAgent"></em></span>
               </div>
               <div class="settings-ctl">
                 <button type="button" class="set-switch" role="switch" data-set-flag="confirmEndAgent"
-                        aria-checked="true" aria-label="结束 agent 前确认"><i></i></button>
-                <button type="button" class="set-reset" data-set-reset="confirmEndAgent" hidden>恢复默认</button>
+                        aria-checked="true" aria-label="结束 agent 前确认" data-i18n-aria-label="settings.confirmEndAgent.label"><i></i></button>
+                <button type="button" class="set-reset" data-set-reset="confirmEndAgent" hidden data-i18n="settings.resetDefault">恢复默认</button>
               </div>
             </div>
             <div class="settings-row" data-set-row="startView"
                  data-search="启动 打开 首页 落点 总览 工作区 start launch startup view home">
               <div class="settings-lab">
-                <b>启动时打开</b>
-                <span>下次打开 Perch 先落在哪一页。这一次不会跳。<em class="set-def"
+                <b data-i18n="settings.startView.label">启动时打开</b>
+                <span data-i18n-text="settings.startView.note">下次打开 Perch 先落在哪一页。这一次不会跳。<em class="set-def"
                       data-set-default-hint="startView"></em></span>
               </div>
               <div class="settings-ctl">
-                <div class="set-seg" role="radiogroup" aria-label="启动时打开">
-                  <button type="button" role="radio" data-set-start="dash" aria-checked="true">总览</button>
-                  <button type="button" role="radio" data-set-start="workspace" aria-checked="false">工作区</button>
+                <div class="set-seg" role="radiogroup" aria-label="启动时打开" data-i18n-aria-label="settings.startView.label">
+                  <button type="button" role="radio" data-set-start="dash" aria-checked="true" data-i18n="settings.startView.dash">总览</button>
+                  <button type="button" role="radio" data-set-start="workspace" aria-checked="false" data-i18n="settings.startView.workspace">工作区</button>
                 </div>
-                <button type="button" class="set-reset" data-set-reset="startView" hidden>恢复默认</button>
+                <button type="button" class="set-reset" data-set-reset="startView" hidden data-i18n="settings.resetDefault">恢复默认</button>
               </div>
             </div>
           </div>
         </section>
 
-        <p class="settings-foot">
+        <p class="settings-foot" data-i18n-html="settings.foot.html">
           设置保存在 <code>%APPDATA%\Perch\settings.json</code>。这里的选项只影响 Perch，不改 agent 自己的配置。
         </p>
       </div>
@@ -767,21 +794,21 @@
      位置（它 24px、应用级；pane 里没有页脚）。原来散在面板头和面板尾的
      cwd / 终端尺寸 / 字体 / 连字 / 渲染后端都并到这里。 -->
 <div id="status">
-  <span class="it"><span class="dot" id="s-dot"></span><span id="s-st">初始化</span></span>
-  <span class="it" id="s-index">索引：—</span>
-  <span class="it pathit"><span class="lbl">会话库</span><span class="ell cwd" id="s-store">—</span></span>
-  <span class="it pathit"><span class="lbl">工作目录</span><span class="ell cwd" id="s-cwd">—</span></span>
-  <span class="it" id="s-grid" title="并行格数 × 每格可用列数"></span>
-  <span class="it" id="s-dims" title="终端的列 × 行">—</span>
+  <span class="it"><span class="dot" id="s-dot"></span><span id="s-st" data-i18n="status.initializing">初始化</span></span>
+  <span class="it" id="s-index" data-i18n="status.indexPending">索引：—</span>
+  <span class="it pathit"><span class="lbl" data-i18n="status.store">会话库</span><span class="ell cwd" id="s-store">—</span></span>
+  <span class="it pathit"><span class="lbl" data-i18n="status.cwd">工作目录</span><span class="ell cwd" id="s-cwd">—</span></span>
+  <span class="it" id="s-grid" title="并行格数 × 每格可用列数" data-i18n-title="status.gridTitle"></span>
+  <span class="it" id="s-dims" title="终端的列 × 行" data-i18n-title="status.dimsTitle">—</span>
   <span class="it">
     <span id="s-font"></span><span id="s-lig"></span><span id="s-render"></span>
   </span>
   <span class="sp"></span>
-  <span class="meter" title="5 小时用量窗（待接入真实计量）">
+  <span class="meter" title="5 小时用量窗（待接入真实计量）" data-i18n-title="status.meter5hTitle">
     <span>5h</span><span class="bar"><i></i></span><span>—</span>
   </span>
-  <span class="meter" title="周用量窗（待接入真实计量）">
-    <span>周</span><span class="bar"><i></i></span><span>—</span>
+  <span class="meter" title="周用量窗（待接入真实计量）" data-i18n-title="status.meterWeekTitle">
+    <span data-i18n="status.weekShort">周</span><span class="bar"><i></i></span><span>—</span>
   </span>
 </div>
 
@@ -1015,6 +1042,7 @@ window.__facts = [];
      全局词法作用域，拆目录会制造"模块化"的错觉。05 先跑（偏好缓存），
      99 最后跑（启动闸）；ESM（wails runtime）只有在 defer 之前求值才可依赖。
      新增文件请取一个能插进现有顺序的编号，并同步这里。 -->
+<script defer src="/js/01-i18n.js"></script>
 <script defer src="/js/05-prefs.js"></script>
 <script defer src="/js/10-term.js"></script>
 <script defer src="/js/20-ctl.js"></script>

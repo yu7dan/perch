@@ -561,7 +561,10 @@ const shell = Stream("shell");
 let pendingShell = null;
 function applyShell(p) {
   STATE = p;
-  $("s-index").textContent = `索引：${STATE.sessions?.length ?? 0} 会话 / ${(STATE.projects || []).length} 项目`;
+  $("s-index").textContent = t("status.index", {
+    sessions: STATE.sessions?.length ?? 0,
+    projects: (STATE.projects || []).length,
+  });
   // 设置随首份载荷一起到（settings.go）。权威值一到就覆盖 localStorage 那份缓存；
   // 终端已经按缓存里的字体/字号建好了，这里再把它们校正到盘上的值。
   if (STATE.settings) {
@@ -587,7 +590,7 @@ shell.onmessage = (ev) => {
   if (!ctlBootReady) { pendingShell = p; return; }
   applyShell(p);
 };
-shell.onerror = () => { $("s-index").textContent = "索引：失败"; };
+shell.onerror = () => { $("s-index").textContent = t("status.indexFailed"); };
 
 /* C7：会话库刷新（关掉一格之后由 Go 重扫一次推回来，见 main.go 的 lib.reload）。
    ⚠️ **不走 renderShell**：那个函数是"页面刚起来时画骨架"的那条路 ——
@@ -627,8 +630,10 @@ function applyLibrary(p) {
   if (NAV_HERE === "dash") renderDashboard("会话库刷新");
   // 状态栏那行"索引：N 会话 / M 项目"每格都是现算的 —— 重扫之后要跟着换，
   // 否则用户点完「重扫会话库」，列表变了而底下那个数还是旧的（同一屏两句话）。
-  $("s-index").textContent =
-    `索引：${p.sessions.length} 会话 / ${(STATE.projects || []).length} 项目`;
+  $("s-index").textContent = t("status.index", {
+    sessions: p.sessions.length,
+    projects: (STATE.projects || []).length,
+  });
   sendCtrl({ type: "log", msg: `会话库已刷新 会话=${p.sessions.length} 子代理=${p.sessions.filter((s) => s.sidechain).length}` });
 }
 

@@ -62,22 +62,22 @@ function settingsCwdPaintReset() {
   reset.classList.toggle("na", na);
   reset.setAttribute("aria-disabled", String(na));
   reset.title = custom
-    ? "回到内置的 <用户主目录>\\Documents\\Perch"
+    ? t("settings.defaultCwd.resetTitleBuiltIn")
     : CWD_DRAFT_DIRTY
-      ? "丢掉草稿，继续用内置默认目录"
-      : "现在用的就是内置默认目录";
+      ? t("settings.defaultCwd.resetTitleDraft")
+      : t("settings.defaultCwd.resetTitleNow");
   reset.setAttribute("aria-label", na
-    ? "恢复默认（现在用的就是内置默认目录）"
-    : "恢复默认");
+    ? t("settings.defaultCwd.resetAriaNa")
+    : t("settings.defaultCwd.resetAria"));
 }
 
 function settingsDefaultLabel(key) {
   const v = SETTINGS_DEFAULTS[key];
   if (key === "termFontFamily") return v === "jetbrains" ? "JetBrains Mono" : "Cascadia Code";
-  if (key === "startView") return v === "workspace" ? "工作区" : "总览";
-  if (key === "defaultAgent") return "自动";
-  if (key === "newAgentShortcut") return v || "关闭";
-  if (typeof v === "boolean") return v ? "开" : "关";
+  if (key === "startView") return v === "workspace" ? t("settings.startView.workspace") : t("settings.startView.dash");
+  if (key === "defaultAgent") return t("settings.defaultAgent.autoShort");
+  if (key === "newAgentShortcut") return v || t("settings.shortcut.unset");
+  if (typeof v === "boolean") return v ? t("settings.switch.on") : t("settings.switch.off");
   return String(v);
 }
 
@@ -93,7 +93,7 @@ function syncDefaultAgentSelect() {
   try { cat = opCatalog(); } catch (_) { cat = []; }
   const avail = cat.filter(opLaunchable);
   const cur = SETTINGS.defaultAgent || "";
-  const rows = [{ id: "", name: "自动（按能力挑）" }]
+  const rows = [{ id: "", name: t("settings.defaultAgent.auto") }]
     .concat(avail.map((a) => ({ id: a.id, name: a.name || a.id })));
   if (cur && !rows.some((r) => r.id === cur)) {
     const a = cat.find((x) => x && x.id === cur);
@@ -103,7 +103,7 @@ function syncDefaultAgentSelect() {
   if (sel.dataset.sig !== sig) {
     sel.dataset.sig = sig;
     sel.innerHTML = rows.map((r) =>
-      `<option value="${esc(r.id)}">${esc(r.name)}${r.missing ? "（未安装）" : ""}</option>`)
+      `<option value="${esc(r.id)}">${esc(r.missing ? t("settings.defaultAgent.missing", { name: r.name }) : r.name)}</option>`)
       .join("");
   }
   sel.value = cur;
@@ -157,7 +157,7 @@ function settingsCwdCommit(v) {
     if (!CWD_PENDING) return;
     CWD_PENDING = false;
     CWD_DRAFT_DIRTY = true;
-    CWD_ERR = "后端没有回应，目录没有改动。";
+    CWD_ERR = t("settings.defaultCwd.pendingError");
     if (NAV_HERE === "settings") { syncSettingsUI(); settingsCwdPaintError(); }
   }, 5000);
   sendCtrl({ type: "settings.set", settings: { defaultCwd: value } });
@@ -192,12 +192,14 @@ function syncSettingsUI() {
   const custom = !!SETTINGS.defaultCwd;
   const kind = $("set-cwd-kind");
   const input = $("set-cwd-input");
-  if (kind) kind.textContent = custom ? "自定义" : "内置";
+  if (kind) kind.textContent = custom
+    ? t("settings.defaultCwd.kind.custom")
+    : t("settings.defaultCwd.kind.builtin");
   if (input) {
     // 草稿/在途期间不覆盖用户写的字；其余时候显示"配置值"（空 = 内置）。
     if (!CWD_DRAFT_DIRTY && !CWD_PENDING) input.value = SETTINGS.defaultCwd || "";
     input.title = path || "";
-    input.placeholder = SETTINGS_BUILTIN_CWD || "内置目录";
+    input.placeholder = SETTINGS_BUILTIN_CWD || t("settings.defaultCwd.placeholder");
   }
   settingsCwdPaintReset();
   settingsCwdPaintError();
@@ -206,12 +208,13 @@ function syncSettingsUI() {
     note.classList.remove("info");
     if (SETTINGS_CWD_MISSING) {
       note.hidden = false;
-      note.textContent = "设置里的目录现在不在盘上；新格子会回落到内置目录" +
-        (SETTINGS_BUILTIN_CWD ? `：${SETTINGS_BUILTIN_CWD}` : "。");
+      note.textContent = SETTINGS_BUILTIN_CWD
+        ? t("settings.defaultCwd.noteMissingPath", { path: SETTINGS_BUILTIN_CWD })
+        : t("settings.defaultCwd.noteMissing");
     } else if (custom && SETTINGS_BUILTIN_CWD) {
       note.hidden = false;
       note.classList.add("info");
-      note.textContent = `内置默认目录是 ${SETTINGS_BUILTIN_CWD}（点「恢复默认」可以回去）。`;
+      note.textContent = t("settings.defaultCwd.noteBuiltin", { path: SETTINGS_BUILTIN_CWD });
     } else {
       note.hidden = true;
       note.textContent = "";
@@ -248,7 +251,7 @@ function syncSettingsUI() {
   for (const el of document.querySelectorAll("#settings [data-set-default-hint]")) {
     const key = el.dataset.setDefaultHint;
     if (key && Object.prototype.hasOwnProperty.call(SETTINGS_DEFAULTS, key)) {
-      el.textContent = `默认：${settingsDefaultLabel(key)}`;
+      el.textContent = t("settings.defaultHint", { value: settingsDefaultLabel(key) });
     }
   }
   for (const b of document.querySelectorAll("#settings [data-set-reset]")) {
@@ -267,30 +270,29 @@ function syncSettingsUI() {
   for (const b of document.querySelectorAll("#settings [data-set-size-step]")) {
     const d = Number(b.dataset.setSizeStep);
     const atBound = idx < 0 || (d < 0 ? idx === 0 : idx === SETTINGS_SIZES.length - 1);
-    const label = d < 0 ? "缩小字号" : "放大字号";
+    const label = d < 0 ? t("settings.fontSize.shrink") : t("settings.fontSize.grow");
+    const why = d < 0 ? t("settings.fontSize.min") : t("settings.fontSize.max");
     b.classList.toggle("na", atBound);
     b.setAttribute("aria-disabled", String(atBound));
-    b.setAttribute("aria-label", atBound
-      ? `${label}（${d < 0 ? "已经是最小字号" : "已经是最大字号"}）`
-      : label);
-    b.title = atBound
-      ? (d < 0 ? "已经是最小字号" : "已经是最大字号")
-      : label;
+    b.setAttribute("aria-label", atBound ? `${label} (${why})` : label);
+    b.title = atBound ? why : label;
   }
 
   syncDefaultAgentSelect();
+  const langSel = $("set-language");
+  if (langSel) langSel.value = SETTINGS.language || "auto";
 
   // 快捷键按钮：录制中显示提示语；否则显示当前组合键（空 = 未设置）。
   // 这里**不改**录制状态本身 —— 录制器自己管开/关，applySettings 只负责画。
   const keyBtn = $("set-newkey");
   if (keyBtn) {
-    if (!SHORTCUT_RECORDING) keyBtn.textContent = SETTINGS.newAgentShortcut || "未设置";
+    if (!SHORTCUT_RECORDING) keyBtn.textContent = SETTINGS.newAgentShortcut || t("settings.shortcut.unset");
     keyBtn.classList.toggle("rec", SHORTCUT_RECORDING);
     keyBtn.title = SHORTCUT_RECORDING
-      ? "按下新的组合键；Esc 取消，Backspace 清除"
+      ? t("settings.shortcut.recordTitle")
       : SETTINGS.newAgentShortcut
-        ? `现在是 ${SETTINGS.newAgentShortcut}；点一下重新录制`
-        : "点一下设置快捷键；留空 = 关闭";
+        ? t("settings.shortcut.setTitle", { key: SETTINGS.newAgentShortcut })
+        : t("settings.shortcut.emptyTitle");
   }
 
   settingsSyncRadioTabStops();
@@ -434,8 +436,8 @@ function beginShortcutRecord(btn) {
   if (SHORTCUT_RECORDING) { endShortcutRecord(null, "再次点击取消"); return; }
   SHORTCUT_RECORDING = true;
   btn.classList.add("rec");
-  btn.textContent = "按下组合键…";
-  btn.title = "Esc 取消；Backspace 清除";
+  btn.textContent = t("settings.shortcut.record");
+  btn.title = t("settings.shortcut.cancelTitle");
   const onKey = (e) => {
     if (e.key === "Escape") {
       e.preventDefault(); e.stopPropagation();
@@ -457,11 +459,11 @@ function beginShortcutRecord(btn) {
     e.preventDefault(); e.stopPropagation();
     const chord = shortcutChordFromEvent(e);
     if (!chord) {
-      showToast("这个键不能当快捷键", "需要 Ctrl 或 Alt + 字母、数字或 F1–F12。", "err");
+      showToast(t("settings.shortcut.invalidTitle"), t("settings.shortcut.invalidNote"), "err");
       return;
     }
     if (SHORTCUT_RESERVED.includes(chord)) {
-      showToast("这个组合键已被占用", `${chord} 已经是 Perch 的快捷键；换一个。`, "err");
+      showToast(t("settings.shortcut.takenTitle"), t("settings.shortcut.takenNote", { chord }), "err");
       return;
     }
     endShortcutRecord(chord, `录到 ${chord}`);
@@ -508,7 +510,8 @@ function settingsStepSize(delta) {
   const cur = idx < 0 ? SETTINGS_SIZES.indexOf(SETTINGS_DEFAULTS.termFontSize) : idx;
   const next = Math.min(SETTINGS_SIZES.length - 1, Math.max(0, cur + delta));
   if (next === cur) {
-    showToast("字号到头了", delta < 0 ? "已经是最小字号 12。" : "已经是最大字号 18。", "info");
+    showToast(t("settings.fontSize.toastTitle"),
+      delta < 0 ? t("settings.fontSize.toastMin") : t("settings.fontSize.toastMax"), "info");
     return;
   }
   settingsSend({ termFontSize: SETTINGS_SIZES[next] }, "终端字号");
@@ -589,7 +592,7 @@ $("settings").addEventListener("click", (e) => {
         sendCtrl({ type: "log", msg: "设置：丢掉默认目录草稿（本来就用内置目录）" });
         return;
       }
-      showToast("已经是默认目录", "现在用的就是内置默认目录。", "info");
+      showToast(t("settings.toast.cwdDefaultTitle"), t("settings.toast.cwdDefaultNote"), "info");
       return;
     }
     // 也走"等后端确认"那条路：目录为空的校验在 Go 那边（它会清掉自定义目录）。
@@ -627,7 +630,7 @@ $("settings").addEventListener("click", (e) => {
     if (b.dataset.setTheme === "light") {
       // 界面主题不是终端主题：应用里还有一百多处写死的深色值，
       // 做浅色要整份换令牌，不在这一版的范围（灰着但可点，点一下说明原因）。
-      showToast("浅色主题还没做", "现在只有深色主题；浅色会在下一版提供。", "info");
+      showToast(t("settings.toast.lightTitle"), t("settings.toast.lightNote"), "info");
       sendCtrl({ type: "log", msg: "设置：点了浅色主题（未实现）" });
     }
     return;
@@ -649,6 +652,34 @@ $("set-agent").addEventListener("change", (e) => {
   if (v === SETTINGS.defaultAgent) return;
   settingsSend({ defaultAgent: v }, `默认 Agent → ${v || "自动"}`);
 });
+
+/* 语言也是 <select>。走乐观写入：applySettings 里会调 setLocale，
+   立刻重画静态 DOM 和这一页；Go 拒绝时会把旧值整份推回来。 */
+$("set-language").addEventListener("change", (e) => {
+  const v = e.target.value || "auto";
+  if (v === SETTINGS.language) return;
+  settingsSend({ language: v }, `界面语言 → ${v}`);
+});
+
+/* 语言变化后的动态重画入口（01-i18n.js 的 setLocale 调用）。
+   静态节点已经由 applyStaticI18n 处理；这里只补 JS 生成的文字。 */
+function onLocaleChanged() {
+  if (typeof renderNav === "function") renderNav();
+  if (typeof renderDashTabs === "function") renderDashTabs();
+  if (typeof paintFontStatus === "function") paintFontStatus();
+  if (typeof paintRenderStatus === "function") paintRenderStatus();
+  if (typeof paintConnStatus === "function" && typeof activeTab !== "undefined" && activeTab) {
+    paintConnStatus(!activeTab.connDown);
+  }
+  if (typeof STATE !== "undefined" && STATE && $("s-index")) {
+    $("s-index").textContent = t("status.index", {
+      sessions: STATE.sessions?.length ?? 0,
+      projects: (STATE.projects || []).length,
+    });
+  }
+  if (typeof syncSettingsUI === "function" && typeof NAV_HERE !== "undefined" &&
+      NAV_HERE === "settings") syncSettingsUI();
+}
 
 /* 单选组的方向键（ARIA radio 语义）：←/↑ 上一个，→/↓ 下一个，Home/End 两端。
    焦点移动即选中；不可用项只聚焦、不选中 —— 灰而不禁，键盘也要走得到。 */

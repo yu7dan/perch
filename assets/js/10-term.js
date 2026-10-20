@@ -737,7 +737,7 @@ stream.onclose = () => {
 stream.onerror = () => {
   T.connDown = true; renderAgentDot(T);
   scheduleProjLive();
-  if (activeTab === T) { $("s-dot").className = "dot off"; $("s-st").textContent = "连接错误"; }
+  if (activeTab === T) { $("s-dot").className = "dot off"; $("s-st").textContent = t("status.connectionError"); }
 };
 stream.onmessage = (ev) => {
   const d = ev.data;
@@ -1010,13 +1010,13 @@ function paintFontStatus() {
   for (const [label, probe] of order) {
     if (document.fonts.check(`14px "${probe}"`)) { usingFont = label; break; }
   }
-  $("s-font").textContent = usingFont ? usingFont : "回退字体 ✗";
+  $("s-font").textContent = usingFont ? usingFont : t("status.fontFallback");
   $("s-font").style.color = usingFont ? "" : "var(--red)";
-  $("s-font").title = "终端实际使用的等宽字体（按设置里的字体栈顺序第一个可用的）";
-  $("s-lig").textContent = (LigaturesAddon && usingFont) ? "· 连字" : "";
+  $("s-font").title = t("status.fontTitle");
+  $("s-lig").textContent = (LigaturesAddon && usingFont) ? t("status.ligatures") : "";
 }
 paintFontStatus();
-$("s-render").title = "xterm 的渲染后端（WebGL 优先，失败回退 DOM）";
+$("s-render").title = t("status.renderTitle");
 // 从这里起，applySettings 可以安全地改所有已存在格子的外观了。
 PERCH_TERM_READY = true;
 
@@ -1024,9 +1024,9 @@ PERCH_TERM_READY = true;
 // （一个 WebGL 起来了一个没有），而状态栏只有一格。所以它是个函数，
 // 切换标签、以及 WebGL 上下文丢失时都要重画一次。
 function paintRenderStatus() {
-  const t = activeTab;
-  if (!t) { $("s-render").textContent = ""; return; }
-  $("s-render").textContent = t.gfx.on ? "· WebGL" : "· DOM 渲染";
+  const tab = activeTab; // 不要叫 t：那会遮住 i18n 的 t()
+  if (!tab) { $("s-render").textContent = ""; return; }
+  $("s-render").textContent = tab.gfx.on ? "· WebGL" : t("status.renderDom");
 }
 
 // 并行格的读数（C4.5）—— 「N 格 · X 列/格」。
@@ -1074,7 +1074,7 @@ function paintGridStatus() {
 // 连接状态那一格同理 —— 每个标签一条 stream，各自可能连上/断开。
 function paintConnStatus(up) {
   $("s-dot").className = up ? "dot on" : "dot off";
-  $("s-st").textContent = up ? "终端已连接" : "终端已断开";
+  $("s-st").textContent = up ? t("status.connected") : t("status.disconnected");
   // C7：「原生对比」那颗（#wt）删了，所以这里不再有"断连就禁用它"这件事 ——
   // 它原来守的是"没有活标签时别点"，见 HTML 标签条右侧那段注释的去向记录。
 }

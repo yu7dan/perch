@@ -8,7 +8,7 @@
 
 /* 顶栏只剩两枚：Agent 的内容 2026-10-17 并进了总览（用户要求）。
    存过 "agents" 的旧 localStorage 会被下面的校验挡掉、回落到总览，不用迁移。 */
-const DASH_TABS = [["overview", "总览"], ["gateway", "网关"]];
+const DASH_TABS = [["overview", "dash.tab.overview"], ["gateway", "dash.tab.gateway"]];
 let dashTab = "overview";
 try {
   const k = localStorage.getItem("perch.dashTab");
@@ -240,11 +240,13 @@ function renderDashTabs() {
   const seg = $("dash-tabs");
   if (!seg) return;
   if (!seg.querySelector(".opt")) {
-    seg.innerHTML = DASH_TABS.map(([id, name]) =>
-      `<button type="button" class="opt" data-dtab="${id}" role="tab">${name}</button>`
+    seg.innerHTML = DASH_TABS.map(([id, key]) =>
+      `<button type="button" class="opt" data-dtab="${id}" role="tab">${esc(t(key))}</button>`
     ).join("");
   }
   for (const b of seg.querySelectorAll(".opt")) {
+    const row = DASH_TABS.find(([id]) => id === b.dataset.dtab);
+    if (row) b.textContent = t(row[1]);
     const on = b.dataset.dtab === dashTab;
     b.classList.toggle("on", on);
     b.setAttribute("aria-selected", String(on));
