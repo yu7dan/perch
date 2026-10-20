@@ -1945,7 +1945,7 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 					// 只留一行"这一帧里又有一份介绍框"。数行数 = 数份数。
 					log.Printf("[banner t%d] 这一帧的字节里含开场介绍框（%d 字节）", host.id, n)
 				}
-				for _, reply := range osc.scan(buf[:n]) {
+				for _, reply := range osc.Scan(buf[:n]) {
 					log.Printf("[osc] 回答颜色查询: %q", reply)
 					if _, werr := sess.Write([]byte(reply)); werr != nil {
 						log.Printf("[osc] 写回应答失败: %v", werr)
@@ -1953,7 +1953,7 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 				}
 				if !probeDone && time.Now().After(probeUntil) {
 					probeDone = true
-					log.Printf("[osc] 这段时间收到的查询统计: %v", osc.seen)
+					log.Printf("[osc] 这段时间收到的查询统计: %v", osc.Seen())
 				}
 				// ⚠️ Send 是「排队」不是「拷贝」。Wails v3 在
 				// pkg/application/stream.go 的注释里把这条契约写得很直白：
