@@ -1,7 +1,8 @@
 # Perch 架构
 
 这份文档回答三个问题：**代码分在哪几层**、**依赖只能朝哪个方向走**、**一次前端请求/一条推送
-经过哪些包**。改结构之前先看这里；前端脚本与 CSS 的规则见 [FRONTEND.md](FRONTEND.md)。
+经过哪些包**。改结构之前先看这里；前端脚本与 CSS 的规则见 [FRONTEND.md](FRONTEND.md)，
+界面语言与 `uimsg` 的约定见 [I18N.md](I18N.md)。
 
 ## 顶层布局
 
@@ -28,11 +29,12 @@ perch/
 │   ├── stream/               PTY 原始流、首帧尺寸握手、调试探针
 │   ├── term/                 ConPTY + OSC 颜色应答
 │   ├── transcript/           Claude 转录跟随/流水/改动（Live 注入）
+│   ├── uimsg/                用户可见消息的稳定 code + params + 原文（见 I18N.md）
 │   └── winproc/              Job Object、进程存活、单实例、打开路径、Exe 发现/Shim
 ├── tools/                    hookprobe / jobtest
-├── docs/                     本文档与 FRONTEND.md、README 截图
+├── docs/                     本文档与 FRONTEND.md、I18N.md、README 截图
 ├── licenses/                 第三方许可全文
-└── scripts/build.ps1         两个 exe 的构建入口
+└── scripts/                  build.ps1（两个 exe）；i18n-check.mjs（CI 守卫）
 ```
 
 根目录不是程序入口：`cmd/perch` 才是。根上的 `embed.go` 保留 `package perch`，只是为了
@@ -47,17 +49,18 @@ cmd/perch ──> ctl, stream, gateway, session, project, settings,
               install, history, agentcatalog, agent, winproc, term,
               panes, transcript, appdir
 ctl        ──> session, project, settings, gateway, install, files,
-                history, agentcatalog
+                history, agentcatalog, uimsg
 stream     ──> 无领域依赖：只认 Conn / Terminal 接口与回调
 session    ──> agent, panes, term, winproc, appdir
 transcript ──> 无领域依赖：Live func() []View 与 Push 注入
-gateway    ──> agentcatalog, appdir
-install    ──> agentcatalog, winproc, appdir
-project    ──> settings, history
-settings   ──> agentcatalog（只用静态 Has / LaunchIDs，不调 Defs()）
+gateway    ──> agentcatalog, appdir, uimsg
+install    ──> agentcatalog, winproc, appdir, uimsg
+project    ──> settings, history, appdir, uimsg
+settings   ──> agentcatalog（只用静态 Has / LaunchIDs，不调 Defs()）, uimsg
 agentcatalog ──> agent, winproc, appdir
 agent      ──> winproc
-叶子：panes, history, files, term, winproc, appdir
+uimsg      ──> 标准库
+叶子：panes, history, files, term, uimsg, winproc, appdir
 ```
 
 禁止的边（`go list -deps` 可查）：`session` 不 import `project/history/stream/ctl`；

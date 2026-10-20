@@ -61,6 +61,9 @@ type Callbacks struct {
 	Rename func(pid int, name string) // rename：用户给这一格起了名字
 	Log    func(msg string)           // log：页面回传的渲染层事实
 	NewOSC func() OSC                 // nil = 不应答 OSC 10/11
+	// ExitNotice 是进程退出时写进 PTY 的那句话（不带前缀/颜色）。
+	// 空 = 内置中文兜底。组合根按当前界面语言注入，stream 不认识设置。
+	ExitNotice string
 }
 
 // ctrlMsg 是标签流里会出现的控制帧字段。ctl 的完整协议另有更大的结构；
@@ -82,7 +85,17 @@ const (
 	initialRows        = 24
 )
 
-const exitNotice = "\r\n\x1b[33m[perch] 进程已退出\x1b[0m\r\n"
+const exitNotice = "进程已退出"
+
+// exitBytes 是写进 PTY 的退出提示。颜色固定用黄：它是"这一格停了"，
+// 不是错误（错误走红色）。
+func (s *Server) exitBytes() []byte {
+	word := s.cb.ExitNotice
+	if word == "" {
+		word = exitNotice
+	}
+	return []byte("\r\n\x1b[33m[perch] " + word + "\x1b[0m\r\n")
+}
 
 type frame struct {
 	data []byte
@@ -183,7 +196,7 @@ func (s *Server) Serve(t Terminal, pending [][]byte) {
 			return // 是我们自己收的尾，不是进程退出
 		}
 		log.Printf("[perch] tab=%d pid=%d 进程已退出，关流", s.cb.TabID, t.Pid())
-		_ = s.conn.Send([]byte(exitNotice))
+		_ = s.conn.Send(s.exitBytes())
 		_ = s.conn.Close() // 让收包循环醒过来、前端看到 onclose
 	}()
 
@@ -285,7 +298,7 @@ func (s *Server) pump(t Terminal) {
 			}
 		}
 		if rerr != nil {
-			_ = s.conn.Send([]byte(exitNotice))
+			_ = s.conn.Send(s.exitBytes())
 			_ = s.conn.Close() // 让收包循环立刻醒过来
 			return
 		}

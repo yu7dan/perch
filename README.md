@@ -156,7 +156,7 @@ Two binaries are required: the main app and a separate hook receiver (the agent'
 
 ## For contributors
 
-Why the frontend uses classic scripts with `defer`, what belongs in each file, icon rules, and why assets require a rebuild — see [docs/FRONTEND.md](docs/FRONTEND.md). Backend layers and dependency direction are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Why the frontend uses classic scripts with `defer`, what belongs in each file, icon rules, and why assets require a rebuild — see [docs/FRONTEND.md](docs/FRONTEND.md). Backend layers and dependency direction are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Interface languages, translation keys, backend message codes, and the CI guard are in [docs/I18N.md](docs/I18N.md).
 
 ## Acknowledgements
 

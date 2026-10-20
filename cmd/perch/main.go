@@ -358,16 +358,20 @@ func main() {
 // PTY 的字节流，不是页面 DOM），所以这里只能后端自己选词：显式 en/zh 跟设置
 // 走；auto 给双语 —— 后端看不到 navigator.languages，猜错一门比两门都写出来
 // 更糟。detail 里是进程/系统的原文，不再翻译。
-func (a *perchApp) termMsg(en, zh, detail string) []byte {
-	text := en + " / " + zh
+func (a *perchApp) termWord(en, zh string) string {
 	if a.prefs != nil {
 		switch a.prefs.Snapshot().Language {
 		case "en":
-			text = en
+			return en
 		case "zh":
-			text = zh
+			return zh
 		}
 	}
+	return en + " / " + zh
+}
+
+func (a *perchApp) termMsg(en, zh, detail string) []byte {
+	text := a.termWord(en, zh)
 	if detail != "" {
 		text += ": " + detail
 	}
@@ -467,6 +471,8 @@ func (a *perchApp) handleTab(c *application.StreamConn, host *session.Tab) {
 		Rename: func(pid int, name string) { session.ApplyRename(a.stateDir, a.titles, pid, name) },
 		Log:    func(msg string) { log.Printf("[web t%d] %s", host.ID, msg) },
 		NewOSC: func() stream.OSC { return term.NewOSCResponder() },
+		// 终端里那行「进程已退出」也跟界面语言走。
+		ExitNotice: a.termWord("Process exited", "进程已退出"),
 	})
 	defer srv.Close()
 	cols, rows, pending, err := srv.AwaitInitialSize()

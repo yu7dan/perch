@@ -3,6 +3,7 @@ package stream
 import (
 	"encoding/json"
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -51,6 +52,18 @@ func TestAwaitInitialSizePreservesPendingFrames(t *testing.T) {
 	}
 	if pending[0][0] != CtrlPrefix || string(pending[1]) != "keystrokes" {
 		t.Fatalf("pending 顺序/内容变了：%q / %q", pending[0], pending[1])
+	}
+}
+
+// 退出提示的措辞由组合根按界面语言注入；空值保留中文兜底。
+func TestExitBytesUsesInjectedNotice(t *testing.T) {
+	s := New(nil, Callbacks{ExitNotice: "Process exited"})
+	if got, want := string(s.exitBytes()), "\r\n\x1b[33m[perch] Process exited\x1b[0m\r\n"; got != want {
+		t.Fatalf("exitBytes = %q, want %q", got, want)
+	}
+	d := New(nil, Callbacks{})
+	if !strings.Contains(string(d.exitBytes()), "进程已退出") {
+		t.Fatalf("default exitBytes = %q", d.exitBytes())
 	}
 }
 

@@ -14,6 +14,10 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: gofmt
         shell: pwsh
         run: |
@@ -26,3 +30,16 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
       - run: go build ./...
+
+      # Every frontend string and every backend uimsg code must exist in both
+      # dictionaries, and en/zh placeholders must agree. See docs/I18N.md.
+      - name: i18n dictionaries
+        run: node scripts/i18n-check.mjs
+
+      - name: frontend syntax
+        shell: pwsh
+        run: |
+          Get-ChildItem assets/js -Filter *.js | ForEach-Object {
+            node --check $_.FullName
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
