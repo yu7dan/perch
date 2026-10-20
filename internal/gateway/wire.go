@@ -1,31 +1,4 @@
-package main
-
-// magpie 读数：Perch 对本地 magpie 网关的**只读**观测。
-//
-// 为什么单独一个文件、为什么全部走 HTTP：
-//
-//   - magpie 的网关就开在 127.0.0.1:3425 上，`/v1/magpie/usage`、
-//     `/v1/magpie/usage/requests`、`/v1/magpie/concurrency`、`/v1/models`
-//     这几条就是它自己界面在用的数据（docs/reference.md:1727+），
-//     形状稳定、字段齐全，还带上了 agent/provider 的名字和图标 id。
-//   - 直接读 `usage.jsonl` 要自己重算聚合，而且那份文件 9MB+、还在长；
-//     网关接口已经把**窗口、聚合、分档**都做好了 —— 不重复造一份会漂的口径。
-//   - 请求记录里**没有 prompt 内容**（reference.md 原话 "What was said in a
-//     call is not in either"）。这是选它、不选 routing/*.jsonl 的硬理由：
-//     后者每一行都带着整份 prompt 的分段统计，我们一个字节都不该往界面上搬。
-//
-// 连接不上的三种真实状态必须分得开（用户特别点名"不要因为本机配好了就忽略
-// 别人接不上的情况"）：
-//
-//	running  3425 上有人应答（magpie 开着）
-//	stopped  ~/.config/magpie 在、但 3425 连不上（装了没开 / 网关关了）
-//	absent   两样都没有（没装，或者装在认不出的位置）
-//
-// 三种都发同一副骨架，前端按 state 决定是画读数还是画空态 —— 不做假数据。
-//
-// ⚠️ 隐私：这里只解 JSON 里点名的字段。provider 的 key、账号、prompt 一律
-// 不进结构体，日志里也只打数量。providers.json 是唯一一份带 key 的文件，
-// 我们只取 id/name/icon/chat/website/preset，并且**永远不 Marshal 原始结构**。
+package gateway
 
 import (
 	"bytes"
@@ -46,18 +19,18 @@ import (
 )
 
 const (
-	magpieGateway   = "http://127.0.0.1:3425"
-	magpiePollEvery = 2500 * time.Millisecond
-	magpieHTTPWait  = 1800 * time.Millisecond
+	gatewayURL = "http://127.0.0.1:3425"
+	pollEvery  = 2500 * time.Millisecond
+	httpWait   = 1800 * time.Millisecond
 )
 
 // ---------------------------------------------------------------------------
 // wire 形状
 // ---------------------------------------------------------------------------
 
-// magpieTotals 是 `/v1/magpie/usage` 的一段汇总。字段名直接沿用接口（snake_case），
+// Totals 是 `/v1/magpie/usage` 的一段汇总。字段名直接沿用接口（snake_case），
 // 少一层翻译就少一处会漂的地方。
-type magpieTotals struct {
+type Totals struct {
 	Calls      int     `json:"calls"`
 	Errors     int     `json:"errors"`
 	Retried    int     `json:"retried"`
@@ -75,7 +48,7 @@ type magpieTotals struct {
 	DecodeN    int     `json:"decode_n"`
 }
 
-type magpieDay struct {
+type Day struct {
 	Day        string `json:"day"` // YYYY-MM-DD（接口给的是本地时区的 RFC3339，截前 10 位）
 	Calls      int    `json:"calls"`
 	Errors     int    `json:"errors"`
@@ -85,7 +58,7 @@ type magpieDay struct {
 	CacheWrite int64  `json:"cache_write"`
 }
 
-type magpieAgentTotal struct {
+type AgentTotal struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	Icon       string `json:"icon"`
@@ -96,7 +69,7 @@ type magpieAgentTotal struct {
 	CacheWrite int64  `json:"cache_write"`
 }
 
-type magpieModelTotal struct {
+type ModelTotal struct {
 	ID        string `json:"id"`
 	Provider  string `json:"provider"`
 	Model     string `json:"model"`
@@ -109,7 +82,7 @@ type magpieModelTotal struct {
 	CacheRead int64  `json:"cache_read"`
 }
 
-type magpieProviderKey struct {
+type ProviderKey struct {
 	ID        string `json:"id"`
 	Provider  string `json:"provider"`
 	Calls     int    `json:"calls"`
@@ -119,7 +92,7 @@ type magpieProviderKey struct {
 	CacheRead int64  `json:"cache_read"`
 }
 
-type magpieSeries struct {
+type Series struct {
 	Time       string `json:"time"`
 	Calls      int    `json:"calls"`
 	Errors     int    `json:"errors"`
@@ -129,18 +102,18 @@ type magpieSeries struct {
 	CacheWrite int64  `json:"cache_write"`
 }
 
-type magpieUsage struct {
-	magpieTotals
-	Since        string              `json:"since"`
-	Bucket       string              `json:"bucket"`
-	Series       []magpieSeries      `json:"series"`
-	Agents       []magpieAgentTotal  `json:"agents"`
-	Models       []magpieModelTotal  `json:"models"`
-	ProviderKeys []magpieProviderKey `json:"providerKeys"`
+type Usage struct {
+	Totals
+	Since        string        `json:"since"`
+	Bucket       string        `json:"bucket"`
+	Series       []Series      `json:"series"`
+	Agents       []AgentTotal  `json:"agents"`
+	Models       []ModelTotal  `json:"models"`
+	ProviderKeys []ProviderKey `json:"providerKeys"`
 }
 
-// magpieReq 是一条已经完成的请求。刻意不含 prompt / 工具参数 / session 正文。
-type magpieReq struct {
+// Req 是一条已经完成的请求。刻意不含 prompt / 工具参数 / session 正文。
+type Req struct {
 	At           string  `json:"t"`
 	Agent        string  `json:"agent"`
 	AgentName    string  `json:"agentName"`
@@ -164,19 +137,19 @@ type magpieReq struct {
 	Prompt int64 `json:"prompt,omitempty"`
 }
 
-type magpieReqResp struct {
-	Rows  []magpieReq `json:"rows"`
-	Total int         `json:"total"`
+type ReqResp struct {
+	Rows  []Req `json:"rows"`
+	Total int   `json:"total"`
 }
 
-type magpieConc struct {
+type Conc struct {
 	Requests int `json:"requests"`
 	Waiting  int `json:"waiting"`
 	Tools    int `json:"tools"`
 	Lanes    int `json:"lanes"`
 }
 
-type magpieProvider struct {
+type Provider struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Icon    string `json:"icon"`
@@ -186,7 +159,7 @@ type magpieProvider struct {
 	Keys    int    `json:"keys"`
 }
 
-type magpieModel struct {
+type Model struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Owner   string `json:"owner"`
@@ -195,7 +168,7 @@ type magpieModel struct {
 	Group   bool   `json:"group"`
 }
 
-type magpieCtx struct {
+type Ctx struct {
 	Prompt    int64  `json:"prompt"`
 	Window    int64  `json:"window"`
 	Model     string `json:"model,omitempty"`
@@ -205,51 +178,47 @@ type magpieCtx struct {
 	At        string `json:"at,omitempty"`
 }
 
-type magpiePlugins struct {
+type Plugins struct {
 	Preset    string   `json:"preset,omitempty"`
 	Installed []string `json:"installed"`
 	Entries   int      `json:"entries"`
 }
 
-// agentCard 是 Agent 名单的一行（定义在 agentcatalog；这里留旧名给 root 过渡期用）。
-// 数据一半来自本机探测（装没装、Perch 能不能跑），一半来自今天的网关流量
-// （calls）—— 后者是"真的接上了"的唯一证据。
-type agentCard = agentcatalog.Card
-
-type magpieSnap struct {
-	State     string           `json:"state"` // running | stopped | absent
-	Version   string           `json:"version,omitempty"`
-	Gateway   string           `json:"gateway,omitempty"`
-	ConfigDir string           `json:"configDir,omitempty"`
-	At        string           `json:"at"`
-	Err       string           `json:"err,omitempty"`
-	Today     magpieTotals     `json:"today"`
-	All       magpieTotals     `json:"all"`
-	Series    []magpieDay      `json:"series"`
-	Recent    []magpieReq      `json:"recent"`
-	Conc      magpieConc       `json:"conc"`
-	Providers []magpieProvider `json:"providers"`
-	Models    []magpieModel    `json:"models"`
-	Context   magpieCtx        `json:"context"`
-	Catalog   []agentCard      `json:"catalog"`
-	Plugins   magpiePlugins    `json:"plugins"`
-	UsageAt   string           `json:"usageAt,omitempty"`
+// Snapshot 是发给前端的整份读数。
+type Snapshot struct {
+	State     string              `json:"state"` // running | stopped | absent
+	Version   string              `json:"version,omitempty"`
+	Gateway   string              `json:"gateway,omitempty"`
+	ConfigDir string              `json:"configDir,omitempty"`
+	At        string              `json:"at"`
+	Err       string              `json:"err,omitempty"`
+	Today     Totals              `json:"today"`
+	All       Totals              `json:"all"`
+	Series    []Day               `json:"series"`
+	Recent    []Req               `json:"recent"`
+	Conc      Conc                `json:"conc"`
+	Providers []Provider          `json:"providers"`
+	Models    []Model             `json:"models"`
+	Context   Ctx                 `json:"context"`
+	Catalog   []agentcatalog.Card `json:"catalog"`
+	Plugins   Plugins             `json:"plugins"`
+	UsageAt   string              `json:"usageAt,omitempty"`
 	// 今天的三个榜（接口算好的，前端只排序取前几）：agent / 模型 / provider 账号。
-	TodayAgents       []magpieAgentTotal  `json:"todayAgents"`
-	TodayModels       []magpieModelTotal  `json:"todayModels"`
-	TodayProviderKeys []magpieProviderKey `json:"todayProviderKeys"`
+	TodayAgents       []AgentTotal  `json:"todayAgents"`
+	TodayModels       []ModelTotal  `json:"todayModels"`
+	TodayProviderKeys []ProviderKey `json:"todayProviderKeys"`
 }
 
 // ---------------------------------------------------------------------------
 // watcher
 // ---------------------------------------------------------------------------
 
-// magpieWatcher 只保留**最新一份**快照。前端拿到的永远是整份（低频、几 KB），
+// watcher 只保留**最新一份**快照。前端拿到的永远是整份（低频、几 KB），
 // 不做增量 —— 读数这种小载荷上，增量省不下什么，却会多出一整类"两边漂了"的毛病。
-type magpieWatcher struct {
+type watcher struct {
 	mu       sync.Mutex
 	refreshM sync.Mutex // 一轮没跑完就不开下一轮（网关卡住时别把协程堆起来）
-	snap     *magpieSnap
+	snap     *Snapshot
 	lastJSON []byte
 	lastStat string // 只用来在状态变化时落一行日志
 	lastCat  string // 本地 Agent 名单的指纹：变了就先推，不等 HTTP
@@ -257,15 +226,41 @@ type magpieWatcher struct {
 	push     func(any)
 }
 
-var (
-	magpieWatchMu sync.RWMutex
-	magpieWatch   *magpieWatcher
-)
+// StartWatcher 先扫本机（瞬时），再把 HTTP 那条腿放进协程。
+// 不阻塞 app.Run：magpie 没开的时候，启动一秒都不该等它。
+func (g *Gateway) StartWatcher() {
+	w := &watcher{
+		client: &http.Client{
+			Timeout: httpWait,
+			// 本机地址绝不能被系统代理截走（Windows 上 HTTP_PROXY 很常见）。
+			Transport: &http.Transport{Proxy: nil},
+		},
+		push: g.push,
+	}
+	// 本机那份先出（版本 / Provider / 插件 / Agent 名单），网关读数稍后补。
+	w.mu.Lock()
+	w.snap = w.scanLocal()
+	w.mu.Unlock()
 
-func magpieSnapshot() *magpieSnap {
-	magpieWatchMu.RLock()
-	w := magpieWatch
-	magpieWatchMu.RUnlock()
+	g.watcherMu.Lock()
+	g.docWatcher = w
+	g.watcherMu.Unlock()
+
+	go func() {
+		w.refresh()
+		t := time.NewTicker(pollEvery)
+		defer t.Stop()
+		for range t.C {
+			w.refresh()
+		}
+	}()
+}
+
+// Snapshot 返回最新一份读数；watcher 还没起来时为 nil。
+func (g *Gateway) Snapshot() *Snapshot {
+	g.watcherMu.RLock()
+	w := g.docWatcher
+	g.watcherMu.RUnlock()
 	if w == nil {
 		return nil
 	}
@@ -274,38 +269,17 @@ func magpieSnapshot() *magpieSnap {
 	return w.snap
 }
 
-// startMagpieWatcher 先扫本机（瞬时），再把 HTTP 那条腿放进协程。
-// 不阻塞 app.Run：magpie 没开的时候，启动一秒都不该等它。
-func startMagpieWatcher(push func(any)) *magpieWatcher {
-	w := &magpieWatcher{
-		client: &http.Client{
-			Timeout: magpieHTTPWait,
-			// 本机地址绝不能被系统代理截走（Windows 上 HTTP_PROXY 很常见）。
-			Transport: &http.Transport{Proxy: nil},
-		},
-		push: push,
-	}
-	// 本机那份先出（版本 / Provider / 插件 / Agent 名单），网关读数稍后补。
-	w.mu.Lock()
-	w.snap = w.scanLocal()
-	w.mu.Unlock()
-
-	magpieWatchMu.Lock()
-	magpieWatch = w
-	magpieWatchMu.Unlock()
-
-	go func() {
+// RefreshNow 立刻跑一轮（用户点刷新）。后台 watcher 仍按自己的节奏走。
+func (g *Gateway) RefreshNow() {
+	g.watcherMu.RLock()
+	w := g.docWatcher
+	g.watcherMu.RUnlock()
+	if w != nil {
 		w.refresh()
-		t := time.NewTicker(magpiePollEvery)
-		defer t.Stop()
-		for range t.C {
-			w.refresh()
-		}
-	}()
-	return w
+	}
 }
 
-func (w *magpieWatcher) refresh() bool {
+func (w *watcher) refresh() bool {
 	if !w.refreshM.TryLock() {
 		return false
 	}
@@ -346,15 +320,15 @@ func (w *magpieWatcher) refresh() bool {
 
 // scanLocal 只碰磁盘：配置目录、版本、Provider 清单、插件、Agent 名单。
 // 网关关着的时候这些仍然是对的 —— 「装了没开」和「没装」必须分得开。
-func (w *magpieWatcher) scanLocal() *magpieSnap {
+func (w *watcher) scanLocal() *Snapshot {
 	home, _ := os.UserHomeDir()
 	dir := magpieConfigDir(home)
-	s := &magpieSnap{
+	s := &Snapshot{
 		State:     "absent",
-		Gateway:   magpieGateway,
+		Gateway:   gatewayURL,
 		ConfigDir: dir,
 		At:        time.Now().Format(time.RFC3339),
-		Catalog:   scanAgentCatalog(home),
+		Catalog:   agentcatalog.Cards(home),
 		Plugins:   scanMagpiePlugins(dir),
 	}
 	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
@@ -369,9 +343,9 @@ func (w *magpieWatcher) scanLocal() *magpieSnap {
 
 // fillRemote 覆盖 HTTP 那部分。任何一个接口失败都不抹掉别的 —— 比如网关开着、
 // usage 却因为一个受限 key 回答 403 时，Provider 清单和「在跑」仍然要看得见。
-func (w *magpieWatcher) fillRemote(s *magpieSnap) {
-	var today, all magpieUsage
-	var recent magpieReqResp
+func (w *watcher) fillRemote(s *Snapshot) {
+	var today, all Usage
+	var recent ReqResp
 	var conc struct {
 		Requests int            `json:"requests"`
 		Waiting  int            `json:"waiting"`
@@ -396,13 +370,13 @@ func (w *magpieWatcher) fillRemote(s *magpieSnap) {
 
 	if errConc == nil {
 		s.State = "running"
-		s.Conc = magpieConc{Requests: conc.Requests, Waiting: conc.Waiting, Tools: conc.Tools, Lanes: len(conc.Data)}
+		s.Conc = Conc{Requests: conc.Requests, Waiting: conc.Waiting, Tools: conc.Tools, Lanes: len(conc.Data)}
 	} else if s.State == "stopped" {
 		// 目录在、网关没应答：保持 stopped，把原因留给界面。
 		s.Err = "网关未运行"
 	}
 	if errToday == nil {
-		s.Today = today.magpieTotals
+		s.Today = today.Totals
 		s.UsageAt = time.Now().Format(time.RFC3339)
 		s.TodayAgents = today.Agents
 		s.TodayModels = today.Models
@@ -418,14 +392,14 @@ func (w *magpieWatcher) fillRemote(s *magpieSnap) {
 		}
 	}
 	if errAll == nil {
-		s.All = all.magpieTotals
+		s.All = all.Totals
 		s.Series = s.Series[:0]
 		for _, p := range all.Series {
 			day := p.Time
 			if len(day) > 10 {
 				day = day[:10]
 			}
-			s.Series = append(s.Series, magpieDay{
+			s.Series = append(s.Series, Day{
 				Day: day, Calls: p.Calls, Errors: p.Errors,
 				Input: p.Input, Output: p.Output,
 				CacheRead: p.CacheRead, CacheWrite: p.CacheWrite,
@@ -444,7 +418,7 @@ func (w *magpieWatcher) fillRemote(s *magpieSnap) {
 				}
 			}
 		}
-		s.Recent = make([]magpieReq, 0, len(recent.Rows))
+		s.Recent = make([]Req, 0, len(recent.Rows))
 		for _, r := range recent.Rows {
 			r.Prompt = r.In + r.CacheRead + r.CacheWrite
 			r.Window = ctx[r.Provider+"/"+r.Served]
@@ -456,7 +430,7 @@ func (w *magpieWatcher) fillRemote(s *magpieSnap) {
 		}
 		if s.Context.At == "" && len(s.Recent) > 0 {
 			r := s.Recent[0]
-			s.Context = magpieCtx{
+			s.Context = Ctx{
 				Prompt: r.Prompt, Window: r.Window, Model: r.Served,
 				Agent: r.AgentName, Icon: r.Icon, CacheRead: r.CacheRead, At: r.At,
 			}
@@ -465,7 +439,7 @@ func (w *magpieWatcher) fillRemote(s *magpieSnap) {
 	if errModels == nil {
 		s.Models = s.Models[:0]
 		for _, m := range models.Data {
-			s.Models = append(s.Models, magpieModel{
+			s.Models = append(s.Models, Model{
 				ID: m.ID, Name: m.Name, Owner: m.Owner, Type: m.Type,
 				Context: m.Context, Group: strings.HasPrefix(m.ID, "group/"),
 			})
@@ -487,8 +461,8 @@ func (w *magpieWatcher) fillRemote(s *magpieSnap) {
 	}
 }
 
-func (w *magpieWatcher) getJSON(path string, v any) error {
-	res, err := w.client.Get(magpieGateway + path)
+func (w *watcher) getJSON(path string, v any) error {
+	res, err := w.client.Get(gatewayURL + path)
 	if err != nil {
 		return err
 	}
@@ -501,7 +475,7 @@ func (w *magpieWatcher) getJSON(path string, v any) error {
 	return json.NewDecoder(io.LimitReader(res.Body, 64<<20)).Decode(v)
 }
 
-// magpieConfigDir 和 magpie 自己的 appdir 规则一致（appdir.go:224-234）：
+// magpieConfigDir 和 magpie 自己的 appdir 规则一致：
 // XDG_CONFIG_HOME 优先，否则 ~/.config/magpie。不猜 portable 目录 ——
 // 猜错会把别人的配置当成"没装"。
 func magpieConfigDir(home string) string {
@@ -511,10 +485,10 @@ func magpieConfigDir(home string) string {
 	return filepath.Join(home, ".config", "magpie")
 }
 
-func scanMagpieProviders(dir string) []magpieProvider {
+func scanMagpieProviders(dir string) []Provider {
 	b, err := os.ReadFile(filepath.Join(dir, "providers.json"))
 	if err != nil {
-		return []magpieProvider{}
+		return []Provider{}
 	}
 	var f struct {
 		Providers []struct {
@@ -529,11 +503,11 @@ func scanMagpieProviders(dir string) []magpieProvider {
 		} `json:"providers"`
 	}
 	if json.Unmarshal(b, &f) != nil {
-		return []magpieProvider{}
+		return []Provider{}
 	}
-	out := make([]magpieProvider, 0, len(f.Providers))
+	out := make([]Provider, 0, len(f.Providers))
 	for _, p := range f.Providers {
-		out = append(out, magpieProvider{
+		out = append(out, Provider{
 			ID: p.ID, Name: p.Name, Icon: p.Icon, Preset: p.Preset,
 			Host: hostOf(p.Chat), Website: p.Website,
 			Keys: len(p.Keys) + boolInt(p.Key != ""),
@@ -543,8 +517,8 @@ func scanMagpieProviders(dir string) []magpieProvider {
 	return out
 }
 
-func scanMagpiePlugins(dir string) magpiePlugins {
-	out := magpiePlugins{Installed: []string{}}
+func scanMagpiePlugins(dir string) Plugins {
+	out := Plugins{Installed: []string{}}
 	b, err := os.ReadFile(filepath.Join(dir, "plugins.yml"))
 	if err != nil {
 		return out
@@ -589,14 +563,6 @@ func scanMagpiePlugins(dir string) magpiePlugins {
 }
 
 // ---------------------------------------------------------------------------
-// Agent 名单
-// ---------------------------------------------------------------------------
-
-// scanAgentCatalog 是本机探测的入口；清单、能力、配方、Exe 发现全在
-// internal/agentcatalog。这里只留旧名字给 root 过渡期用。
-func scanAgentCatalog(home string) []agentCard { return agentcatalog.Cards(home) }
-
-// ---------------------------------------------------------------------------
 // 小工具
 // ---------------------------------------------------------------------------
 
@@ -623,6 +589,13 @@ func boolInt(b bool) int {
 func orDash(s string) string {
 	if s == "" {
 		return "—"
+	}
+	return s
+}
+
+func orNone(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "无"
 	}
 	return s
 }

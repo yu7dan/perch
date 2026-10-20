@@ -1,4 +1,4 @@
-package main
+package gateway
 
 // magpie 本体的版本与更新。
 //
@@ -27,12 +27,11 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 )
 
-type gwUpdateInfo struct {
+type updateInfo struct {
 	State   string `json:"state"` // checking | latest | downloading | ready | available | source | error | blocked
 	Current string `json:"current"`
 	Latest  string `json:"latest"`
@@ -44,24 +43,19 @@ type gwUpdateInfo struct {
 	Total   int64  `json:"total"`
 }
 
-var (
-	gwUpdMu   sync.Mutex // TryLock：同一时间只允许一条更新链路
-	gwUpdLast string     // 上一次推给前端的原始状态，进度没变就不重复推
-)
-
-func gwUpdateRead() (json.RawMessage, *gwUpdateInfo, error) {
-	b, err := gwAPI("GET", "/api/update", nil)
+func (g *Gateway) updateRead() (json.RawMessage, *updateInfo, error) {
+	b, err := g.API("GET", "/api/update", nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	var u gwUpdateInfo
+	var u updateInfo
 	if err := json.Unmarshal(b, &u); err != nil {
 		return nil, nil, errors.New("magpie 返回的更新状态不是 JSON")
 	}
 	return json.RawMessage(b), &u, nil
 }
 
-func gwUpdatePush(op string, raw json.RawMessage, busy, errMsg string, updated bool) {
+func (g *Gateway) updatePush(op string, raw json.RawMessage, busy, errMsg string, updated bool) {
 	m := map[string]any{
 		"type": "magpie.update", "op": op, "busy": busy, "at": nowISO(),
 	}
@@ -74,57 +68,57 @@ func gwUpdatePush(op string, raw json.RawMessage, busy, errMsg string, updated b
 	if updated {
 		m["updated"] = true
 	}
-	pushJSON(m)
+	g.emit(m)
 }
 
-// gwMagpieUpdateGet 只读版本状态。控制面没接上就安静返回 —— 网关页自己会
+// MagpieUpdateGet 只读版本状态。控制面没接上就安静返回 —— 网关页自己会
 // 接入，没接上时不该因为一次轮询去拉起进程，也不该在页面上留一条红字。
-func gwMagpieUpdateGet() {
-	_, _, client, _ := gwConnState()
+func (g *Gateway) MagpieUpdateGet() {
+	_, _, client, _ := g.connState()
 	if client == nil {
 		return
 	}
-	raw, _, err := gwUpdateRead()
+	raw, _, err := g.updateRead()
 	if err != nil {
-		gwUpdatePush("get", nil, "", err.Error(), false)
+		g.updatePush("get", nil, "", err.Error(), false)
 		return
 	}
-	gwUpdatePush("get", raw, "", "", false)
+	g.updatePush("get", raw, "", "", false)
 }
 
-// gwMagpieUpdateInstall 是「更新」按钮的全部：需要时先让它检查/下载，等到
+// MagpieUpdateInstall 是「更新」按钮的全部：需要时先让它检查/下载，等到
 // ready 再 install；装完等新进程应答，认领 PID，最后把新状态推回去。
-func gwMagpieUpdateInstall() {
-	if !gwUpdMu.TryLock() {
+func (g *Gateway) MagpieUpdateInstall() {
+	if !g.updMu.TryLock() {
 		return // 已经有一条在跑
 	}
-	defer gwUpdMu.Unlock()
-	gwUpdLast = ""
+	defer g.updMu.Unlock()
+	g.updLast = ""
 
-	if err := gwEnsure(); err != nil {
-		gwUpdatePush("install", nil, "", err.Error(), false)
+	if err := g.Ensure(); err != nil {
+		g.updatePush("install", nil, "", err.Error(), false)
 		return
 	}
-	port, key, _, ours := gwConnState()
-	raw, u, err := gwUpdateRead()
+	port, key, _, ours := g.connState()
+	raw, u, err := g.updateRead()
 	if err != nil {
-		gwUpdatePush("install", nil, "", err.Error(), false)
+		g.updatePush("install", nil, "", err.Error(), false)
 		return
 	}
 	if u.Latest == "" || u.Latest == u.Current {
-		gwUpdatePush("install", raw, "", "", false)
+		g.updatePush("install", raw, "", "", false)
 		return
 	}
 
 	// 1) 还没准备好就先检查（magpie 会自己下载到 ready）。
 	if u.State != "ready" {
-		raw, u, err = gwUpdatePrepare(raw, u)
+		raw, u, err = g.updatePrepare(raw, u)
 		if err != nil {
-			gwUpdatePush("install", raw, "", err.Error(), false)
+			g.updatePush("install", raw, "", err.Error(), false)
 			return
 		}
 		if u.State != "ready" {
-			gwUpdatePush("install", raw, "", "没有拿到可安装的更新（状态："+u.State+"）", false)
+			g.updatePush("install", raw, "", "没有拿到可安装的更新（状态："+u.State+"）", false)
 			return
 		}
 	}
@@ -132,14 +126,14 @@ func gwMagpieUpdateInstall() {
 	// 2) 记住旧进程（只有 Perch 拉起的才在退出时收；外部的保持运行）。
 	var old *os.Process
 	if ours {
-		gwConn.mu.Lock()
-		old = gwConn.proc
-		gwConn.mu.Unlock()
+		g.mu.Lock()
+		old = g.proc
+		g.mu.Unlock()
 	}
 
-	gwUpdatePush("install", raw, "restarting", "", false)
-	if _, err := gwAPI("POST", "/api/update/install", map[string]any{"when": "now"}); err != nil {
-		gwUpdatePush("install", raw, "", "magpie 没有接受更新："+err.Error(), false)
+	g.updatePush("install", raw, "restarting", "", false)
+	if _, err := g.API("POST", "/api/update/install", map[string]any{"when": "now"}); err != nil {
+		g.updatePush("install", raw, "", "magpie 没有接受更新："+err.Error(), false)
 		return
 	}
 
@@ -162,7 +156,7 @@ func gwMagpieUpdateInstall() {
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
 		if gwPing(port, key) {
-			if r2, u2, err := gwUpdateRead(); err == nil {
+			if r2, u2, err := g.updateRead(); err == nil {
 				raw, now, back = r2, *u2, true
 				if now.Current != u.Current || now.Latest == "" || now.Latest == now.Current {
 					break
@@ -173,43 +167,43 @@ func gwMagpieUpdateInstall() {
 		back = false
 	}
 	if !back {
-		gwUpdatePush("install", raw, "", "更新后控制面没有恢复应答；重启 Perch 或重开网关页再试", false)
+		g.updatePush("install", raw, "", "更新后控制面没有恢复应答；重启 Perch 或重开网关页再试", false)
 		return
 	}
 
 	// 5) re-exec 换了 PID：原来是我们拉起的那份，现在按端口认领新的。
 	if ours {
 		if p := gwPortOwner(port); p != nil {
-			gwConn.mu.Lock()
-			gwConn.proc, gwConn.ours = p, true
-			gwConn.mu.Unlock()
+			g.mu.Lock()
+			g.proc, g.ours = p, true
+			g.mu.Unlock()
 		} else {
 			log.Printf("[magpie] 更新：没能按端口 %d 认领新控制面；退出 Perch 时它可能留下", port)
 		}
 	}
-	gwConn.mu.Lock()
-	gwConn.client = gwClient() // 丢掉指向旧进程的连接池
-	gwConn.mu.Unlock()
+	g.mu.Lock()
+	g.client = gwClient() // 丢掉指向旧进程的连接池
+	g.mu.Unlock()
 
 	log.Printf("[magpie] 已更新到 %s（控制面端口 %d，%s）", now.Current, port, map[bool]string{true: "Perch 拉起", false: "外部进程"}[ours])
-	gwUpdatePush("install", raw, "", "", true)
-	gwRefresh()
+	g.updatePush("install", raw, "", "", true)
+	g.Refresh()
 }
 
-// gwUpdatePrepare 把状态推到 ready：必要时 POST /api/update/check，然后每
+// updatePrepare 把状态推到 ready：必要时 POST /api/update/check，然后每
 // 2 秒读一次，直到 ready / 终态。进度只在原始 JSON 变了时推。
-func gwUpdatePrepare(raw json.RawMessage, u *gwUpdateInfo) (json.RawMessage, *gwUpdateInfo, error) {
+func (g *Gateway) updatePrepare(raw json.RawMessage, u *updateInfo) (json.RawMessage, *updateInfo, error) {
 	if u.State != "downloading" && u.State != "checking" {
-		b, err := gwAPI("POST", "/api/update/check", map[string]any{})
+		b, err := g.API("POST", "/api/update/check", map[string]any{})
 		if err != nil {
 			return raw, u, errors.New("magpie 检查更新失败：" + err.Error())
 		}
 		raw = json.RawMessage(b)
-		var u2 gwUpdateInfo
+		var u2 updateInfo
 		if err := json.Unmarshal(b, &u2); err == nil {
 			u = &u2
 		}
-		gwUpdLast = ""
+		g.updLast = ""
 	}
 	deadline := time.Now().Add(15 * time.Minute)
 	for time.Now().Before(deadline) {
@@ -227,16 +221,16 @@ func gwUpdatePrepare(raw json.RawMessage, u *gwUpdateInfo) (json.RawMessage, *gw
 			return raw, u, nil
 		}
 		sig := string(raw)
-		if sig != gwUpdLast {
-			gwUpdLast = sig
+		if sig != g.updLast {
+			g.updLast = sig
 			busy := "downloading"
 			if u.State == "checking" {
 				busy = "checking"
 			}
-			gwUpdatePush("install", raw, busy, "", false)
+			g.updatePush("install", raw, busy, "", false)
 		}
 		time.Sleep(2 * time.Second)
-		r2, u2, err := gwUpdateRead()
+		r2, u2, err := g.updateRead()
 		if err != nil {
 			continue // 下载中偶发读失败不值得中止整条链路
 		}

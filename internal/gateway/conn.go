@@ -1,22 +1,25 @@
-package main
-
-// magpie 控制面适配器。
+// Package gateway 是 Perch 对本地 magpie 网关的**只读观测**与**控制面**适配。
 //
-// 用户 2026-10-17 的要求：「供应商、路由、用量、插件要去使用 magpie 的原生体验」，
-// 同时「能够在这个产品里进行修改和配置」，但「不希望把它和产品绑死」。
+// 读数为什么全部走 HTTP：
+//   - magpie 的网关就开在 127.0.0.1:3425 上，`/v1/magpie/usage`、
+//     `/v1/magpie/usage/requests`、`/v1/magpie/concurrency`、`/v1/models`
+//     这几条就是它自己界面在用的数据（docs/reference.md:1727+），
+//     形状稳定、字段齐全，还带上了 agent/provider 的名字和图标 id。
+//   - 直接读 `usage.jsonl` 要自己重算聚合，而且那份文件 9MB+、还在长；
+//     网关接口已经把**窗口、聚合、分档**都做好了 —— 不重复造一份会漂的口径。
+//   - 请求记录里**没有 prompt 内容**（reference.md 原话 "What was said in a
+//     call is not in either"）。这是选它、不选 routing/*.jsonl 的硬理由。
 //
-// 做法：Perch 不重写 magpie 的配置层，也不把 magpie 的页面 iframe 进来。
-// 它在需要时拉起一个**独立的** `magpie web` 进程（127.0.0.1:3439），把同一份
-// 配置的 /api/* 读出来、按 Perch 的页面画；写操作也走同一组 API。magpie 的
-// 桌面程序、网关、配置文件都不受 Perch 生命周期影响 —— 控制面进程可以被
-// 单独停掉，桌面 magpie 照常服务 agent。
+// 连接不上的三种真实状态必须分得开：
 //
-// 安全边界：
-//  1. MAGPIE_WEB_KEY 由 Perch 生成，只存在内存和 %APPDATA%\Perch\magpie-web.key
-//     （0600）；**不进日志、不进渲染进程**。渲染进程只发 magpie 的 API 路径/载荷。
-//  2. /api/ 路径白名单 + GET/POST 白名单；不允许 /_magpie、不允许带 ?k= 的请求。
-//  3. 供应商 key 只在用户点「保存」时从 ctl 消息里过一次，随即交给 magpie；
-//     不缓存、不打印、不回显（magpie 自己回的是 masked）。
+//	running  3425 上有人应答（magpie 开着）
+//	stopped  ~/.config/magpie 在、但 3425 连不上（装了没开 / 网关关了）
+//	absent   两样都没有（没装，或者装在认不出的位置）
+//
+// ⚠️ 隐私：这里只解 JSON 里点名的字段。provider 的 key、账号、prompt 一律
+// 不进结构体，日志里也只打数量。providers.json 是唯一一份带 key 的文件，
+// 我们只取 id/name/icon/chat/website/preset，并且**永远不 Marshal 原始结构**。
+package gateway
 
 import (
 	"bytes"
@@ -29,7 +32,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,7 +51,11 @@ const (
 	gwActionWait = 8 * time.Minute // 首个插件要下载 Bun + npm 包
 )
 
-type gwServer struct {
+// Gateway 是控制面连接 + 读数 watcher + 内嵌页反代的持有者。
+// 用 New 构造；零值不可用。
+type Gateway struct {
+	push func(any)
+
 	mu      sync.Mutex
 	port    int
 	key     string
@@ -58,9 +64,29 @@ type gwServer struct {
 	ours    bool
 	exe     string
 	lastErr string
+
+	watcherMu  sync.RWMutex
+	docWatcher *watcher
+
+	uiMu sync.Mutex
+	ui   *uiState
+
+	updMu   sync.Mutex // TryLock：同一时间只允许一条更新链路
+	updLast string     // 上一次推给前端的原始状态，进度没变就不重复推
+
+	driftErr string
 }
 
-var gwConn gwServer
+// New 构造一个未连接的网关。push 是发给前端的函数，可以为 nil（测试）。
+func New(push func(any)) *Gateway {
+	return &Gateway{push: push}
+}
+
+func (g *Gateway) emit(v any) {
+	if g.push != nil {
+		g.push(v)
+	}
+}
 
 // ---------------------------------------------------------------------------
 // 进程与鉴权
@@ -74,9 +100,9 @@ func gwKeyPath() string {
 	return p
 }
 
-// gwUsedBefore 只看 key 文件在不在：存在 = 这台机器上用过网关（Perch 起过控制面）。
-// 不能用 gwLoadKey 判断 —— 它没有时会新发一枚并落盘，把标记本身造出来。
-func gwUsedBefore() bool {
+// UsedBefore 只看 key 文件在不在：存在 = 这台机器上用过网关（Perch 起过控制面）。
+// 不能用 loadKey 判断 —— 它没有时会新发一枚并落盘，把标记本身造出来。
+func (g *Gateway) UsedBefore() bool {
 	p := gwKeyPath()
 	if p == "" {
 		return false
@@ -85,8 +111,8 @@ func gwUsedBefore() bool {
 	return err == nil && !fi.IsDir()
 }
 
-// gwLoadKey 取上一次的 key（重启 Perch 后还能接上同一个控制面），没有就新发一枚。
-func gwLoadKey() string {
+// loadKey 取上一次的 key（重启 Perch 后还能接上同一个控制面），没有就新发一枚。
+func (g *Gateway) loadKey() string {
 	p := gwKeyPath()
 	if p != "" {
 		if b, err := os.ReadFile(p); err == nil {
@@ -137,27 +163,27 @@ func gwPing(port int, key string) bool {
 	return res.StatusCode == http.StatusOK
 }
 
-// gwEnsure 接上或拉起控制面。只由用户点「连接」或启动时的被动探测调用。
-func gwEnsure() error {
-	gwConn.mu.Lock()
-	defer gwConn.mu.Unlock()
+// Ensure 接上或拉起控制面。只由用户点「连接」或启动时的被动探测调用。
+func (g *Gateway) Ensure() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 
-	if gwConn.client != nil && gwPing(gwConn.port, gwConn.key) {
+	if g.client != nil && gwPing(g.port, g.key) {
 		return nil
 	}
 
-	key := gwConn.key
+	key := g.key
 	if key == "" {
-		key = gwLoadKey()
+		key = g.loadKey()
 	}
 	// 1) 已经有一个用同一枚 key 跑在候选端口上的控制面：直接接。
 	for p := gwFirstPort; p < gwFirstPort+gwPortTries; p++ {
 		if gwPing(p, key) {
-			gwConn.port, gwConn.key = p, key
-			gwConn.client = gwClient()
-			gwConn.proc, gwConn.ours = nil, false
-			gwConn.lastErr = ""
-			gwConn.exe = ""
+			g.port, g.key = p, key
+			g.client = gwClient()
+			g.proc, g.ours = nil, false
+			g.lastErr = ""
+			g.exe = ""
 			log.Printf("[gw] 接到已有的 magpie 控制面 127.0.0.1:%d", p)
 			return nil
 		}
@@ -165,8 +191,8 @@ func gwEnsure() error {
 	// 2) 自己拉一个。端口被别的程序占着就换下一个 —— 绝不能停别人的进程。
 	exe := findMagpieExe()
 	if exe == "" {
-		gwConn.lastErr = "没有找到 magpie 可执行文件（先安装/打开一次 magpie）"
-		return errors.New(gwConn.lastErr)
+		g.lastErr = "没有找到 magpie 可执行文件（先安装/打开一次 magpie）"
+		return errors.New(g.lastErr)
 	}
 	var lastStart error
 	for p := gwFirstPort; p < gwFirstPort+gwPortTries; p++ {
@@ -183,10 +209,10 @@ func gwEnsure() error {
 		deadline := time.Now().Add(30 * time.Second)
 		for time.Now().Before(deadline) {
 			if gwPing(p, key) {
-				gwConn.port, gwConn.key = p, key
-				gwConn.client = gwClient()
-				gwConn.proc, gwConn.ours = cmd.Process, true
-				gwConn.exe, gwConn.lastErr = exe, ""
+				g.port, g.key = p, key
+				g.client = gwClient()
+				g.proc, g.ours = cmd.Process, true
+				g.exe, g.lastErr = exe, ""
 				log.Printf("[gw] 已启动 magpie 控制面 127.0.0.1:%d（pid=%d，只由 Perch 使用）", p, cmd.Process.Pid)
 				return nil
 			}
@@ -203,11 +229,11 @@ func gwEnsure() error {
 		}
 		lastStart = fmt.Errorf("magpie web 没能在 127.0.0.1:%d 起来：%s", p, strings.TrimSpace(msg))
 	}
-	gwConn.lastErr = "控制面启动失败"
+	g.lastErr = "控制面启动失败"
 	if lastStart != nil {
-		gwConn.lastErr = lastStart.Error()
+		g.lastErr = lastStart.Error()
 	}
-	return errors.New(gwConn.lastErr)
+	return errors.New(g.lastErr)
 }
 
 // findMagpieExe 找 magpie 本体：先问正在跑的那个进程（最可靠 —— 用户点开的就是它），
@@ -231,7 +257,7 @@ func findMagpieExe() string {
 	local := os.Getenv("LOCALAPPDATA")
 	var cands []string
 	if local != "" {
-		// Perch 自己装的（见 install.go 的 magpie 配方）优先：它是最可控的一份，
+		// Perch 自己装的（见 agentcatalog 的 magpie 配方）优先：它是最可控的一份，
 		// 不会被 Downloads 里残留的旧版本抢走。
 		cands = append(cands, filepath.Join(local, "Perch", "magpie", "magpie.exe"))
 	}
@@ -246,8 +272,8 @@ func findMagpieExe() string {
 				filepath.Join(local, "Programs", "magpie", n),
 				filepath.Join(local, "magpie", n),
 			)
-			for _, g := range []string{filepath.Join(local, "Programs", "magpie*", n), filepath.Join(local, "magpie*", n)} {
-				if m, _ := filepath.Glob(g); len(m) > 0 {
+			for _, glob := range []string{filepath.Join(local, "Programs", "magpie*", n), filepath.Join(local, "magpie*", n)} {
+				if m, _ := filepath.Glob(glob); len(m) > 0 {
 					cands = append(cands, m...)
 				}
 			}
@@ -266,19 +292,19 @@ func findMagpieExe() string {
 	return ""
 }
 
-// gwStop 只关 Perch 自己拉起来的那个控制面；接上的外部控制面只断开连接。
+// Stop 只关 Perch 自己拉起来的那个控制面；接上的外部控制面只断开连接。
 // 没接控制面时直接返回：关窗路径也会调它，不要凭空打一行"已断开 0"。
-func gwStop() {
-	gwConn.mu.Lock()
-	if gwConn.client == nil && gwConn.proc == nil {
-		gwConn.mu.Unlock()
+func (g *Gateway) Stop() {
+	g.mu.Lock()
+	if g.client == nil && g.proc == nil {
+		g.mu.Unlock()
 		return
 	}
-	proc, ours := gwConn.proc, gwConn.ours
-	gwConn.client, gwConn.proc, gwConn.ours = nil, nil, false
-	gwConn.lastErr = ""
-	port := gwConn.port
-	gwConn.mu.Unlock()
+	proc, ours := g.proc, g.ours
+	g.client, g.proc, g.ours = nil, nil, false
+	g.lastErr = ""
+	port := g.port
+	g.mu.Unlock()
 	if ours && proc != nil {
 		_ = proc.Kill()
 		_, _ = proc.Wait()
@@ -286,22 +312,22 @@ func gwStop() {
 	} else {
 		log.Printf("[gw] 已断开控制面（%d 是外部进程，保持运行）", port)
 	}
-	gwPush(map[string]any{"connected": false, "at": nowISO(), "external": true})
+	g.emit(map[string]any{"type": "gw", "gw": map[string]any{"connected": false, "at": nowISO(), "external": true}})
 }
 
 // ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
 
-func gwConnState() (int, string, *http.Client, bool) {
-	gwConn.mu.Lock()
-	defer gwConn.mu.Unlock()
-	return gwConn.port, gwConn.key, gwConn.client, gwConn.ours
+func (g *Gateway) connState() (int, string, *http.Client, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.port, g.key, g.client, g.ours
 }
 
-// gwAPI 是唯一一条通往 magpie 的 HTTP 路。路径白名单在这里，不在前端。
-func gwAPI(method, path string, body any) ([]byte, error) {
-	port, key, client, _ := gwConnState()
+// API 是唯一一条通往 magpie 的 HTTP 路。路径白名单在这里，不在前端。
+func (g *Gateway) API(method, path string, body any) ([]byte, error) {
+	port, key, client, _ := g.connState()
 	if client == nil {
 		return nil, errors.New("控制面未连接")
 	}
@@ -352,46 +378,34 @@ func gwAPI(method, path string, body any) ([]byte, error) {
 	return data, nil
 }
 
-func gwGetJSON(path string, v any) error {
-	b, err := gwAPI("GET", path, nil)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(b, v)
-}
-
 func nowISO() string { return time.Now().Format(time.RFC3339) }
 
-func gwPush(gw map[string]any) {
-	pushJSON(map[string]any{"type": "gw", "gw": gw})
+func (g *Gateway) pushGW(m map[string]any) {
+	g.emit(map[string]any{"type": "gw", "gw": m})
 }
 
-func gwPushErr(err error) {
-	gwPush(map[string]any{"connected": false, "at": nowISO(), "err": err.Error()})
-}
-
-// gwConnect 由用户点「连接」触发：接上（必要时拉起）控制面，再推整份原生读数。
-func gwConnect() {
-	if err := gwEnsure(); err != nil {
+// Connect 由用户点「连接」触发：接上（必要时拉起）控制面，再推整份原生读数。
+func (g *Gateway) Connect() {
+	if err := g.Ensure(); err != nil {
 		log.Printf("[gw] 连接失败：%v", err)
-		gwPushErr(err)
+		g.pushGW(map[string]any{"connected": false, "at": nowISO(), "err": err.Error()})
 		return
 	}
-	gwRefresh()
+	g.Refresh()
 }
 
-/* gwRefresh 只确认「控制面还在、端口是多少」。供应商/路由/用量/插件的数据
- * 全部由内嵌的 magpie 页面自己取（gwui.go），Perch 不再抄一份到内存里。 */
-func gwRefresh() {
-	port, key, client, ours := gwConnState()
+/* Refresh 只确认「控制面还在、端口是多少」。供应商/路由/用量/插件的数据
+ * 全部由内嵌的 magpie 页面自己取（ui.go），Perch 不再抄一份到内存里。 */
+func (g *Gateway) Refresh() {
+	port, key, client, ours := g.connState()
 	if client == nil || !gwPing(port, key) {
-		gwPush(map[string]any{"connected": false, "at": nowISO()})
+		g.pushGW(map[string]any{"connected": false, "at": nowISO()})
 		return
 	}
-	gwConn.mu.Lock()
-	exe := gwConn.exe
-	gwConn.mu.Unlock()
-	gwPush(map[string]any{
+	g.mu.Lock()
+	exe := g.exe
+	g.mu.Unlock()
+	g.pushGW(map[string]any{
 		"connected": true,
 		"port":      port,
 		"ours":      ours,
@@ -400,24 +414,22 @@ func gwRefresh() {
 	})
 }
 
-// gwProbe 是启动时的被动探测：只接已经存在的控制面，绝不拉起进程。
-func gwProbe() {
-	key := gwLoadKey()
+// Probe 是启动时的被动探测：只接已经存在的控制面，绝不拉起进程。
+func (g *Gateway) Probe() {
+	key := g.loadKey()
 	for p := gwFirstPort; p < gwFirstPort+gwPortTries; p++ {
 		if gwPing(p, key) {
-			gwConn.mu.Lock()
-			gwConn.port, gwConn.key = p, key
-			gwConn.client = gwClient()
-			gwConn.proc, gwConn.ours, gwConn.exe = nil, false, ""
-			gwConn.mu.Unlock()
+			g.mu.Lock()
+			g.port, g.key = p, key
+			g.client = gwClient()
+			g.proc, g.ours, g.exe = nil, false, ""
+			g.mu.Unlock()
 			log.Printf("[gw] 启动时接到已有的控制面 127.0.0.1:%d", p)
-			gwRefresh()
+			g.Refresh()
 			return
 		}
 	}
 }
-
-func urlQueryEscape(s string) string { return url.QueryEscape(s) }
 
 func firstNonEmpty(xs ...string) string {
 	for _, x := range xs {

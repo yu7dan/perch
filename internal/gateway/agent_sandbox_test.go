@@ -1,8 +1,8 @@
-package main
+package gateway
 
 // 沙盒验收（P0.1，2026-10-18）：不碰用户的 Claude Code，只在一个隔离的
 // USERPROFILE/APPDATA 里起一个 magpie 控制面，并且**只放 codex 的配置**，
-// 然后走 Perch 真实的 gwAgent* 函数跑完一整圈：
+// 然后走 Perch 真实的 Agent* 方法跑完一整圈：
 //
 //	读状态 → 接入 → 改字段 → 重新应用 → 断开预览 → 断开还原
 //
@@ -32,9 +32,9 @@ func sandboxVal(t *testing.T, name string) string {
 	return v
 }
 
-func sandboxAgents(t *testing.T) []map[string]any {
+func sandboxAgents(t *testing.T, g *Gateway) []map[string]any {
 	t.Helper()
-	b, err := gwAPI("GET", "/api/state", nil)
+	b, err := g.API("GET", "/api/state", nil)
 	if err != nil {
 		t.Fatalf("读 /api/state：%v", err)
 	}
@@ -47,9 +47,9 @@ func sandboxAgents(t *testing.T) []map[string]any {
 	return st.Agents
 }
 
-func sandboxState(t *testing.T) map[string]any {
+func sandboxState(t *testing.T, g *Gateway) map[string]any {
 	t.Helper()
-	agents := sandboxAgents(t)
+	agents := sandboxAgents(t, g)
 	for _, a := range agents {
 		if a["id"] == "claude" {
 			t.Fatalf("沙盒里看到了 claude：隔离失败，拒绝继续")
@@ -87,8 +87,11 @@ func TestAgentSandboxCycle(t *testing.T) {
 	if !gwPing(port, key) {
 		t.Fatalf("沙盒控制面 127.0.0.1:%d 没起来（先让沙盒脚本起一个隔离控制面）", port)
 	}
-	// 直接指向沙盒：client 非空且 ping 通，gwEnsure 就不会去拉起任何进程。
-	gwConn = gwServer{port: port, key: key, client: gwClient()}
+	// 直接指向沙盒：client 非空且 ping 通，Ensure 就不会去拉起任何进程。
+	g := New(nil)
+	g.mu.Lock()
+	g.port, g.key, g.client = port, key, gwClient()
+	g.mu.Unlock()
 
 	cfg := filepath.Join(home, ".codex", "config.toml")
 	orig, err := os.ReadFile(cfg)
@@ -98,7 +101,7 @@ func TestAgentSandboxCycle(t *testing.T) {
 
 	// 1) 读状态：没有 claude（隔离成功的证据），codex 在，未接入。
 	//    pi 可能因为装在机器 PATH 上被列出来，不写它就没事。
-	ag := sandboxState(t)
+	ag := sandboxState(t, g)
 	if ag["wired"] == true {
 		t.Fatalf("沙盒一开始就是已接入：%v", ag)
 	}
@@ -108,9 +111,9 @@ func TestAgentSandboxCycle(t *testing.T) {
 	}
 
 	// 2) 接入。
-	gwAgentAction("connect", "codex")
-	if st := sandboxState(t); st["wired"] != true {
-		_, e := gwAPI("POST", "/api/agents/connect/codex", map[string]any{})
+	g.AgentAction("connect", "codex")
+	if st := sandboxState(t, g); st["wired"] != true {
+		_, e := g.API("POST", "/api/agents/connect/codex", map[string]any{})
 		t.Fatalf("接入后 wired 不是 true：%v（原接口错误：%v）", st, e)
 	}
 	connected, err := os.ReadFile(cfg)
@@ -124,23 +127,23 @@ func TestAgentSandboxCycle(t *testing.T) {
 		t.Fatalf("接入后 config.toml 没有 base_url：\n%s", connected)
 	}
 
-	// 3) 改一个字段（走 Perch 的 gwAgentSet）。
-	gwAgentSet("codex", "effort", "high")
-	ag = sandboxState(t)
+	// 3) 改一个字段（走 Perch 的 AgentSet）。
+	g.AgentSet("codex", "effort", "high")
+	ag = sandboxState(t, g)
 	if got := fieldValue(ag, "effort"); got != "high" {
 		t.Fatalf("改 effort 后 state 里是 %q，期望 high", got)
 	}
 
 	// 4) 重新应用（漂移修复同一套 URL/动作）。
-	gwAgentAction("reapply", "codex")
-	if st := sandboxState(t); st["wired"] != true {
+	g.AgentAction("reapply", "codex")
+	if st := sandboxState(t, g); st["wired"] != true {
 		t.Fatalf("重新应用后 wired 不是 true：%v", st)
 	}
 
 	// 5) 断开预览：必须是合法 JSON，且不动文件。
 	beforePreview, _ := os.ReadFile(cfg)
-	gwAgentPreview("codex")
-	pb, err := gwAPI("GET", "/api/agents/preview/codex", nil)
+	g.AgentPreview("codex")
+	pb, err := g.API("GET", "/api/agents/preview/codex", nil)
 	if err != nil {
 		t.Fatalf("断开预览：%v", err)
 	}
@@ -153,8 +156,8 @@ func TestAgentSandboxCycle(t *testing.T) {
 	}
 
 	// 6) 断开，并还原到接入前。
-	gwAgentAction("disconnect", "codex")
-	if st := sandboxState(t); st["wired"] == true {
+	g.AgentAction("disconnect", "codex")
+	if st := sandboxState(t, g); st["wired"] == true {
 		t.Fatalf("断开后 wired 还是 true：%v", st)
 	}
 	left, err := os.ReadFile(cfg)

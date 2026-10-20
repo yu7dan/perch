@@ -1,7 +1,7 @@
-package main
+package install
 
-// 安装脚本的沙盒验收（P1.3，2026-10-18）：把 install.go 里**真正被用户点击时
-// 执行的那段 PowerShell 原文**写到临时文件，在一个隔离的 LOCALAPPDATA 里跑。
+// 安装脚本的沙盒验收（P1.3，2026-10-18）：把**真正被用户点击时执行的那段
+// PowerShell 原文**写到临时文件，在一个隔离的 LOCALAPPDATA 里跑。
 //
 // 验的是：
 //   - feed 能读到版本和资产（usemagpie.ai/api/latest）
@@ -18,6 +18,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/yu7dan/perch/internal/agentcatalog"
 )
 
 func TestMagpieInstallerSandbox(t *testing.T) {
@@ -28,11 +30,11 @@ func TestMagpieInstallerSandbox(t *testing.T) {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatalf("建沙盒：%v", err)
 	}
-	script := installRecipes["magpie"].Script
+	script := agentcatalog.Recipes["magpie"].Script
 	if len(script) == 0 {
-		t.Fatal("installRecipes[magpie].Script 是空的")
+		t.Fatal("agentcatalog.Recipes[magpie].Script 是空的")
 	}
-	// 与 install.go 真正的执行方式一致：-Command，脚本原文作为参数传进去
+	// 与真正的执行方式一致：-Command，脚本原文作为参数传进去
 	// （UTF-16），不落成 .ps1 文件 —— 落文件会被 PS 5.1 按 ANSI 读，中文全坏。
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
 	cmd.Env = append(os.Environ(), "LOCALAPPDATA="+root)

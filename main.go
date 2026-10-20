@@ -934,13 +934,8 @@ func handleCtl(c *application.StreamConn) {
 			// 用户点刷新：立刻跑一轮（后台 watcher 仍在按自己的节奏走）。
 			// 换协程 —— HTTP 最长 5 × 1.8s，不能把 ctl 收包卡住。
 			go func() {
-				magpieWatchMu.RLock()
-				w := magpieWatch
-				magpieWatchMu.RUnlock()
-				if w != nil {
-					w.refresh()
-					log.Printf("[magpie] 手动刷新完成")
-				}
+				gw.RefreshNow()
+				log.Printf("[magpie] 手动刷新完成")
 			}()
 		case "magpie.update.get":
 			// 读控制面自己的更新状态（GET /api/update），只读。
@@ -1313,7 +1308,7 @@ func main() {
 			// （见 gwui.go；真正的 /gwui/* 与 /api/* 在 127.0.0.1 的
 			// 随机端口上，因为 Wails 这一版交给 asset handler 的
 			// POST 请求没有请求体）。其余路径仍由嵌入的 assets 提供。
-			Handler: gwUIAssets{assets: application.BundledAssetFileServer(assets)},
+			Handler: gwUIHandler(application.BundledAssetFileServer(assets)),
 		},
 	})
 	// 标签是运行期创建的，创建时要 HandleStream —— 拿不到 app 就注册不了。
