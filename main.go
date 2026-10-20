@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +18,8 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+
+	"perch/internal/agent"
 )
 
 //go:embed assets
@@ -159,12 +160,7 @@ type ctrlMsg struct {
 // ---------------------------------------------------------------------------
 
 // resumeIntent 是「以什么姿态接上已有会话」。前端只声明意图，
-// 翻译成命令行是 agent 自己的事（见 agentDefs）。
-type resumeIntent struct {
-	Kind string `json:"kind"` // "new" | "latest" | "exact" | "fork"
-	ID   string `json:"id"`
-}
-
+// 翻译成命令行是 agent 自己的事（见 internal/agent 的 Def）。
 type spawnSpec struct {
 	Agent  string       `json:"agent"`
 	CWD    string       `json:"cwd"`
@@ -183,36 +179,8 @@ type spawnSpec struct {
 	DegradedFrom string `json:"degradedFrom,omitempty"`
 }
 
-// agentDef 把「续接意图」翻译成命令行参数，外加这个 agent 需要的环境变量。
-//
-// 新增第三个 agent = 在这张表里加一条，别处**零改动**。
-// 参数来源：计划书那张意图表，两个 agent 各自的 --help 都核实过。
-// （pi 先不登记 —— 它的 --session/--fork 要绝对 jsonl 路径，
-//
-//	那要等索引器把 SourcePath 喂进来，C2 一起做。）
-type agentDef struct {
-	Exe string
-	// Bin 是没解析前的命令名（如 "codex"）。有它时，**每次开格都重新解析一次**
-	// 可执行文件位置 —— 用户可能在 Perch 开着的时候装了/更新了一个 agent，
-	// init() 里只解析一次会把这个新装的 exe 永远漏在外。claude 走自己的
-	// resolveClaudeExe，Bin 为空。
-	Bin string
-	// Prefix 只在 Windows 的 .cmd/.bat shim 上出现（npm 装出来的 CLI）：
-	// Exe 是 cmd.exe，Prefix 是 ["/c", <shim>]。ConPTY 不能直接启动 .cmd。
-	Prefix []string
-	Env    map[string]string
-	// Args 把「续接意图」翻译成命令行。settings 是我们注入的那份 --settings
-	// JSON 字符串（空 = 不注入）：它跟着**每一次启动**走、只对这一次生效，
-	// 不碰用户的任何配置文件（第 0 步实测：--settings 是**合并**不是替换，
-	// 用户 settings.json 里的 env/model 照样生效）。
-	Args func(resumeIntent, string) []string
-	// Prepare 在每次开格前调用，用来做“这一格才有的”准备：分配端口、生成口令、
-	// 决定事件文件路径。cwd 是这一格将要启动的目录（Codex 的 app-server 要在
-	// 同一个目录里起来，thread/start 的默认 cwd 才和 TUI 一致）。
-	// 返回的 env/args 只作用于这一次启动；observe 在 PTY 起来之后跑，
-	// ctx 一取消就退出。Claude 不用它（它的 hook 走 --settings）。
-	Prepare func(tag string, tabID int, cwd string) (env map[string]string, args []string, observe func(context.Context), err error)
-}
+// agentDef / resumeIntent 的字段定义在 internal/agent（见 agent_bridge.go 的别名）。
+// 新增一个深度适配的 agent = 在那个包里加一份构造函数，别处不用改。
 
 // resolveClaudeExe 找 agent 的可执行文件，顺序：
 //
@@ -267,6 +235,7 @@ var agentDefs = map[string]agentDef{
 // 深度适配（续接、hook、转录）仍然只对 claude 做 —— 用户 2026-10-17 确认的
 // 第一阶段范围是“装完能在 Perch 里启动”。
 func init() {
+	agent.SetHost(rootAgentHost{})
 	for _, d := range agentCatalogDefs {
 		if d.ID == "claude" || d.ID == "zcode" || d.Bin == "" {
 			continue
@@ -275,25 +244,14 @@ func init() {
 	}
 	// 通用适配只负责“能开一格”；OpenCode 有自己的一套启动参数/状态观察，
 	// 覆盖掉通用那条。以后 Pi/Codex 同样在这里覆盖。
-	agentDefs["opencode"] = openCodeAgentDef()
+	agentDefs["opencode"] = agent.OpenCodeDef()
 	// Pi 也覆盖通用那条：续接参数 + -e 观察扩展。
-	agentDefs["pi"] = piAgentDef()
-	// Codex：每格一个 app-server + TUI --remote（见 agent_codex.go）。
-	agentDefs["codex"] = codexAgentDef()
+	agentDefs["pi"] = agent.PiDef()
+	// Codex：每格一个 app-server + TUI --remote（见 internal/agent/codex.go）。
+	agentDefs["codex"] = agent.CodexDef()
 }
 
-func genericAgentDef(bin string) agentDef {
-	exe, prefix := resolveAgentExe(bin)
-	return agentDef{
-		Exe:    exe,
-		Bin:    bin,
-		Prefix: prefix,
-		Args: func(resumeIntent, string) []string {
-			// 通用适配第一阶段只开新会话；续接要按 agent 逐个补。
-			return nil
-		},
-	}
-}
+func genericAgentDef(bin string) agentDef { return agent.GenericDef(bin) }
 
 type tabHost struct {
 	id     int
@@ -1580,70 +1538,6 @@ func main() {
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
-}
-
-// envBlocked 列出**绝不能从宿主继承**的终端呈现类变量。
-//
-// 规则的由来：宿主自己就是一个 Claude Code 会话，它的环境是
-// 「我是谁、我在什么终端里」的**第一人称描述** —— 对子进程来说这些描述全是
-// 谎话，而且会实质改变子 agent 的行为。我们已经在这上面栽过两次：
-//
-//   - CLAUDE_CODE_CHILD_SESSION 之类 → 子 claude 认为自己是子会话，
-//     **历史根本不落盘**，直接毁掉「续接」这个核心功能。
-//   - NO_COLOR=1 → 子 claude 认为终端不支持颜色，**关掉全部颜色输出**。
-//     表现是：开场横幅的吉祥物从 #D97757 橙色变成纯白，整个终端黑白一片。
-//     2026-10-15 实测：去掉这个变量后，终端区域的主色立刻变成 215,119,87。
-//
-// 两次都是「宿主的环境泄漏进了子 agent」。补一个删一个的写法永远补不完，
-// 所以这里把**终端呈现相关的一整类**显式列出并整类剥掉，
-// 再由我们在下面按事实重新声明。
-var envBlocked = map[string]bool{
-	"NO_COLOR": true, "FORCE_COLOR": true,
-	"CLICOLOR": true, "CLICOLOR_FORCE": true,
-	"TERM": true, "COLORTERM": true, "COLORFGBG": true,
-	"TERM_PROGRAM": true, "TERM_PROGRAM_VERSION": true,
-	// 下面这些是在**别的终端里**才成立的标识。宿主如果跑在 Windows Terminal
-	// 里，它们就会漏进来，让子 claude 以为自己在 WT 里（进而期待 WT 才有的能力）。
-	"WT_SESSION": true, "WT_PROFILE_ID": true,
-	"VTE_VERSION": true, "KITTY_WINDOW_ID": true,
-	"ITERM_SESSION_ID": true, "ITERM_PROFILE": true,
-	"WEZTERM_PANE": true, "WEZTERM_EXECUTABLE": true,
-}
-
-// buildEnv 从父进程环境出发，剥掉不该继承的，再**按事实**重新声明终端身份。
-// extra 是 agent 自己那份（claude 要 CLAUDE_CONFIG_DIR，pi 要 PI_CODING_AGENT_DIR）——
-// 从外面传进来，因为这个函数不该知道有几个 agent。
-func buildEnv(extra map[string]string) []string {
-	parent := os.Environ()
-	out := make([]string, 0, len(parent)+len(extra)+8)
-	for _, e := range parent {
-		k, _, _ := strings.Cut(e, "=")
-		if strings.HasPrefix(k, "CLAUDE") || envBlocked[strings.ToUpper(k)] {
-			continue
-		}
-		out = append(out, e)
-	}
-	// 排序只为让日志/调试时两次运行的顺序一致（map 遍历顺序是随机的）。
-	keys := make([]string, 0, len(extra))
-	for k := range extra {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		out = append(out, k+"="+extra[k])
-	}
-	return append(out,
-		// 下面这几条是**我们对"自己是什么终端"的事实声明**，不是从宿主抄来的。
-		"TERM=xterm-256color",
-		"COLORTERM=truecolor",
-		"TERM_PROGRAM=ai-workbench",
-		// fg;bg 的 0-15 索引形式。有些工具只认这个、不做 OSC 查询。
-		// 我们的主题是深底 + 白字 → 15;0。底色 2026-10-15 改成 #0a0a0a 后
-		// **这条不用动**：索引 0 就是"黑"，任何近黑底都对得上。
-		"COLORFGBG=15;0",
-		// 兜底再声明一次"要颜色"，24-bit。有它就不怕上游再塞进别的禁色变量。
-		"FORCE_COLOR=3",
-	)
 }
 
 // openInWindowsTerminal 用 Windows Terminal 打开同一个 cwd 的 claude。

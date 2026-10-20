@@ -613,7 +613,7 @@ func scanMagpiePlugins(dir string) magpiePlugins {
 // 探测规则抄 magpie 的 reference.md（第 88 行起那张表）：**看配置文件**，
 // 不看 PATH —— Windows 上装完不重开、PATH 没刷新的情况太常见了。
 // 能不能启动、有没有忙闲、能不能看到“在等你”是三件事，能力由 capsForAgent
-// （agent_status.go）决定。别再拿 agentDefs 里有没有它当“已接入”：通用启动
+// （internal/agent/status.go）决定。别再拿 agentDefs 里有没有它当“已接入”：通用启动
 // 会给所有有 Bin 的 agent 都注册一条，只代表能开一格。
 //
 // URL 一律是官方安装页/仓库：按钮的动作是"打开下载页"，不是静默安装 ——

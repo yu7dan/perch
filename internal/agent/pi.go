@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"context"
@@ -28,7 +28,7 @@ import (
 // 每格一份事件文件（同 hooks 的理由）：归属由文件名定，不做 session 反查，
 // 也就没有“SessionStart 比登记表早到、事件没主”的竞态。
 //
-// 扩展源码在仓库的 pi/observer.ts，go:embed 进二进制、启动时释放到
+// 扩展源码在仓库的 internal/agent/pi/observer.ts，go:embed 进二进制、启动时释放到
 // %APPDATA%\Perch\pi-ext\perch-observer.ts；用户目录里那份是派生物，不是配置。
 // ---------------------------------------------------------------------------
 
@@ -41,10 +41,10 @@ const (
 //go:embed pi/observer.ts
 var piObserverSource string
 
-func piAgentDef() agentDef {
-	d := genericAgentDef("pi")
+func piDef() Def {
+	d := GenericDef("pi")
 	// 续接参数走这里（和 Claude 的 Args 同一个位置）；扩展参数在 Prepare 里追加。
-	d.Args = func(r resumeIntent, _ string) []string {
+	d.Args = func(r ResumeIntent, _ string) []string {
 		switch r.Kind {
 		case "latest":
 			return []string{"--continue"}
@@ -73,7 +73,7 @@ func piDataDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(d, poolDirName), nil
+	return filepath.Join(d, DataDirName), nil
 }
 
 // ensurePiObserver 把二进制里的扩展释放到磁盘。
@@ -229,14 +229,14 @@ func handlePiLine(tabID int, line string, st *piPaneState, sink func(agentEvent)
 	switch ev.Type {
 	case "session_start":
 		log.Printf("[pi t%d] session_start reason=%s session=%s",
-			tabID, orNone(ev.Reason), short(ev.Session))
+			tabID, OrNone(ev.Reason), Short(ev.Session))
 		return
 	case "name":
 		// 名字不是状态：**不能**单独推一条没有 status 的 agent 消息 ——
 		// 前端 applyAgent 会执行 v.st = m.status || ""，把忙/闲清空。
 		// 记在这里，跟下一条 status 一起发。空名字 = 用户清掉了显示名。
 		st.name = ev.Name
-		log.Printf("[pi t%d] 名字 → %q", tabID, clip(ev.Name, 80))
+		log.Printf("[pi t%d] 名字 → %q", tabID, Clip(ev.Name, 80))
 		return
 	case "status":
 	default:
@@ -249,7 +249,7 @@ func handlePiLine(tabID int, line string, st *piPaneState, sink func(agentEvent)
 	out := agentEvent{
 		V: 1, Tab: tabID, Agent: "pi", Event: "status",
 		Status: ev.Status, State: ev.State, Kind: ev.Kind, Text: ev.Text,
-		Session: ev.Session, Name: st.name, Evidence: agentEvidenceExtension,
+		Session: ev.Session, Name: st.name, Evidence: EvidenceExtension,
 	}
 	// 观察扩展只写它确定的部分（比如提问工具会给 state=blocked）；
 	// 剩下的 working/done 从这里按 status 补齐，UI 不需要猜。
@@ -305,7 +305,7 @@ func piSessionRoot(cwd string) string {
 // 只 glob 一层项目目录。找到的是**文件名以 _<id>.jsonl 结尾**的文件；
 // Pi 默认命名是 <时间戳>_<session-id>.jsonl（实测 1.2.0）。
 func piSessionFileExists(cwd, id string) bool {
-	if !safeSessionID(id) {
+	if !SafeSessionID(id) {
 		return false
 	}
 	root := piSessionRoot(cwd)
@@ -316,26 +316,32 @@ func piSessionFileExists(cwd, id string) bool {
 	return err == nil && len(m) > 0
 }
 
-// sessionFileExistsFor：冷恢复/续接护栏的 agent 分派口。
-// Claude 的判据原样保留（projects/<slug>/<id>.jsonl），别的 agent 各问各的盘。
-func sessionFileExistsFor(agent, cwd, id string) bool {
-	switch agent {
+// SessionFileExistsFor：冷恢复/续接护栏的 agent 分派口。
+// 这里只回答本包有适配器的 agent；其余（Claude）由宿主自己判。
+func SessionFileExistsFor(name, cwd, id string) bool {
+	switch name {
 	case "pi":
-		return piSessionFileExists(cwd, id)
+		return PiSessionFileExists(cwd, id)
 	case "codex":
-		return codexSessionFileExists(cwd, id)
+		return CodexSessionFileExists(cwd, id)
 	}
-	return sessionFileExists(id)
+	return false
 }
 
+// PiSessionFileExists：这条 Pi 会话在盘上还有没有（给宿主的分派口）。
+func PiSessionFileExists(cwd, id string) bool { return piSessionFileExists(cwd, id) }
+
+// CodexSessionFileExists：这条 Codex 会话在盘上还有没有（给宿主的分派口）。
+func CodexSessionFileExists(cwd, id string) bool { return codexSessionFileExists(cwd, id) }
+
 // bindObservedSession 是“外部状态源报告了会话身份”的统一入口。
-// agent 只用于日志措辞；bind/rebind 的语义见 main.go。
+// agent 只用于日志措辞；bind/rebind 的语义见宿主的 TabManager。
 func bindObservedSession(tabID int, sid, agent string) {
-	if tabs.bindSession(tabID, sid, "", agent) {
-		log.Printf("[agent t%d] 关联建立 session=%s（%s）", tabID, short(sid), agent)
+	if host.BindSession(tabID, sid, "", agent) {
+		log.Printf("[agent t%d] 关联建立 session=%s（%s）", tabID, Short(sid), agent)
 		return
 	}
-	if tabs.rebindSession(tabID, sid, "", agent) {
-		log.Printf("[agent t%d] 会话改写 session=%s（%s）", tabID, short(sid), agent)
+	if host.RebindSession(tabID, sid, "", agent) {
+		log.Printf("[agent t%d] 会话改写 session=%s（%s）", tabID, Short(sid), agent)
 	}
 }

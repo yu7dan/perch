@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"crypto/sha256"
@@ -10,15 +10,15 @@ import (
 )
 
 func TestCodexResumeArgs(t *testing.T) {
-	def := codexAgentDef()
+	def := CodexDef()
 	cases := []struct {
-		in   resumeIntent
+		in   ResumeIntent
 		want []string
 	}{
-		{resumeIntent{Kind: "new"}, nil},
-		{resumeIntent{Kind: "latest"}, []string{"resume", "--last"}},
-		{resumeIntent{Kind: "exact", ID: "01a15035-3fc0"}, []string{"resume", "01a15035-3fc0"}},
-		{resumeIntent{Kind: "fork", ID: "01a15035-3fc0"}, []string{"fork", "01a15035-3fc0"}},
+		{ResumeIntent{Kind: "new"}, nil},
+		{ResumeIntent{Kind: "latest"}, []string{"resume", "--last"}},
+		{ResumeIntent{Kind: "exact", ID: "01a15035-3fc0"}, []string{"resume", "01a15035-3fc0"}},
+		{ResumeIntent{Kind: "fork", ID: "01a15035-3fc0"}, []string{"fork", "01a15035-3fc0"}},
 	}
 	for _, c := range cases {
 		got := def.Args(c.in, "")
@@ -286,8 +286,8 @@ func TestCodexSessionFileExists(t *testing.T) {
 	if !codexSessionFileExists("", id) {
 		t.Fatal("盘上有 rollout 文件，却报不存在")
 	}
-	if !sessionFileExistsFor("codex", "", id) {
-		t.Fatal("sessionFileExistsFor 没有分派到 Codex 的判据")
+	if !SessionFileExistsFor("codex", "", id) {
+		t.Fatal("SessionFileExistsFor 没有分派到 Codex 的判据")
 	}
 	if codexSessionFileExists("", "../01a15035") {
 		t.Fatal("非法 id 不该报存在")

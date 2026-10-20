@@ -1,12 +1,13 @@
 //go:build windows
 
-package main
+package agent
 
 import (
 	"context"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -34,6 +35,32 @@ func (w *testTail) String() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return string(w.b)
+}
+
+// liveCodexExe 给真机测试找 codex。生产路径由宿主注入（它有一份完整的
+// 安装位置候选表）；测试里只补最常见的两个落点。
+func liveCodexExe() (string, []string) {
+	if v := strings.TrimSpace(os.Getenv("PERCH_CODEX_LIVE_EXE")); v != "" {
+		return v, nil
+	}
+	if exe, prefix := host.ResolveExe("codex"); exe != "codex" {
+		return exe, prefix
+	}
+	home, _ := os.UserHomeDir()
+	cands := []string{
+		filepath.Join(home, ".codex", "packages", "standalone", "current", "bin", "codex.exe"),
+	}
+	if local := os.Getenv("LOCALAPPDATA"); local != "" {
+		cands = append([]string{
+			filepath.Join(local, "Programs", "OpenAI", "Codex", "bin", "codex.exe"),
+		}, cands...)
+	}
+	for _, p := range cands {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p, nil
+		}
+	}
+	return "codex", nil
 }
 
 // TestCodexLiveAppServer 是**真机**集成测试：起真的 app-server、真的 Codex
@@ -91,10 +118,10 @@ func TestCodexLiveAppServer(t *testing.T) {
 		}, func() {}) // server 由本测试自己的 defer 收
 	}()
 
-	exe, prefix := resolveAgentExe("codex")
+	exe, prefix := liveCodexExe()
 	args := append(append([]string{}, prefix...),
 		"--remote", url, "--remote-auth-token-env", codexTokenEnv)
-	env := buildEnv(map[string]string{codexTokenEnv: token})
+	env := BuildEnv(map[string]string{codexTokenEnv: token})
 	sess, err := startPTY(exe, args, cwd, env, 110, 32)
 	if err != nil {
 		t.Fatalf("TUI 起不来: %v", err)

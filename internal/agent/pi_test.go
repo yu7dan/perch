@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"os"
@@ -19,7 +19,7 @@ func TestPiBlockedState(t *testing.T) {
 	}
 	ev := got[0]
 	if ev.State != agentStateBlocked || ev.Status != "waiting" ||
-		ev.Evidence != agentEvidenceExtension || ev.Kind != "ask" {
+		ev.Evidence != EvidenceExtension || ev.Kind != "ask" {
 		t.Fatalf("提问工具事件不对: %+v", ev)
 	}
 
@@ -27,21 +27,21 @@ func TestPiBlockedState(t *testing.T) {
 	handlePiLine(1, `{"type":"status","session":"ses_pi","status":"busy"}`, &piPaneState{}, func(ev agentEvent) {
 		got = append(got, ev)
 	})
-	if ev := got[len(got)-1]; ev.State != agentStateWorking || ev.Evidence != agentEvidenceExtension {
+	if ev := got[len(got)-1]; ev.State != agentStateWorking || ev.Evidence != EvidenceExtension {
 		t.Fatalf("busy 事件不对: %+v", ev)
 	}
 }
 
 func TestPiResumeArgs(t *testing.T) {
-	def := piAgentDef()
+	def := PiDef()
 	cases := []struct {
-		in   resumeIntent
+		in   ResumeIntent
 		want []string
 	}{
-		{resumeIntent{Kind: "new"}, nil},
-		{resumeIntent{Kind: "latest"}, []string{"--continue"}},
-		{resumeIntent{Kind: "exact", ID: "01a15035-3fc0"}, []string{"--session-id", "01a15035-3fc0"}},
-		{resumeIntent{Kind: "fork", ID: "01a15035-3fc0"}, []string{"--fork", "01a15035-3fc0"}},
+		{ResumeIntent{Kind: "new"}, nil},
+		{ResumeIntent{Kind: "latest"}, []string{"--continue"}},
+		{ResumeIntent{Kind: "exact", ID: "01a15035-3fc0"}, []string{"--session-id", "01a15035-3fc0"}},
+		{ResumeIntent{Kind: "fork", ID: "01a15035-3fc0"}, []string{"--fork", "01a15035-3fc0"}},
 	}
 	for _, c := range cases {
 		got := def.Args(c.in, "")
@@ -76,8 +76,8 @@ func TestPiSessionFileExists(t *testing.T) {
 	if !piSessionFileExists("", "01a15035-3fc0-7204-8817-23e1bf203ddc") {
 		t.Fatal("盘上有会话文件，却报不存在")
 	}
-	if !sessionFileExistsFor("pi", "", "01a15035-3fc0-7204-8817-23e1bf203ddc") {
-		t.Fatal("sessionFileExistsFor 没有分派到 Pi 的判据")
+	if !SessionFileExistsFor("pi", "", "01a15035-3fc0-7204-8817-23e1bf203ddc") {
+		t.Fatal("SessionFileExistsFor 没有分派到 Pi 的判据")
 	}
 	// 形状不对的 id 不去 glob（同 safeSessionID 的白名单）。
 	if piSessionFileExists("", "../01a15035") {

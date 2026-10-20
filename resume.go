@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"perch/internal/agent"
 )
 
 /* ===========================================================================
@@ -66,20 +68,7 @@ type refusal struct {
 //	② 拿去拼盘上的路径做 glob —— `..`、`/`、`\`、`*`、`?` 都是路径或通配符语法。
 //
 // claude 给的 id 是 UUID、子代理文件是 agent-<hex>，白名单一点代价都没有。
-func safeSessionID(id string) bool {
-	if id == "" || len(id) > 128 {
-		return false
-	}
-	for i := 0; i < len(id); i++ {
-		c := id[i]
-		ok := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-			(c >= '0' && c <= '9') || c == '-' || c == '_'
-		if !ok {
-			return false
-		}
-	}
-	return true
-}
+func safeSessionID(id string) bool { return agent.SafeSessionID(id) }
 
 // sessionFileExists：这条会话在盘上还有没有。
 //
@@ -97,6 +86,16 @@ func sessionFileExists(id string) bool {
 	}
 	m, err := filepath.Glob(filepath.Join(claudeStateDir, "projects", "*", id+".jsonl"))
 	return err == nil && len(m) > 0
+}
+
+// sessionFileExistsFor：冷恢复/续接护栏的 agent 分派口。
+// Claude 的判据原样保留（projects/<slug>/<id>.jsonl），别的 agent 各问各的盘。
+func sessionFileExistsFor(agentName, cwd, id string) bool {
+	switch agentName {
+	case "pi", "codex":
+		return agent.SessionFileExistsFor(agentName, cwd, id)
+	}
+	return sessionFileExists(id)
 }
 
 // sessionLiveElsewhere：这条会话正被**某个 claude 进程**跑着吗？返回那个 pid。

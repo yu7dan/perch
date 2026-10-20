@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"bufio"
@@ -68,9 +68,9 @@ const (
 // 但前面可能带 ANSI 颜色或时间戳，所以不锚定行首。
 var codexPortRe = regexp.MustCompile(`ws://127\.0\.0\.1:(\d+)`)
 
-func codexAgentDef() agentDef {
-	d := genericAgentDef("codex")
-	d.Args = func(r resumeIntent, _ string) []string {
+func codexDef() Def {
+	d := GenericDef("codex")
+	d.Args = func(r ResumeIntent, _ string) []string {
 		switch r.Kind {
 		case "latest":
 			// resume --last：不弹选择器，直接接最近一条（0.163.0 的 --help 实测）。
@@ -149,7 +149,7 @@ func newCodexToken() (token, digest string, err error) {
 // stderr 用自己建的 os.Pipe 接：cmd.Wait 只关它自己那一端的句柄，不会把
 // 还没读完的 banner 截掉（exec.Cmd.StderrPipe 的文档明确警告这个顺序）。
 func startCodexAppServer(tag, cwd, digest string) (*exec.Cmd, chan error, int, error) {
-	exe, prefix := resolveAgentExe("codex")
+	exe, prefix := host.ResolveExe("codex")
 	args := append(append([]string{}, prefix...),
 		"app-server",
 		"--listen", "ws://127.0.0.1:0",
@@ -161,7 +161,7 @@ func startCodexAppServer(tag, cwd, digest string) (*exec.Cmd, chan error, int, e
 		cmd.Dir = cwd
 	}
 	// 和 PTY 里那份环境一致：不继承 CLAUDE*、终端身份由我们声明。
-	cmd.Env = buildEnv(nil)
+	cmd.Env = BuildEnv(nil)
 	// 同一个 job：Perch 一退，server 跟着退（见 job_windows.go）。
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 
@@ -237,7 +237,7 @@ func scanCodexStderr(r io.ReadCloser, tag string, portCh chan<- int) {
 		// 输出当日志刷屏（turn 的执行输出走的是别的通知，不在这里）。
 		low := strings.ToLower(line)
 		if kept < 20 || strings.Contains(low, "error") || strings.Contains(low, "panic") {
-			log.Printf("[codex %s] app-server: %s", tag, clip(line, 300))
+			log.Printf("[codex %s] app-server: %s", tag, Clip(line, 300))
 			kept++
 		}
 	}
@@ -326,7 +326,7 @@ func codexInitialize(ctx context.Context, conn *websocket.Conn, tag string) erro
 			UserAgent string `json:"userAgent"`
 		}
 		_ = json.Unmarshal(m.Result, &res)
-		log.Printf("[codex %s] app-server 握手完成（%s）", tag, clip(res.UserAgent, 160))
+		log.Printf("[codex %s] app-server 握手完成（%s）", tag, Clip(res.UserAgent, 160))
 		return nil
 	}
 }
@@ -343,7 +343,7 @@ func observeCodex(ctx context.Context, tabID int, cwd, url, token string, conn *
 		ephemeral: map[string]bool{},
 		subagent:  map[string]bool{},
 		// 第一帧是快照：冷恢复的格子可能带着重启前的旧状态，前端要按 resync 处理。
-		evidence: agentEvidenceResync,
+		evidence: EvidenceResync,
 	}
 	backoff := codexRetryMin
 	for {
@@ -585,9 +585,9 @@ func (st *codexPaneState) emit(sink func(agentEvent)) {
 	evidence := st.evidence
 	if evidence == "" {
 		// 测试构造的 state 没有这个字段；生产构造时一定是 resync。
-		evidence = agentEvidenceAppServer
+		evidence = EvidenceAppServer
 	}
-	st.evidence = agentEvidenceAppServer
+	st.evidence = EvidenceAppServer
 	state := agentStateWaiting // waitingOnApproval / waitingOnUserInput 都是“在等你”
 	switch status {
 	case "busy":
@@ -658,7 +658,7 @@ func handleCodexNotification(method string, params json.RawMessage, st *codexPan
 			st.name = p.Name
 			// 名字不是状态：单独发一条没有 status 的 agent 消息会把前端
 			// v.st 清成 ""（同 Pi）。跟着下一条状态一起发。
-			log.Printf("[codex t%d] 名字 → %q", st.tabID, clip(p.Name, 80))
+			log.Printf("[codex t%d] 名字 → %q", st.tabID, Clip(p.Name, 80))
 		}
 
 	default:
@@ -684,7 +684,7 @@ func (st *codexPaneState) handleThreadRead(result json.RawMessage, sink func(age
 	}
 	// 这是**断线期间**的补齐：前端刚冷恢复时，先把这一帧当 resync（waiting 要等
 	// 一条活事件才认，见 80-live.js 的 restoredUnconfirmed）。
-	st.evidence = agentEvidenceResync
+	st.evidence = EvidenceResync
 	st.emit(sink)
 }
 
@@ -716,7 +716,7 @@ func codexHome(cwd string) string {
 // 归档目录的层级各版本不同，两种形状都试一次；找不到只影响冷恢复的
 // 判定（会被降级成新会话），不会写任何东西。
 func codexSessionFileExists(cwd, id string) bool {
-	if !safeSessionID(id) {
+	if !SafeSessionID(id) {
 		return false
 	}
 	root := codexHome(cwd)

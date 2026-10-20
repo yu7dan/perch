@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"context"
@@ -45,11 +45,11 @@ func TestNormalizeAgentEvent(t *testing.T) {
 }
 
 func TestCapsForAgent(t *testing.T) {
-	claude := capsForAgent("claude")
+	claude := CapsFor("claude", true)
 	if !claude.Resume || !claude.Status || !claude.Waiting || !claude.Actions {
 		t.Fatalf("claude 能力矩阵不对: %+v", claude)
 	}
-	oc := capsForAgent("opencode")
+	oc := CapsFor("opencode", true)
 	if !oc.Launch || !oc.Status || !oc.Waiting {
 		t.Fatalf("opencode 能力矩阵不对: %+v", oc)
 	}
@@ -57,15 +57,15 @@ func TestCapsForAgent(t *testing.T) {
 		t.Fatalf("opencode 还没做续接，不能标成 resume: %+v", oc)
 	}
 	// 通用启动不等于有状态。qwen 有 Bin，能开一格；但没接状态。
-	qwen := capsForAgent("qwen")
+	qwen := CapsFor("qwen", true)
 	if !qwen.Launch || qwen.Status || qwen.Waiting {
 		t.Fatalf("通用 agent 只能 launch: %+v", qwen)
 	}
 	// zcode 在 init 里被跳过（Bin 有但不能直接启动），不能假装能开。
-	if zcode := capsForAgent("zcode"); zcode.Launch {
+	if zcode := CapsFor("zcode", false); zcode.Launch {
 		t.Fatalf("zcode 没有启动适配器，不能标 launch: %+v", zcode)
 	}
-	pi := capsForAgent("pi")
+	pi := CapsFor("pi", true)
 	if !pi.Launch || !pi.Resume || !pi.Status || !pi.Waiting {
 		t.Fatalf("pi 能力矩阵不对: %+v", pi)
 	}

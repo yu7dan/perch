@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"context"
@@ -44,24 +44,32 @@ import (
 // blocked 和 waiting 在 UI 上都是“需要你”，区别留给以后画不同的卡片。
 // 别把 blocked 当成“出错”：出错是 done + 一条 fail note（见 80-live.js）。
 const (
-	agentStateWorking = "working"
-	agentStateBlocked = "blocked"
-	agentStateWaiting = "waiting"
-	agentStateDone    = "done"
+	StateWorking = "working"
+	StateBlocked = "blocked"
+	StateWaiting = "waiting"
+	StateDone    = "done"
+)
+
+// 包内的短名字，读起来和原来的四态表一致。
+const (
+	agentStateWorking = StateWorking
+	agentStateBlocked = StateBlocked
+	agentStateWaiting = StateWaiting
+	agentStateDone    = StateDone
 )
 
 // 状态证据的来源（wire 字段 evidence）。前端用它判断冷恢复后收到的是
 // **重放**还是活事件：resync 的 waiting 在确认之前不许记未读。
 const (
-	agentEvidenceHook      = "hook"
-	agentEvidenceRegistry  = "registry"
-	agentEvidenceExtension = "extension"
-	agentEvidenceHTTP      = "http"
-	agentEvidenceAppServer = "app-server"
-	agentEvidenceResync    = "resync"
+	EvidenceHook      = "hook"
+	EvidenceRegistry  = "registry"
+	EvidenceExtension = "extension"
+	EvidenceHTTP      = "http"
+	EvidenceAppServer = "app-server"
+	EvidenceResync    = "resync"
 )
 
-type agentCaps struct {
+type Caps struct {
 	Launch    bool   `json:"launch"`    // Perch 能在终端里启动它
 	Resume    bool   `json:"resume"`    // 能按会话续接
 	Status    bool   `json:"status"`    // 能给出忙/闲
@@ -71,7 +79,7 @@ type agentCaps struct {
 	Mechanism string `json:"mechanism,omitempty"`
 }
 
-var agentAdapterCaps = map[string]agentCaps{
+var agentAdapterCaps = map[string]Caps{
 	"claude": {
 		Launch: true, Resume: true, Status: true, Waiting: true, Actions: true,
 		Mechanism: "hook",
@@ -81,7 +89,7 @@ var agentAdapterCaps = map[string]agentCaps{
 		Mechanism: "http",
 	},
 	"pi": {
-		// 状态/等待来自 pi -e 挂进去的观察扩展（pi/observer.ts）。
+		// 状态/等待来自 pi -e 挂进去的观察扩展（internal/agent/pi/observer.ts）。
 		// 等待是**条件性**的：Pi 没有内建审批，只有扩展的 ctx.ui 提示才会
 		// 出现 waiting；没有扩展提问时不会等 —— 这是能力边界，不假装。
 		Launch: true, Resume: true, Status: true, Waiting: true,
@@ -97,17 +105,17 @@ var agentAdapterCaps = map[string]agentCaps{
 	},
 }
 
-// capsForAgent 决定 Agent 名单上那一行该说什么。
+// CapsFor 决定 Agent 名单上那一行该说什么。
 //
-// ⚠️ “能启动”和“有状态”是两件事：agentDefs 里每个有 Bin 的 agent 都有一条
-// genericAgentDef（只开新会话），如果拿它当“已接入”，总览会把“只能启动”写成
-// “完整状态”。这里分开：Launch 看 agentDefs，Status/Waiting 看适配器表。
-func capsForAgent(id string) agentCaps {
+// ⚠️ “能启动”和“有状态”是两件事：能启动的 agent 都可以有一条 GenericDef
+// （只开新会话），如果拿它当“已接入”，总览会把“只能启动”写成“完整状态”。
+// 这里分开：Launch 由宿主传入（它知道完整的 agent 名单），Status/Waiting
+// 只看适配器表。
+func CapsFor(id string, canLaunch bool) Caps {
 	if c, ok := agentAdapterCaps[id]; ok {
 		return c
 	}
-	_, canLaunch := agentDefs[id]
-	return agentCaps{Launch: canLaunch, Mechanism: "terminal"}
+	return Caps{Launch: canLaunch, Mechanism: "terminal"}
 }
 
 // agentEvent 是适配器 -> Perch 的归一化事件。未来的外部适配器（JSONL/HTTP）
@@ -201,13 +209,13 @@ func emitAgentStatus(ev agentEvent) {
 	stateChanged := ev.State != "" && ev.State != prevState
 	evidenceChanged := ev.Evidence != "" && ev.Evidence != prevEvidence
 
-	prev, changed := tabs.setStatus(ev.Tab, ev.Status)
+	prev, changed := host.SetStatus(ev.Tab, ev.Status)
 	if !changed && !(ev.Status == "waiting" && noteChanged) && !stateChanged && !evidenceChanged {
 		return
 	}
 	log.Printf("[agent t%d] %s status %s → %s state=%s evidence=%s%s", ev.Tab, ev.Agent,
-		prev, ev.Status, orNone(ev.State), orNone(ev.Evidence), waitingHint(ev))
-	pushJSON(map[string]any{
+		prev, ev.Status, OrNone(ev.State), OrNone(ev.Evidence), waitingHint(ev))
+	host.Push(map[string]any{
 		"type":     "agent",
 		"tab":      ev.Tab,
 		"session":  ev.Session,
@@ -248,8 +256,8 @@ func waitingHint(ev agentEvent) string {
 
 const openCodePollEvery = 500 * time.Millisecond
 
-func openCodeAgentDef() agentDef {
-	d := genericAgentDef("opencode")
+func openCodeDef() Def {
+	d := GenericDef("opencode")
 	d.Prepare = prepareOpenCode
 	return d
 }
@@ -389,7 +397,7 @@ func observeOpenCode(ctx context.Context, tabID int, baseURL, password string, e
 		out := agentEvent{
 			V: 1, Tab: tabID, Agent: "opencode", Event: "status",
 			Status: st.status, Kind: st.kind, Text: st.text,
-			Session: st.session, Evidence: agentEvidenceHTTP,
+			Session: st.session, Evidence: EvidenceHTTP,
 		}
 		normalizeAgentEvent(&out)
 		sink(out)
@@ -397,12 +405,12 @@ func observeOpenCode(ctx context.Context, tabID int, baseURL, password string, e
 }
 
 func bindOpenCodeSession(tabID int, sid string) {
-	if tabs.bindSession(tabID, sid, "", "opencode") {
-		log.Printf("[agent t%d] 关联建立 session=%s（opencode）", tabID, short(sid))
+	if host.BindSession(tabID, sid, "", "opencode") {
+		log.Printf("[agent t%d] 关联建立 session=%s（opencode）", tabID, Short(sid))
 		return
 	}
-	if tabs.rebindSession(tabID, sid, "", "opencode") {
-		log.Printf("[agent t%d] 会话改写 session=%s（opencode）", tabID, short(sid))
+	if host.RebindSession(tabID, sid, "", "opencode") {
+		log.Printf("[agent t%d] 会话改写 session=%s（opencode）", tabID, Short(sid))
 	}
 }
 
@@ -475,7 +483,7 @@ func pollOpenCode(ctx context.Context, client *http.Client, baseURL, password st
 				out.text += ": " + pat
 			}
 		}
-		out.text = clip(out.text, 160)
+		out.text = Clip(out.text, 160)
 		return out, nil
 	}
 	for _, q := range questions {
@@ -488,7 +496,7 @@ func pollOpenCode(ctx context.Context, client *http.Client, baseURL, password st
 			if t == "" {
 				t = strings.TrimSpace(q.Questions[0].Question)
 			}
-			out.text = clip(t, 160)
+			out.text = Clip(t, 160)
 		}
 		if out.text == "" {
 			out.text = "OpenCode 在等你回答"
@@ -564,7 +572,7 @@ func ocGet(ctx context.Context, client *http.Client, url, password string, out a
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("%s: HTTP %d %s", url, resp.StatusCode, clip(string(b), 120))
+		return fmt.Errorf("%s: HTTP %d %s", url, resp.StatusCode, Clip(string(b), 120))
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }
