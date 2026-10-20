@@ -13,7 +13,7 @@ Run several agents side by side in one window — one real terminal per pane. Co
 </div>
 
 <p align="center">
-  <a href="docs/images/overview.png"><img src="docs/images/overview.png" alt="Perch overview: parallel agent panes, gateway usage, and the agent catalog" width="960"></a>
+  <a href="docs/images/overview.png"><img src="docs/images/overview.png" alt="Perch overview: workspace status, gateway usage, and the agent catalog" width="960"></a>
 </p>
 
 Perch is a Windows desktop gateway for agent terminals, in the same **agent development environment** category as Orca.
@@ -41,7 +41,7 @@ Each pane is a live ConPTY with its own scrollback, tab, and status dot. Switchi
 
 </td>
 <td width="50%">
-  <a href="docs/images/overview.png"><img src="docs/images/overview.png" alt="Parallel agent panes in the Perch overview" width="100%"></a>
+  <a href="docs/images/overview.png"><img src="docs/images/overview.png" alt="Workspace status, activity, and the agent catalog in the Perch overview" width="100%"></a>
 </td>
 </tr>
 <tr>
@@ -53,7 +53,7 @@ Connect, disconnect, re-apply, or keep the current configuration. Long model lis
 
 </td>
 <td width="50%">
-  <a href="docs/images/agent-wiring.png"><img src="docs/images/agent-wiring.png" alt="Agent configuration drawer with gateway wiring and a searchable model picker" width="100%"></a>
+  <a href="docs/images/agent-wiring.png"><img src="docs/images/agent-wiring.png" alt="Agent configuration drawer with gateway wiring and model selection" width="100%"></a>
 </td>
 </tr>
 <tr>
@@ -65,7 +65,7 @@ Providers, routing, usage, and plugins use magpie's own pages; the version and u
 
 </td>
 <td width="50%">
-  <a href="docs/images/gateway.png"><img src="docs/images/gateway.png" alt="Embedded magpie gateway with usage, sessions, models, and agent statistics" width="100%"></a>
+  <a href="docs/images/gateway.png"><img src="docs/images/gateway.png" alt="Embedded magpie gateway showing usage, sessions, projects, and models" width="100%"></a>
 </td>
 </tr>
 </table>
