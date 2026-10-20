@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>Perch · 栖枝</title>
+<title data-i18n="app.title">Perch · 栖枝</title>
 <!-- CSS 按域拆分，链接顺序 = 层叠顺序（基础 token → 各区域 → 第三方覆盖）。
      新增样式放进对应的域文件，不要再建第二份全局样式表。 -->
 <link rel="stylesheet" href="/vendor/xterm.css">
@@ -238,7 +238,7 @@
          全文件只有两条可拖元素（右栏左边界、右栏上下段），这里只有 1px 的
          border-right 装饰线，所以"拖不动"不是被谁挡住，是那里什么都没有。
          几何照 .divider，抓取区整条落在这一侧，见那条 CSS 的注释。 -->
-    <div id="list-divider" class="divider" title="拖动调整列表宽度"></div>
+    <div id="list-divider" class="divider" title="拖动调整列表宽度" data-i18n-title="divider.listTitle"></div>
     <div id="panes">
       <!-- A：实时终端。
            面板里**只有终端**：头上那条是 absolute overlay 且默认 chromeless
@@ -252,7 +252,8 @@
              它不记得"当前是谁" —— 那是 activeTab 的事。 --></div>
         <div class="phead">
           <div class="rt">
-            <button class="pbtn" id="restore" title="把上次的输出恢复到这个面板"></button>
+            <button class="pbtn" id="restore" title="把上次的输出恢复到这个面板"
+              data-i18n-title="term.restore.title"></button>
           </div>
         </div>
       </section>
@@ -305,20 +306,20 @@
              folder-tree 是**文件夹**的图标，不能同时代表模块和目录行。
              path 逐字取自 lucide-icons/lucide main:icons/files.svg（24 网格，
              官方 stroke-width=2；这里按 16px 渲染、描边 1.7，和本列其它图标同重）。 -->
-        <button class="arbtn on" data-mod="files" title="文件">
+        <button class="arbtn on" data-mod="files" title="文件" data-i18n-title="rail.files" data-i18n-aria-label="rail.files">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2h-4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8"/><path d="M16.706 2.706A2.4 2.4 0 0 0 15 2v5a1 1 0 0 0 1 1h5a2.4 2.4 0 0 0-.706-1.706z"/><path d="M5 7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 1.732-1"/></svg>
         </button>
-        <button class="arbtn" data-mod="side" title="子代理">
+        <button class="arbtn" data-mod="side" title="子代理" data-i18n-title="rail.side" data-i18n-aria-label="rail.side">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg>
         </button>
-        <button class="arbtn" data-mod="flow" title="流水">
+        <button class="arbtn" data-mod="flow" title="流水" data-i18n-title="rail.flow" data-i18n-aria-label="rail.flow">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></svg>
         </button>
         <!-- 对话流原来在这里占第 5 个按钮位，现在它是下段常驻的那一块（见本文件
              #rsb-hist）。撤掉按钮不是删功能 —— 它从"要点一下才存在"变成"一直在"。 -->
       </div>
       <div class="rt">
-        <button class="icon-btn" id="rsb-close" title="收起右栏 (Ctrl+Shift+B)">
+        <button class="icon-btn" id="rsb-close" title="收起右栏 (Ctrl+Shift+B)" data-i18n-title="chrome.collapseRight.title" data-i18n-aria-label="chrome.collapseRight.title">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg>
         </button>
       </div>
@@ -339,24 +340,26 @@
            上面活动条里那颗图标已经是这个模块的身份，页面里再说一遍就是噪音
            （用户 2026-10-20 第三次点名："视觉重叠度太高了"）。 -->
       <div id="files-bar">
-        <div class="fsegs" role="tablist" aria-label="文件视图">
+        <div class="fsegs" role="tablist" aria-label="文件视图" data-i18n-aria-label="files.viewAria">
           <button type="button" class="fseg on" data-fmode="touched" role="tab"
-            title="当前这一格在转录里碰过的文件（新建 / 改动 / 读过）">碰过的</button>
+            title="当前这一格在转录里碰过的文件（新建 / 改动 / 读过）" data-i18n-title="files.touchedTitle"
+            data-i18n="files.touched">碰过的</button>
           <button type="button" class="fseg" data-fmode="all" role="tab"
-            title="工作区里的全部文件（只读；懒加载）">全部</button>
+            title="工作区里的全部文件（只读；懒加载）" data-i18n-title="files.allTitle"
+            data-i18n="files.all">全部</button>
         </div>
         <span class="fsp"></span>
         <span class="files-cnt" id="files-cnt"></span>
         <button type="button" class="fdot" id="files-dot" aria-pressed="false"
-          title="显示/隐藏 . 开头的文件">.env</button>
-        <button class="icon-btn" id="files-refresh" title="刷新文件树">
+          title="显示/隐藏 . 开头的文件" data-i18n-title="files.dotTitle">.env</button>
+        <button class="icon-btn" id="files-refresh" title="刷新文件树" data-i18n-title="files.refresh" data-i18n-aria-label="files.refresh">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></svg>
         </button>
       </div>
       <div id="files-rootrow" hidden>
-        <select id="files-root" aria-label="文件树根目录"></select>
+        <select id="files-root" aria-label="文件树根目录" data-i18n-aria-label="files.rootAria"></select>
       </div>
-      <div class="scroll"><div id="files-tree"><div class="empty">还没有可显示的文件。</div></div></div>
+      <div class="scroll"><div id="files-tree"><div class="empty" data-i18n="files.empty">还没有可显示的文件。</div></div></div>
     </section>
 
     <!-- ② 子代理 —— 从左侧列表的第三组搬过来。它原本和主会话挤在同一个
@@ -372,7 +375,7 @@
            上面那段是"正在发生"，下面那段是"发生过" —— 所以实时那段在上。 -->
       <div class="scroll">
         <div id="side-live"></div>
-        <div class="cap" id="side-cap">会话库里的子代理 · 0</div>
+        <div class="cap" id="side-cap" data-i18n="shell.side.capZero">会话库里的子代理 · 0</div>
         <div id="side-list"></div>
       </div>
     </section>
@@ -386,7 +389,7 @@
       <!-- 24px 上下文行：主语（当前格）+ 条数。没有模块图标/名字 ——
            活动条上已经有「流水」，这里只补这条流**讲的是谁**。 -->
       <div class="rmod-bar">
-        <span class="sub ell" id="feed-who">没有当前格</span>
+        <span class="sub ell" id="feed-who" data-i18n="flow.noAgent">没有当前格</span>
         <span class="pill" id="feed-cnt">0</span>
       </div>
       <div class="scroll"><div class="vlist" id="feed-list"></div></div>
@@ -394,7 +397,7 @@
     </div><!-- /#rsb-mods 上段到此为止 -->
 
     <!-- 上段/下段之间那条可拖的边界（拖 = 改下段高度）。 -->
-    <div id="rsb-split" title="拖动调整对话流高度"></div>
+    <div id="rsb-split" title="拖动调整对话流高度" data-i18n-title="divider.rsbSplit"></div>
 
     <!-- 下段：对话流，**常驻**。主语是**左栏选中的那个会话**，和上面四个格子级
          模块不同源 —— 它是会话库（历史）的读物。等 C6b 把左栏改成
@@ -408,14 +411,15 @@
         <span class="ico">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
         </span>
-        <span class="nm2">对话流</span>
-        <button id="h-src" title="下段显示的是哪一段对话">当前 agent</button>
-        <span class="sub ell" id="h-sub">未选择会话</span>
-        <div class="rt"><span class="sub" id="h-foot"></span><span class="pill g" id="h-cnt">0</span><button class="icon-btn" id="h-fold" title="展开/收起对话流" aria-expanded="false"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></button></div>
+        <span class="nm2" data-i18n="flow.title">对话流</span>
+        <button id="h-src" title="下段显示的是哪一段对话" data-i18n-title="flow.srcTitle"
+          data-i18n="flow.src">当前 agent</button>
+        <span class="sub ell" id="h-sub" data-i18n="flow.subNone">未选择会话</span>
+        <div class="rt"><span class="sub" id="h-foot"></span><span class="pill g" id="h-cnt">0</span><button class="icon-btn" id="h-fold" title="展开/收起对话流" data-i18n-title="flow.foldToggle" aria-expanded="false"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></button></div>
       </div>
       <div class="pbody">
-        <div id="hist"><div class="hist-empty">这一格还没有动。</div></div>
-        <button id="h-jump" aria-label="跳到最新" inert><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg><span>最新</span></button>
+        <div id="hist"><div class="hist-empty" data-i18n="flow.empty">这一格还没有动。</div></div>
+        <button id="h-jump" aria-label="跳到最新" data-i18n-aria-label="flow.jump" inert><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg><span data-i18n="flow.jump">最新</span></button>
       </div>
     </section>
   </aside>
@@ -533,14 +537,17 @@
       <div class="inst-card">
         <div class="inst-head">
           <span class="dot" id="inst-dot"></span>
-          <b id="inst-title">安装</b>
+          <b id="inst-title" data-i18n="inst.installShort">安装</b>
           <span class="inst-kind">CLI</span>
           <span id="inst-state"></span>
           <span class="inst-src" id="inst-source"></span>
           <span class="inst-time" id="inst-time"></span>
-          <button type="button" class="inst-btn" id="inst-log-toggle">查看日志</button>
-          <button type="button" class="inst-btn" id="inst-cancel" hidden>取消</button>
-          <button type="button" class="inst-btn" id="inst-close" hidden>收起</button>
+          <button type="button" class="inst-btn" id="inst-log-toggle"
+            data-i18n="inst.logShow">查看日志</button>
+          <button type="button" class="inst-btn" id="inst-cancel" hidden
+            data-i18n="common.cancel">取消</button>
+          <button type="button" class="inst-btn" id="inst-close" hidden
+            data-i18n="common.collapse">收起</button>
         </div>
         <div class="inst-bar" id="inst-bar"><span class="inst-bar-fill"></span></div>
         <div class="inst-last" id="inst-last"></div>
@@ -579,7 +586,7 @@
         </header>
 
         <div class="settings-empty" id="set-empty" hidden>
-          <p>没有找到「<span id="set-empty-q"></span>」相关的设置。</p>
+          <p><span data-i18n="settings.empty.before">没有找到「</span><span id="set-empty-q"></span><span data-i18n="settings.empty.after">」相关的设置。</span></p>
           <p class="sub" data-i18n="settings.empty.sub">换个词试试，比如「字体」「目录」「确认」。</p>
           <button type="button" class="set-btn" id="set-empty-clear" data-i18n="settings.empty.clear">清空搜索</button>
         </div>
@@ -598,7 +605,8 @@
               </div>
               <div class="settings-ctl set-cwd-ctl">
                 <div class="set-cwd-line">
-                  <span class="set-kind" id="set-cwd-kind">内置</span>
+                  <span class="set-kind" id="set-cwd-kind"
+                    data-i18n="settings.defaultCwd.kind.builtin">内置</span>
                   <input class="set-path set-input" id="set-cwd-input" type="text"
                          spellcheck="false" autocomplete="off" placeholder="内置目录"
                          aria-label="默认工作目录" data-i18n-aria-label="settings.defaultCwd.label"
@@ -688,7 +696,9 @@
               <div class="settings-ctl">
                 <div class="set-size-ctl">
                   <button type="button" class="set-step" data-set-size-step="-1"
-                          aria-label="缩小字号" title="缩小字号">−</button>
+                          aria-label="缩小字号" title="缩小字号"
+                          data-i18n-aria-label="settings.fontSize.shrink"
+                          data-i18n-title="settings.fontSize.shrink">−</button>
                   <div class="set-seg" id="set-fontsize" role="radiogroup" aria-label="终端字号" data-i18n-aria-label="settings.fontSize.label">
                     <button type="button" role="radio" data-set-size="12" aria-checked="false">12</button>
                     <button type="button" role="radio" data-set-size="13" aria-checked="false">13</button>
@@ -698,7 +708,9 @@
                     <button type="button" role="radio" data-set-size="18" aria-checked="false">18</button>
                   </div>
                   <button type="button" class="set-step" data-set-size-step="1"
-                          aria-label="放大字号" title="放大字号">+</button>
+                          aria-label="放大字号" title="放大字号"
+                          data-i18n-aria-label="settings.fontSize.grow"
+                          data-i18n-title="settings.fontSize.grow">+</button>
                 </div>
                 <button type="button" class="set-reset" data-set-reset="termFontSize" hidden data-i18n="settings.resetDefault">恢复默认</button>
               </div>
@@ -820,12 +832,13 @@
 <!-- 「需要你」的浮层（标题栏铃铛点开）。数据仍走 needModel/renderNeed ——
      它和总览的「在等你」是同一份读数，不另算。fixed 定位，落点在铃铛下面，
      打开时由 80-live 量一次；点外面 / Esc / 点一行都关。 -->
-<div id="need-pop" role="dialog" aria-label="需要你" hidden>
+<div id="need-pop" role="dialog" aria-label="需要你" data-i18n-aria-label="need.title" hidden>
   <div class="np-head">
-    <span class="np-title">需要你</span>
+    <span class="np-title" data-i18n="need.title">需要你</span>
     <span class="pill" id="need-cnt">0</span>
     <span class="fsp"></span>
-    <button class="icon-btn np-x" id="need-pop-x" title="关闭" aria-label="关闭">
+    <button class="icon-btn np-x" id="need-pop-x" title="关闭" aria-label="关闭"
+      data-i18n-title="common.close" data-i18n-aria-label="common.close">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
         stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
     </button>
@@ -847,7 +860,7 @@
         <span class="fv-path" id="fv-path"></span>
       </div>
       <span class="fv-meta" id="fv-meta"></span>
-      <button class="fv-x" id="fv-x" title="关闭" aria-label="关闭">
+      <button class="fv-x" id="fv-x" title="关闭" aria-label="关闭" data-i18n-title="common.close" data-i18n-aria-label="common.close">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
@@ -855,20 +868,20 @@
     <!-- 改动与文件正文在同一张预览里：点碰过的文件先落在「改动」（有 diff 时），
          再切到「文件」看当前全文。2026-10-20 把原来独立的「改动」模块并进来,
          同一份数据不再在两栏各说一遍。 -->
-    <div class="fv-tabs" id="fv-tabs" role="tablist" aria-label="文件视图" hidden>
-      <button type="button" class="fv-tab" data-fvtab="diff" role="tab">改动</button>
-      <button type="button" class="fv-tab" data-fvtab="code" role="tab">文件</button>
+    <div class="fv-tabs" id="fv-tabs" role="tablist" aria-label="文件视图" data-i18n-aria-label="files.viewAria" hidden>
+      <button type="button" class="fv-tab" data-fvtab="diff" role="tab" data-i18n="fv.tab.diff">改动</button>
+      <button type="button" class="fv-tab" data-fvtab="code" role="tab" data-i18n="fv.tab.code">文件</button>
       <span class="fsp"></span>
       <span class="fv-sum" id="fv-sum"></span>
     </div>
     <div class="fv-note" id="fv-note" hidden></div>
-    <div class="fv-body" id="fv-body"><div class="fv-loading">读取中…</div></div>
+    <div class="fv-body" id="fv-body"><div class="fv-loading" data-i18n="fv.loading">读取中…</div></div>
     <div class="fv-foot">
-      <button type="button" id="fv-copy">复制路径</button>
-      <button type="button" id="fv-reveal">在文件夹中显示</button>
-      <button type="button" id="fv-open">用默认程序打开</button>
+      <button type="button" id="fv-copy" data-i18n="fv.copyPath">复制路径</button>
+      <button type="button" id="fv-reveal" data-i18n="fv.reveal">在文件夹中显示</button>
+      <button type="button" id="fv-open" data-i18n="fv.open">用默认程序打开</button>
       <span class="fsp"></span>
-      <button type="button" id="fv-close">关闭</button>
+      <button type="button" id="fv-close" data-i18n="common.close">关闭</button>
     </div>
   </div>
 </div>
@@ -881,85 +894,94 @@
 <div id="newspace" role="dialog" aria-modal="true" aria-labelledby="ns-title" hidden>
   <div class="ns-card" role="document">
     <div class="ns-head">
-      <span class="ns-title" id="ns-title">新建工作区</span>
-      <button class="ns-x" id="ns-x" title="关闭" aria-label="关闭">
+      <span class="ns-title" id="ns-title" data-i18n="ns.title">新建工作区</span>
+      <button class="ns-x" id="ns-x" title="关闭" aria-label="关闭"
+        data-i18n-title="common.close" data-i18n-aria-label="common.close">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
     </div>
     <div class="ns-body">
-      <div class="ns-lab">文件夹</div>
-      <select id="ns-folder" aria-label="选择工作区文件夹"></select>
+      <div class="ns-lab" data-i18n="ns.folder">文件夹</div>
+      <select id="ns-folder" aria-label="选择工作区文件夹" data-i18n-aria-label="ns.folderAria"></select>
       <div class="ns-folder-row">
-        <button type="button" id="ns-pick">选择其他文件夹…</button>
+        <button type="button" id="ns-pick" data-i18n="ns.pick">选择其他文件夹…</button>
         <span class="ns-path ell" id="ns-path"></span>
       </div>
-      <div class="ns-lab">Agent <span class="ns-opt">可选</span></div>
-      <div class="ns-agents" id="ns-agents" role="listbox" aria-label="选择 Agent"></div>
+      <div class="ns-lab"><span data-i18n="ns.agent">Agent</span> <span class="ns-opt" data-i18n="ns.optional">可选</span></div>
+      <div class="ns-agents" id="ns-agents" role="listbox" aria-label="选择 Agent"
+        data-i18n-aria-label="ns.agentsAria"></div>
       <div class="ns-note" id="ns-note"></div>
     </div>
     <div class="ns-foot">
-      <button type="button" id="ns-cancel">取消</button>
-      <button type="button" id="ns-create" class="primary">创建</button>
+      <button type="button" id="ns-cancel" data-i18n="common.cancel">取消</button>
+      <button type="button" id="ns-create" class="primary" data-i18n="ns.create">创建</button>
     </div>
   </div>
 </div>
 
 <!-- 「开一个 agent」选择面板（点标签条 + 打开）。和 #cardmenu 一样静态放在这里：
      单例、看得见、量得到。内容（工作区下拉、会话行）全是开的时候现填。 -->
-<div id="openpanel" role="dialog" aria-label="开一个 agent">
+<div id="openpanel" role="dialog" aria-label="开一个 agent" data-i18n-aria-label="op.title">
   <div class="op-head">
-    <span class="op-title">开一个 agent</span>
-    <button class="op-x" id="op-x" title="关闭" aria-label="关闭">
+    <span class="op-title" data-i18n="op.title">开一个 agent</span>
+    <button class="op-x" id="op-x" title="关闭" aria-label="关闭"
+      data-i18n-title="common.close" data-i18n-aria-label="common.close">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
         stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
     </button>
   </div>
   <div class="op-tabs" role="tablist">
-    <button class="op-tab on" data-optab="new" role="tab">新会话</button>
-    <button class="op-tab" data-optab="resume" role="tab">接上已有</button>
+    <button class="op-tab on" data-optab="new" role="tab" data-i18n="op.newTab">新会话</button>
+    <button class="op-tab" data-optab="resume" role="tab" data-i18n="op.resumeTab">接上已有</button>
   </div>
   <div class="op-ws">
-    <span class="op-wslab">工作区</span>
-    <select id="op-ws" aria-label="工作区"></select>
-    <button id="op-all" hidden title="不按工作区筛，列全部历史会话">全部工作区</button>
+    <span class="op-wslab" data-i18n="op.workspace">工作区</span>
+    <select id="op-ws" aria-label="工作区" data-i18n-aria-label="op.workspaceAria"></select>
+    <button id="op-all" hidden title="不按工作区筛，列全部历史会话"
+      data-i18n="op.allWorkspaces" data-i18n-title="op.allWorkspacesHint">全部工作区</button>
   </div>
   <div class="op-body" id="op-new">
     <div class="op-newcard">
-      <div class="op-newtitle">在这个工作区里开一个全新的 agent</div>
+      <div class="op-newtitle" data-i18n="op.newCardTitle">在这个工作区里开一个全新的 agent</div>
       <div class="op-newpath" id="op-newpath"></div>
       <!-- Agent 名单（2026-10-19）：只列**已安装且能启动**的；默认预选。
            名单来自 panes.list 的启动快照 / 总览的 catalog（同一份 Go 探测）。
            「设为默认」写 settings.defaultAgent，左栏一键新开与群组 + 都读它。 -->
       <div class="op-agents">
         <div class="op-aghead"><span class="op-aglab">Agent</span></div>
-        <div class="op-aglist" id="op-aglist" role="listbox" aria-label="选择 Agent"></div>
+        <div class="op-aglist" id="op-aglist" role="listbox" aria-label="选择 Agent"
+          data-i18n-aria-label="op.agentAria"></div>
         <div class="op-agfoot">
           <span class="op-agtip" id="op-agtip"></span>
-          <button type="button" class="op-agdef" id="op-agdef">设为默认</button>
+          <button type="button" class="op-agdef" id="op-agdef" data-i18n="op.setDefault">设为默认</button>
         </div>
       </div>
-      <button class="op-go" id="op-go">+ 新开一个 agent</button>
+      <button class="op-go" id="op-go" data-i18n="pages.go.open">+ 新开一个 agent</button>
     </div>
   </div>
   <div class="op-body hide" id="op-resume">
     <input class="op-search" id="op-search" type="text" spellcheck="false"
-      placeholder="搜索历史会话…" aria-label="搜索历史会话">
+      placeholder="搜索历史会话…" aria-label="搜索历史会话"
+      data-i18n-placeholder="op.searchPlaceholder" data-i18n-aria-label="op.searchAria">
     <div id="op-list"></div>
   </div>
 </div>
 <!-- Agent 配置抽屉（总览 → Agent 名单 → 点一行）。数据与写操作都走 magpie
      控制面（internal/gateway/agents.go / 89-agent-cfg.js）；这里只放壳，内容打开时现填。
      fixed 在右沿、标题栏之下、状态栏之上；点外面、Esc、× 都收起。 -->
-<aside id="agentcfg" role="dialog" aria-label="Agent 配置" aria-hidden="true">
+<aside id="agentcfg" role="dialog" aria-label="Agent 配置" aria-hidden="true"
+  data-i18n-aria-label="ac.title">
   <div class="ac-head">
     <span class="ac-ico" id="ac-ico"></span>
     <div class="ac-id">
       <b id="ac-name">Agent</b>
       <span class="ac-path" id="ac-path"></span>
     </div>
-    <span class="ac-chip" title="Perch 的使用层只安装/运行 CLI agent">CLI</span>
-    <button type="button" class="ac-x" id="ac-x" title="关闭" aria-label="关闭">
+    <span class="ac-chip" title="Perch 的使用层只安装/运行 CLI agent"
+      data-i18n-title="ac.cliHint" data-i18n="ac.cli">CLI</span>
+    <button type="button" class="ac-x" id="ac-x" title="关闭" aria-label="关闭"
+      data-i18n-title="common.close" data-i18n-aria-label="common.close">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
         stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
     </button>
@@ -975,13 +997,13 @@
     <div class="cf-head">
       <span class="cf-ico" id="confirm-ico" aria-hidden="true"></span>
       <div class="cf-id">
-        <b id="confirm-title">确认</b>
+        <b id="confirm-title" data-i18n="common.confirm">确认</b>
         <p id="confirm-body"></p>
       </div>
     </div>
     <div class="cf-actions">
-      <button type="button" class="cf-btn" id="confirm-cancel">取消</button>
-      <button type="button" class="cf-btn cf-ok" id="confirm-ok">确定</button>
+      <button type="button" class="cf-btn" id="confirm-cancel" data-i18n="common.cancel">取消</button>
+      <button type="button" class="cf-btn cf-ok" id="confirm-ok" data-i18n="common.ok">确定</button>
     </div>
   </div>
 </div>
@@ -1020,7 +1042,8 @@ window.__facts = [];
           "padding:8px 12px;white-space:pre-wrap;max-height:40vh;overflow:auto";
         (document.body || document.documentElement).appendChild(d);
       }
-      d.textContent += (d.textContent ? "\n" : "启动错误：\n") + msg;
+      // 这一段跑在 i18n 之前（它是模块语法错误的最后逃生口），所以写双语。
+      d.textContent += (d.textContent ? "\n" : "Boot error / 启动错误：\n") + msg;
     } catch (_) {}
   }
   window.addEventListener("error", function (e) {
@@ -1028,7 +1051,7 @@ window.__facts = [];
     if (e && (e.message || e.error)) show(String(e.message || e.error));
   }, true);
   window.addEventListener("unhandledrejection", function (e) {
-    show("未处理的 Promise 拒绝: " + String((e && e.reason) || "?"));
+    show("Unhandled promise rejection / 未处理的 Promise 拒绝: " + String((e && e.reason) || "?"));
   });
 })();
 </script>

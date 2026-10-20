@@ -666,6 +666,23 @@ $("set-language").addEventListener("change", (e) => {
 function onLocaleChanged() {
   if (typeof renderNav === "function") renderNav();
   if (typeof renderDashTabs === "function") renderDashTabs();
+  // 左栏（项目行、agent 行、已关闭行）是整表现画的：状态词、计数、菜单标题都随语言变。
+  if (typeof renderLists === "function") renderLists();
+  // 格子头：默认标题、关闭键 title、换 Agent 的 aria/title、状态点 aria-label。
+  if (typeof TAB_LIST !== "undefined") {
+    for (const tab of TAB_LIST) {
+      if (typeof renderTabTitle === "function") renderTabTitle(tab);
+      if (typeof renderAgentDot === "function") renderAgentDot(tab);
+      if (tab.freshBtn) {
+        tab.freshBtn.title = tab.fresh
+          ? t("term.fresh.changeFresh", { name: freshAgentLabel(tab) })
+          : t("term.fresh.changeStarted");
+        tab.freshBtn.setAttribute("aria-label", t("term.fresh.label"));
+      }
+      const x = tab.tabEl && tab.tabEl.querySelector(".x");
+      if (x) x.title = t("term.tab.close");
+    }
+  }
   // 总览的读数、Agent 名单、热力图骨架都是 JS 现画的，静态翻译管不到。
   if (typeof NAV_HERE !== "undefined" && NAV_HERE === "dash" &&
       typeof renderDashboard === "function") {
@@ -676,6 +693,25 @@ function onLocaleChanged() {
   if (typeof paintConnStatus === "function" && typeof activeTab !== "undefined" && activeTab) {
     paintConnStatus(!activeTab.connDown);
   }
+  // 右栏与文件预览里的文字多是 JS 现画的；切语言时就地重画一次。
+  if (typeof renderFiles === "function") renderFiles(true);
+  if (typeof renderFeed === "function") renderFeed();
+  if (typeof renderNeed === "function") renderNeed();
+  if (typeof renderSideLive === "function") renderSideLive();
+  // 安装进度台：标题/阶段/日志开关都是现画的。
+  if (typeof INSTALL !== "undefined" && INSTALL && typeof instPaint === "function") instPaint();
+  if (typeof renderFlow === "function") renderFlow("locale");
+  if (typeof fvRender === "function" && typeof FV !== "undefined" && FV) fvRender();
+  // 新建工作区卡片开着时，note/预选标签/等待文案都是 JS 现画的。
+  if (typeof NS !== "undefined" && NS && typeof renderNewSpace === "function") renderNewSpace();
+  // 「开一个 agent」面板的按钮/提示/会话行同样是现画的。
+  const opPanel = $("openpanel");
+  if (typeof renderOpPanel === "function" && opPanel && opPanel.classList.contains("on")) {
+    renderOpPanel();
+  }
+  // 收起终端后的群组看板：行头、待办卡、权限卡都是现画的。整表重建是有意的
+  // （语言切换本来就是低频事件；卡片展开态按 ask/act id 记着，不会丢）。
+  if (typeof scheduleGroup === "function") scheduleGroup();
   if (typeof STATE !== "undefined" && STATE && $("s-index")) {
     $("s-index").textContent = t("status.index", {
       sessions: STATE.sessions?.length ?? 0,
@@ -785,13 +821,13 @@ function askConfirm(opts) {
   CONFIRM.danger = !!o.danger;
   CONFIRM.prev = document.activeElement;
 
-  $("confirm-title").textContent = o.title || "确认";
+  $("confirm-title").textContent = o.title || t("common.confirm");
   $("confirm-body").textContent = o.body || "";
   const ico = $("confirm-ico");
   ico.innerHTML = lucide(o.danger ? LUCIDE_TRIANGLE_ALERT : LUCIDE_INFO, 16);
   ico.classList.toggle("warn", !!o.danger);
   const ok = $("confirm-ok");
-  ok.textContent = o.ok || "确定";
+  ok.textContent = o.ok || t("common.ok");
   ok.classList.toggle("danger", !!o.danger);
   // 破坏性动作默认把焦点放在「取消」上（回车不会顺手把记录删掉）。
   el.hidden = false;
@@ -864,10 +900,9 @@ function onCloseRequest() {
   }
   sendCtrl({ type: "log", msg: "关窗确认：收到 Go 的请求，弹确认框" });
   askConfirm({
-    title: "关闭 Perch？",
-    body: "所有正在跑的 agent 会随窗口结束。\n" +
-          "座位记录会保留，下次打开还能接上；agent 自己盘上的对话文件不受影响。",
-    ok: "关闭窗口",
+    title: t("confirm.close.title"),
+    body: t("confirm.close.body"),
+    ok: t("confirm.close.ok"),
   }).then((ok) => {
     if (ok) {
       sendCtrl({ type: "window.close" });
