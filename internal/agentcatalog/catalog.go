@@ -61,11 +61,9 @@ var entries = []Entry{
 			"~/.local/share/opencode/auth.json"}, "opencode", true},
 	{"agy", "Antigravity CLI", "antigravity-color", "Google", "https://antigravity.google/docs/cli/install", "", true, false,
 		[]string{"~/.gemini/antigravity-cli/settings.json"}, "agy", true},
-	// dsh 的官方入口是 web；社区的 dsh-tui 依赖一个已运行的 dsh web host
-	// 和它的 API cookie，不是能独立开格的 CLI TUI。产品约定只接独立 CLI，
-	// 所以先保留「可安装/可检测」，不提供启动；等有托管 host 的形态再说。
-	{"dsh", "DeepSeek Harness", "deepseek-color", "DeepSeek", "https://www.npmjs.com/package/@deepseek-ai/dsh", "", true, false,
-		[]string{"~/.dsh/config.yaml", "~/.dsh/settings.yaml", "~/.dsh/profiles"}, "dsh", false},
+	// DeepSeek Harness 不在终端 agent 目录里：官方入口是 web，社区的 dsh-tui
+	// 依赖一个已运行的 dsh web host 和它的 API cookie，不是独立 CLI TUI。
+	// 它属于 magpie 的网关层，不属于 Perch 的终端层（2026-10-21 定）。
 	{"cursor", "Cursor", "cursor", "Anysphere", "https://cursor.com/cli", "", true, false,
 		[]string{"~/.cursor/cli-config.json"}, "cursor-agent", true},
 	{"codebuddy", "CodeBuddy Code", "codebuddy-color", "Tencent", "https://www.codebuddy.ai/docs/cli/installation", "", true, false,

@@ -247,7 +247,7 @@ function acBodyHTML(a, name) {
     html += `<div class="ac-hint">${esc(t("ac.launchOnly"))}</div>`;
     if (a.launch) html += `<div class="ac-hint">${esc(t("ac.launch.viaGateway"))}</div>`;
   } else if (!caps.launch && cat && cat.installed) {
-    // 装了但没有终端入口（dsh 目前就是这种）：把边界说清楚，
+    // 装了但 Perch 还没有为它接入终端启动：把边界说清楚，
     // 不要让抽屉里只剩一个不能点的「接入网关」。
     html += `<div class="ac-hint">${esc(t("ac.noTerminal"))}</div>`;
   }

@@ -160,8 +160,8 @@ func (in *Installer) Start(id string) {
 func (in *Installer) runRecipe(id string, r agentcatalog.Recipe, job *run) {
 	limit := 20 * time.Minute
 	if r.NPM {
-		// npm 的大包（dsh 这类）在慢网络上会超过 20 分钟；重试会命中缓存，
-		// 但第一次要给它足够的时间走完，不然前面下载的包全白费。
+		// npm 的大包（带原生依赖/桌面运行时的 CLI）在慢网络上会超过 20 分钟；
+		// 重试会命中缓存，但第一次要给它足够的时间走完，否则前面的下载全白费。
 		limit = 30 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), limit)

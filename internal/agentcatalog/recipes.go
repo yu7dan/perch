@@ -45,10 +45,6 @@ var Recipes = map[string]Recipe{
 		Source: `irm https://antigravity.google/cli/install.ps1 | iex`,
 		Script: `irm https://antigravity.google/cli/install.ps1 | iex`,
 	},
-	"dsh": {
-		Source: `npm install -g @deepseek-ai/dsh`,
-		NPM:    true, Pkg: "@deepseek-ai/dsh",
-	},
 	"cursor": {
 		Source: `irm 'https://cursor.com/install?win32=true' | iex`,
 		Script: `irm 'https://cursor.com/install?win32=true' | iex`,

@@ -84,7 +84,7 @@ Providers, routing, usage, and plugins use magpie's own pages; the version and u
 
 ## Supported agents
 
-Perch's catalog contains CLI agents only. Desktop clients are not installed or launched by Perch; they belong to magpie's gateway layer. The catalog ships with 15 CLI agents, grouped by integration depth.
+Perch's catalog contains CLI agents only. Desktop and web clients are not installed or launched by Perch; they belong to magpie's gateway layer. The catalog ships with 14 CLI agents, grouped by integration depth.
 
 ### Full integration
 
@@ -101,18 +101,17 @@ These four have dedicated adapters: structured status and exact session resume. 
 
 ### Install and launch
 
-The other ten have a one-click install recipe — the official installer or an npm package — and can be started in a Perch pane. They share the same icon, detection, install, and launch path.
+The other nine have a one-click install recipe — the official installer or an npm package — and can be started in a Perch pane. They share the same icon, detection, install, and launch path.
 
 <table align="center">
 <tr>
 <td align="center" width="20%"><img src="assets/icons/agents/antigravity-color.svg" width="32" height="32" alt="Antigravity CLI"><br><sub>Antigravity CLI</sub></td>
-<td align="center" width="20%"><img src="assets/icons/agents/deepseek-color.svg" width="32" height="32" alt="DeepSeek Harness"><br><sub>DeepSeek Harness</sub></td>
 <td align="center" width="20%"><img src="assets/icons/agents/cursor.svg" width="32" height="32" alt="Cursor"><br><sub>Cursor</sub></td>
 <td align="center" width="20%"><img src="assets/icons/agents/codebuddy-color.svg" width="32" height="32" alt="CodeBuddy Code"><br><sub>CodeBuddy Code</sub></td>
 <td align="center" width="20%"><img src="assets/icons/agents/kimi.svg" width="32" height="32" alt="Kimi Code"><br><sub>Kimi Code</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/meta-color.svg" width="32" height="32" alt="Muse Code"><br><sub>Muse Code</sub></td>
 </tr>
 <tr>
-<td align="center" width="20%"><img src="assets/icons/agents/meta-color.svg" width="32" height="32" alt="Muse Code"><br><sub>Muse Code</sub></td>
 <td align="center" width="20%"><img src="assets/icons/agents/geminicli-color.svg" width="32" height="32" alt="Gemini CLI"><br><sub>Gemini CLI</sub></td>
 <td align="center" width="20%"><img src="assets/icons/agents/githubcopilot.svg" width="32" height="32" alt="Copilot CLI"><br><sub>Copilot CLI</sub></td>
 <td align="center" width="20%"><img src="assets/icons/agents/qwen-color.svg" width="32" height="32" alt="Qwen Code"><br><sub>Qwen Code</sub></td>
