@@ -1,4 +1,4 @@
-package main
+package transcript
 
 import (
 	"encoding/json"

@@ -1,8 +1,8 @@
-package main
+package transcript
 
 import "testing"
 
-// systemTurn 是**按形状**认的，形状又来自实测 —— 那就把它按实测原文钉死。
+// SystemTurn 是**按形状**认的，形状又来自实测 —— 那就把它按实测原文钉死。
 // 下面每一条都是从一个真实转录里抄下来的（出处写在名字里），不是编的样例：
 // 编出来的样例只会证明"我写的判据和我想的一样"，证明不了它认识现实。
 func TestSystemTurn(t *testing.T) {
@@ -71,9 +71,9 @@ func TestSystemTurn(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		label, drop := systemTurn(c.txt)
+		label, drop := SystemTurn(c.txt)
 		if label != c.label || drop != c.drop {
-			t.Errorf("%s: systemTurn() = (%q, %v), 想要 (%q, %v)", c.name, label, drop, c.label, c.drop)
+			t.Errorf("%s: SystemTurn() = (%q, %v), 想要 (%q, %v)", c.name, label, drop, c.label, c.drop)
 		}
 	}
 }
