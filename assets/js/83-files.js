@@ -124,7 +124,7 @@ function filesRootOptions(root) {
   if (!sel) return;
   if (sig !== FS.rootOptSig) {
     FS.rootOptSig = sig;
-    sel.innerHTML = `<option value="">跟随当前格</option>` + projs.map((p) =>
+    sel.innerHTML = `<option value="">${esc(t("files.rootFollow"))}</option>` + projs.map((p) =>
       `<option value="${esc(p.path)}">${esc(p.name)}</option>`).join("");
   }
   // 固定的根已经不在池子里时，FU.root 会在 filesRootPath 里被忽略；
@@ -162,7 +162,7 @@ function filesList(root, dir, why) {
     if (!FS.reqs.has(req)) return;
     FS.reqs.delete(req);
     FS.loading.delete(dir);
-    FS.err.set(dir, "请求超时（ctl 通道可能断了）");
+    FS.err.set(dir, t("files.err.timeout"));
     renderFiles(true);
   }, 8000));
   sendCtrl({ type: "fs.list", root, path: dir, req });
@@ -194,10 +194,10 @@ function scheduleFilesRefresh(why) {
 
 /* ---- 渲染 ---------------------------------------------------------------- */
 
-function filesTouchedHtml(t, v) {
+function filesTouchedHtml(tab, v) { // 参数别叫 t：会遮住 i18n 的 t()
   const files = (v && v.files) || [];
-  if (!t) return `<div class="empty">没有当前格 · 切到一个 agent，就能看到它碰过的文件</div>`;
-  if (!files.length) return `<div class="empty">这一格还没碰过文件 · agent 新建 / 修改 / 读取过的文件会出现在这里</div>`;
+  if (!tab) return `<div class="empty">${esc(t("files.empty.noTab"))}</div>`;
+  if (!files.length) return `<div class="empty">${esc(t("files.empty.noFiles"))}</div>`;
   const root = filesRootPath();
   const rootNode = { dirs: new Map(), files: [] };
   for (const f of files) {
@@ -237,22 +237,22 @@ function filesTouchedHtml(t, v) {
       a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
     for (const { name, f } of fs) {
       const op = opOf(f);
-      const ops = (f.ops || []).map((o) => OP_NAME[o] || o).join(" + ");
+      const ops = (f.ops || []).map((o) => opName(o) || o).join(" + ");
       const d = (f.add || f.del)
         ? `<span class="fdiff"><span class="d-add">+${f.add || 0}</span> <span class="d-del">−${f.del || 0}</span></span>`
         : `<span class="fdiff"></span>`;
       // 最后一次改动被拒绝 / 文件已经不在盘上：行尾给一个短标记。点开预览
       // 仍能看到当时记录下来的 diff（正文在 trace.diff 里，不随列表推送）。
       const bad = f.state === "rejected"
-        ? `<span class="fbad rej" title="最后一次改动被拒绝，没有落盘">拒</span>`
+        ? `<span class="fbad rej" title="${esc(t("files.bad.rejectedTitle"))}">${esc(t("files.bad.rejected"))}</span>`
         : f.state === "failed"
-          ? `<span class="fbad fail" title="最后一次改动失败，没有落盘">错</span>`
+          ? `<span class="fbad fail" title="${esc(t("files.bad.failedTitle"))}">${esc(t("files.bad.failed"))}</span>`
           : f.state === "missing"
-            ? `<span class="fbad miss" title="文件现在不在盘上">缺</span>`
+            ? `<span class="fbad miss" title="${esc(t("files.bad.missingTitle"))}">${esc(t("files.bad.missing"))}</span>`
             : "";
-      const badWord = f.state === "rejected" ? "最后一次改动被拒绝"
-        : f.state === "failed" ? "最后一次改动失败"
-          : f.state === "missing" ? "文件已不在盘上" : "";
+      const badWord = f.state === "rejected" ? t("files.badWord.rejected")
+        : f.state === "failed" ? t("files.badWord.failed")
+          : f.state === "missing" ? t("files.badWord.missing") : "";
       const tip = [f.path, ops, badWord, f.at].filter(Boolean).join("\n");
       rows.push(`<button type="button" class="frow ffile" data-fpath="${esc(f.path || "")}" `
         + `data-froot="${esc(filesRootForPath(f.path || ""))}" data-fname="${esc(name)}" `
@@ -265,7 +265,7 @@ function filesTouchedHtml(t, v) {
     }
   };
   walk(rootNode, "", 0);
-  return rows.join("") || `<div class="empty">这一格还没碰过文件。</div>`;
+  return rows.join("") || `<div class="empty">${esc(t("files.empty.touched"))}</div>`;
 }
 
 function filesEntryHtml(root, dir, depth) {
@@ -273,26 +273,28 @@ function filesEntryHtml(root, dir, depth) {
   const err = FS.err.get(dir);
   const loading = FS.loading.has(dir);
   let html = "";
-  if (loading && !rec) html += `<div class="frow fstate">读取中…</div>`;
+  if (loading && !rec) html += `<div class="frow fstate">${esc(t("files.loading"))}</div>`;
   if (err) {
-    html += `<div class="frow fstate ferr" title="${esc(err)}">读不了：${esc(err)}`
-      + `<button type="button" class="flink" data-fretry="${esc(dir)}">重试</button></div>`;
+    html += `<div class="frow fstate ferr" title="${esc(err)}">${esc(t("files.err.read", { err }))}`
+      + `<button type="button" class="flink" data-fretry="${esc(dir)}">${esc(t("files.retry"))}</button></div>`;
   }
   if (!rec) return html;
   const list = rec.entries.filter((e) => FU.dot || !e.hidden);
-  if (!list.length && !loading) return html + `<div class="frow fstate">这个目录是空的。</div>`;
+  if (!list.length && !loading) {
+    return html + `<div class="frow fstate">${esc(t("files.empty.dir"))}</div>`;
+  }
   for (const e of list) {
     const pad = filesPad(depth);
     if (e.dir) {
       const open = FS.open.has(e.path);
-      const ext = e.external ? `（指向工作区外，打不开）` : "";
+      const ext = e.external ? t("files.externalSuffix") : "";
       html += `<button type="button" class="frow fdir${e.external ? " ext" : ""}" `
         + `data-fdir="${esc(e.path)}" aria-expanded="${open ? "true" : "false"}" `
         + `title="${esc(e.path + ext)}" style="padding-left:${pad}px">`
         + `<span class="fchev">${filesChev()}</span>`
         + `<span class="fico">${fileDirIconSvg(open, 14)}</span>`
         + `<span class="fnm ell">${esc(e.name)}</span>`
-        + (e.external ? `<span class="fext">外部</span>` : "")
+        + (e.external ? `<span class="fext">${esc(t("files.external"))}</span>` : "")
         + `</button>`;
       if (open && !e.external) html += filesEntryHtml(root, e.path, depth + 1);
     } else {
@@ -300,30 +302,30 @@ function filesEntryHtml(root, dir, depth) {
       html += `<button type="button" class="frow ffile${e.link ? " link" : ""}${e.external ? " ext" : ""}" `
         + `data-fpath="${esc(e.path)}" data-froot="${esc(root)}" data-fname="${esc(e.name)}" `
         + (e.external ? `data-fext="1" ` : "")
-        + `title="${esc(e.path + (e.link ? "\n符号链接" : "") + (e.external ? "（指向工作区外）" : ""))}" `
+        + `title="${esc(e.path + (e.link ? t("files.linkTitle") : "") + (e.external ? t("files.externalTitle") : ""))}" `
         + `style="padding-left:${pad}px">`
         + `<span class="fchev"></span>`
         + `<span class="ficoslot">${fileIconSvg(e.path, 14)}</span>`
         + `<span class="fnm ell">${esc(e.name)}</span>`
-        + (e.external ? `<span class="fext">外部</span>` : "")
+        + (e.external ? `<span class="fext">${esc(t("files.external"))}</span>` : "")
         + `</button>`;
     }
   }
   if (rec.truncated) {
-    html += `<div class="frow fstate">只显示了前 2000 条 —— 这个目录太大了。</div>`;
+    html += `<div class="frow fstate">${esc(t("files.tooMany"))}</div>`;
   }
   return html;
 }
 
 function filesAllHtml(root) {
-  if (!root) return `<div class="empty">还没有工作区 · 先在左栏或总览里新建一个工作区</div>`;
+  if (!root) return `<div class="empty">${esc(t("files.empty.root"))}</div>`;
   const rec = FS.children.get(root);
   if (!rec) {
     filesEnsureRoot(root);
-    return `<div class="frow fstate">读取中…</div>`;
+    return `<div class="frow fstate">${esc(t("files.loading"))}</div>`;
   }
   return filesEntryHtml(root, root, 0)
-    || `<div class="empty">这个工作区是空的。</div>`;
+    || `<div class="empty">${esc(t("files.empty.ws"))}</div>`;
 }
 
 function renderFiles(force) {
@@ -335,8 +337,8 @@ function renderFiles(force) {
   // 必须画一次，否则会停在空白等**下一次**状态推送（空闲时可能永远等不到）。
   // 最常撞见的一条：右栏收起再展开，收起期间没有任何推送。
   if (!force && host.childElementCount === 0) force = true;
-  const t = activeTab;
-  const v = t ? LIVE.get(t.id) : null;
+  const tab = activeTab; // 别叫 t：会遮住 i18n 的 t()
+  const v = tab ? LIVE.get(tab.id) : null;
   const files = (v && v.files) || [];
   const root = filesRootPath();
   const touchSig = files.map((f) =>
@@ -351,7 +353,7 @@ function renderFiles(force) {
   if (FU.mode === "all") filesEnsureRoot(root);
 
   const sig = [
-    FU.mode, FU.dot ? 1 : 0, root, t ? t.id : 0,
+    FU.mode, FU.dot ? 1 : 0, root, tab ? tab.id : 0,
     FU.mode === "touched" ? touchSig : "",
     FU.mode === "all" ? [...FS.open].sort().join(",") : "",
     [...FS.loading].sort().join(","),
@@ -367,7 +369,7 @@ function renderFiles(force) {
 
   let html = "";
   if (FU.mode === "touched") {
-    html = filesTouchedHtml(t, v);
+    html = filesTouchedHtml(tab, v);
     const cnt = $("files-cnt");
     if (cnt) {
       // 模块头的汇总：文件数 + 改动行数。读过的文件也算"碰过"，所以 N 用
@@ -380,10 +382,11 @@ function renderFiles(force) {
         }
       }
       cnt.textContent = files.length
-        ? `${files.length} 个文件` + ((add || del) ? ` · +${add} −${del}` : "")
+        ? tCount("files.count", files.length) + ((add || del) ? ` · +${add} −${del}` : "")
         : "";
       cnt.title = files.length
-        ? `这一格碰过 ${files.length} 个文件` + ((add || del) ? `，改动 +${add} / −${del} 行` : "")
+        ? tCount("files.touchedSub", files.length) +
+          ((add || del) ? t("files.touchedAdd", { add, del }) : "")
         : "";
     }
   } else {
@@ -392,7 +395,7 @@ function renderFiles(force) {
     const cnt = $("files-cnt");
     if (cnt) {
       const n = rec ? rec.entries.filter((e) => FU.dot || !e.hidden).length : 0;
-      cnt.textContent = rec ? `${n} 个文件` : "";
+      cnt.textContent = rec ? tCount("files.count", n) : "";
       cnt.title = "";
     }
   }
@@ -464,7 +467,7 @@ $("files-tree").addEventListener("click", (e) => {
     // 外部目录是个"看得到、打不开"的条目（护栏在 Go 侧）。点了要说一句为什么，
     // 不能静默 return —— 那和"按钮坏了"在界面上是同一件事。
     if (d.classList.contains("ext")) {
-      showToast("打不开这个目录", "它是指向工作区外面的符号链接。", "err");
+      showToast(t("files.toast.linkDirTitle"), t("files.toast.linkDirNote"), "err");
       return;
     }
     if (FS.open.has(dir)) FS.open.delete(dir);
@@ -478,7 +481,7 @@ $("files-tree").addEventListener("click", (e) => {
   const f = e.target.closest("[data-fpath]");
   if (!f) return;
   if (f.dataset.fext === "1") {
-    showToast("打不开这个文件", "它是一个指向工作区外面的符号链接。", "err");
+    showToast(t("files.toast.linkFileTitle"), t("files.toast.linkFileNote"), "err");
     return;
   }
   // ⚠️ froot 空串要保留成空串：那表示"这个文件不归任何工作区"，
@@ -543,11 +546,11 @@ function fvSyncTabs() {
   if (!sum) return;
   const d = FV.diff;
   if (FV.diffLoading) {
-    sum.textContent = "取改动…";
+    sum.textContent = t("fv.loadingChanges");
   } else if (d && (d.changes || []).length) {
     sum.innerHTML = `<span class="d-add">+${d.add || 0}</span> ` +
       `<span class="d-del">−${d.del || 0}</span>` +
-      `<span class="fv-nchg">${(d.changes || []).length} 次</span>`;
+      `<span class="fv-nchg">${esc(tCount("fv.changeCount", (d.changes || []).length))}</span>`;
   } else {
     sum.textContent = "";
   }
@@ -566,7 +569,7 @@ function fvSetTab(mode, why) {
 function fvError(text) {
   if (FV) {
     FV.readLoading = false;
-    FV.readErr = text || "读取失败";
+    FV.readErr = text || t("fv.readFailed");
     FV.read = null;
   }
   fvRender();
@@ -576,17 +579,17 @@ function openFileView(path, root, name) {
   if (!path) return;
   const box = $("fview");
   if (!box) return;
-  const t = activeTab;
+  const tab = activeTab; // 别叫 t：会遮住 i18n 的 t()
   const touch = fvTouchOf(path);
   const hasDiff = !!(touch && touch.hasDiff);
   FV = {
     path, root: root || filesRootForPath(path), name: name || base(path),
     req: 0, opener: document.activeElement,
-    tab: t ? t.id : 0,
+    tab: tab ? tab.id : 0,
     tabMode: hasDiff ? "diff" : "code",
     tabPicked: false,
     hasDiff,
-    diff: null, diffReq: 0, diffLoading: !!(t && t.id), diffErr: "",
+    diff: null, diffReq: 0, diffLoading: !!(tab && tab.id), diffErr: "",
     read: null, readLoading: true, readErr: "", readNotes: [], readNoteKind: "",
   };
   $("fv-name").textContent = FV.name;
@@ -609,7 +612,7 @@ function openFileView(path, root, name) {
       FS.reqs.delete(dreq);
       if (FV && FV.diffReq === dreq) {
         FV.diffLoading = false;
-        FV.diffErr = "请求超时（转录跟随器没有应答）";
+        FV.diffErr = t("fv.diffTimeout");
         fvSyncTabs();
         fvRender();
       }
@@ -621,7 +624,7 @@ function openFileView(path, root, name) {
     fvSyncTabs();
   }
   if (!FV.root) {
-    fvError("这个文件不在任何工作区里。Perch 只预览项目池目录下的文件（护栏在 Go 侧）。");
+    fvError(t("fv.outside"));
     sendCtrl({ type: "log", msg: `文件预览 拒绝（不在工作区里）path=${path}` });
     return;
   }
@@ -631,7 +634,7 @@ function openFileView(path, root, name) {
   FS.timeouts.set(req, setTimeout(() => {
     FS.timeouts.delete(req);
     FS.reqs.delete(req);
-    if (FV && FV.req === req) fvError("请求超时（ctl 通道可能断了）");
+    if (FV && FV.req === req) fvError(t("fv.ctlTimeout"));
   }, 8000));
   sendCtrl({ type: "fs.read", root: FV.root, path, req });
   sendCtrl({ type: "log", msg: `文件预览 请求 path=${path} 根=${FV.root} req=${req}` });
@@ -652,7 +655,7 @@ function closeFileView(why) {
   }
   const p = FV ? FV.path : "";
   FV = null;
-  $("fv-body").innerHTML = `<div class="fv-loading">读取中…</div>`;
+  $("fv-body").innerHTML = `<div class="fv-loading">${esc(t("fv.loading"))}</div>`;
   const tabs = $("fv-tabs");
   if (tabs) tabs.hidden = true;
   const sum = $("fv-sum");
@@ -666,11 +669,13 @@ function closeFileView(why) {
 function fvCodeHtml(text) {
   const lines = String(text ?? "").split("\n");
   const shown = lines.slice(0, FILES_PREVIEW_LINES);
-  if (!text) return `<div class="fv-loading">这个文件是空的。</div>`;
+  if (!text) return `<div class="fv-loading">${esc(t("fv.emptyFile"))}</div>`;
   let html = shown.map((line, i) =>
     `<div class="fl"><span class="ln">${i + 1}</span><span class="lc">${esc(line) || " "}</span></div>`).join("");
   if (lines.length > FILES_PREVIEW_LINES) {
-    html += `<div class="fv-cut">只显示前 ${FILES_PREVIEW_LINES} 行（共 ${lines.length} 行）</div>`;
+    html += `<div class="fv-cut">${esc(t("fv.truncated", {
+      n: FILES_PREVIEW_LINES, total: lines.length,
+    }))}</div>`;
   }
   return html;
 }
@@ -715,13 +720,15 @@ function fvWholeTextHtml(text, kind, label) {
     kind === "add" ? fvDiffRow("add", "", i + 1, line)
                    : fvDiffRow("del", i + 1, "", line)).join("");
   if (lines.length > FILES_PREVIEW_LINES) {
-    html += `<div class="fv-cut">只显示前 ${FILES_PREVIEW_LINES} 行（共 ${lines.length} 行）</div>`;
+    html += `<div class="fv-cut">${esc(t("fv.truncated", {
+      n: FILES_PREVIEW_LINES, total: lines.length,
+    }))}</div>`;
   }
   return html;
 }
 
 function fvChangeHtml(ch) {
-  const tool = ch.tool || "改动";
+  const tool = ch.tool || t("fv.tool.change");
   const when = fvClock(ch.at);
   const sum = (ch.add || ch.del)
     ? `<span class="dfsum"><span class="d-add">+${ch.add || 0}</span> ` +
@@ -730,7 +737,7 @@ function fvChangeHtml(ch) {
   const failed = ch.ok === false;
   const bad = failed
     ? `<span class="dfbad${ch.denied ? "" : " fail"}">` +
-      (ch.denied ? "被拒绝，未落盘" : "失败，未落盘") + `</span>`
+      esc(ch.denied ? t("fv.denied") : t("fv.failed")) + `</span>`
     : "";
   let html = `<div class="dfchg${failed ? " rej" : ""}">` +
     `<div class="dfhead"><span class="dftool">${esc(tool)}</span>` +
@@ -741,20 +748,20 @@ function fvChangeHtml(ch) {
     html += ch.patch.map(fvPatchHtml).join("");
   } else if (ch.content) {
     html += fvWholeTextHtml(ch.content, "add",
-      ch.ok === false ? "尝试写入的内容（未落盘）" : "整份写入");
+      ch.ok === false ? t("fv.attempted") : t("fv.wholeWrite"));
   } else if (ch.old || ch.new) {
-    if (ch.old) html += fvWholeTextHtml(ch.old, "del", "原内容（调用参数）");
-    if (ch.new) html += fvWholeTextHtml(ch.new, "add", "新内容（调用参数）");
+    if (ch.old) html += fvWholeTextHtml(ch.old, "del", t("fv.oldContent"));
+    if (ch.new) html += fvWholeTextHtml(ch.new, "add", t("fv.newContent"));
   } else {
-    html += `<div class="dfempty">这次改动没有可展示的正文。</div>`;
+    html += `<div class="dfempty">${esc(t("fv.noDiffBody"))}</div>`;
   }
   if (ch.truncated) {
-    html += `<div class="fv-cut">改动内容过长，只显示了前一部分（完整内容仍在转录里）。</div>`;
+    html += `<div class="fv-cut">${esc(t("fv.diffTruncated"))}</div>`;
   }
   // 失败/被拒绝的通用标记已经在右上角，正文里只补错误原因，避免同一句话说两遍。
   let note = ch.note || "";
   if (failed) {
-    for (const p of ["被拒绝，未落盘", "失败，未落盘"]) {
+    for (const p of ["被拒绝，未落盘", "失败，未落盘", t("fv.denied"), t("fv.failed")]) {
       if (note.startsWith(p)) {
         note = note.slice(p.length).replace(/^\s*·\s*/, "");
         break;
@@ -767,7 +774,7 @@ function fvChangeHtml(ch) {
 
 function fvDiffHtml(d) {
   const list = (d && d.changes) || [];
-  if (!list.length) return `<div class="fv-loading">没有可显示的改动。</div>`;
+  if (!list.length) return `<div class="fv-loading">${esc(t("fv.noChanges"))}</div>`;
   return list.map(fvChangeHtml).join("");
 }
 
@@ -780,11 +787,11 @@ function fvRender() {
   if (FV.tabMode === "diff") {
     if (FV.diffLoading) {
       fvSetNote("", "");
-      body.innerHTML = `<div class="fv-loading">读取改动…</div>`;
+      body.innerHTML = `<div class="fv-loading">${esc(t("fv.loadingChanges"))}</div>`;
       return;
     }
     if (FV.diffErr) {
-      fvSetNote("改动记录取不到；可以切到「文件」看当前正文。", "warn");
+      fvSetNote(t("fv.diffUnavailable"), "warn");
       body.innerHTML = `<div class="fv-loading fv-err">${esc(FV.diffErr)}</div>`;
       return;
     }
@@ -793,16 +800,16 @@ function fvRender() {
     const notes = [];
     let kind = "";
     if (d && d.missing) {
-      notes.push("这个文件现在不在盘上；下面是当时记录的改动。");
+      notes.push(t("fv.noteMissing"));
       kind = "warn";
     }
     if (!d || !d.found) {
-      notes.push("这次会话的转录里没有这个文件的改动记录。");
+      notes.push(t("fv.noteNoRecord"));
       kind = kind || "warn";
     }
     fvSetNote(notes.join(" "), kind);
     if (!changes.length) {
-      body.innerHTML = `<div class="fv-loading">没有可显示的改动。</div>`;
+      body.innerHTML = `<div class="fv-loading">${esc(t("fv.noChanges"))}</div>`;
       return;
     }
     body.innerHTML = fvDiffHtml(d);
@@ -812,12 +819,11 @@ function fvRender() {
   // 「文件」页
   if (FV.readLoading) {
     fvSetNote("", "");
-    body.innerHTML = `<div class="fv-loading">读取中…</div>`;
+    body.innerHTML = `<div class="fv-loading">${esc(t("fv.loading"))}</div>`;
     return;
   }
   if (FV.readErr) {
-    fvSetNote(FV.hasDiff ? "文件读不了；可以切到「改动」看这次会话记录的改动。" : "",
-      FV.hasDiff ? "warn" : "");
+    fvSetNote(FV.hasDiff ? t("fv.cantReadDiff") : "", FV.hasDiff ? "warn" : "");
     body.innerHTML = `<div class="fv-loading fv-err">${esc(FV.readErr)}</div>`;
     return;
   }
@@ -825,7 +831,7 @@ function fvRender() {
   const notes = FV.readNotes || [];
   fvSetNote(notes.join(" "), FV.readNoteKind || "");
   if (m && (m.binary || m.encoding === "non-utf8")) {
-    body.innerHTML = `<div class="fv-loading">${esc(notes[notes.length - 1] || "不预览正文")}</div>`;
+    body.innerHTML = `<div class="fv-loading">${esc(notes[notes.length - 1] || t("fv.noPreview"))}</div>`;
   } else {
     body.innerHTML = fvCodeHtml((m && m.text) || "");
   }
@@ -845,9 +851,9 @@ function applyFsRead(m) {
   FV.readErr = "";
   FV.readNotes = [];
   FV.readNoteKind = "";
-  if (m.truncated) FV.readNotes.push("文件大于 512 KiB，只显示前 512 KiB。");
-  if (m.binary) FV.readNotes.push("这是二进制文件，不预览正文；可以复制路径或在文件夹中显示。");
-  else if (m.encoding === "non-utf8") FV.readNotes.push("这不是 UTF-8 文本（可能是 GBK 等编码），不预览正文。");
+  if (m.truncated) FV.readNotes.push(t("fv.noteTooBig"));
+  if (m.binary) FV.readNotes.push(t("fv.noteBinary"));
+  else if (m.encoding === "non-utf8") FV.readNotes.push(t("fv.noteNonUtf8"));
   if (m.binary || m.encoding === "non-utf8") FV.readNoteKind = "warn";
   fvRender();
   sendCtrl({ type: "log", msg: `文件预览 到达 path=${m.path} size=${m.size} ` +
@@ -906,11 +912,11 @@ function applyFsErr(m) {
   FS.timeouts.delete(m.req);
   if (w.op === "list") {
     FS.loading.delete(w.dir);
-    FS.err.set(w.dir, m.err || "读取失败");
+    FS.err.set(w.dir, m.err || t("fv.readFailed"));
     renderFiles(true);
   } else if (w.op === "read" && FV && FV.req === m.req) {
     FV.readLoading = false;
-    FV.readErr = m.err || "读取失败";
+    FV.readErr = m.err || t("fv.readFailed");
     FV.read = null;
     // 文件没了也不把已记录的改动藏起来：有 diff 就落到「改动」页
     // （用户亲手切过页的话仍尊重他的选择）。
@@ -919,7 +925,7 @@ function applyFsErr(m) {
     fvRender();
   } else if (w.op === "diff" && FV && FV.diffReq === m.req) {
     FV.diffLoading = false;
-    FV.diffErr = m.err || "读取改动失败";
+    FV.diffErr = m.err || t("fv.diffErrFallback");
     FV.diff = null;
     fvSyncTabs();
     fvRender();
@@ -937,7 +943,7 @@ $("fv-close").addEventListener("click", () => closeFileView("点关闭"));
 $("fv-copy").addEventListener("click", () => {
   if (!FV) return;
   copyText(FV.path).then((ok) => {
-    if (ok) showToast("已复制路径", FV ? FV.path : "", "ok", true);
+    if (ok) showToast(t("fv.copied"), FV ? FV.path : "", "ok", true);
   });
 });
 $("fv-reveal").addEventListener("click", () => {

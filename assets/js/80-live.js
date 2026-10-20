@@ -77,7 +77,7 @@ function showToast(title, body, kind, mono) {
     + `<span class="tic">${lucide(k === "err" ? LUCIDE_TRIANGLE_ALERT
                                           : k === "ok" ? LUCIDE_CHECK : LUCIDE_INFO, 14)}</span>`
     + `<span class="ttl"></span>`
-    + `<button class="tclose" type="button" aria-label="关闭">${lucide(LUCIDE_X, 13)}</button>`
+    + `<button class="tclose" type="button" aria-label="${esc(t("common.close"))}">${lucide(LUCIDE_X, 13)}</button>`
     + `</div>`
     + `<div class="tbody${mono ? " mono" : ""}"></div>`;
   // 走 textContent：标题和正文里有路径、引号、中文引号 —— 不能拼 HTML
@@ -134,25 +134,29 @@ function cardMenuItems(s) {
     /* 重命名排在最前面：它是这份菜单里**唯一**一件"改我们自己的东西"的事
        （其余全是跟 claude 或文件系统打交道），而且它是那种会想顺手做一下的动作。
        接上这条会话在**这一行本身上**已经有更好的出口（hover 浮出的 ▶）。 */
-    { act: "rename", icon: ICON_PENCIL, label: "重命名",
-      hint: (STATE?.titles?.[s.id] ? `现在叫「${STATE.titles[s.id]}」` : "这条会话还没有名字")
-            + "\n改的是**显示名**：会话 id 是盘上那份文件的文件名，不动它。清空 = 取消命名" },
+    { act: "rename", icon: ICON_PENCIL, label: t("live.menu.rename"),
+      hint: (STATE?.titles?.[s.id]
+              ? t("live.menu.renameNow", { name: STATE.titles[s.id] })
+              : t("live.menu.renameNone"))
+            + "\n" + t("live.menu.renameHint") },
     { sep: true },
-    { act: "resume", icon: ICON_PLAY, label: "接上这条会话", cls: na,
-      hint: why || "新开一格，在它自己的工作目录里继续" },
-    { act: "fork", icon: ICON_FORK, label: "另起分支", cls: na,
-      hint: why || "读这条会话、写一条新的（原会话不动，两条可以并着跑）" },
+    { act: "resume", icon: ICON_PLAY, label: t("live.menu.resume"), cls: na,
+      hint: why || t("live.menu.resumeHint") },
+    { act: "fork", icon: ICON_FORK, label: t("live.menu.fork"), cls: na,
+      hint: why || t("live.menu.forkHint") },
     { sep: true },
-    { act: "copycmd", icon: ICON_COPY, label: "复制 resume 命令",
-      hint: `claude --resume ${s.id}（在 ${s.cwd || "默认目录"} 里执行）` },
-    { act: "copyid", icon: ICON_COPY, label: "复制会话 id", hint: s.id },
+    { act: "copycmd", icon: ICON_COPY, label: t("live.menu.copyCmd"),
+      hint: t("live.menu.copyCmdHint", {
+        id: s.id, cwd: s.cwd || t("live.menu.defaultCwd"),
+      }) },
+    { act: "copyid", icon: ICON_COPY, label: t("live.menu.copyId"), hint: s.id },
     { sep: true },
-    { act: "openlog", icon: ICON_OPEN, label: "打开会话文件", cls: hasFile ? "" : " na",
-      hint: hasFile ? s.path : "这张卡片没有文件路径" },
-    { act: "reveallog", icon: ICON_DIR, label: "在文件夹中显示", cls: hasFile ? "" : " na",
-      hint: hasFile ? s.path : "这张卡片没有文件路径" },
-    { act: "opencwd", icon: ICON_DIR, label: "打开工作目录", cls: s.cwd ? "" : " na",
-      hint: s.cwd || "这条会话没有工作目录" },
+    { act: "openlog", icon: ICON_OPEN, label: t("live.menu.openLog"), cls: hasFile ? "" : " na",
+      hint: hasFile ? s.path : t("live.menu.noFilePath") },
+    { act: "reveallog", icon: ICON_DIR, label: t("live.menu.reveal"), cls: hasFile ? "" : " na",
+      hint: hasFile ? s.path : t("live.menu.noFilePath") },
+    { act: "opencwd", icon: ICON_DIR, label: t("live.menu.openCwd"), cls: s.cwd ? "" : " na",
+      hint: s.cwd || t("live.menu.noCwd") },
   ];
 }
 
@@ -214,69 +218,67 @@ function openCardMenu(cardEl, anchor, alignRight) {
      · 未开始 —— 其它项可点，换 = 重开这一格；
      · 已经开始 —— 当前项和其它项**一律灰掉**，点了会说明"要换请新开一格"，
        不静默（不可用的动作做灰、做说明，不做隐）。 */
-function freshMenuItems(t) {
-  const cur = (t.spec && t.spec.agent) || "";
-  const started = !t.fresh;
+function freshMenuItems(tab) { // 参数别叫 t：会遮住 i18n 的 t()
+  const cur = (tab.spec && tab.spec.agent) || "";
+  const started = !tab.fresh;
   const list = opCatalog().filter(opLaunchable);
   if (!list.length) {
     return [{ act: "fresh:none", icon: lucide(LUCIDE_INFO, 13),
-      label: "没有可启动的 Agent", cls: " na",
-      hint: "没有检测到已安装、能启动的 Agent。去总览 → Agent 安装。" }];
+      label: t("live.fresh.noAgents"), cls: " na",
+      hint: t("live.fresh.noAgentsHint") }];
   }
   return list.map((a) => {
     const isCur = a.id === cur;
     let cls = "", hint;
     if (isCur) {
       cls = " na";
-      hint = started
-        ? "现在就是这个 Agent；这一格已经开始干活"
-        : "现在就是这个 Agent；这一格还没开始，随时可以换";
+      hint = started ? t("live.fresh.curStarted") : t("live.fresh.curReady");
     } else if (started) {
       cls = " na";
-      hint = `${a.name}：这一格已经开始干活，不能原地换 —— 要换请新开一格（Ctrl+Alt+N）`;
+      hint = t("live.fresh.otherStarted", { name: a.name });
     } else {
-      hint = `换成 ${a.name}：这一格会重开（还没开始，旧的空会话不留记录）`;
+      hint = t("live.fresh.otherReady", { name: a.name });
     }
     return {
       act: "fresh:" + a.id,
       icon: opAgentIcon(a.icon) || lucide(LUCIDE_INFO, 13),
-      label: a.name + (isCur ? "（当前）" : ""),
+      label: a.name + (isCur ? t("live.fresh.currentSuffix") : ""),
       cls, hint,
     };
   });
 }
 
-function openFreshAgentMenu(t, anchorEl) {
-  if (!t || !TAB_LIST.includes(t)) return;
+function openFreshAgentMenu(tab, anchorEl) {
+  if (!tab || !TAB_LIST.includes(tab)) return;
   const r = anchorEl.getBoundingClientRect();
   cardMenuCard = null;
   cardMenuProj = null;
   cardMenuAgent = null;
   cardMenuClosed = null;
-  cardMenuFresh = t;
+  cardMenuFresh = tab;
   cardMenuRowEl = null;
-  showMenuAt(`<div class="mhead">Agent · ${t.fresh ? "这一格还没开始" : "这一格已经开始"}</div>`,
-    freshMenuItems(t), r, false,
-    `格子头 Agent 菜单 tab=${t.id || 0} agent=${(t.spec && t.spec.agent) || "?"} ` +
-    `fresh=${t.fresh ? 1 : 0}`);
+  showMenuAt(`<div class="mhead">Agent · ${esc(t(tab.fresh ? "live.fresh.headReady" : "live.fresh.headStarted"))}</div>`,
+    freshMenuItems(tab), r, false,
+    `格子头 Agent 菜单 tab=${tab.id || 0} agent=${(tab.spec && tab.spec.agent) || "?"} ` +
+    `fresh=${tab.fresh ? 1 : 0}`);
 }
 
-function doFreshAct(act, t) {
+function doFreshAct(act, tab) {
   if (!act || act.indexOf("fresh:") !== 0) return;
   const id = act.slice("fresh:".length);
   if (id === "none") {
-    showToast("没有可启动的 Agent", "没有检测到已安装、能启动的 Agent。去总览 → Agent 安装。", "err");
+    showToast(t("live.fresh.noAgents"), t("live.fresh.noAgentsHint"), "err");
     return;
   }
   // 已经开始干活：菜单项是灰的，但点了要**说清楚**为什么不做（不做静默）。
-  if (!t.fresh) {
-    showToast("这一格已经开始干活", "换 Agent 只能在新会话开始前；要换请新开一格。", "info");
-    sendCtrl({ type: "log", msg: `换 Agent 拒绝：tab=${t.id || 0} 已开始` +
-      `（${t.freshStartedBy || "?"}）` });
+  if (!tab.fresh) {
+    showToast(t("live.fresh.startedTitle"), t("live.fresh.startedNote"), "info");
+    sendCtrl({ type: "log", msg: `换 Agent 拒绝：tab=${tab.id || 0} 已开始` +
+      `（${tab.freshStartedBy || "?"}）` });
     return;
   }
   // 不 await：菜单已经关了，重开一格是后台上的一段异步动作（内部自己会报结果）。
-  switchFreshAgent(t, id);
+  switchFreshAgent(tab, id);
 }
 
 function closeCardMenu(why) {
@@ -317,7 +319,7 @@ async function copyText(text) {
     sendCtrl({ type: "log", msg: `剪贴板 写入 ${text.length} 字符（execCommand=${ok}）` });
     return ok;
   } catch (e) {
-    showToast("复制失败", String(e && e.message ? e.message : e), "err");
+    showToast(t("live.copyFailed"), String(e && e.message ? e.message : e), "err");
     return false;
   }
 }
@@ -327,7 +329,7 @@ async function copyText(text) {
    --fork-session`（见 agentDefs.Args）—— 这里只声明意图，不拼命令行。 */
 async function connectSession(s, kind) {
   const why = resumeWhy(s);
-  if (why) { showToast("接不上这条会话", why, "err"); return; }
+  if (why) { showToast(t("live.resumeFailed"), why, "err"); return; }
   /* ⚠️ **exact 才有这条**：它已经在某一格里跑着 ⇒ 那不是"接上"，是**跳到那一格**。
      再起一条 = 两个 claude 同时写同一份会话文件，Go 那道护栏会拒 —— 而用户看到的
      是红字报错 + 白等 2.4 秒重试。就在这个出口上判一次（点会话行和行尾那颗 ▶
@@ -339,12 +341,12 @@ async function connectSession(s, kind) {
     if (live) { jumpToTab(live, "它已经在跑了"); return; }
   }
   if (soloTab) backToGrid();   // 新格加进的是"并行区"，正看独立页时先回网格
-  const t = await createTab({ agent: "claude", cwd: s.cwd || "", resume: { kind, id: s.id } });
+  const tab = await createTab({ agent: "claude", cwd: s.cwd || "", resume: { kind, id: s.id } });
   // Go 拒了：createTab 那条路上已经把占位格撤掉、toast 弹过了（见 tab.ok 的处理）。
   // tab.id === 0 就是"这个标签没有 PTY"，不是一条能用的格子。
-  if (!t || !t.id) return;
-  setActive(t);
-  sendCtrl({ type: "log", msg: `接上会话 id=${s.id} kind=${kind} → tab=${t.id} ` +
+  if (!tab || !tab.id) return;
+  setActive(tab);
+  sendCtrl({ type: "log", msg: `接上会话 id=${s.id} kind=${kind} → tab=${tab.id} ` +
     `cwd=${s.cwd || "(默认)"} 格数=${TAB_LIST.length}` });
 }
 
@@ -352,7 +354,8 @@ async function doCardAct(act, el, s, anchorEl) {
   // 灰的项**可点**：点一下把 title 里那句原因原样说出来。禁用元素在 Chromium 里
   // 不弹 title，所以"灰"如果不可点，原因就没有任何出口。
   if (el && el.classList.contains("na")) {
-    showToast(miLabel(el) || (el && el.dataset.act === "resume" ? "接不上这条会话" : "做不了"),
+    showToast(miLabel(el) || (el && el.dataset.act === "resume"
+        ? t("live.resumeFailed") : t("common.cantDo")),
       el.title, "err"); return;
   }
   switch (act) {
@@ -364,7 +367,7 @@ async function doCardAct(act, el, s, anchorEl) {
          ⚠️ 元素找不到就说出来，别静默什么都不做：那样"点了没反应"又要靠猜。 */
       const nmEl = liveNmEl(s.id, anchorEl && anchorEl.querySelector(".nm"));
       if (!nmEl) {
-        showToast("这一行已经不在界面上了", "列表刚重画过 —— 再点一次 ⋯。", "err");
+        showToast(t("live.rowGoneTitle"), t("live.rowGoneNote"), "err");
         sendCtrl({ type: "log", msg: `重命名 找不到标题元素 id=${s.id} anchor=${anchorEl ? anchorEl.className : "null"}` });
         break;
       }
@@ -380,12 +383,12 @@ async function doCardAct(act, el, s, anchorEl) {
       // **必须和 Go 那边 agentDefs.Args 拼出来的是同一条命令** —— 否则"复制出来的"
       // 和"接上跑的"不是一个东西，这条功能就只剩误导。
       const cmd = "claude --resume " + s.id;
-      if (await copyText(cmd)) showToast("已复制 resume 命令",
-        `${cmd}（在 ${s.cwd || "默认目录"} 里执行）`, "ok");
+      if (await copyText(cmd)) showToast(t("live.copyCmdDone"),
+        t("live.copyCmdDoneNote", { cmd, cwd: s.cwd || t("live.menu.defaultCwd") }), "ok");
       break;
     }
     case "copyid":
-      if (await copyText(s.id)) showToast("已复制会话 id", s.id, "ok", true);
+      if (await copyText(s.id)) showToast(t("live.copyIdDone"), s.id, "ok", true);
       break;
     case "openlog":   sendCtrl({ type: "open", mode: "open",   path: s.path }); break;
     case "reveallog": sendCtrl({ type: "open", mode: "reveal", path: s.path }); break;
@@ -1259,8 +1262,15 @@ function swapList(vlistId, html) {
   if (sc) sc.scrollTop = top;
 }
 
+// 日志仍用中文；UI 走 NEED_WHY_KEY + t()，这样切语言时列表跟着变。
 const NEED_WHY = { stop: "跑完了一轮", ask: "在等你回答", perm: "要你批权限",
                    fail: "出错了", idle: "空闲" };
+const NEED_WHY_KEY = { stop: "live.need.whyStop", ask: "live.need.whyAsk",
+                       perm: "live.need.whyPerm", fail: "live.need.whyFail",
+                       idle: "live.need.whyIdle" };
+function needWhy(kind) {
+  return NEED_WHY_KEY[kind] ? t(NEED_WHY_KEY[kind]) : kind;
+}
 const NEED_GLYPH = { stop: G_BELL, ask: G_ASK, perm: G_ASK, fail: G_DOT, idle: G_DOT };
 
 // 「需要你」的模型 = 每一格当前该怎么归类。抽出来是因为徽标和列表要读**同一个**
@@ -1313,7 +1323,7 @@ function needModel() {
 
 function needRowHTML(r) {
   const nm = currentTabTitle(r.t);
-  const why = NEED_WHY[r.kind] || r.kind;
+  const why = needWhy(r.kind);
   const title = `${nm} · ${why}${r.text ? "\n" + r.text : ""}`;
   return `<button class="vrow need${r.kind === "idle" ? " quiet" : ""} k-${r.kind}"
       data-tab="${r.t.id}" title="${esc(title)}">
@@ -1331,7 +1341,8 @@ function renderNeed() {
   const M = needModel();
   let html = "";
   if (M.wait.length) {
-    html += `<div class="cap">在等你 · ${M.wait.length}</div>` + M.wait.map(needRowHTML).join("");
+    html += `<div class="cap">${esc(t("live.need.capWait", { n: M.wait.length }))}</div>` +
+      M.wait.map(needRowHTML).join("");
   }
   // quiet 里混着两种事：真的没事做（idle），和"你正看着它，所以不算未读"
   // （前台格的权限框/提问）。原来一律写「空闲」—— 于是一条「要你批权限」
@@ -1339,15 +1350,15 @@ function renderNeed() {
   const quietSeen = M.quiet.filter((r) => r.kind !== "idle");
   const quietIdle = M.quiet.filter((r) => r.kind === "idle");
   if (quietSeen.length) {
-    html += `<div class="cap">已看到 · ${quietSeen.length}</div>` + quietSeen.map(needRowHTML).join("");
+    html += `<div class="cap">${esc(t("live.need.capSeen", { n: quietSeen.length }))}</div>` +
+      quietSeen.map(needRowHTML).join("");
   }
   if (quietIdle.length) {
-    html += `<div class="cap">空闲 · ${quietIdle.length}</div>` + quietIdle.map(needRowHTML).join("");
+    html += `<div class="cap">${esc(t("live.need.capIdle", { n: quietIdle.length }))}</div>` +
+      quietIdle.map(needRowHTML).join("");
   }
   if (!M.rows.length) {
-    html = `<div class="empty">没有在等你的格子。<br>
-      这里列的是"跑完了一轮而你没在看"和"正挂着问题"的格子 ——
-      数据来自 agent 自己的 hook 事件和它的会话登记表，不靠猜。</div>`;
+    html = `<div class="empty">${t("live.need.empty")}</div>`;
   }
   swapList("need-list", html);
   const cnt = $("need-cnt");
@@ -1372,7 +1383,7 @@ function paintNeedBadge() {
   // （那会把 title 静默留在旧元素上，铃铛永远只有一句"需要你"）。
   const btn = b.closest("button");
   if (btn) {
-    btn.title = n ? `需要你 · ${n} 件还没看` : "需要你";
+    btn.title = n ? t("live.bell.titleCount", { n }) : t("live.bell.title");
     btn.classList.toggle("has", !!n);
   }
 }
@@ -1410,7 +1421,11 @@ function setNeedPop(open, why) {
 //   独立「改动」模块并进文件预览之后，这三个符号只剩文件树在用；
 //   ±N 仍是**字面量**（来自转录里 Edit 的 structuredPatch / Write 的 content）。
 const OP_LETTER = { write: "A", edit: "M", read: "R" };
-const OP_NAME = { write: "新建", edit: "改动", read: "读过" };
+const OP_NAME = { write: "新建", edit: "改动", read: "读过" }; // 83-files 迁移前的旧表
+const OP_NAME_KEY = { write: "live.op.write", edit: "live.op.edit", read: "live.op.read" };
+function opName(op) {
+  return OP_NAME_KEY[op] ? t(OP_NAME_KEY[op]) : op;
+}
 // 一个文件可能被读过也被改过（ops 是个**去重集合**）——展示时取"最重"的那个动作：
 // 新建 > 改动 > 读过。抽成一个函数是因为文件树和预览都要用它，
 // 两处各写一遍必然有一天不一致。
@@ -1436,11 +1451,11 @@ function feedRowHTML(a) {
     // 工具行分两段：**工具名**（亮）和**目标**（暗的等宽）—— 一眼看出
     // "这一步在动什么"，不用把整行读完。path 只有文件类工具有。
     const tgt = a.rel || a.path || "";
-    body = `<span class="tool">${esc(a.tool || "工具")}</span>` +
+    body = `<span class="tool">${esc(a.tool || t("live.toolFallback"))}</span>` +
            (tgt ? ` <span class="tgt">${esc(tgt)}</span>`
                 : (a.text ? ` <span class="tgt">${esc(a.text)}</span>` : ""));
-    if (a.ok == null) body += ' <span class="ok">跑着…</span>';
-    else if (a.ok === false) body += ' <span class="no">失败</span>';
+    if (a.ok == null) body += ` <span class="ok">${esc(t("live.running"))}</span>`;
+    else if (a.ok === false) body += ` <span class="no">${esc(t("live.failed"))}</span>`;
   } else if (k === "thinking") {
     body = `<span class="tgt">${esc(clamp(a.text, 200))}</span>`;
   } else {
@@ -1454,20 +1469,19 @@ function feedRowHTML(a) {
 }
 
 function renderFeed() {
-  const t = activeTab;
-  const v = t ? LIVE.get(t.id) : null;
+  const tab = activeTab; // 参数别叫 t：会遮住 i18n 的 t()
+  const v = tab ? LIVE.get(tab.id) : null;
   const acts = (v && v.acts) || [];
-  $("feed-who").textContent = t ? currentTabTitle(t) : "没有当前格";
+  $("feed-who").textContent = tab ? currentTabTitle(tab) : t("live.noActivePane");
   $("feed-cnt").textContent = acts.length;
   // 只画最后一屏的量（内存里留 300 条是为了"更新时能按 id 找到"，
   // 不是为了全画出来 —— 一屏 120 行已经比任何人愿意读的都多）。
   const last = acts.slice(-120).reverse();
   swapList("feed-list", last.length ? last.map(feedRowHTML).join("")
-    : `<div class="empty">${t ? "这一格还没有动静。" : "没有当前格。"}<br>
-       流水跟着当前格的转录文件实时进来：它说的每句话、每次工具调用、
-       每个文件动作，都在这里按时间排开。</div>`);
+    : `<div class="empty">${esc(tab ? t("live.feed.emptyActive") : t("live.feed.emptyNoActive"))}<br>
+       ${esc(t("live.feed.emptyNote"))}</div>`);
   const a0 = last[0];
-  uiFact("feed", `流水 当前格=${t ? t.id : "?"} 共${acts.length} 屏上${last.length}` +
+  uiFact("feed", `流水 当前格=${tab ? tab.id : "?"} 共${acts.length} 屏上${last.length}` +
     (a0 ? ` 首条=${a0.kind}${a0.tool ? "/" + a0.tool : ""}` +
       (a0.rel || a0.path ? ` ${a0.rel || a0.path}` : "") +
       ` ${a0.ok == null ? "跑着" : a0.ok ? "成" : "败"}「${String(a0.text || "").replace(/\s+/g, " ").slice(0, 24)}」` : ""));
@@ -1586,20 +1600,22 @@ function subStateOf(s) {
    以及 refreshSubChips 过期重算的时候 —— 抄一份就等于两处会分叉。
    ② 那条要分成两种说法：hook 说的（权威）和文件推断的（弱证据）。 */
 function cardSubWhy(s, st) {
-  if (st === "run") return subLiveRunning(subKey(s.id))
-    ? "我们看着它起的，hook 还没报 SubagentStop"
-    : `最后一条事件在 ${Math.round(SUB_RECENT_MS / 60000)} 分钟内（文件还在写）`;
+  if (st === "run") {
+    return subLiveRunning(subKey(s.id))
+      ? t("live.subs.cardWhyRunLive")
+      : t("live.subs.cardWhyRunFile", { min: Math.round(SUB_RECENT_MS / 60000) });
+  }
   if (st === "closed") return subClosed.has(subKey(s.id))
-    ? "我们看着它那一格被关掉了"
-    : "末尾是一次没拿到结果的工具调用 —— 被打断";
+    ? t("live.subs.cardWhyClosedSeen")
+    : t("live.subs.cardWhyClosedTool");
   if (st === "done") {
     // 三种说法对应三种可信度：我们记着的 > 这一格 hook 现在说的 > 对文件的推断
     const k = subKey(s.id);
     // 不用括号：subNote 那条日志自己会再包一层（`→ 已完成（…）`），
     // 嵌套起来读着累
-    if (subDone.has(k)) return "hook 报过 SubagentStop · 在它那一格关掉之前";
-    if (subHookSeenDone(k)) return "hook 报了 SubagentStop";
-    return "停下来了，末尾不是悬空的工具调用";
+    if (subDone.has(k)) return t("live.subs.cardWhyDoneSeen");
+    if (subHookSeenDone(k)) return t("live.subs.cardWhyDoneHook");
+    return t("live.subs.cardWhyDoneFile");
   }
   return "";
 }
@@ -1634,7 +1650,7 @@ function adotEl(state, sm) {
 function subChipHTML(st, id, why, sid) {
   if (!st) return "";
   subNote(id, st, why);
-  return `<span class="subst ${st}" data-st="${st}"${sid ? ` data-sid="${esc(sid)}"` : ""} title="${esc(why || "")}">${adotEl(st, true)}<span class="w">${SUB_WORD[st]}</span></span>`;
+  return `<span class="subst ${st}" data-st="${st}"${sid ? ` data-sid="${esc(sid)}"` : ""} title="${esc(why || "")}">${adotEl(st, true)}<span class="w">${esc(t("sub." + st))}</span></span>`;
 }
 
 /* 状态签会**过期**，这和相对时间是同一件事，但危害更大：subStateOf 里
@@ -1659,15 +1675,15 @@ function refreshSubChips() {
 // —— ② 子代理的"正在跑"那段。数据源是转录里的 Agent/Task 工具调用（它带**描述**
 //    和结果），用 hook 报的 agent_type 补一格类型 —— 两边靠 agentId join。
 function renderSideLive() {
-  const t = activeTab;
-  const v = t ? LIVE.get(t.id) : null;
+  const tab = activeTab; // 参数别叫 t：会遮住 i18n 的 t()
+  const v = tab ? LIVE.get(tab.id) : null;
   const acts = (v && v.acts) || [];
   const subs = acts.filter((a) => a.kind === "tool" && (a.tool === "Agent" || a.tool === "Task"));
   const host = $("side-live");
   if (!host) return;
   if (!subs.length) {
     host.innerHTML = "";
-    uiFact("subs", `子代理实时 当前格=${t ? t.id : "?"} 0 个`);
+    uiFact("subs", `子代理实时 当前格=${tab ? tab.id : "?"} 0 个`);
     return;
   }
   /* 状态判据 —— **顺序是实测出来的，别按直觉改**（2026-10-16 00:46 那次）：
@@ -1695,14 +1711,14 @@ function renderSideLive() {
   const hooksAlive = v.subs.length > 0;
   const rows = subs.slice(-5).reverse().map((a) => {
     const s = v.subs.find((x) => x.id && subKey(x.id) === subKey(a.agent)) || {};
-    const desc = String(a.text || "子代理").replace(/^子代理：/, "");
+    const desc = String(a.text || t("live.subs.fallback")).replace(/^(子代理|Subagent):\s*/, "");
     const st = a.ok === false ? "fail"
              : s.done ? "done"
              : hooksAlive ? "run" : (a.ok != null ? "done" : "run");
-    const why = st === "fail" ? "工具调用失败"
-      : st === "done" ? (s.done ? "hook 报了 SubagentStop" : "工具结果回来了（这一格没有 hook 记录作证）")
-      : a.ok != null ? "工具返回了，但 hook 还没报 SubagentStop（后台子代理就是这样）"
-      : "工具调用还没有结果";
+    const why = st === "fail" ? t("live.subs.whyFail")
+      : st === "done" ? (s.done ? t("live.subs.whyDoneHook") : t("live.subs.whyDoneWeak"))
+      : a.ok != null ? t("live.subs.whyRunReturned")
+      : t("live.subs.whyPending");
     /* ⚠️ 状态日志的主键是**这个工具调用自己的 id**（a.id），不是 a.agent：
        工具还没返回时 Go 那边往 Agent 里放的是**描述**（transcript.go:370，
        返回之后才换成真 agentId，:569）—— 拿它当键会记出 "Run slee → 进行中"
@@ -1723,11 +1739,12 @@ function renderSideLive() {
   }).length;
   // 小标题带一个**汇总**：一行行扫之前，先知道这一堆里还有几个在跑
   // （Orca 的分组头也是这个作用："Ran 2 subagents … 2 failed"）。
-  host.innerHTML = `<div class="cap">本格在跑 · ${subs.length}${running ? `（${running} 个进行中）` : ""}</div>` + rows.join("");
+  host.innerHTML = `<div class="cap">${esc(t("live.subs.cap", { n: subs.length }))}` +
+    `${running ? esc(t("live.subs.capRunning", { n: running })) : ""}</div>` + rows.join("");
   const s0 = subs[subs.length - 1];
   // ⚠️ 这一句里 s0.agent 可能还是**描述**（工具没返回时，见上面那条），
   // 所以如实写成"首个"，不写"首个agentId" —— 免得后来的人拿它去 join 别的东西。
-  uiFact("subs", `子代理实时 当前格=${t ? t.id : "?"} ${subs.length} 个 进行中=${running}` +
+  uiFact("subs", `子代理实时 当前格=${tab ? tab.id : "?"} ${subs.length} 个 进行中=${running}` +
     (s0 ? ` 首个=${s0.agent ? subKey(s0.agent).slice(0, 8) : "?"}` : ""));
 }
 

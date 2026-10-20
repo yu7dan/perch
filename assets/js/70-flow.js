@@ -17,19 +17,19 @@ const ICON_DOTS = `<svg width="12" height="12" viewBox="0 0 24 24" fill="current
 function cardHTML(s) {
   const perm = s.permission === "auto" ? `<span class="chip">auto</span>`
     : s.permission ? `<span class="chip warn">${esc(s.permission)}</span>` : "";
-  const branch = s.branch ? `<span class="chip br" title="git 分支">
+  const branch = s.branch ? `<span class="chip br" title="${esc(t("flow.gitBranch"))}">
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M6 8.5v7M18 6a6 6 0 0 1-6 6"/><circle cx="18" cy="6" r="2.5"/></svg>
       <span class="x">${esc(s.branch)}</span></span>` : "";
   const repo = s.cwd ? `<span class="chip" title="${esc(s.cwd)}"><span class="x">${esc(shortPath(s.cwd))}</span></span>` : "";
-  const atype = s.agentType ? `<span class="chip" title="agent 类型"><span class="x">${esc(s.agentType)}</span></span>` : "";
-  const agents = s.agents ? `<span class="pill b" title="子代理会话">◈ ${s.agents}</span>` : "";
-  const turns = s.turns ? `<span class="pill" title="轮次">${s.turns} 轮</span>` : "";
-  const size = s.bytes ? `<span class="pill" title="会话文件大小">${(s.bytes / 1048576).toFixed(1)}M</span>` : "";
+  const atype = s.agentType ? `<span class="chip" title="${esc(t("flow.agentType"))}"><span class="x">${esc(s.agentType)}</span></span>` : "";
+  const agents = s.agents ? `<span class="pill b" title="${esc(t("flow.subagentSession"))}">◈ ${s.agents}</span>` : "";
+  const turns = s.turns ? `<span class="pill" title="${esc(t("flow.turnsTitle"))}">${esc(tCount("flow.turnsPill", s.turns))}</span>` : "";
+  const size = s.bytes ? `<span class="pill" title="${esc(t("flow.fileSize"))}">${(s.bytes / 1048576).toFixed(1)}M</span>` : "";
   // 子代理卡：图标换成绿色分支点、加一枚「子代理」标记，和主会话一眼可分
   const icon = s.sidechain
     ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="1.9" style="flex:none"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v6M12 15v6M3 12h6M15 12h6"/></svg>`
     : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--claude)" stroke-width="1.9" style="flex:none"><path d="M5 6l5 6-5 6M13 18h6"/></svg>`;
-  const sideTag = s.sidechain ? `<span class="pill g">子代理</span>` : "";
+  const sideTag = s.sidechain ? `<span class="pill g">${esc(t("flow.subagent"))}</span>` : "";
   /* C7：子代理卡的第二行从「类型 + 分支」换成「类型 + **来自哪条会话**」。
      分支对子代理没有信息量 —— 它是从主会话兜过来的（store.go:209-211）；
      而"这条子代理是谁派出来的"，正是用户说的"根本不知道有什么区别"里最缺的那条。
@@ -37,8 +37,10 @@ function cardHTML(s) {
       native-chat-types.ts:142-154。) */
   const parent = (s.sidechain && s.parent)
     ? (STATE?.sessions || []).find((v) => v.id === s.parent) : null;
+  const fromFull = (parent && sessionTitle(parent)) || String(s.parent || "?");
+  const fromShort = (parent && sessionTitle(parent)) || fromFull.slice(0, 8);
   const fromChip = s.sidechain
-    ? `<span class="chip" title="派它的那条会话：${esc((parent && sessionTitle(parent)) || s.parent || "?")}"><span class="x">来自 ${esc((parent && sessionTitle(parent)) || String(s.parent || "?").slice(0, 8))}</span></span>`
+    ? `<span class="chip" title="${esc(t("flow.fromTitle", { name: fromFull }))}"><span class="x">${esc(t("flow.from", { name: fromShort }))}</span></span>`
     : "";
   /* C7：状态签。st === "" 表示**判不出来**（判据见 subStateOf）—— 那时候什么都不画，
      而不是猜一个"已完成"：会话库里几十张老卡，猜错一次就是"我以为它跑完了"。
@@ -51,7 +53,7 @@ function cardHTML(s) {
      由 Go 拒绝 + toast 说明，这里不猜。 */
   const why = resumeWhy(s);
   const resumeBtn = `<button class="cardbtn${why ? " na" : ""}" data-act="resume"
-    title="${esc(why || "接上这条会话（新开一格）")}">${ICON_PLAY}</button>`;
+    title="${esc(why || t("flow.resumeCard"))}">${ICON_PLAY}</button>`;
   return `<div class="card${s.sidechain ? " side" : ""}" role="button" tabindex="0"
     data-id="${esc(s.id)}" title="${esc(sessionTitle(s))}\n${esc(s.cwd || "")}">
     <span class="t">
@@ -59,7 +61,7 @@ function cardHTML(s) {
       <span class="nm ell">${esc(sessionTitle(s))}</span>
       <span class="cardacts">
         <span class="hgroup">${resumeBtn}</span>
-        <button class="cardbtn" data-act="menu" title="更多动作">${ICON_DOTS}</button>
+        <button class="cardbtn" data-act="menu" title="${esc(t("shell.proj.more"))}">${ICON_DOTS}</button>
       </span>
     </span>
     <span class="r2">${s.sidechain ? atype + fromChip : repo + branch + perm}</span>
@@ -83,9 +85,9 @@ function cardHTML(s) {
    tabManager.bySession 里，前端手上没有会话 id。硬猜会得到第二个、偶尔和 Go
    矛盾的答案源 —— 那比没有更糟。 */
 function resumeWhy(s) {
-  if (!s) return "没有这条会话";
-  if (s.sidechain) return "子代理会话不能单独接上（它的 id 不是一条独立会话）";
-  if (!s.turns) return "这条会话没存下往来，接不上（Conversation not saved）";
+  if (!s) return t("flow.whyNoSession");
+  if (s.sidechain) return t("flow.whySubagent");
+  if (!s.turns) return t("flow.whyNoTurns");
   return null;
 }
 
@@ -172,14 +174,14 @@ function flowSource() {
       stamp: "lib:" + flowSub.id,
       title: s ? sessionTitle(s) : String(flowSub.id).slice(0, 8),
       from: (s && s.sidechain) ? ((par && sessionTitle(par)) || String(s.parent || "").slice(0, 8)) : "",
-      foot: s ? [s.sidechain ? "子代理" : "", st ? SUB_WORD[st] : "",
-                 `${s.turns || 0}轮`, `${(s.bytes / 1048576).toFixed(1)}MB`].filter(Boolean).join(" · ") : "",
+      foot: s ? [s.sidechain ? t("flow.subagent") : "", st ? t("sub." + st) : "",
+                 `${s.turns || 0}`, `${(s.bytes / 1048576).toFixed(1)}MB`].filter(Boolean).join(" · ") : "",
       items: hist.map((it, i) => ({ id: "lib:" + i, role: it.role === "user" ? "user" : "agent", text: it.text, at: it.at })),
-      empty: "这个会话里没有可显示的对话文本（只有工具调用/附件）。",
+      empty: t("flow.emptyLib"),
     };
   }
-  const t = activeTab;
-  const v = t ? LIVE.get(t.id) : null;
+  const tab = activeTab; // 别叫 t：会遮住 i18n 的 t()
+  const v = tab ? LIVE.get(tab.id) : null;
   const acts = (v && v.acts) || [];
   /* 2026-10-17（用户点名的一条）：右栏这条流**就是 agent 的记录** —— 点一个
      agent，这里呈现的就是它干过什么。所以"实时流水是空的"不能让这一栏说谎：
@@ -188,7 +190,7 @@ function flowSource() {
        · 而盘上最后 30 轮已经在 `STATE.history[sessionId]` 里（store.go 的
          tailHistory，启动时扫好的）。
      有实时就用实时（更全、会长），没有就用盘上那一份，并如实标出来源。 */
-  const sid = t && t.sessionID;
+  const sid = tab && tab.sessionID;
   const lib = (!acts.length && sid) ? ((STATE?.history || {})[sid] || []) : [];
   const items = acts.length
     ? acts.filter((a) => FLOW_ROLE[a.kind]).map((a) => ({
@@ -203,23 +205,23 @@ function flowSource() {
     // actsGen 是 Go 那次"整份替换"的代际号（见 applyActs）：它变了就说明这一格
     // 换了会话/页面补发了快照，列表要整表重建而不是接着追加。
     // 末尾那一位是**来源**：实时 ↔ 盘上记录切换时必须重建（两套 id 空间）。
-    stamp: `live:${t ? t.id : 0}:${((v && v.actsGen) | 0) || 0}:${acts.length ? "l" : "h"}`,
+    stamp: `live:${tab ? tab.id : 0}:${((v && v.actsGen) | 0) || 0}:${acts.length ? "l" : "h"}`,
     // 主语是 **agent**，不是格子：头像行叫什么，这里就叫什么（同名来源 = agentRowName）。
-    title: t ? agentRowName(t) : "没有当前 agent",
+    title: tab ? agentRowName(tab) : t("flow.noAgent"),
     /* 行尾读数只放**短**的两样：哪种 agent、这份是不是盘上补的。
        ⚠️ 别把工作区名也塞进来：`.bhead .sub` 是唯一的弹性元素（见它的 CSS 注释），
        行尾一长，第一个被挤成 0 宽的就是**名字** —— 2026-10-17 实测：写成
        「claude · 默认工作区」之后，头上只剩「当前 agent  claude · 默认工作区」，
        agent 叫什么一个字都看不见了。工作区去 h-sub 的 title 里说。 */
-    foot: t ? [(t.spec && t.spec.agent) || "claude",
-      acts.length ? "" : (lib.length ? "盘上记录" : "")].filter(Boolean).join(" · ") : "",
+    foot: tab ? [(tab.spec && tab.spec.agent) || "claude",
+      acts.length ? "" : (lib.length ? t("flow.diskRecord") : "")].filter(Boolean).join(" · ") : "",
     // turn/swallowed 是压缩节点独有的（Go 那边只有 kind=compact 会带，见
     // transcript.go 的 consumeCompact）：第几回合 / 距上次压缩几个回合。
     // 别的条目没有 ⇒ 0，compactRowHTML 见到 0 就不写那截 —— 转录里没有的数不编。
     items,
-    empty: (t && t.connDown)
-      ? "这个 agent 已经停了，盘上也没有读到它的对话。点左栏那一行可以接上它。"
-      : "这一格还没有动。",
+    empty: (tab && tab.connDown)
+      ? t("flow.emptyStopped")
+      : t("flow.emptyActive"),
   };
 }
 /* 正文被截断时**明说**（`fullLen` = 原文总字数，Go 的 msgText 带过来的）。
@@ -227,8 +229,9 @@ function flowSource() {
    （实测里就是这么被读错的）。显示前多少字按**手上这条**算，不写死那个上限 ——
    写死就等于让前端去猜 Go 的常量。 */
 const truncNote = (it) => (it.fullLen
-  ? `<div class="trunc">这条被截了 —— 全文 ${it.fullLen} 字，这里显示前 ${(it.text || "").length} 字。` +
-    `原文在那一格的终端里。</div>`
+  ? `<div class="trunc">${esc(t("flow.truncated", {
+      full: it.fullLen, shown: (it.text || "").length,
+    }))}</div>`
   : "");
 /* 压缩节点。它**不是一条发言** —— 是这一栏里的一条极淡分隔线（照 Orca 的
    `Context compacted`：它连正文都不画）。我们比它多一件事：**正文我们手上有**
@@ -241,20 +244,22 @@ const truncNote = (it) => (it.fullLen
    缺字段就不写那截，写"上下文已压缩"这五个字也成立。 */
 function compactRowHTML(it, open) {
   const meta = [];
-  if (it.turn > 0) meta.push(`第 ${it.turn} 回合`);
-  if (it.swallowed > 0) meta.push(`距上次压缩 ${it.swallowed} 回合`);
+  if (it.turn > 0) meta.push(t("flow.turn", { n: it.turn }));
+  if (it.swallowed > 0) meta.push(t("flow.sinceCompact", { n: it.swallowed }));
   return `<div class="hit compact${open ? " open" : ""}"${it.id ? ` data-fid="${esc(it.id)}"` : ""}>
-    <div class="fh" title="上下文压缩 —— 会话内部折起来的一页。点它就地摊开这份摘要（不碰终端、不换栏）">
+    <div class="fh" title="${esc(t("flow.compactTitle"))}">
       <span class="ln"></span>
       <span class="who"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${LUCIDE_FOLD_VERTICAL}</svg></span>
-      <span class="rl">${FLOW_TAG.compact}</span>
+      <span class="rl">${esc(t("flow.tag.compact"))}</span>
       ${meta.length ? `<span class="cm">${esc(meta.join(" · "))}</span>` : ""}
       <span class="ln"></span>
       <span class="tm" data-at="${esc(it.at || "")}">${rel(it.at)}</span>
       <span class="cv" aria-hidden="true"></span>
     </div>
     <div class="tx"><div>${md(it.text || "")}</div></div>
-    ${it.fullLen ? `<div class="trunc">这份摘要全文 ${it.fullLen} 字，这里只带出来前 ${(it.text || "").length} 字。</div>` : ""}
+    ${it.fullLen ? `<div class="trunc">${esc(t("flow.compactTruncated", {
+      full: it.fullLen, shown: (it.text || "").length,
+    }))}</div>` : ""}
   </div>`;
 }
 function flowRowHTML(it) {
@@ -268,12 +273,12 @@ function flowRowHTML(it) {
   return `<div class="hit ${r}${open ? " open" : ""}"${it.id ? ` data-fid="${esc(it.id)}"` : ""}>
     <div class="fh">
       <span class="who"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">${FLOW_ICON[r] || FLOW_ICON.agent}</svg></span>
-      <span class="rl">${FLOW_TAG[r] || r}</span>
+      <span class="rl">${esc(FLOW_TAG[r] ? t("flow.tag." + r) : r)}</span>
       <span class="tm" data-at="${esc(it.at || "")}">${rel(it.at)}</span>
     </div>
     <div class="tx"><div>${md(it.text || "")}</div></div>
     ${truncNote(it)}
-    <div class="more"><button type="button" class="mo" data-flow-more="${esc(it.id || "")}" aria-expanded="${open ? "true" : "false"}">${open ? "收起 ▴" : "… 摊开 ▾"}</button></div>
+    <div class="more"><button type="button" class="mo" data-flow-more="${esc(it.id || "")}" aria-expanded="${open ? "true" : "false"}">${esc(open ? t("flow.collapse") : t("flow.expandDots"))}</button></div>
   </div>`;
 }
 // 单独一条重画（正文变长了）：只换里那个 div，**不换整行** ——
@@ -293,10 +298,8 @@ function flowMoreLabel(el, open, overPx) {
   const b = el.querySelector(":scope > .more .mo");
   if (!b) return;
   const n = Math.max(1, Math.round((overPx || 0) / 20));
-  b.textContent = open ? "收起 ▴" : `… 其余 ${n} 行 ▾`;
-  b.title = open
-    ? "收起来，回到只出一部分"
-    : "这一条只出了一部分 —— 点它就地摊开全文（不碰终端、不换栏）";
+  b.textContent = open ? t("flow.collapse") : t("flow.expandRest", { n });
+  b.title = open ? t("flow.collapseTitle") : t("flow.expandTitle");
   b.setAttribute("aria-expanded", String(!!open));
 }
 /* 量一遍"哪几条正文超出了预算"，把结论写进类名（`.fold`）。
@@ -528,17 +531,17 @@ function renderFlow(why) {
   // 子代理主语时，悬停里补上"谁派出来的"（标题是**人写的任务描述**，
   // 而同一个描述在多条会话里完全可能重复出现）。
   $("h-sub").title = flowSub.kind === "lib"
-    ? (src.title + (src.from ? ` · 来自 ${src.from}` : "") + "（会话库）")
+    ? (src.title + (src.from ? t("flow.fromInline", { name: src.from }) : "") + t("flow.subLibSuffix"))
     // 工作区名字放在悬停里（行尾见 flowSource 的 foot 那条：放不下，会被挤没）
-    : (src.title + (activeTab ? ` · ${workspaceNameFor(activeTab)}` : "") + "（当前 agent）");
+    : (src.title + (activeTab ? ` · ${workspaceNameFor(activeTab)}` : "") + t("flow.subCurrentSuffix"));
   $("h-foot").textContent = src.foot;
   $("h-cnt").textContent = String(src.items.length);
   const chip = $("h-src");
   // 这一栏的主语是 agent（2026-10-17 用户定的模型）：「当前格」是运行时那一层的说法，
   // 而用户点的、左栏列的都是 agent —— 标签跟着叫，两处才指同一件东西。
-  chip.textContent = flowSub.kind === "lib" ? "会话库" : "当前 agent";
+  chip.textContent = flowSub.kind === "lib" ? t("flow.source.lib") : t("flow.source.current");
   chip.classList.toggle("lib", flowSub.kind === "lib");
-  chip.title = flowSub.kind === "lib" ? "看的是会话库里的会话 —— 点一下回到当前 agent" : "下段跟着当前 agent 实时走";
+  chip.title = flowSub.kind === "lib" ? t("flow.source.libTitle") : t("flow.source.currentTitle");
 
   if (flowFollowing) flowStick();
   paintJump();

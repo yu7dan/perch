@@ -67,7 +67,7 @@ function nsAgentRowsHtml() {
     + `<span class="ns-agck" aria-hidden="true"><svg width="13" height="13" viewBox="0 0 24 24" `
     + `fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" `
     + `stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span></button>`;
-  let html = row("", "不启动 Agent", "只把文件夹加进工作区",
+  let html = row("", t("ns.noAgent"), t("ns.noAgentNote"),
     `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" `
     + `stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">`
     + `<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>`,
@@ -79,13 +79,13 @@ function nsAgentRowsHtml() {
     const isRemembered = a.id === remembered;
     // 两个标签不同时出：记住项优先显示"上次用的"，其余才显示"默认/自动"。
     const pill = isRemembered
-      ? `<span class="ns-agpill ns-agpill-last">上次用的</span>`
-      : isDef ? `<span class="ns-agpill">${pinned === a.id ? "默认" : "自动"}</span>` : "";
+      ? `<span class="ns-agpill ns-agpill-last">${esc(t("ns.lastUsed"))}</span>`
+      : isDef ? `<span class="ns-agpill">${esc(pinned === a.id
+          ? t("pages.pill.default") : t("pages.pill.auto"))}</span>` : "";
     html += row(a.id, a.name, opCapsText(a), opAgentIcon(a.icon), NS.agent === a.id, pill);
   }
   if (!list.length) {
-    html += `<div class="ns-agempty">没有检测到已安装、能启动的 Agent。`
-      + `可以只添加文件夹，去总览 → Agent 安装后再回来。</div>`;
+    html += `<div class="ns-agempty">${esc(t("ns.emptyAgents"))}</div>`;
   }
   return html;
 }
@@ -113,36 +113,39 @@ function renderNewSpace() {
   // 取消，前端收不到任何消息。所以等待期间这颗键必须变成"取消等待"，
   // 否则卡片会一直灰着创建键，用户只剩关掉卡片这一条路。
   const pick = $("ns-pick");
-  if (pick) pick.textContent = NS.pickPending ? "取消等待" : "选择其他文件夹…";
+  if (pick) pick.textContent = NS.pickPending ? t("ns.pickPending") : t("ns.pick");
   const path = $("ns-path");
-  path.textContent = NS.folder || "（还没有可用的工作区）";
+  path.textContent = NS.folder || t("ns.noWorkspace");
   path.title = NS.folder || "";
   $("ns-agents").innerHTML = nsAgentRowsHtml();
 
   const note = $("ns-note");
   if (NS.pickPending) {
-    note.textContent = "正在等系统文件夹选择器…";
+    note.textContent = t("ns.notePicking");
   } else if (!NS.folder) {
-    note.textContent = "先选一个文件夹，或者用「选择其他文件夹…」加一个。";
+    note.textContent = t("ns.notePickFirst");
   } else if (NS.staleAgent) {
     // 记忆里有、但现在起不来：把原因摆在预选旁边，**不静默换成别的 Agent**。
     // 用户仍然可以点一个可启动的，或者关掉卡片去装回来。
-    note.textContent = `这个文件夹上次用的 ${opAgentById(NS.staleAgent)?.name || NS.staleAgent}`
-      + " 现在不可用（未安装/不能启动）；请重新选一个。";
+    note.textContent = t("ns.noteStale", {
+      name: opAgentById(NS.staleAgent)?.name || NS.staleAgent,
+    });
   } else if (!NS.agent && !nsCanCreate()) {
-    note.textContent = "这个文件夹已经在工作区里 —— 选一个 Agent 才会新建格子；"
-      + "或者用「选择其他文件夹…」加一个新的。";
+    note.textContent = t("ns.noteExisting");
   } else if (!NS.agent) {
-    note.textContent = "只把新文件夹加进工作区，不启动 agent。";
+    note.textContent = t("ns.noteFolderOnly");
   } else {
-    note.textContent = `在「${shortPath(NS.folder)}」里新开一个 ${opAgentById(NS.agent)?.name || NS.agent}。`;
+    note.textContent = t("ns.noteCreate", {
+      path: shortPath(NS.folder),
+      name: opAgentById(NS.agent)?.name || NS.agent,
+    });
   }
   const go = $("ns-create");
   const na = !nsCanCreate();
   go.classList.toggle("na", na);
   go.setAttribute("aria-disabled", na ? "true" : "false");
   go.title = na
-    ? (!NS.folder ? "先选一个文件夹" : "选一个 Agent，或者加一个新文件夹")
+    ? (!NS.folder ? t("ns.createNaPickFolder") : t("ns.createNaPickAgent"))
     : "";
   sendCtrl({ type: "log", msg: `新建工作区卡片 渲染 folder=${NS.folder || "?"} ` +
     `agent=${NS.agent || "(只加文件夹)"} 可创建=${!na} 池子=${projs.length}` });
@@ -225,8 +228,8 @@ function newSpacePoolUpdate(projects, picked, err) {
     else NS.addedPaths.add(path);
     NS.base = new Set((projects || []).map((p) => p.path));
     renderNewSpace();
-    if (had) showToast("这个文件夹已经在工作区里", shortPath(path), "info");
-    else showToast("文件夹已添加", shortPath(path), "ok");
+    if (had) showToast(t("ns.toast.existsTitle"), shortPath(path), "info");
+    else showToast(t("ns.toast.addedTitle"), shortPath(path), "ok");
     sendCtrl({ type: "log", msg: `新建工作区卡片 选择器结果 folder=${path} 已在池中=${had}` });
     return true;
   }
@@ -240,7 +243,7 @@ function newSpacePoolUpdate(projects, picked, err) {
   NS.addedPaths.add(fresh.path);
   NS.base = new Set((projects || []).map((p) => p.path));
   renderNewSpace();
-  showToast("文件夹已添加", fresh.name || fresh.path, "ok");
+  showToast(t("ns.toast.addedTitle"), fresh.name || fresh.path, "ok");
   sendCtrl({ type: "log", msg: `新建工作区卡片 选择器结果 folder=${fresh.path}` });
   return true;
 }
@@ -289,8 +292,8 @@ $("ns-create").addEventListener("click", () => {
   if (!NS) return;
   if (!nsCanCreate()) {
     // 灰而不禁：点了要说清楚为什么，不能没反应。
-    showToast("还差一步", !NS.folder ? "先选一个文件夹。"
-      : "这个文件夹已经在工作区里；选一个 Agent，或者加一个新文件夹。", "err");
+    showToast(t("ns.toast.stepTitle"), !NS.folder ? t("ns.toast.pickFolder")
+      : t("ns.toast.pickAgent"), "err");
     return;
   }
   const folder = NS.folder;
@@ -299,7 +302,7 @@ $("ns-create").addEventListener("click", () => {
   closeNewSpace("创建");
   setNavView("workspace");
   if (onlyFolder) {
-    showToast("工作区已添加", shortPath(folder), "ok");
+    showToast(t("shell.pool.added"), shortPath(folder), "ok");
     sendCtrl({ type: "log", msg: `新建工作区卡片 只添加文件夹 folder=${folder}` });
     return;
   }
