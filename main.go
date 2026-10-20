@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -22,15 +20,11 @@ import (
 	"github.com/yu7dan/perch/internal/agent"
 	"github.com/yu7dan/perch/internal/agentcatalog"
 	"github.com/yu7dan/perch/internal/appdir"
+	"github.com/yu7dan/perch/internal/stream"
 )
 
 //go:embed assets
 var assets embed.FS
-
-// ctrlPrefix 是控制帧的起始字节。
-// xterm 的键盘输入只会产生 0x00–0x7F 的字节，0xFF 不可能出现在真实终端输入里，
-// 所以用它来区分「控制帧」和「原样透传的终端输入」。
-const ctrlPrefix = 0xFF
 
 // 状态根，以及"拿不到用户主目录时落在哪"的兜底。
 // 可执行文件**不在代码里写死**了 —— 见下面的 agentDefs。
@@ -1125,208 +1119,11 @@ func handleShell(c *application.StreamConn) {
 	_ = c.Send(b)
 }
 
-// sgrParams 从一段原始 PTY 字节里挑出所有 SGR（`ESC [ … m`）序列并原样返回。
-//
-// 只认 `m` 结尾，且要求 ESC [ 与 m 之间全是数字和分号 —— 这样就不会把
-// 光标移动、清屏之类的 CSI 混进来（那些是渲染指令，不是颜色）。
-// 序列可能被切在两个读块中间，所以这里会漏掉边界上的少数几条；
-// 对「上游到底用不用这个色号」这个判断来说足够了。
-func sgrParams(b []byte) []string {
-	var out []string
-	for i := 0; i+2 < len(b); i++ {
-		if b[i] != 0x1b || b[i+1] != '[' {
-			continue
-		}
-		j := i + 2
-		for j < len(b) && (b[j] == ';' || (b[j] >= '0' && b[j] <= '9')) {
-			j++
-		}
-		if j < len(b) && b[j] == 'm' && j > i+2 {
-			out = append(out, string(b[i+2:j]))
-			i = j
-		}
-	}
-	return out
-}
-
-// 说明：sgrParams 是上一轮排查"横幅为什么全白"时留下的探针。结论是
-// **上游根本没发颜色**（真因是宿主会话的 NO_COLOR=1 泄漏，见 buildEnv），
-// 所以现在改由 osc_color.go 在字节流里应答 OSC 10/11 查询 —— 那才是
-// 让 agent 敢用颜色的正路。这个函数暂时留着，别删：
-// 下次再遇到"颜色不对"时，第一步还是先看上游到底发了什么。
-// rawProbeLimit 是启动时原样打印的字节数上限。
-//
-// 为什么需要它：屏幕上"看起来不对"时，有两类完全不同的原因 ——
-//
-//	A. CLI 本来就发的是这些字符（那我们渲染是忠实的，要改的是别处）；
-//	B. 我们的链路把字节改了（那是我们的 bug）。
-//
-// 从截图上分辨这两者是徒劳的。**先看 CLI 到底发了什么，一次就能定性。**
-// 开场横幅很小、出现得很早，几 KB 足够覆盖。
-//
-// ⚠️ 2026-10-15 补：这个"只dump前 8000 字节"的闸门**自己把证据掐断过**。
-// 排查「吉祥物反复出现」时，9 秒时探针数到回滚缓冲里有 1 个介绍框、现在有 6 个，
-// 而中间那 5 个恰好全部发生在 8000 字节用完之后 —— 日志一片安静，说不清是什么触发的。
-// 所以现在加了下面这条按**内容**触发的探针：不再限制总量，而是只标记
-// 「这一帧的字节里含开场介绍框」。介绍框每被重画一次，回滚缓冲就多一份，
-// 于是"什么时刻、因为什么又画了一帧"在日志里就是可数的一行行。
-const rawProbeLimit = 8000
-
-// bannerMark 是开场介绍框的判据：介绍框里最有辨识度、又不会出现在别处的字符串。
-// （前端的 countBanners 用的是同一串，两边对得上。）
-const bannerMark = "API Usage Billing"
-
-// escapeBytes 把原始字节转成可读形式：控制字符和 ESC 显式标出，
-// 其余字节原样保留（本来就是 UTF-8，块元素和中文都能直接看）。
-func escapeBytes(b []byte) string {
-	var sb strings.Builder
-	for _, c := range b {
-		switch {
-		case c == 0x1b:
-			sb.WriteString("<ESC>")
-		case c == '\r':
-			sb.WriteString("<CR>")
-		case c == '\n':
-			sb.WriteString("<LF>")
-		case c < 0x20:
-			fmt.Fprintf(&sb, "<%02X>", c)
-		default:
-			sb.WriteByte(c)
-		}
-	}
-	return sb.String()
-}
-
-// awaitInitialSize 等前端把它 fit 出来的列宽行数报上来。
-//
-// 为什么必须等：终端进程的**第一个字节**就决定了它按多少列画屏。
-// 原来这里写死 120x30 起 PTY，前端 fit 到 60 列之后再 resize —— 但那时
-// CLI 已经按 120 列画完一整屏了；xterm 收到 resize 会把已有内容按新宽度
-// **折行重排**，于是屏幕上出现 "C / de / Claude Code v" 这种交错重影，
-// 且这段脏内容永久留在回滚缓冲里。
-//
-// 这类问题在截图上看起来像"渲染 bug"，根因却在启动时序上。
-// 前端在 stream.onopen 里就会发第一帧 resize（sendCtrl 需要 ready，
-// onopen 里 ready 已经置位），所以正常路径下这里是零等待。
-// 兜底：1.5 秒还没等到（比如前端 fit 失败）就用 80x24 起，宁可难看也别卡死。
-const (
-	initialSizeTimeout = 1500 * time.Millisecond
-	initialCols        = 80
-	initialRows        = 24
-)
-
-/*
-前端上报的一帧。data 与 err 二选一。
-
-	⚠️ 读 conn 的**只能有一个 goroutine**（Receive 内部是 sync.Cond，两个读者会把帧
-	随机分走 —— 键盘字节被偷走那种错）。所以这里不是"再加一个读者"，而是把**读**
-	整个搬进这个 goroutine：这个 goroutine 是全程唯一的读家，处理逻辑只从通道拿帧。
-*/
-type tabFrame struct {
-	data []byte
-	err  error
-}
-
-/*
-读帧 goroutine。为什么非得把读挪出去（2026-10-16 实测的根因）：
-
-	`StreamConn.Receive()` 是 sync.Cond 上的死等 —— **只有两件事叫得醒它**：来帧，
-	或者 Close（Close 会 cancel + Broadcast）。它没有 deadline、没有可用的 ctx。
-	而下面那句 1.5 秒兜底原来写在循环体里：
-
-	    for { if time.Now().After(deadline) { 兜底启动 }; data, err := c.Receive() }
-
-	—— 时间是**在 Receive 返回之后**才检查的。一帧都没有的时候它永远不返回，
-	于是"宁可难看也别卡死"那句兜底压根轮不到：**收起的群组里新建的那一格
-	45 秒都没有 PTY，展开的那一下才起来**（2026-10-16 实测）。
-	把读挪进这里，处理逻辑才第一次有可能"在没帧的时候被定时器叫醒"。
-
-	代价是帧要过一次通道 —— 顺序由通道保证（单读、单消费、无重排、无丢失）。
-
-	⚠️ 两个细节都是**防泄漏**的，不是顺手写的：
-	· 缓冲至少 1：读家从 Receive 拿到一帧就去塞通道，塞不进去就卡着；消费方那一瞬间
-	  正好在跑 handle 的时候，有个槽位它才不用等。
-	· done：消费方提前 return 的时候（下面 PTY 写失败那条），读家可能**正卡在塞帧上**
-	  —— 那时它不在 Receive 里，`c.Close()` 根本叫不醒它，这条 goroutine 就永远留下了。
-	  所以塞帧要走 select，done 一关就撤。
-*/
-func readFrames(c *application.StreamConn, done <-chan struct{}) <-chan tabFrame {
-	frames := make(chan tabFrame, 1)
-	send := func(f tabFrame) bool {
-		select {
-		case frames <- f:
-			return true
-		case <-done:
-			return false
-		}
-	}
-	go func() {
-		defer close(frames)
-		for {
-			data, err := c.Receive()
-			if err != nil {
-				send(tabFrame{err: err})
-				return
-			}
-			if !send(tabFrame{data: data}) {
-				return
-			}
-		}
-	}()
-	return frames
-}
-
-// ⚠️ 2026-10-15 修：这个握手以前会**吃掉**不是 resize 的控制帧，后果很严重。
-// 前端启动那一刻是连着发好几条的（fit 读数、fontprobe、dpr…），全被这里
-// `continue` 掉。更糟的是：前端发消息是**事件驱动**的 —— onopen 那一批被吃掉之后，
-// 除非尺寸/内容再变，它不会再发。于是握手一旦超时，整条前端->后端通道看起来就是死的：
-// 页面正常（终端在跑、页脚写着"已连接"），日志却一片安静。排查吉祥物那次，
-// 我在这上面绕了很久，直到把握手摘掉才看见日志里立刻冒出 `[web] fit=...`。
-// 现在把吃掉的帧按原顺序交还给收包循环，一帧不丢。
-func awaitInitialSize(frames <-chan tabFrame) (int, int, [][]byte, error) {
-	var pending [][]byte
-	timer := time.NewTimer(initialSizeTimeout)
-	defer timer.Stop()
-	for {
-		select {
-		case f, ok := <-frames:
-			if !ok { // 读家退出了（通道被关），等价于原来 Receive 报错
-				return 0, 0, nil, application.ErrStreamClosed
-			}
-			if f.err != nil {
-				return 0, 0, nil, f.err
-			}
-			data := f.data
-			if len(data) == 0 {
-				continue
-			}
-			if data[0] == ctrlPrefix {
-				var m ctrlMsg
-				if json.Unmarshal(data[1:], &m) == nil && m.Type == "resize" && m.Cols > 0 && m.Rows > 0 {
-					log.Printf("[perch] 前端报尺寸 %dx%d，按此启动 PTY", m.Cols, m.Rows)
-					return m.Cols, m.Rows, pending, nil
-				}
-			}
-			pending = append(pending, data)
-		case <-timer.C:
-			// 一寸都没报（不是"fit 失败"，而是**一个字节都没来**）——前端发消息是
-			// 事件驱动的，隐藏的格子报不出尺寸，也就什么都不会发。这里必须起，
-			// 否则这一格永远没有 PTY。
-			// ⚠️ 副作用要知道：80x24 起来之后，真正的那一帧尺寸到了会走
-			//    Resize —— CLI 会重画开场界面（老那一份进回滚缓冲）。这是
-			//    "宁可难看也别卡死"这句兜底本来就要付的代价，别当成新 bug。
-			log.Printf("[perch] 前端 %v 内未报尺寸，按 %dx%d 兜底启动（其间收到 %d 帧，转交收包循环）",
-				initialSizeTimeout, initialCols, initialRows, len(pending))
-			return initialCols, initialRows, pending, nil
-		}
-	}
-}
-
 // handleTab 是**一个标签**的数据通道：Go → 前端是 PTY 原始字节，
 // 前端 → Go 是键盘原始字节 + 0xFF 打头的控制帧。
 //
 // 这条通道的寿命就是标签的寿命：前端关掉标签 = 关掉这条流 = 本函数返回
-// = `defer sess.Close()` 收掉 ConPTY。**所以不需要一条"关闭标签"的控制帧** ——
+// = `defer running.Close()` 收掉 ConPTY。**所以不需要一条"关闭标签"的控制帧** ——
 // 少一个能跟真实状态不同步的开关。
 func handleTab(c *application.StreamConn, host *tabHost) {
 	defer c.Close()
@@ -1335,12 +1132,18 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 	// 和下面"起来后"那条配对 —— 两条合起来才能看出"这一格带走了什么、留下了什么"。
 	defer logJobInventory(fmt.Sprintf("tab=%d 收尾", host.ID))
 
-	// 读家**必须在握手之前**就位：握手要能"在没帧的时候被定时器叫醒"，
-	// 而 Receive 是会死等的那种读（见 readFrames 的说明）。
-	done := make(chan struct{})
-	defer close(done) // 本函数一返回就让读家撤（防它卡在塞帧上，见 readFrames）
-	frames := readFrames(c, done)
-	cols, rows, pending, err := awaitInitialSize(frames)
+	// 流的一生（握手、唯一的读协程、原始字节转发、四个控制帧）在 stream 包里。
+	// Close 的时机和以前的 done 一样：本函数一返回就让读协程撤
+	// （防它卡在塞帧上 —— 那时它不在 Receive 里，c.Close 叫不醒它）。
+	srv := stream.New(wailsConn{c}, stream.Callbacks{
+		TabID:  host.ID,
+		OpenWT: func() { go openInWindowsTerminal(host.Spec) },
+		Rename: func(pid int, name string) { applyRename(claudeStateDir, titlesStore, pid, name) },
+		Log:    func(msg string) { log.Printf("[web t%d] %s", host.ID, msg) },
+		NewOSC: func() stream.OSC { return newOSCColorResponder() },
+	})
+	defer srv.Close()
+	cols, rows, pending, err := srv.AwaitInitialSize()
 	if err != nil {
 		return
 	}
@@ -1369,158 +1172,10 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 	defer running.Close()
 	// 状态观察者跟着这条 PTY 的生命周期走：流一断/进程一关，ctx 就取消。
 	defer running.StopObserve()
-	sess := running.Session
-
-	// 「这一格停了」的唯一可靠信号。
-	// 2026-10-17 实测：格内 /exit 之后 claude.exe 已经没了（Get-CimInstance 查不到），
-	// 而 ConPTY 的读循环**一条错误都没报** —— conhost 还活着、管道两端都还在我们
-	// 手里，EOF 不会来。于是前端永远等不到 onclose、connDown 永远不置位，左栏那
-	// 一行永远写着"在跑"，点它也进不了「接上它」这条路。
-	// 所以得问**进程本身**（conpty.Wait 每 1s 看一次 WAIT_TIMEOUT）。它退了就关流：
-	// 前端 onclose → connDown → 行翻「已停止」+ ▶，格内也留一行字说明。
-	go func() {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		go func() { <-done; cancel() }() // 本函数收尾（关格/关窗）就把等待撤掉
-		if _, werr := sess.Wait(ctx); werr != nil {
-			return // 是我们自己收的尾，不是进程退出
-		}
-		log.Printf("[perch] tab=%d pid=%d 进程已退出，关流", host.ID, sess.Pid())
-		_ = c.Send([]byte("\r\n\x1b[33m[perch] 进程已退出\x1b[0m\r\n"))
-		_ = c.Close() // 让收包循环醒过来、前端看到 onclose
-	}()
 	// C3 的观察腿（格子起来这一端）：这一格的 claude 是靠**继承**进 job 的
 	// （我们从没单独 assign 过它）—— 这句话是不是真的，问内核拿清单看。
-	logJobInventory(fmt.Sprintf("tab=%d pid=%d 起来后", host.ID, sess.Pid()))
+	logJobInventory(fmt.Sprintf("tab=%d pid=%d 起来后", host.ID, running.Pid()))
 
-	// ConPTY -> 前端：原样转发字节，不做任何字符串转换。
-	// string(bytes) 会把被切在两个读块之间的 UTF-8 序列打断 ——
-	// 而这个场景满地中文。
-	go func() {
-		buf := make([]byte, 32*1024)
-		// OSC 10/11 颜色查询应答。必须在**原始字节**这一层做，
-		// 因为查询可能早于任何渲染器到达（见 osc_color.go 的说明）。
-		osc := newOSCColorResponder()
-		probeDone := false
-		probeUntil := time.Now().Add(20 * time.Second)
-		rawLeft := rawProbeLimit
-		for {
-			n, rerr := sess.Read(buf)
-			if n > 0 {
-				if rawLeft > 0 {
-					take := n
-					if take > rawLeft {
-						take = rawLeft
-					}
-					rawLeft -= take
-					log.Printf("[raw t%d] %s", host.ID, escapeBytes(buf[:take]))
-				} else if bytes.Contains(buf[:n], []byte(bannerMark)) {
-					// 不打印整帧（TUI 重画很频繁，整个 dump 出来日志会失控），
-					// 只留一行"这一帧里又有一份介绍框"。数行数 = 数份数。
-					log.Printf("[banner t%d] 这一帧的字节里含开场介绍框（%d 字节）", host.ID, n)
-				}
-				for _, reply := range osc.Scan(buf[:n]) {
-					log.Printf("[osc] 回答颜色查询: %q", reply)
-					if _, werr := sess.Write([]byte(reply)); werr != nil {
-						log.Printf("[osc] 写回应答失败: %v", werr)
-					}
-				}
-				if !probeDone && time.Now().After(probeUntil) {
-					probeDone = true
-					log.Printf("[osc] 这段时间收到的查询统计: %v", osc.Seen())
-				}
-				// ⚠️ Send 是「排队」不是「拷贝」。Wails v3 在
-				// pkg/application/stream.go 的注释里把这条契约写得很直白：
-				//
-				//	The frame is queued, not copied. Do not mutate or reuse
-				//	data after passing it to Send; hand over a slice the
-				//	transport can own until it is delivered.
-				//
-				// 而 buf 是每轮 Read 复用的 —— 直接 Send(buf[:n]) 就等于把一块
-				// **马上会被下一次 Read 覆盖**的内存交出去，帧往往在送达前就被改了。
-				//
-				// 症状极具欺骗性：同一个字节流，每次跑出来都不一样。
-				// 2026-10-15 实测到的样子是开场横幅里
-				// `<ESC>[38;2;215;119;87m` 被当正文打出来（`8;2;215;119;87m`
-				// 出现在第 0 行）、吉祥物位置随机漂移、还多出一个字符 ——
-				// 看起来全是字体/渲染/宽度问题，实际是读循环和发送队列抢同一块内存。
-				// 用同一个字节流喂**干净的** xterm 实例则完全正确，这就是分水岭。
-				//
-				// 修法：按帧复制。一次 PTY 读块多一次分配，代价可忽略，
-				// 换来"交出去的内存归对方"这条不变量。
-				frame := make([]byte, n)
-				copy(frame, buf[:n])
-				if serr := c.Send(frame); serr != nil {
-					return
-				}
-			}
-			if rerr != nil {
-				_ = c.Send([]byte("\r\n\x1b[33m[perch] 进程已退出\x1b[0m\r\n"))
-				_ = c.Close() // 让下面的收包循环立刻醒过来
-				return
-			}
-		}
-	}()
-
-	// 前端 -> ConPTY。控制帧（0xFF 打头）在这里分发，其余字节原样写进终端。
-	// 抽成闭包是为了让握手里攒下的帧走**同一条**路径（见 awaitInitialSize）。
-	handle := func(data []byte) (stop bool) {
-		if len(data) == 0 {
-			return false
-		}
-		if data[0] == ctrlPrefix {
-			var m ctrlMsg
-			if json.Unmarshal(data[1:], &m) == nil {
-				switch m.Type {
-				case "resize":
-					if m.Cols > 0 && m.Rows > 0 {
-						if err := sess.Resize(m.Cols, m.Rows); err != nil {
-							log.Printf("[perch] resize %dx%d 失败: %v", m.Cols, m.Rows, err)
-						}
-					}
-				case "open-wt":
-					go openInWindowsTerminal(host.Spec)
-				case "rename":
-					// 用户给这个面板起了个名字。名字的主语是**会话**，不是面板 ——
-					// 面板在内存里，会话在盘上，中间那条链子见 titles.go 的
-					// sessionIDForPID。这里只把 pid 交出去，反查和落盘都在那边做，
-					// 以免这段收包逻辑被拖住（反查有重试，可能等上一两秒）。
-					applyRename(claudeStateDir, titlesStore, sess.Pid(), m.Msg)
-				case "log":
-					// 前端把渲染层的事实（fit 结果 / 元素尺寸 / dpr）回传到
-					// 服务端日志 —— 页面里没有控制台可看，这是唯一能拿到的真相。
-					// 带标签号：多标签之后不带号的日志没法读。
-					log.Printf("[web t%d] %s", host.ID, m.Msg)
-				}
-			}
-			return false
-		}
-		if _, werr := sess.Write(data); werr != nil {
-			return true
-		}
-		return false
-	}
-	for _, data := range pending {
-		if handle(data) {
-			return
-		}
-	}
-	// 通道由 readFrames 那个 goroutine 关：它把 Receive 的错先当一帧发出来再 close，
-	// 所以这里的 `!ok` 是防御性的（真有那一天说明那条约定被改了）。
-	for f := range frames {
-		if f.err != nil {
-			// 读到这儿只有一个成因：这条流关了（前端关标签 / 页面重载 / 窗口关掉）
-			// —— `StreamConn.Receive` 唯一的错误就是 ErrStreamClosed（stream.go:293
-			// 直接返回那个哨兵），而正常关格本来就是这个结果。所以这里**不打日志**：
-			// 每次关格一条像报错的行，读日志的人很快就会不看日志了。
-			//（留这个判断而不是直接 return：万一以后换成别的读法，真错还能露出来。）
-			if !errors.Is(f.err, application.ErrStreamClosed) {
-				log.Printf("[perch] tab=%d 读帧中断: %v", host.ID, f.err)
-			}
-			return
-		}
-		if handle(f.data) {
-			return
-		}
-	}
+	// 进程退出看门狗、PTY→前端、前端→PTY 都在 Serve 里；它返回 = 这条流结束。
+	srv.Serve(running.Session, pending)
 }
