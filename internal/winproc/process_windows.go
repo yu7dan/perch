@@ -1,4 +1,4 @@
-package main
+package winproc
 
 /* 一格还活着吗 —— 全项目唯一一次"问系统"。
 
@@ -34,7 +34,8 @@ var (
 	procCloseHandle         = kernel32.NewProc("CloseHandle")
 )
 
-func processAlive(pid int) bool {
+// Alive 问系统这个 pid 还在不在。打不开句柄一律当"没在跑"。
+func Alive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
