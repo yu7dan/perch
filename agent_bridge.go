@@ -5,8 +5,8 @@ import (
 	"github.com/yu7dan/perch/internal/agentcatalog"
 )
 
-// 这一层只做两件事：把主程序的旧名字接到 internal/agent 的公开类型上，
-// 以及把标签表/前端推送/可执行文件解析这几样宿主能力交给适配器。
+// 这一层把主程序的旧名字接到 internal/agent 的公开类型上。
+// Host 的实现已经搬进 internal/session（Manager），由 main 在组合期 SetHost。
 
 type agentDef = agent.Def
 type resumeIntent = agent.ResumeIntent
@@ -29,24 +29,3 @@ func capsForAgent(id string) agentCaps {
 
 // buildEnv 让主程序和适配器共用同一份终端环境规则。
 func buildEnv(extra map[string]string) []string { return agent.BuildEnv(extra) }
-
-// rootAgentHost 把适配器需要的最小表面接回主程序。
-type rootAgentHost struct{}
-
-func (rootAgentHost) BindSession(tabID int, sid, name, agentID string) bool {
-	return tabs.bindSession(tabID, sid, name, agentID)
-}
-
-func (rootAgentHost) RebindSession(tabID int, sid, name, agentID string) bool {
-	return tabs.rebindSession(tabID, sid, name, agentID)
-}
-
-func (rootAgentHost) SetStatus(tabID int, status string) (string, bool) {
-	return tabs.setStatus(tabID, status)
-}
-
-func (rootAgentHost) Push(v any) { pushJSON(v) }
-
-func (rootAgentHost) ResolveExe(bin string) (string, []string) {
-	return resolveAgentExe(bin)
-}

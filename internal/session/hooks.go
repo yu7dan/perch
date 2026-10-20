@@ -1,15 +1,4 @@
-package main
-
-import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"log"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
-)
+package session
 
 // ---------------------------------------------------------------------------
 // 注入给 claude 的 hooks：让 agent **自己**告诉我们它在干什么
@@ -20,7 +9,7 @@ import (
 //
 //  1. hook 走 **exec 形式**（`command` + `args`）→ **完全不过 shell**。
 //     不过 shell 就没有引号解析、没有 Windows 上「装了 Git for Windows 就走
-//     `bash -c`、否则走 powershell」这条歧义、也没有那个没验清楚的 `\`→`/` 改写。
+//     `bash -c`、否则走 powershell」这条歧义。
 //
 //  2. `async: true` —— 观察型 hook 没有任何理由阻塞用户那一轮。实测 TUI 会把
 //     "running Stop hook · 1s" 画在状态栏上（也就是 hook 耗时**用户看得见**），
@@ -34,49 +23,55 @@ import (
 //     agent" 是默认行为，不用额外声明。
 //
 // 订阅表刻意**保持收敛**：PreToolUse 只收 AskUserQuestion（不是宽 matcher）；
-// 每次工具调用的事件只收 PostToolUse / PostToolUseFailure（只用来销账，见
-// 下面的 Wave 2）。要「改动」的细粒度走 jsonl（store.go），不走 hook。
+// 每次工具调用的事件只收 PostToolUse / PostToolUseFailure（只用来销账）。
+// 要「改动」的细粒度走 jsonl，不走 hook。
 //
 // 2026-10-19 Wave 1 加了两个**窄**例外（低延迟的“卡在等你”信号）：
 //
 //	PermissionRequest        批准框一出现就到（比 Notification 早、还带 tool_name）
 //	PreToolUse(matcher=AskUserQuestion)  提问选择器一出现就到
 //
-// 这两个是交互点，不是背景观察，所以它们**同步**跑（不加 async）：观察进程只写
-// 一行就退出（毫秒级），同步不会拖慢用户；而 async 会把“它到底卡住了没有”变成
-// 一个事件到达前的猜测。
+// 这两个是交互点，不是背景观察，所以它们**同步**跑（不加 async）。
 //
 // 2026-10-19 Wave 2 又补了**收尾**的一组（Orca 的 managed hook 同一组事件，
 // src/main/claude/claude-managed-hook-events.ts:9-72）：
 //
 //	PostToolUse / PostToolUseFailure（matcher=*，async）
-//	    工具返回 = 这次等待有结局。没有它，用户答完批准/提问后如果这一轮还
-//	    跑了几分钟，「在等你」会一直挂着，直到 Stop。
+//	    工具返回 = 这次等待有结局。
 //	UserPromptSubmit（async）    用户又发了提示 ⇒ 之前那条等待一定是旧账
 //	PostCompact（async）         手动 /compact 结束时不发 Stop（Orca STA-2915）
-//
-// PostToolUse 是**每次工具调用一个进程**，代价照实说：接收器是几 KB 的原生
-// exe（实测 16–25ms），且 async 不挡 agent。Orca 在同样规模上就是这么做的；
-// 真机上如果看到日志/CPU 噪音，退路是改用已经在 tail 的转录来销账。
 //
 // ⚠️ 一条从自己代码里踩出来的设计教训：**每个格子一个事件文件，归属由文件名定**。
 // 第一版所有格子共用一个文件、靠 session_id 反查格子，结果 SessionStart 比登记表
 // 轮询早几百毫秒到达，那条事件就没主（日志里是 `[hook t0]`）。
 // 而 --settings 本来就是**每格子一份**的 —— 那就顺手把路径写死进去。
-// 现在"这条事件属于哪个格子"不依赖任何反查，race 从根上不存在。
 // ---------------------------------------------------------------------------
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/yu7dan/perch/internal/agent"
+)
 
 const (
 	// ⚠️ 文件名**写死在代码里**；构建脚本要产出一份同名的 exe 放在主程序旁边。
-	// 少这个文件的症状是"hook 功能静默消失"（buildHookSettings 返回空串）。
-	hookExeName = "perch-hook.exe"
-	hookDirName = "hook-events"
+	// 少这个文件的症状是"hook 功能静默消失"（BuildHookSettings 返回空串）。
+	HookExeName = "perch-hook.exe"
+	HookDirName = "hook-events"
 
 	// 事件文件是**实时信号**不是历史，轮询要快；一次只加几百字节，代价可忽略。
 	hookPollEvery = 300 * time.Millisecond
 )
 
-// hookEventTypes 是我们订阅的事件。挑的原则是「这一层只关心状态与轮次」：
+// HookEventTypes 是我们订阅的事件。挑的原则是「这一层只关心状态与轮次」：
 //
 //	SessionStart/SessionEnd —— 这个格子活了/死了
 //	Stop                    —— 一轮跑完（带 last_assistant_message）
@@ -89,7 +84,7 @@ const (
 //	PostToolUse/PostToolUseFailure —— 工具返回：这次等待有结局（销账）
 //	UserPromptSubmit        —— 用户发了新提示：之前的等待是旧账（销账）
 //	PostCompact             —— 手动 /compact 结束，可能不发 Stop（销账）
-var hookEventTypes = []string{
+var HookEventTypes = []string{
 	"SessionStart", "SessionEnd", "Stop", "StopFailure",
 	"UserPromptSubmit", "Notification", "SubagentStart", "SubagentStop",
 	"PermissionRequest", "PreToolUse", "PostToolUse", "PostToolUseFailure",
@@ -106,58 +101,58 @@ var hookSyncEvents = map[string]bool{
 // hookMatchers 给 PreToolUse 收窄到提问工具。PermissionRequest 不加 matcher：
 // 任何批准框都是“卡在等你”，都要看见。
 //
-// PostToolUse/PostToolUseFailure 用 "*"（Orca 同款，见其 managed-hook-events.ts:
-// 50-56）：它们的作用是「任何工具返回都来报告一声」，好让先前那条等待销账。
-// 这里不能只等 Stop —— 用户答完批准后这一轮可能还要跑好几分钟。
+// PostToolUse/PostToolUseFailure 用 "*"（Orca 同款）：它们的作用是「任何工具
+// 返回都来报告一声」，好让先前那条等待销账。
 var hookMatchers = map[string]string{
 	"PreToolUse":         "AskUserQuestion",
 	"PostToolUse":        "*",
 	"PostToolUseFailure": "*",
 }
 
-func hookDir() string { return filepath.Join(claudeStateDir, hookDirName) }
+// HookDir 是 hook 事件目录（在 Claude 状态根下）。
+func HookDir(stateDir string) string { return filepath.Join(stateDir, HookDirName) }
 
-// hookEventsPathFor 每个格子一份事件文件。tag 形如 "t1"（标签）/"wt"（对比窗口）。
-func hookEventsPathFor(tag string) string {
-	return filepath.Join(hookDir(), tag+".jsonl")
+// HookEventsPathFor 每个格子一份事件文件。tag 形如 "t1"（标签）/"wt"（对比窗口）。
+func HookEventsPathFor(stateDir, tag string) string {
+	return filepath.Join(HookDir(stateDir), tag+".jsonl")
 }
 
-// hookExePath 找 hook 接收器：和主程序同目录。
+// HookExePath 找 hook 接收器：和主程序同目录。
 //
 // ⚠️ 当前形态是两个产物并排构建（主程序 + 几 KB 的接收器）。以后可以把它
 // go:embed 进主程序、启动时释放到状态目录 —— 否则"少一个 exe"就变成
 // "功能静默消失"。
-func hookExePath() string {
+func HookExePath() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
 	}
-	p := filepath.Join(filepath.Dir(exe), hookExeName)
+	p := filepath.Join(filepath.Dir(exe), HookExeName)
 	if fi, err := os.Stat(p); err != nil || fi.IsDir() {
 		return ""
 	}
 	return p
 }
 
-// buildHookSettings 造那份 --settings。造不出来返回空串，调用方据此不注入。
+// BuildHookSettings 造那份 --settings。造不出来返回空串，调用方据此不注入。
 //
 // 关键性质（实测）：--settings 是**合并**不是替换 —— 用户自己 settings.json 里的
 // env/model 照样生效，我们只是把 hooks 加上去。所以这条路径**不碰用户的任何配置文件**。
-func buildHookSettings(tag string) string {
-	exe := hookExePath()
+func BuildHookSettings(stateDir, tag string) string {
+	exe := HookExePath()
 	if exe == "" {
 		return ""
 	}
-	hooks := make(map[string]any, len(hookEventTypes))
+	hooks := make(map[string]any, len(HookEventTypes))
 	// 大部分事件刻意**不加 matcher**：matcher 是启动时写死的，改订阅就得重开
 	// 所有格子；而 notification_type 本来就在 payload 里，过滤放 Go 端改一次就生效。
 	// 只有 PreToolUse 必须加 —— 见 hookMatchers。
-	for _, e := range hookEventTypes {
+	for _, e := range HookEventTypes {
 		one := map[string]any{
 			"type": "command",
 			// exec 形式：command 是可执行文件本身，参数在 args 里 —— 不过 shell。
 			"command": filepath.ToSlash(exe),
-			"args":    []string{filepath.ToSlash(hookEventsPathFor(tag))},
+			"args":    []string{filepath.ToSlash(HookEventsPathFor(stateDir, tag))},
 			"timeout": 5,
 		}
 		if !hookSyncEvents[e] {
@@ -191,14 +186,14 @@ type hookEvent struct {
 	AgentID              string `json:"agent_id"`               // 只有子代理里才有
 	Reason               string `json:"reason"`                 // StopFailure
 	ToolName             string `json:"tool_name"`              // PreToolUse / PermissionRequest / PostToolUse
-	ToolUseID            string `json:"tool_use_id"`            // 工具调用的身份：销等待时靠它对准（不是靠工具名）
+	ToolUseID            string `json:"tool_use_id"`            // 工具调用的身份：销等待时靠它对准
 	Trigger              string `json:"trigger"`                // PostCompact: manual / auto
 }
 
 // resetHookDir 启动时清空事件目录：这是**实时信号**不是历史，
 // 上一次运行的事件不该在新的一次里重放。只删我们自己造的 *.jsonl。
-func resetHookDir() {
-	dir := hookDir()
+func resetHookDir(stateDir string) {
+	dir := HookDir(stateDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		log.Printf("[hook] 建事件目录失败: %v", err)
 		return
@@ -214,12 +209,12 @@ func resetHookDir() {
 	}
 }
 
-// startHookEventPoller 跟着"现在活着的那些格子"的事件文件走。
+// StartHookPoller 跟着"现在活着的那些格子"的事件文件走。
 //
 // 每个文件一个 offset，全程只在**追加**语义下工作；文件被截断（我们只在启动时
 // 干过一次）也能自愈。格子关掉之后它的 offset 会被丢掉、文件留在盘上（下次启动清）。
-func startHookEventPoller(push func(any)) {
-	resetHookDir()
+func (m *Manager) StartHookPoller() {
+	resetHookDir(m.stateDir)
 	go func() {
 		offs := map[string]int64{}
 		carry := map[string]string{}
@@ -227,10 +222,10 @@ func startHookEventPoller(push func(any)) {
 			time.Sleep(hookPollEvery)
 			// 目标集合 = 活着的标签 + 对比窗口（它不是标签，用固定 tag）。
 			targets := map[string]int{}
-			for _, v := range tabs.live() {
-				targets[hookEventsPathFor(fmt.Sprintf("t%d", v.id))] = v.id
+			for _, v := range m.Live() {
+				targets[HookEventsPathFor(m.stateDir, fmt.Sprintf("t%d", v.ID))] = v.ID
 			}
-			targets[hookEventsPathFor("wt")] = 0
+			targets[HookEventsPathFor(m.stateDir, "wt")] = 0
 
 			for path, tabID := range targets {
 				fi, err := os.Stat(path)
@@ -268,7 +263,7 @@ func startHookEventPoller(push func(any)) {
 					}
 					line, rest := buf[:i], buf[i+1:]
 					buf = rest
-					handleHookLine(line, tabID, push)
+					m.handleHookLine(line, tabID)
 				}
 				carry[path] = buf
 			}
@@ -278,7 +273,7 @@ func startHookEventPoller(push func(any)) {
 
 // handleHookLine 解析一行事件并处理。tabID 来自**文件名**，是硬归属；
 // 查不到格子（=0）时再退回 session 反查（比如对比窗口那条）。
-func handleHookLine(line string, tabID int, push func(any)) {
+func (m *Manager) handleHookLine(line string, tabID int) {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return
@@ -294,11 +289,11 @@ func handleHookLine(line string, tabID int, push func(any)) {
 	}
 	tab := tabID
 	if tab == 0 {
-		tab = tabs.tabForSession(ev.SessionID)
+		tab = m.TabForSession(ev.SessionID)
 	}
 	// 顺带把关联钉下来：事件里的 session_id 是**第一时间**到达的那个，
 	// 比登记表轮询还早。绑定只在第一次生效，所以它和登记表那条路不会打架。
-	if tab != 0 && ev.SessionID != "" && tabs.bindSession(tab, ev.SessionID, "", ev.Source) {
+	if tab != 0 && ev.SessionID != "" && m.BindSession(tab, ev.SessionID, "", ev.Source) {
 		log.Printf("[agent t%d] 关联建立 session=%s（来自 hook 事件，比登记表更早）", tab, ev.SessionID)
 	}
 
@@ -308,8 +303,8 @@ func handleHookLine(line string, tabID int, push func(any)) {
 		// 「这一格说过话」的唯一证据（见 panes.Pane.Spoke）：一轮跑完 = 这条会话
 		// 有内容，盘上那份 jsonl 于是开始存在。冷恢复靠它分辨"上次这条会话丢了"
 		// 和"上一格压根没说过话"—— 后者安安静静地开新格，别吓唬用户。
-		if id := paneIDFor(tab); id > 0 {
-			panes.MarkSpoke(id, "一轮跑完 tab="+itoa(tab))
+		if id := m.PaneIDFor(tab); id > 0 && m.panes != nil {
+			m.panes.MarkSpoke(id, "一轮跑完 tab="+strconv.Itoa(tab))
 		}
 	case "Notification":
 		// 「需要你」的正主：官方的人机信号，类型就在 payload 里。
@@ -320,7 +315,7 @@ func handleHookLine(line string, tabID int, push func(any)) {
 		// transcript_path 是**路径的权威来源**：不要自己去 projects\<有损slug>\ 下面拼
 		// （那个 slug 中文和连字符都还原不回来）。「改动/流水」那条腿就跟着这个文件走。
 		if tab != 0 {
-			tabs.setTranscript(tab, ev.TranscriptPath)
+			m.SetTranscript(tab, ev.TranscriptPath)
 		}
 	case "SessionEnd":
 		log.Printf("[hook t%d] SessionEnd session=%s", tab, short(ev.SessionID))
@@ -329,8 +324,8 @@ func handleHookLine(line string, tabID int, push func(any)) {
 		// 非正常收尾也算"说过话"：撞限额/鉴权失败之前那一轮是真跑过的，
 		// 转录也在盘上。Orca 把 interrupted turn 明确算作可续
 		// （resume-sleeping-agent-session.ts:182-183），我们这里同一件事的另一半。
-		if id := paneIDFor(tab); id > 0 {
-			panes.MarkSpoke(id, "非正常收尾 tab="+itoa(tab))
+		if id := m.PaneIDFor(tab); id > 0 && m.panes != nil {
+			m.panes.MarkSpoke(id, "非正常收尾 tab="+strconv.Itoa(tab))
 		}
 	case "PermissionRequest":
 		// 批准框出现：比 Notification(permission_prompt) 早，而且 tool_name 直接
@@ -356,7 +351,7 @@ func handleHookLine(line string, tabID int, push func(any)) {
 		log.Printf("[hook t%d] %s session=%s", tab, ev.HookEventName, short(ev.SessionID))
 	}
 
-	push(map[string]any{
+	m.Push(map[string]any{
 		"type":    "hook",
 		"event":   ev.HookEventName,
 		"tab":     tab,
@@ -373,23 +368,6 @@ func handleHookLine(line string, tabID int, push func(any)) {
 		"trigger": ev.Trigger,
 		// 证据来源：前端拿它区分“活事件”和冷恢复时的重放（见 80-live.js
 		// 的 restoredUnconfirmed）。hook 永远算活事件。
-		"evidence": agentEvidenceHook,
+		"evidence": agent.EvidenceHook,
 	})
-}
-
-// short 把 uuid 截成前 8 位 —— 日志里只要"能对上"就够，整条 uuid 是噪音。
-func short(s string) string {
-	if len(s) <= 8 {
-		return s
-	}
-	return s[:8]
-}
-
-// clip 截断长文本，并把换行压成可见记号（否则一行日志会被撑成很多行）。
-func clip(s string, n int) string {
-	r := []rune(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", " "), "\n", " "))
-	if len(r) <= n {
-		return string(r)
-	}
-	return string(r[:n]) + "…"
 }

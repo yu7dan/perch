@@ -397,9 +397,9 @@ func startTranscriptFollower(push func(any)) {
 			case <-time.After(transcriptPollEvery):
 			}
 			live := map[int]tabView{}
-			for _, v := range tabs.live() {
-				if v.transcript != "" {
-					live[v.id] = v
+			for _, v := range tabs.Live() {
+				if v.Transcript != "" {
+					live[v.ID] = v
 				}
 			}
 			// 格子关掉了就丢掉它的跟随状态（文件留着，那是 claude 的资产）
@@ -410,10 +410,10 @@ func startTranscriptFollower(push func(any)) {
 			}
 			for id, v := range live {
 				tr := traces[id]
-				if tr == nil || tr.path != v.transcript {
-					tr = newTrace(v.transcript, v.cwd)
+				if tr == nil || tr.path != v.Transcript {
+					tr = newTrace(v.Transcript, v.CWD)
 					traces[id] = tr
-					log.Printf("[trace t%d] 开始跟随 %s（cwd=%s）", id, v.transcript, v.cwd)
+					log.Printf("[trace t%d] 开始跟随 %s（cwd=%s）", id, v.Transcript, v.CWD)
 				}
 				// 一格的一行坏数据**不许**带走整条腿。这个协程一死，「流水」和
 				// 「改动」两条腿一起静默停更，而界面上完全看不出来（用户看到的

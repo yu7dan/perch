@@ -47,7 +47,7 @@ var fallbackCWD = appdir.HomeOrDot()
 // 2026-10-16 起它是默认工作区（<用户主目录>\Documents\Perch，见 projects.go）——
 // 左栏末尾那一行就是它，用户没挑项目时新格就该落在它那里（Claude / Codex 桌面端
 // 也是这么办的）。拿不到用户主目录才退回 fallbackCWD。
-// ⚠️ tabManager.live() 报"这一格在哪个目录跑"必须用**同一个**函数：两处各写一遍，
+// ⚠️ session.Manager.Live() 报"这一格在哪个目录跑"必须用**同一个**函数：两处各写一遍，
 // 报出来的 cwd 和真正起 PTY 用的 cwd 会在"拿不到主目录"的机器上悄悄分叉 ——
 // 而那种分叉从界面上看不出来，只会表现为"某个动作在这个目录里失败"。
 func defaultCWD() string {
@@ -55,16 +55,6 @@ func defaultCWD() string {
 		return p
 	}
 	return fallbackCWD
-}
-
-// effectiveCWD 是一份 spec 的**生效 cwd** = 落盘那份记录里该记的值。
-// 它就是"起 PTY 时真正用的那个目录"，所以谁都不许自己再写一遍这个判断
-// （三处各写一遍的下场见 defaultCWD 上面那条注释）。
-func effectiveCWD(spec spawnSpec) string {
-	if c := strings.TrimSpace(spec.CWD); c != "" {
-		return c
-	}
-	return defaultCWD()
 }
 
 type ctrlMsg struct {
@@ -144,398 +134,19 @@ type ctrlMsg struct {
 	Value string `json:"value"`
 }
 
-// ---------------------------------------------------------------------------
-// 标签：一个标签 = 一条 stream + 一个 ConPTY + 一份启动意图
-// ---------------------------------------------------------------------------
-
-// resumeIntent 是「以什么姿态接上已有会话」。前端只声明意图，
-// 翻译成命令行是 agent 自己的事（见 internal/agent 的 Def）。
-type spawnSpec struct {
-	Agent  string       `json:"agent"`
-	CWD    string       `json:"cwd"`
-	Resume resumeIntent `json:"resume"`
-	// PaneID：**冷恢复建出来的那一格**认领登记表里的旧身份时原样回传。
-	// 0 / 缺省 = 这是一格全新的格子，paneId 由 Go 现发（见 paneStore.nextID）。
-	// 为什么要这个字段而不是"按顺序认领"：冷恢复的建格是**一次 burst**，
-	// 中间还夹着"被拒了就重试"的格子 —— 按顺序认领在那种队列上会整体错位一格
-	// （表现是"每格跑的都是隔壁的会话"，而日志全正常）。
-	PaneID int `json:"paneId,omitempty"`
-	// DegradedFrom：这一格是**降级**建出来的，原本要接的是这条会话（空 = 不是降级）。
-	// 降级这个决定是前端做的（只有它知道拒绝码、也只有它知道两次重试都过了）——
-	// 而它重建这一格时正好有一趟 `tabs.create` 顺路回来，所以这件事就搭这趟车，
-	// 不必再开一条 ctl 消息去说（多一条消息就多一个"它没到"的失败模式）。
-	// 它只喂给 panes.markDegraded 留一笔证据，**不参与任何判定**。
-	DegradedFrom string `json:"degradedFrom,omitempty"`
-}
-
+// 标签的形状（spawnSpec / resumeIntent）在 internal/session 与 internal/agent；
+// 这里只留组合根需要的别名（见 session_bridge.go）。
+//
 // agentDef / resumeIntent 的字段定义在 internal/agent（见 agent_bridge.go 的别名）。
 // 新增一个深度适配的 agent = 在那个包里加一份构造函数，别处不用改。
 
 // agentDefs 是本机可启动的 agent 表。清单、能力、配方、Exe 解析全在
 // internal/agentcatalog；这里只留启动表本身。
 //
-// ⚠️ 必须是 init() 里构造，不能做成包级字面量：Defs 会走
-// agent.Host.ResolveExe，必须先 SetHost。这是组合期的顺序，不是风格。
+// ⚠️ 只能在 main 里、**agent.SetHost 之后**构造，不能做成包级字面量或 init：
+// Defs 会走 agent.Host.ResolveExe，先建表会拿到占位实现给出的 exe。
+// 这是组合期的顺序，不是风格（见 docs/ARCHITECTURE.md 的启动顺序）。
 var agentDefs map[string]agentDef
-
-func init() {
-	agent.SetHost(rootAgentHost{})
-	agentDefs = agentcatalog.Defs(claudeStateDir)
-}
-
-type tabHost struct {
-	id     int
-	stream string
-	spec   spawnSpec
-
-	// paneID 是这一格**跨重启的身份**（登记表里的 PaneID，见 panes.go）。
-	// ⚠️ 它和 id 是两件事：id 是这一次运行里的编号（1、2、3…，每次启动重发），
-	// paneID 是"哪一格"这个问题的答案。拿 id 当身份的话，重启后 1 号格就会
-	// 继承上次 1 号格的会话 —— 那正是"接错会话"。
-	paneID int
-
-	// 下面这些是**运行期状态**，一律只经 tabManager 的方法读写（锁在那边）。
-	// 它们由 status.go 的轮询在盘上的登记表里发现，不是启动时算出来的 ——
-	// 所以格子刚起来时它们都是空的。
-	pid       int
-	sessionID string
-	sessName  string // claude 自己派生的会话名（nameSource:"derived"）
-	status    string // "busy" | "idle"（实测取值，见 status.go 的更正说明）
-	// transcript 是会话的 .jsonl 绝对路径。**由 hook 的 SessionStart 直接给**
-	// （payload 里有 transcript_path）—— 比我们去 projects\<有损slug>\ 下面拼路径可靠。
-	transcript string
-}
-
-// tabManager 发放标签 id 和 stream 名。
-//
-// ⚠️ 一条读 Wails 源码得到的关键事实（不是试出来的）：HandleStream 只是往 map
-// 里塞，**服务端在连接建立时**才按名字查 handler，查不到直接 404
-// （stream_server.go:247-256）。所以顺序必须是「Go 先注册、前端后连接」——
-// 这条由 ctl 通道的 request/reply 保证，不靠时序运气。
-// 容量：streamMaxConnectionsGlobal = 4096，标签数远够。
-type tabManager struct {
-	mu        sync.Mutex
-	next      int
-	tabs      map[int]*tabHost
-	bySession map[string]*tabHost // sessionId → 格子：hook 事件靠它认领归属
-}
-
-var tabs = &tabManager{tabs: map[int]*tabHost{}, bySession: map[string]*tabHost{}}
-
-func (tm *tabManager) create(app *application.App, spec spawnSpec) *tabHost {
-	// paneId 在**锁外**定：panes 有自己的锁，而且下面的 bind 会落盘 ——
-	// 绝不持着 tm.mu 做磁盘 I/O（那会把所有格子的操作一起卡在文件系统上）。
-	paneID := 0
-	if spec.PaneID > 0 {
-		panes.Claim(spec.PaneID, "冷恢复建格")
-		paneID = spec.PaneID
-	} else if panes != nil {
-		paneID = panes.NextID()
-	}
-	tm.mu.Lock()
-	tm.next++
-	host := &tabHost{id: tm.next, stream: fmt.Sprintf("term:%d", tm.next), spec: spec, paneID: paneID}
-	tm.tabs[host.id] = host
-	// 闭包只捕获 host：每次连接自己起一个新 PTY，连接断了那个 PTY 就结束。
-	app.HandleStream(host.stream, func(c *application.StreamConn) { handleTab(c, host) })
-	tm.mu.Unlock()
-
-	if panes != nil && paneID > 0 {
-		// 建格**立刻**记一条：还没有 sessionId 也要写 —— "这一格开着"本身就是一件
-		// 事实（它意味着"这一格的座位还在"，重启后要给它留个位置）。
-		panes.Bind(paneID, spec.Agent, effectiveCWD(spec), "", "", fmt.Sprintf("建格 tab=%d", host.id))
-		// 降级那一笔（如果有）**跟在 bind 后面**写：bind 的规矩是"空值不覆盖"，
-		// 两者写的是不同字段，谁也不影响谁 —— 分开写是为了让"留证"这件事
-		// 一眼看得出是**附带**的，不是建格的一部分。
-		if spec.DegradedFrom != "" {
-			panes.MarkDegraded(paneID, spec.DegradedFrom, fmt.Sprintf("tab=%d 被拒后改起新会话", host.id))
-		}
-	}
-	return host
-}
-
-// drop 在流断开时把一个标签从运行期表里摘掉。
-//
-// ⚠️ **它一行都不许碰登记表**（panes.go 的第 ③ 条约束）。原因是一条读 Wails
-// 源码得来的关停顺序（application.go:79 vs :199-200，任务按注册序执行）：
-// `streams.close` 排在**我们自己的 OnShutdown 之前**，于是关窗那一刻，
-// 每个格子的 `defer tabs.drop` 都会先跑一遍 —— 要是这里顺手删了记录，
-// 写下去的就是 `{"panes":[]}`，**恢复能力被自己抹掉，而且不报错**。
-// 删记录只有一条路：前端在用户点「结束这个 agent」时发 `pane.forget`
-// （点 × 发的是 `pane.close` —— 只打 Closed 标记，记录留着）。
-func (tm *tabManager) drop(id int) {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	if h := tm.tabs[id]; h != nil && h.sessionID != "" {
-		delete(tm.bySession, h.sessionID)
-	}
-	delete(tm.tabs, id)
-}
-
-// paneIDFor：运行期的 tab id → **跨重启**的 paneId（登记表的身份）。
-//
-// hook 事件带的是 tab id（它认识的是"这一格"这个运行期概念），而记录认的是
-// paneId —— 这层翻译只有 tabManager 做得了，所以它住在这里，读一次就放开锁。
-func paneIDFor(tab int) int {
-	tabs.mu.Lock()
-	defer tabs.mu.Unlock()
-	if h := tabs.tabs[tab]; h != nil {
-		return h.paneID
-	}
-	return 0
-}
-
-// setPID 在 PTY 起来之后登记 pid —— 登记表是按 pid 命名的，这是那条链子的起点。
-func (tm *tabManager) setPID(id, pid int) {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	if h := tm.tabs[id]; h != nil {
-		h.pid = pid
-	}
-}
-
-// tabView 是给轮询用的**只读快照**：轮询在锁外拿数据，不和收包循环抢，
-// 也不用让整个轮询循环持着锁去读盘。
-type tabView struct {
-	id         int
-	pid        int
-	sessionID  string
-	status     string
-	name       string
-	transcript string
-	cwd        string
-}
-
-func (tm *tabManager) live() []tabView {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	out := make([]tabView, 0, len(tm.tabs))
-	for _, h := range tm.tabs {
-		out = append(out, tabView{
-			id: h.id, pid: h.pid, sessionID: h.sessionID, status: h.status,
-			name: h.sessName, transcript: h.transcript, cwd: effectiveCWD(h.spec),
-		})
-	}
-	return out
-}
-
-// setTranscript 记下这个格子的转录文件（hook SessionStart 里直接给的）。
-//
-// ⚠️ 它也受步 5 那条规则管（test 造出来的洞：2026-10-17 用一条伪造的
-// SessionStart 打在"请求 exact X"的格子上，记录里 sessionId 保住了 X，而
-// transcript 被换成了那条伪造事件给的路径 —— 同一份记录里两条字段说了两条会话，
-// 读它的人（流水/尾部历史）就会去开一个和 sessionId 无关的文件）。
-// 判据是**同一条规则**、只是换了个输入：转录文件名去掉目录和 .jsonl 就是会话 id
-// （实测：`projects\<目录>\<session id>.jsonl`），拿它去问 judgeResume 即可 ——
-// 多写一条"这两个字段要不要一起改"的规矩，迟早会和那条分叉。
-func (tm *tabManager) setTranscript(id int, path string) {
-	if path == "" {
-		return
-	}
-	tm.mu.Lock()
-	h := tm.tabs[id]
-	if h == nil {
-		tm.mu.Unlock()
-		return
-	}
-	h.transcript = path
-	intent := h.spec.Resume
-	paneID, agent, cwd := h.paneID, h.spec.Agent, effectiveCWD(h.spec)
-	tm.mu.Unlock()
-	// 落盘在**锁外**（磁盘 I/O 不进 tm.mu）
-	if panes == nil {
-		return
-	}
-	if stem := transcriptStem(path); judgeResume(intent, stem) == evMissed {
-		log.Printf("[panes] ⚠️ 转录路径不记：pane=%d 那条路径说的是会话 %s，而这一格请求的是 %s —— "+
-			"记录里 sessionId 和 transcript 必须说**同一条**会话（见 setTranscript 的注释）",
-			paneID, short(stem), short(intent.ID))
-		return
-	}
-	panes.Bind(paneID, agent, cwd, "", path, "拿到转录路径")
-}
-
-// transcriptStem 从转录路径里取会话 id：`…\projects\<目录>\<id>.jsonl` → `<id>`。
-// 取不出来（不是 .jsonl / 空）就返回空串 —— 那样 judgeResume 判成"没有承诺"，
-// 照旧记（宁可少拦一次，也不要凭一个猜出来的名字去拒绝一条真的路径）。
-func transcriptStem(path string) string {
-	b := filepath.Base(path)
-	if !strings.HasSuffix(b, ".jsonl") {
-		return ""
-	}
-	return strings.TrimSuffix(b, ".jsonl")
-}
-
-/*
-resumeEvidence 是**步 5 的唯一判据**：「这一次身份到达」能不能当成
-
-	"这一格接回了我们请求的那条会话"的证据。
-
-	⚠️ 为什么需要一条规则，而不是"收到什么就是什么"：`--resume <id>` 的**意图**
-	与**结果**是两件事。claude 在某些条件下（会话文件不在它认得的项目目录里、
-	文件坏了、被改名了）可能找不到就**开一条新的**，而新会话的 id 会随 hook
-	事件到达 —— 我们要是照单全收写进记录，就等于把"接错的那条"固化成事实，
-	而且下一次重开会照着它再错一遍。冷恢复整个链条里，**这一步是唯一一次
-	"我们以为自己知道了、其实是别人说了算"**。
-
-	✅ 实测（2026-10-16，见 [[resume-hook-source-evidence]]）：`--resume <id>`
-	成功时 hook 报 `source=resume` 且 **id 与请求的完全一致**；cwd 与会的所属
-	目录错配时 claude 也不会静默换会话（它照旧接住那一条，只把新行的 cwd
-	记成新目录）。所以"对不上"在今天是**观察不到**的 —— 这条规则防的是
-	"观察不到"变成"发生了也看不出来"。
-
-	三种情况（只有前两种允许改写记录）：
-	  evNoPromise  这一格**没有对某条会话的承诺**（裸启动 / --fork-session 写的是
-	               新文件 / --continue 挑的是"最新那条"、我们手上没有 id 可比）。
-	               来的是谁就是谁 —— 记下来是对的。
-	  evMatched    承诺的是 `exact X`，来的**正是** X。这就是 `source=resume`
-	               该有的样子；记录照写（同一 id，等价于确认），并撤掉上一次
-	               可能留下的那笔落空（panes.clearMismatch）。
-	  evMissed     承诺的是 `exact X`，来的却是别人 —— **记录一个字都不改**，
-	               只留 mismatchAt（panes.markMismatch）+ 一条醒目日志 + 格内横幅。
-
-	⚠️ `latest` 按"没有承诺"处理：`--continue` 的承诺是"这个目录里最新那条"，
-	我们手上**没有 id 可以去对**。判不了的事不判 —— 宁可少记一次落空，
-	也不要凭猜测去改记录（猜错的代价是"接错会话"，而那是不可逆的那一类）。
-*/
-type resumeEvidence int
-
-const (
-	evNoPromise resumeEvidence = iota
-	evMatched
-	evMissed
-)
-
-func judgeResume(intent resumeIntent, sid string) resumeEvidence {
-	if sid == "" || intent.Kind != "exact" || intent.ID == "" {
-		return evNoPromise
-	}
-	if intent.ID == sid {
-		return evMatched
-	}
-	return evMissed
-}
-
-// bindSession 把"这个格子跑的是哪个会话"钉下来（只在第一次生效，返回是否绑上了）。
-// 两个调用点：hook 事件（最早，session_id 直接随事件来）和会话登记表（兜底）。
-//
-// ⚠️ 它同时喂**两张表**，而两张表记的不是同一件事 —— 这是这一层最容易搞混的地方：
-//
-//	运行期表（h.sessionID + bySession）记的是**事实**：这一格现在跑的就是 sid。
-//	  所以要**照实记、无条件记** —— 护栏 liveOwnerOf 靠它拦"两个进程写同一份
-//	  jsonl"，记成"我们以为的那条"就会放过一次真正的冲突（那是全项目唯一
-//	  不可逆的失败）。
-//	盘上那条记录（panes.json 的 sessionId）记的是**意图**：下次重开该去接谁。
-//	  这一张只在有证据时才改写（见 judgeResume）。
-//
-// `source` 只给日志用（SessionStart 事件里带 startup/resume/clear/compact/fork，
-// 别的调用点给空串）——**判据本身不依赖它**：我们请求的是 exact X，来的不是 X
-// 就是落空，这件事不需要 claude 自报家门。
-func (tm *tabManager) bindSession(id int, sid, name, source string) bool {
-	tm.mu.Lock()
-	h := tm.tabs[id]
-	if h == nil || h.sessionID != "" || sid == "" {
-		tm.mu.Unlock()
-		return false
-	}
-	h.sessionID = sid
-	if name != "" {
-		h.sessName = name
-	}
-	tm.bySession[sid] = h
-	intent := h.spec.Resume
-	paneID, agent, cwd := h.paneID, h.spec.Agent, effectiveCWD(h.spec)
-	tm.mu.Unlock()
-
-	// 没有续接能力的 agent（OpenCode 现在就是）不要拿请求的 exact 去判落空：
-	// 它本来就会开一条新会话，判成 mismatch 只会给用户挂一条假横幅。
-	if !capsForAgent(agent).Resume {
-		intent = resumeIntent{Kind: "new"}
-	}
-
-	// 首次身份绑定**立即落盘**（配 ~250ms 合并窗，见 panes.go 的 paneFlushWindow）：
-	// 建格到绑上身份之间大约 1–3 秒，正是整条链最脆的窗口 —— 这段里被关掉，
-	// 记录里就只会有"这一格开着、不知道跑的是谁"。⚠️ 出了锁才写：那是磁盘 I/O。
-	if panes == nil {
-		return true
-	}
-	switch judgeResume(intent, sid) {
-	case evMissed:
-		panes.MarkMismatch(paneID, intent.ID, sid, "首次身份到达")
-		log.Printf("[panes] ⚠️ 续接落空：请求 %s 实际 %s（source=%s）—— 格子 t%d pane=%d。"+
-			"记录里那条会话 id **一个字都不改**（盘上那条还在），只留 mismatchAt",
-			short(intent.ID), short(sid), orNone(source), id, paneID)
-		// 格内横幅（步 6）：横幅是给**人**看的，日志是给排查看的，两样都要。
-		// pushJSON 走 ctl 那条常驻通道，加锁的，可以从任何 goroutine 调。
-		pushJSON(map[string]any{
-			"type": "pane.mismatch", "pane": paneID, "tab": id,
-			"want": intent.ID, "got": sid, "source": source,
-		})
-	case evMatched:
-		if panes.ClearMismatch(paneID, fmt.Sprintf("续接对上 tab=%d（撤掉上次那笔落空）", id)) {
-			log.Printf("[panes] 续接对上：格子 t%d pane=%d 请求的就是 %s（source=%s）—— 上次那笔落空撤掉",
-				id, paneID, short(sid), orNone(source))
-		} else {
-			log.Printf("[panes] 续接对上：格子 t%d pane=%d 请求的就是 %s（source=%s）",
-				id, paneID, short(sid), orNone(source))
-		}
-		panes.Bind(paneID, agent, cwd, sid, "", fmt.Sprintf("首次绑上会话 tab=%d（证据对上）", id))
-	default:
-		panes.Bind(paneID, agent, cwd, sid, "", fmt.Sprintf("首次绑上会话 tab=%d", id))
-	}
-	return true
-}
-
-// rebindSession 是“格内换了会话”的路径（OpenCode 的 active session 变了会走它）。
-// 和 bindSession 的区别只有一个：允许覆盖已有的 sessionID。
-//
-// 为什么要单独一条：bindSession 的“只在第一次生效”是 Claude 那条链子的护栏
-// （hook 和登记表会先后报同一个 id，不能让后到的把先到的改掉）。但格内 /new、
-// /clear 之后确实会换一条会话；前端靠 agent 消息里的 session 改写，Go 这边的
-// bySession 反查表也必须跟着改，否则后续事件会继续认旧格子。
-func (tm *tabManager) rebindSession(id int, sid, name, source string) bool {
-	tm.mu.Lock()
-	h := tm.tabs[id]
-	if h == nil || sid == "" || h.sessionID == sid {
-		tm.mu.Unlock()
-		return false
-	}
-	old := h.sessionID
-	if old != "" {
-		delete(tm.bySession, old)
-	}
-	h.sessionID = sid
-	if name != "" {
-		h.sessName = name
-	}
-	tm.bySession[sid] = h
-	intent := h.spec.Resume
-	paneID, agent, cwd := h.paneID, h.spec.Agent, effectiveCWD(h.spec)
-	tm.mu.Unlock()
-
-	log.Printf("[agent t%d] 会话改写 %s → %s（source=%s）",
-		id, short(old), short(sid), orNone(source))
-	if !capsForAgent(agent).Resume {
-		intent = resumeIntent{Kind: "new"}
-	}
-	if panes == nil {
-		return true
-	}
-	// 和 bindSession 用同一条判据：请求的是 exact X 却来了 Y，记录里那条 id
-	// 一个字都不改，只留 mismatch；格子的内存身份仍然跟着 Y（它才是现在跑的）。
-	switch judgeResume(intent, sid) {
-	case evMissed:
-		panes.MarkMismatch(paneID, intent.ID, sid, "格内换会话")
-	case evMatched:
-		if panes.ClearMismatch(paneID, fmt.Sprintf("格内换会话对上 tab=%d", id)) {
-			log.Printf("[panes] 续接对上：格子 t%d pane=%d 请求的就是 %s（格内换会话）",
-				id, paneID, short(sid))
-		}
-	default:
-		panes.Bind(paneID, agent, cwd, sid, "", fmt.Sprintf("格内换会话 tab=%d", id))
-	}
-	return true
-}
 
 // orNone 让日志里那个字段永远**有值**：空字符串在日志里和"这一行没打出来"
 // 长得一样，而"source 是空的"（比如登记表那条兜底路径根本没有 source）
@@ -545,31 +156,6 @@ func orNone(s string) string {
 		return "(未报)"
 	}
 	return s
-}
-
-// setStatus 记一次忙闲变化，返回上一次的值和"到底变没变" ——
-// 调用方只在变的时候出声，否则 700ms 一次会把日志淹掉。
-func (tm *tabManager) setStatus(id int, st string) (string, bool) {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	h := tm.tabs[id]
-	if h == nil || st == "" || h.status == st {
-		return "", false
-	}
-	prev := h.status
-	h.status = st
-	return prev, true
-}
-
-// tabForSession 反查：这条 hook 事件是哪个格子发出来的。
-// 查不到返回 0（事件照样推给前端，只是没有归属 —— 比如登记表还没写出来的那一瞬）。
-func (tm *tabManager) tabForSession(sid string) int {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	if h := tm.bySession[sid]; h != nil {
-		return h.id
-	}
-	return 0
 }
 
 // globalApp 只是为了在**运行期**注册新的 stream handler（见 tabManager.create）。
@@ -761,10 +347,10 @@ func handleCtl(c *application.StreamConn) {
 					// （瞬时冲突那 2 次重试，见计划书步 4），要么让它显式降级 ——
 					// 少一个身份，降级后的那一格就没法再写进记录里。
 					"pane": m.Spec.PaneID,
-					"err":  ref.code, "msg": ref.msg,
+					"err":  ref.Code, "msg": ref.Msg,
 					// 能不能重试由**判的人**给（见 resume.go 的 refusal.retryable）：
 					// 前端不许拿 code 去查表 —— 那是第二份会漂的规则。
-					"retryable": ref.retryable,
+					"retryable": ref.Retryable,
 				})
 				_ = c.Send(reply)
 				if m.Req != 0 {
@@ -772,22 +358,25 @@ func handleCtl(c *application.StreamConn) {
 				}
 				log.Printf("[ctl] 拒绝接上 agent=%s cwd=%s resume=%s id=%s pane=%d 因=%s：%s",
 					m.Spec.Agent, m.Spec.CWD, m.Spec.Resume.Kind, m.Spec.Resume.ID,
-					m.Spec.PaneID, ref.code, ref.msg)
+					m.Spec.PaneID, ref.Code, ref.Msg)
 				continue
 			}
-			host := tabs.create(globalApp, *m.Spec)
+			host := tabs.Create(*m.Spec)
+			// 顺序是硬约束：**先**注册流、**再**回 tab.ok。Wails 在连接建立时
+			// 才按名字查 handler，查不到直接 404；前端拿到应答就会立刻去连。
+			globalApp.HandleStream(host.Stream, func(c *application.StreamConn) { handleTab(c, host) })
 			reply, _ := json.Marshal(map[string]any{
-				"type": "tab.ok", "tab": host.id, "stream": host.stream, "req": m.Req,
+				"type": "tab.ok", "tab": host.ID, "stream": host.Stream, "req": m.Req,
 				// paneId 是这一格**跨重启的身份**：前端拿着它，才能在用户显式
 				// 关格时发 pane.forget（那是唯一一条会删记录的路径）。
-				"pane": host.paneID,
+				"pane": host.PaneID,
 			})
 			_ = c.Send(reply)
 			if m.Req != 0 {
 				tabReqCache[m.Req] = reply // 重发同一令牌时重放它 —— 绝不建第二个格子
 			}
 			log.Printf("[ctl] 新标签 tab=%d pane=%d stream=%s agent=%s cwd=%s resume=%s id=%s",
-				host.id, host.paneID, host.stream, m.Spec.Agent, m.Spec.CWD,
+				host.ID, host.PaneID, host.Stream, m.Spec.Agent, m.Spec.CWD,
 				m.Spec.Resume.Kind, m.Spec.Resume.ID)
 		case "panes.query":
 			/* 冷恢复的那一次查询（步 3）：前端在**建任何格子之前**问一次
@@ -869,13 +458,13 @@ func handleCtl(c *application.StreamConn) {
 				log.Printf("[title] title.set 缺 id 或名字表不可用，不动：id=%q", id)
 				continue
 			}
-			if err := titlesStore.set(id, m.Name); err != nil {
+			if err := titlesStore.Set(id, m.Name); err != nil {
 				log.Printf("[title] 写 titles.json 失败（会话 %s）：%v", short(id), err)
 				// 前端是**乐观**改的（先把那一行改了、再落盘），所以这里必须有一条
 				// 回来的路：把权威的那份表推回去，让界面掉回真实状态。不推的话，
 				// 屏幕上挂着一个盘上不存在的名字，下次打开又变回去 —— 那种
 				// "我明明改过"的悬案最难查。
-				pushJSON(map[string]any{"type": "titles", "titles": titlesStore.snapshot()})
+				pushJSON(map[string]any{"type": "titles", "titles": titlesStore.Snapshot()})
 				continue
 			}
 			if strings.TrimSpace(m.Name) == "" {
@@ -1139,7 +728,7 @@ func handleCtl(c *application.StreamConn) {
 			   代价：载荷 85KB、扫一遍毫秒级，而关格子是低频动作 —— 所以直接**同步**
 			   重扫。不换协程，是因为 Send 走的就是手里这根流，换协程反而要和
 			   在途的推送（pushCtrl）处理并发，而这里慢的那几十毫秒没有任何人等着。 */
-			st := buildShellPayload(claudeStateDir, defaultCWD(), titlesStore.snapshot())
+			st := buildShellPayload(claudeStateDir, defaultCWD(), titlesStore.Snapshot())
 			b, err := json.Marshal(map[string]any{"type": "state", "state": st})
 			if err != nil {
 				log.Printf("[ctl] 会话库刷新失败: %v", err)
@@ -1252,6 +841,10 @@ var prefsStore *settingsStore
 // 这时候所有记录动作都是 no-op —— 冷恢复这一轮退化成现状（一个默认格）。
 var panes *paneStore
 
+// tabs 是会话表（见 internal/session）。在 main 里构造 —— 它要 titles/panes
+// 先就位，而且必须在 agent.SetHost 之前。
+var tabs *tabManager
+
 // secondInstance = 这台机器上已经有一个我在跑（见 instance_windows.go 的步 7）。
 // 它的作用有两个，缺一不可：
 //
@@ -1299,6 +892,14 @@ func main() {
 	// 必须早于任何子进程（窗口的 WebView2、每个格子的 ConPTY 都在这之后才起）。
 	// 挂一次宿主，此后所有进程靠继承覆盖，不需要每格再管一次。
 	ownProcessTree()
+
+	// 会话表（步 7）：先只拿宿主能力；启动表要等 SetHost 之后才建。
+	tabs = newSessionManager()
+	// 步 8：适配器此后拿到的就是真正的会话表（绑定/状态/推送/Exe 解析）。
+	agent.SetHost(tabs)
+	// 步 9：Defs() 会走 Host.ResolveExe，所以**必须**在 SetHost 之后。
+	agentDefs = agentcatalog.Defs(claudeStateDir)
+	tabs.SetDefs(agentDefs)
 
 	app := application.New(application.Options{
 		Name:        "Perch",
@@ -1399,10 +1000,10 @@ func main() {
 	// hooks：每个格子启动时现造一份**只对它生效**的 --settings（不碰用户的配置文件）。
 	// 接收器不在 exe 旁边就造不出来 → 不注入，忙闲那条腿仍然可用。
 	if exe := hookExePath(); exe == "" {
-		log.Printf("[hook] 未注入 hooks：%s 不在 exe 旁边（忙闲仍来自 sessions\\<pid>.json）", hookExeName)
+		log.Printf("[hook] 未注入 hooks：%s 不在 exe 旁边（忙闲仍来自 sessions\\<pid>.json）", sessionHookExeName)
 	} else {
 		log.Printf("[hook] 已备好：%d 个事件（exec 形式 / 交互点 sync、其余 async / timeout=5s）接收器=%s 事件目录=%s",
-			len(hookEventTypes), exe, hookDir())
+			hookEventCount(), exe, hookDir())
 	}
 
 	// 两条观察腿，一细一粗：
@@ -1410,8 +1011,8 @@ func main() {
 	//   会话登记表    —— 粗粒度忙闲，永远在（hook 没起来时它也告诉你谁在等你）
 	// 两条都只写日志 + 推前端，**不碰 PTY 通道**：这一层坏掉最坏是"侧栏没数据"，
 	// 绝不会让终端本身出问题。
-	startHookEventPoller(pushJSON)
-	startAgentStatusPoller(pushJSON)
+	tabs.StartHookPoller()
+	tabs.StartStatusPoller()
 	// 第三条腿：跟着每个格子的转录文件走（「改动」和「流水」的数据源）。
 	// 它靠 SessionStart 给的 transcript_path 才知道该跟哪个文件，所以排在 hooks 之后。
 	startTranscriptFollower(pushJSON)
@@ -1515,7 +1116,7 @@ func handleShell(c *application.StreamConn) {
 		_ = c.Close()
 	}()
 
-	b, err := json.Marshal(buildShellPayload(claudeStateDir, defaultCWD(), titlesStore.snapshot()))
+	b, err := json.Marshal(buildShellPayload(claudeStateDir, defaultCWD(), titlesStore.Snapshot()))
 	if err != nil {
 		log.Printf("[perch] 索引失败: %v", err)
 		return
@@ -1729,10 +1330,10 @@ func awaitInitialSize(frames <-chan tabFrame) (int, int, [][]byte, error) {
 // 少一个能跟真实状态不同步的开关。
 func handleTab(c *application.StreamConn, host *tabHost) {
 	defer c.Close()
-	defer tabs.drop(host.id)
+	defer tabs.Drop(host.ID)
 	// C3 的观察腿（格子收尾这一端）：这一格关了之后，job 里还剩谁。
 	// 和下面"起来后"那条配对 —— 两条合起来才能看出"这一格带走了什么、留下了什么"。
-	defer logJobInventory(fmt.Sprintf("tab=%d 收尾", host.id))
+	defer logJobInventory(fmt.Sprintf("tab=%d 收尾", host.ID))
 
 	// 读家**必须在握手之前**就位：握手要能"在没帧的时候被定时器叫醒"，
 	// 而 Receive 是会死等的那种读（见 readFrames 的说明）。
@@ -1744,17 +1345,17 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 		return
 	}
 
-	def, ok := agentDefs[host.spec.Agent]
+	def, ok := agentDefs[host.Spec.Agent]
 	if !ok {
-		log.Printf("[perch] tab=%d 未知 agent %q", host.id, host.spec.Agent)
-		_ = c.Send([]byte("\r\n\x1b[31m[perch] 未知 agent: " + host.spec.Agent + "\x1b[0m\r\n"))
+		log.Printf("[perch] tab=%d 未知 agent %q", host.ID, host.Spec.Agent)
+		_ = c.Send([]byte("\r\n\x1b[31m[perch] 未知 agent: " + host.Spec.Agent + "\x1b[0m\r\n"))
 		return
 	}
-	tag := fmt.Sprintf("t%d", host.id)
+	tag := fmt.Sprintf("t%d", host.ID)
 	// 「新格没指定目录时落在哪」只有这一个答案（见 effectiveCWD / defaultCWD）——
 	// 2026-10-16 起是默认工作区，不是 fallbackCWD。这也正是记进登记表的那个值。
 	// Prepare 也要它：Codex 的 app-server 必须和 TUI 在同一个目录里起来。
-	cwd := effectiveCWD(host.spec)
+	cwd := effectiveCWD(host.Spec)
 	// Prepare 是“这一格才有的”启动准备（OpenCode 的端口/口令、Codex 的
 	// app-server 都是它给的）。
 	var prepEnv map[string]string
@@ -1762,9 +1363,9 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 	var observe func(context.Context)
 	if def.Prepare != nil {
 		var perr error
-		prepEnv, prepArgs, observe, perr = def.Prepare(tag, host.id, cwd)
+		prepEnv, prepArgs, observe, perr = def.Prepare(tag, host.ID, cwd)
 		if perr != nil {
-			log.Printf("[perch] tab=%d 启动准备失败: %v", host.id, perr)
+			log.Printf("[perch] tab=%d 启动准备失败: %v", host.ID, perr)
 			_ = c.Send([]byte("\r\n\x1b[31m[perch] 启动准备失败: " + perr.Error() + "\x1b[0m\r\n"))
 			return
 		}
@@ -1773,7 +1374,7 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 	// 于是"这条事件属于哪个格子"由文件名决定，不需要任何反查（见 hooks.go 末尾那段）。
 	// 只有 Claude 用这份 --settings；别的 agent 传空串。
 	settings := ""
-	if host.spec.Agent == "claude" {
+	if host.Spec.Agent == "claude" {
 		settings = buildHookSettings(tag)
 	}
 	// 每次开格重新解析一次（见 agentDef.Bin 的注释）：装完/更新完不用重启 Perch。
@@ -1781,7 +1382,7 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 	if def.Bin != "" {
 		exe, prefix = resolveAgentExe(def.Bin)
 	}
-	args := append(append([]string{}, prefix...), def.Args(host.spec.Resume, settings)...)
+	args := append(append([]string{}, prefix...), def.Args(host.Spec.Resume, settings)...)
 	args = append(args, prepArgs...)
 
 	env := make(map[string]string, len(def.Env)+len(prepEnv))
@@ -1801,13 +1402,13 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 			ocancel()
 			go observe(octx)
 		}
-		log.Printf("[perch] tab=%d 启动失败: %v", host.id, err)
+		log.Printf("[perch] tab=%d 启动失败: %v", host.ID, err)
 		_ = c.Send([]byte("\r\n\x1b[31m[perch] 启动失败: " + err.Error() + "\x1b[0m\r\n"))
 		return
 	}
 	defer sess.Close()
 	// pid 是「格子 ↔ 会话」那条链子的起点（登记表按 pid 命名，见 status.go）。
-	tabs.setPID(host.id, sess.Pid())
+	tabs.SetPID(host.ID, sess.Pid())
 
 	// 状态观察者跟着这条 PTY 的生命周期走：流一断/进程一关，ctx 就取消。
 	// observe 自己负责“server 还没起来就等”，不阻塞这里的启动。
@@ -1832,17 +1433,17 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 		if _, werr := sess.Wait(ctx); werr != nil {
 			return // 是我们自己收的尾，不是进程退出
 		}
-		log.Printf("[perch] tab=%d pid=%d 进程已退出，关流", host.id, sess.Pid())
+		log.Printf("[perch] tab=%d pid=%d 进程已退出，关流", host.ID, sess.Pid())
 		_ = c.Send([]byte("\r\n\x1b[33m[perch] 进程已退出\x1b[0m\r\n"))
 		_ = c.Close() // 让收包循环醒过来、前端看到 onclose
 	}()
 	// 注意日志里**打印参数**会把整份 --settings JSON 也打出来（几 KB）。
 	// 这里改打长度：那串东西对读日志的人是噪音，长度足够判断"注进去了没有"。
 	log.Printf("[perch] tab=%d 已启动 pid=%d exe=%s 参数%d个(settings=%d字节) cwd=%s resume=%s",
-		host.id, sess.Pid(), exe, len(args), len(settings), cwd, host.spec.Resume.Kind)
+		host.ID, sess.Pid(), exe, len(args), len(settings), cwd, host.Spec.Resume.Kind)
 	// C3 的观察腿（格子起来这一端）：这一格的 claude 是靠**继承**进 job 的
 	// （我们从没单独 assign 过它）—— 这句话是不是真的，问内核拿清单看。
-	logJobInventory(fmt.Sprintf("tab=%d pid=%d 起来后", host.id, sess.Pid()))
+	logJobInventory(fmt.Sprintf("tab=%d pid=%d 起来后", host.ID, sess.Pid()))
 
 	// ConPTY -> 前端：原样转发字节，不做任何字符串转换。
 	// string(bytes) 会把被切在两个读块之间的 UTF-8 序列打断 ——
@@ -1864,11 +1465,11 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 						take = rawLeft
 					}
 					rawLeft -= take
-					log.Printf("[raw t%d] %s", host.id, escapeBytes(buf[:take]))
+					log.Printf("[raw t%d] %s", host.ID, escapeBytes(buf[:take]))
 				} else if bytes.Contains(buf[:n], []byte(bannerMark)) {
 					// 不打印整帧（TUI 重画很频繁，整个 dump 出来日志会失控），
 					// 只留一行"这一帧里又有一份介绍框"。数行数 = 数份数。
-					log.Printf("[banner t%d] 这一帧的字节里含开场介绍框（%d 字节）", host.id, n)
+					log.Printf("[banner t%d] 这一帧的字节里含开场介绍框（%d 字节）", host.ID, n)
 				}
 				for _, reply := range osc.Scan(buf[:n]) {
 					log.Printf("[osc] 回答颜色查询: %q", reply)
@@ -1930,7 +1531,7 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 						}
 					}
 				case "open-wt":
-					go openInWindowsTerminal(host.spec)
+					go openInWindowsTerminal(host.Spec)
 				case "rename":
 					// 用户给这个面板起了个名字。名字的主语是**会话**，不是面板 ——
 					// 面板在内存里，会话在盘上，中间那条链子见 titles.go 的
@@ -1941,7 +1542,7 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 					// 前端把渲染层的事实（fit 结果 / 元素尺寸 / dpr）回传到
 					// 服务端日志 —— 页面里没有控制台可看，这是唯一能拿到的真相。
 					// 带标签号：多标签之后不带号的日志没法读。
-					log.Printf("[web t%d] %s", host.id, m.Msg)
+					log.Printf("[web t%d] %s", host.ID, m.Msg)
 				}
 			}
 			return false
@@ -1966,7 +1567,7 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 			// 每次关格一条像报错的行，读日志的人很快就会不看日志了。
 			//（留这个判断而不是直接 return：万一以后换成别的读法，真错还能露出来。）
 			if !errors.Is(f.err, application.ErrStreamClosed) {
-				log.Printf("[perch] tab=%d 读帧中断: %v", host.id, f.err)
+				log.Printf("[perch] tab=%d 读帧中断: %v", host.ID, f.err)
 			}
 			return
 		}

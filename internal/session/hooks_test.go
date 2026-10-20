@@ -1,4 +1,4 @@
-package main
+package session
 
 import (
 	"encoding/json"
@@ -12,21 +12,22 @@ import (
 // 这几条都是“看字节才知道对不对”的事（--settings 是启动时写死的，改错了界面
 // 上只会表现为“销账慢/不销账”）。
 func TestBuildHookSettingsWave2(t *testing.T) {
-	// buildHookSettings 只认“和当前进程同目录”的接收器。测试进程在 go-build 的
+	// BuildHookSettings 只认“和当前进程同目录”的接收器。测试进程在 go-build 的
 	// 临时目录里，放一个占位文件就够（只解析生成出来的 JSON，不执行它）。
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	dummy := filepath.Join(filepath.Dir(exe), hookExeName)
+	dummy := filepath.Join(filepath.Dir(exe), HookExeName)
 	if err := os.WriteFile(dummy, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Remove(dummy) })
 
-	raw := buildHookSettings("t7")
+	stateDir := t.TempDir()
+	raw := BuildHookSettings(stateDir, "t7")
 	if raw == "" {
-		t.Fatal("buildHookSettings 返回空串：接收器找不到？")
+		t.Fatal("BuildHookSettings 返回空串：接收器找不到？")
 	}
 	var cfg struct {
 		Hooks map[string][]struct {
@@ -64,7 +65,7 @@ func TestBuildHookSettingsWave2(t *testing.T) {
 			t.Errorf("%s 的 hook 不是 exec 形式: %+v", ev, h)
 		}
 		if len(h.Args) != 1 || filepath.Base(h.Args[0]) != "t7.jsonl" {
-			t.Errorf("%s 的事件文件参数不对: %+v", ev, h.Args)
+			t.Errorf("%s 的事件文件参数不对: %+v", ev, h)
 		}
 		if h.Timeout != 5 {
 			t.Errorf("%s timeout=%d，要 5", ev, h.Timeout)
@@ -75,7 +76,7 @@ func TestBuildHookSettingsWave2(t *testing.T) {
 			t.Errorf("%s async=%v，要 %v", ev, h.Async, wantAsync)
 		}
 	}
-	if len(cfg.Hooks) != len(hookEventTypes) {
-		t.Errorf("订阅了 %d 个事件，表里有 %d 个", len(cfg.Hooks), len(hookEventTypes))
+	if len(cfg.Hooks) != len(HookEventTypes) {
+		t.Errorf("订阅了 %d 个事件，表里有 %d 个", len(cfg.Hooks), len(HookEventTypes))
 	}
 }

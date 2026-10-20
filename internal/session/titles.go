@@ -1,15 +1,4 @@
-package main
-
-import (
-	"encoding/json"
-	"log"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
-)
+package session
 
 // ---------------------------------------------------------------------------
 // 用户给会话起的名字
@@ -29,16 +18,28 @@ import (
 // 是两个 agent 都认的、稳定且唯一的标识。
 // ---------------------------------------------------------------------------
 
-type titleStore struct {
+import (
+	"encoding/json"
+	"log"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// TitleStore 是 titles.json 的内存副本 + 落盘器。
+type TitleStore struct {
 	mu   sync.Mutex
 	path string
 	m    map[string]string
 }
 
-// loadTitleStore 读一张已有的名字表。文件不存在是**正常路径**（第一次运行），
+// LoadTitleStore 读一张已有的名字表。文件不存在是**正常路径**（第一次运行），
 // 不是错误 —— 别在这里 log 一行看似失败的东西。
-func loadTitleStore(path string) *titleStore {
-	t := &titleStore{path: path, m: map[string]string{}}
+func LoadTitleStore(path string) *TitleStore {
+	t := &TitleStore{path: path, m: map[string]string{}}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return t
@@ -52,7 +53,8 @@ func loadTitleStore(path string) *titleStore {
 	return t
 }
 
-func (t *titleStore) snapshot() map[string]string {
+// Snapshot 返回名字表的一份副本。
+func (t *TitleStore) Snapshot() map[string]string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	out := make(map[string]string, len(t.m))
@@ -62,10 +64,10 @@ func (t *titleStore) snapshot() map[string]string {
 	return out
 }
 
-// set 写入一个名字；name 为空 = **删掉**这个名字，让会话回到 agent 自己写的标题。
+// Set 写入一个名字；name 为空 = **删掉**这个名字，让会话回到 agent 自己写的标题。
 // （Orca 的语义：trim 后为空 → onSetCustomTitle(…, null) / removePaneTitle，
 // 见 use-sortable-tab-rename.ts:38-41 与 use-terminal-pane-context-actions.ts:58-66。）
-func (t *titleStore) set(sessionID, name string) error {
+func (t *TitleStore) Set(sessionID, name string) error {
 	name = strings.TrimSpace(name)
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -93,20 +95,16 @@ func (t *titleStore) set(sessionID, name string) error {
 	return os.Rename(tmp, t.path)
 }
 
-// sessionIDForPID 反查「这个 pid 跑的是哪个会话」。
+// SessionIDForPID 反查「这个 pid 跑的是哪个会话」。
 //
 // 这是"名字跟着会话走"这条链子上唯一缺的一环，而它**只有我们这个形态**才需要：
 // 标签和面板活在内存里，会话活在盘上，把两者接起来的只有 Claude 的实时登记表：
 //
 //	ConPTY 子进程 pid → <stateDir>\sessions\<pid>.json → sessionId
 //
-// 登记表的形状（计划里已核实）：
-//
-//	{pid, sessionId, cwd, status:"waiting", waitingFor:"input needed", name, kind, entrypoint}
-//
 // 注意这里**没有**去猜、也没有去反解项目目录名（那是有损编码）——
 // 只是读一个 pid 命名的文件。Pi 那边没有登记表，将来要用它自己的会话文件兜底。
-func sessionIDForPID(stateDir string, pid int) string {
+func SessionIDForPID(stateDir string, pid int) string {
 	p := filepath.Join(stateDir, "sessions", strconv.Itoa(pid)+".json")
 	b, err := os.ReadFile(p)
 	if err != nil {
@@ -122,7 +120,7 @@ func sessionIDForPID(stateDir string, pid int) string {
 	return rec.SessionID
 }
 
-// applyRename 把「用户在标签上起的名字」落到它真正的主语 —— 会话 —— 上。
+// ApplyRename 把「用户在标签上起的名字」落到它真正的主语 —— 会话 —— 上。
 //
 // pid→sessionId 的登记表**不是**在 PTY 一起来就有的：claude 自己要过一小会儿
 // 才把它写出来。用户能点到重命名至少也是窗口起来之后，正常都在；但"正常都在"
@@ -132,11 +130,11 @@ const (
 	renameResolveInterval = 250 * time.Millisecond
 )
 
-func applyRename(stateDir string, titles *titleStore, pid int, name string) {
+func ApplyRename(stateDir string, titles *TitleStore, pid int, name string) {
 	go func() {
 		var sid string
 		for i := 0; i < renameResolveTries; i++ {
-			if sid = sessionIDForPID(stateDir, pid); sid != "" {
+			if sid = SessionIDForPID(stateDir, pid); sid != "" {
 				break
 			}
 			time.Sleep(renameResolveInterval)
@@ -146,7 +144,7 @@ func applyRename(stateDir string, titles *titleStore, pid int, name string) {
 				pid, pid)
 			return
 		}
-		if err := titles.set(sid, name); err != nil {
+		if err := titles.Set(sid, name); err != nil {
 			log.Printf("[title] 写 titles.json 失败: %v", err)
 			return
 		}
