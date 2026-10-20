@@ -64,6 +64,12 @@ type run struct {
 	cancel  context.CancelFunc
 	pid     int
 	started time.Time
+	// queued 只用于 npm 配方：它们共用同一个全局前缀，不能并发执行。
+	// 排队中的 run 没有进程，Cancel 直接从队列里摘掉即可。
+	queued bool
+	// cancelled 覆盖「刚点开始、进程还没起来」的那一小段：Cancel 先记下，
+	// runRecipe 起来后看到就不再启动 PowerShell。
+	cancelled bool
 }
 
 // Deps 是安装器需要的外部能力。Cards/MergeCalls 让"安装完重扫名单"与
@@ -79,10 +85,17 @@ type Deps struct {
 }
 
 // Installer 串行化每个 agent 的安装，构建外部调用面。
+//
+// npm 配方额外走一条单队列：npm 的全局前缀（%APPDATA%\npm）只有一份，
+// 几个 `npm install -g` 同时跑会争 lockfile 和 shim，轻则互相等待，重则
+// 装完了却没有命令。脚本配方（irm | iex）落在各自的目录里，仍可并行。
 type Installer struct {
 	deps Deps
 	mu   sync.Mutex
 	runs map[string]*run
+
+	npmQueue  []string // 等待中的 npm id（先进先出）
+	npmActive string   // 正在跑的 npm id；空 = 空闲
 }
 
 // New 构造安装器。Deps 里除 Push 外都应为非 nil；缺失的能力按"没有"处理。
@@ -101,6 +114,9 @@ func (in *Installer) log(id, line string) {
 }
 
 // Start 在后台跑一条配方。同一个 agent 同时只允许一条。
+//
+// npm 配方不会并发：第一条直接跑，后面的进队列并推 install.queued。
+// 脚本配方各自独立，仍按原来的方式并行。
 func (in *Installer) Start(id string) {
 	r, ok := agentcatalog.Recipes[id]
 	if !ok || (r.Script == "" && !r.NPM) {
@@ -109,16 +125,59 @@ func (in *Installer) Start(id string) {
 			uimsg.New("install.noRecipe", "这个 agent 没有可用的自动安装配方（请打开官方安装说明）。")))
 		return
 	}
+
 	in.mu.Lock()
 	if _, busy := in.runs[id]; busy {
 		in.mu.Unlock()
 		in.log(id, "已经在安装了。")
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
-	defer cancel()
-	job := &run{cancel: cancel, started: time.Now()}
+	job := &run{}
 	in.runs[id] = job
+	if r.NPM && in.npmActive != "" {
+		job.queued = true
+		in.npmQueue = append(in.npmQueue, id)
+		ahead := len(in.npmQueue) - 1
+		active := in.npmActive
+		in.mu.Unlock()
+		// 先推 queued 再写日志：前端收到日志时已经知道这是排队，不会闪一下
+		// 「安装中」再退回「排队中」。
+		in.emit(map[string]any{
+			"type": "install.queued", "id": id, "source": r.Source,
+			"ahead": ahead, "active": active, "at": time.Now().UnixMilli(),
+		})
+		return
+	}
+	if r.NPM {
+		in.npmActive = id
+	}
+	in.mu.Unlock()
+
+	in.runRecipe(id, r, job)
+}
+
+// runRecipe 是真正执行一条配方的部分。排队项被推进时也走这里。
+func (in *Installer) runRecipe(id string, r agentcatalog.Recipe, job *run) {
+	limit := 20 * time.Minute
+	if r.NPM {
+		// npm 的大包（dsh 这类）在慢网络上会超过 20 分钟；重试会命中缓存，
+		// 但第一次要给它足够的时间走完，不然前面下载的包全白费。
+		limit = 30 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+	if r.NPM {
+		// 无论成功、失败还是超时，都要把队列往前推一格。
+		defer in.npmDone(id)
+	}
+	in.mu.Lock()
+	if job.cancelled {
+		in.mu.Unlock()
+		in.finish(id, false, 0, uimsg.New("install.cancelled", "已取消"), true)
+		return
+	}
+	job.cancel = cancel
+	job.started = time.Now()
 	in.mu.Unlock()
 
 	home := ""
@@ -199,9 +258,51 @@ func (in *Installer) Start(id string) {
 		}
 	}
 	if ctx.Err() == context.DeadlineExceeded {
-		werr = uimsg.New("install.timeout", "安装超时（20 分钟）")
+		minutes := "20"
+		if r.NPM {
+			minutes = "30"
+		}
+		werr = uimsg.NewParams("install.timeout", fmt.Sprintf("安装超时（%s 分钟）", minutes),
+			map[string]string{"minutes": minutes})
 	}
 	in.finish(id, werr == nil, code, werr, cancelled(ctx))
+}
+
+// npmDone 在当前 npm 安装结束后推进队列。只有正在跑的那一条能推进；
+// 取消排队项不会走到这里（Cancel 直接从 npmQueue 摘掉）。
+func (in *Installer) npmDone(id string) {
+	in.mu.Lock()
+	if in.npmActive != id {
+		in.mu.Unlock()
+		return
+	}
+	in.npmActive = ""
+	var nextID string
+	var nextR agentcatalog.Recipe
+	var next *run
+	for len(in.npmQueue) > 0 {
+		candidate := in.npmQueue[0]
+		in.npmQueue = in.npmQueue[1:]
+		job, ok := in.runs[candidate]
+		if !ok || !job.queued {
+			continue
+		}
+		recipe, ok := agentcatalog.Recipes[candidate]
+		if !ok || !recipe.NPM {
+			// 配方表是静态的；真出现缺口就把它从内存里摘掉，别卡住后面的队列。
+			delete(in.runs, candidate)
+			continue
+		}
+		job.queued = false
+		in.npmActive = candidate
+		nextID, nextR, next = candidate, recipe, job
+		break
+	}
+	in.mu.Unlock()
+	if nextID == "" {
+		return
+	}
+	go in.runRecipe(nextID, nextR, next)
 }
 
 func cancelled(ctx context.Context) bool {
@@ -342,15 +443,36 @@ func (in *Installer) retryCatalog(id string) {
 }
 
 // Cancel 先按进程树杀（npm / winget 会再起子进程），再取消 context。
+// 排队中的 npm 任务没有进程，从队列里摘掉并直接推 done。
 func (in *Installer) Cancel(id string) {
 	in.mu.Lock()
 	job := in.runs[id]
-	in.mu.Unlock()
 	if job == nil {
+		in.mu.Unlock()
 		return
 	}
-	if job.pid > 0 {
-		_ = exec.Command("taskkill", "/PID", fmt.Sprint(job.pid), "/T", "/F").Run()
+	if job.queued {
+		delete(in.runs, id)
+		for i, v := range in.npmQueue {
+			if v == id {
+				in.npmQueue = append(in.npmQueue[:i], in.npmQueue[i+1:]...)
+				break
+			}
+		}
+		in.mu.Unlock()
+		in.emit(uimsg.Fields(map[string]any{
+			"type": "install.done", "id": id, "ok": false, "code": 0, "elapsedMs": 0,
+		}, uimsg.New("install.cancelled", "已取消")))
+		return
 	}
-	job.cancel()
+	job.cancelled = true
+	pid := job.pid
+	cancel := job.cancel
+	in.mu.Unlock()
+	if pid > 0 {
+		_ = exec.Command("taskkill", "/PID", fmt.Sprint(pid), "/T", "/F").Run()
+	}
+	if cancel != nil {
+		cancel()
+	}
 }

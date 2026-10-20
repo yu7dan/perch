@@ -708,8 +708,9 @@ function onLocaleChanged() {
   if (typeof renderFeed === "function") renderFeed();
   if (typeof renderNeed === "function") renderNeed();
   if (typeof renderSideLive === "function") renderSideLive();
-  // 安装进度台：标题/阶段/日志开关都是现画的。
-  if (typeof INSTALL !== "undefined" && INSTALL && typeof instPaint === "function") instPaint();
+  // 安装进度台：标题/阶段/日志开关/任务条都是现画的。
+  if (typeof INSTALLS !== "undefined" && Object.keys(INSTALLS).length &&
+      typeof instPaint === "function") instPaint();
   if (typeof renderFlow === "function") renderFlow("locale");
   if (typeof fvRender === "function" && typeof FV !== "undefined" && FV) fvRender();
   // 新建工作区卡片开着时，note/预选标签/等待文案都是 JS 现画的。

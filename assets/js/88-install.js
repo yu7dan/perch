@@ -15,35 +15,58 @@
 let INSTALL_LOG_OPEN = false;
 let INSTALL_TICK = 0;
 
-function instElapsed() {
-  if (!INSTALL) return "";
-  const ms = INSTALL.elapsedMs || (Date.now() - (INSTALL.startedAt || Date.now()));
+function instAll() { return Object.keys(INSTALLS).map((k) => INSTALLS[k]); }
+function instCur() { return INSTALL_AT ? (INSTALLS[INSTALL_AT] || null) : null; }
+function instRunning() { return instAll().some((x) => x.state === "running"); }
+
+function instEnsure(id) {
+  if (INSTALLS[id]) return INSTALLS[id];
+  const m = mg();
+  const a = ((m && m.catalog) || []).find((x) => x.id === id);
+  const it = {
+    id, name: (a && a.name) || id, state: "running", phase: "preparing",
+    source: "", startedAt: Date.now(), lines: [], ahead: 0, active: "",
+    detected: undefined, err: null, elapsedMs: 0,
+  };
+  INSTALLS[id] = it;
+  if (!INSTALL_AT) INSTALL_AT = id;
+  return it;
+}
+
+function instElapsed(it) {
+  if (!it) return "";
+  const ms = it.elapsedMs || (Date.now() - (it.startedAt || Date.now()));
   const s = Math.max(0, Math.floor(ms / 1000));
   return String(Math.floor(s / 60)).padStart(2, "0") + ":" +
          String(s % 60).padStart(2, "0");
 }
 
-function instPhaseText() {
-  if (!INSTALL) return "";
-  if (INSTALL.state === "failed") {
-    return INSTALL.err ? t("inst.failedWith", { err: msgText(INSTALL.err) }) : t("inst.failed");
+function instPhaseText(it) {
+  if (!it) return "";
+  if (it.state === "failed") {
+    return it.err ? t("inst.failedWith", { err: msgText(it.err) }) : t("inst.failed");
   }
-  if (INSTALL.state === "done") {
-    if (INSTALL.detected === true) return t("inst.doneDetected");
-    if (INSTALL.detected === false) return t("inst.doneNotDetected");
+  if (it.state === "done") {
+    if (it.detected === true) return t("inst.doneDetected");
+    if (it.detected === false) return t("inst.doneNotDetected");
     return t("inst.doneRescanned");
   }
-  if (INSTALL.phase === "scanning") return t("inst.phase.scanning");
-  if (INSTALL.phase === "cancelling") return t("inst.phase.cancelling");
-  if (INSTALL.phase === "preparing") return t("inst.phase.preparing");
+  if (it.phase === "queued") {
+    return (it.ahead | 0) > 0
+      ? t("inst.phase.queuedAhead", { n: it.ahead | 0 })
+      : t("inst.phase.queued");
+  }
+  if (it.phase === "scanning") return t("inst.phase.scanning");
+  if (it.phase === "cancelling") return t("inst.phase.cancelling");
+  if (it.phase === "preparing") return t("inst.phase.preparing");
   return t("inst.phase.installing");
 }
 
 function startInstTicker() {
-  if (INSTALL_TICK) clearInterval(INSTALL_TICK);
+  if (INSTALL_TICK) return;
   INSTALL_TICK = setInterval(() => {
-    if (!INSTALL) { clearInterval(INSTALL_TICK); INSTALL_TICK = 0; return; }
-    if (INSTALL.state === "running") instPaint();
+    if (!instRunning()) { stopInstTicker(); return; }
+    instPaint();
   }, 1000);
 }
 
@@ -51,49 +74,74 @@ function stopInstTicker() {
   if (INSTALL_TICK) { clearInterval(INSTALL_TICK); INSTALL_TICK = 0; }
 }
 
-/* 只画进度台，不动名单；名单由 instOpen/instDone 显式重画。 */
+/* 只画进度台，不动名单；名单由 instOpen/instDone 显式重画。
+   顶部任务条只在有两个以上任务时出现：一个任务时它就是原来的面板。 */
 function instPaint() {
-  if (!INSTALL) return;
+  const tasks = instAll();
   const box = $("dash-install");
   if (!box) return;
+  if (!tasks.length) { box.hidden = true; return; }
+  if (!INSTALL_AT || !INSTALLS[INSTALL_AT]) {
+    INSTALL_AT = (tasks.find((x) => x.state === "running") || tasks[0]).id;
+  }
+  const it = INSTALLS[INSTALL_AT];
   box.hidden = false;
-  $("inst-title").textContent = t("inst.title", { name: INSTALL.name });
-  $("inst-source").textContent = INSTALL.source || "CLI";
-  $("inst-state").textContent = instPhaseText();
-  $("inst-time").textContent = instElapsed();
+
+  const strip = $("inst-tasks");
+  if (strip) {
+    strip.hidden = tasks.length < 2;
+    if (tasks.length >= 2) {
+      strip.innerHTML = tasks.map((x) => {
+        const dot = x.state === "done" ? "on" : x.state === "failed" ? "bad" : "running";
+        return `<button type="button" role="tab" class="inst-task${x.id === INSTALL_AT ? " on" : ""}"` +
+          ` aria-selected="${x.id === INSTALL_AT}" data-inst="${esc(x.id)}" title="${esc(x.name)}">` +
+          `<span class="dot ${dot}"></span><span class="nm">${esc(x.name)}</span>` +
+          (x.state === "running" ? "" :
+            `<span class="x" data-instdrop="${esc(x.id)}" title="${esc(t("inst.dismiss"))}">×</span>`) +
+          `</button>`;
+      }).join("");
+    }
+  }
+
+  $("inst-title").textContent = t("inst.title", { name: it.name });
+  $("inst-source").textContent = it.source || "CLI";
+  $("inst-state").textContent = instPhaseText(it);
+  $("inst-time").textContent = instElapsed(it);
   $("inst-dot").className = "dot" +
-    (INSTALL.state === "done" ? " on" : INSTALL.state === "failed" ? " bad" : " running");
+    (it.state === "done" ? " on" : it.state === "failed" ? " bad" : " running");
   const bar = $("inst-bar");
   if (bar) {
     bar.className = "inst-bar" +
-      (INSTALL.state === "failed" ? " bad" : INSTALL.state === "done" ? " ok" : " running");
+      (it.state === "failed" ? " bad" : it.state === "done" ? " ok" : " running");
   }
   const last = $("inst-last");
   if (last) {
-    last.textContent = INSTALL.lines.length
-      ? INSTALL.lines[INSTALL.lines.length - 1]
-      : t("inst.waitingOutput");
+    last.textContent = it.phase === "queued"
+      ? t("inst.queuedWait")
+      : (it.lines.length ? it.lines[it.lines.length - 1] : t("inst.waitingOutput"));
   }
   const log = $("inst-log");
   if (log) log.hidden = !INSTALL_LOG_OPEN;
   const lt = $("inst-log-toggle");
   if (lt) lt.textContent = INSTALL_LOG_OPEN ? t("inst.logHide") : t("inst.logShow");
-  $("inst-cancel").hidden = INSTALL.state !== "running";
-  $("inst-close").hidden = INSTALL.state === "running";
+  $("inst-cancel").hidden = it.state !== "running";
+  $("inst-close").hidden = it.state === "running";
 }
 
-function instLine(line) {
-  if (!INSTALL) return;
+function instLine(id, line) {
+  const it = INSTALLS[id];
+  if (!it) return;
+  it.lines.push(line);
+  if (it.lines.length > 1500) it.lines.splice(0, it.lines.length - 1500);
+  if (id !== INSTALL_AT) return;
   const log = $("inst-log");
-  INSTALL.lines.push(line);
-  if (INSTALL.lines.length > 1500) INSTALL.lines.splice(0, INSTALL.lines.length - 1500);
   if (log) {
     const nearBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 24;
-    log.textContent = INSTALL.lines.join("\n");
+    log.textContent = it.lines.join("\n");
     if (nearBottom) log.scrollTop = log.scrollHeight;
   }
-  if (INSTALL.phase === "preparing") {
-    INSTALL.phase = "running";
+  if (it.phase === "preparing") {
+    it.phase = "running";
     instPaint();
   }
   const last = $("inst-last");
@@ -101,11 +149,12 @@ function instLine(line) {
 }
 
 function instOpen(a) {
-  INSTALL = {
+  INSTALLS[a.id] = {
     id: a.id, name: a.name, state: "running", phase: "preparing",
-    source: "", startedAt: Date.now(), lines: [],
+    source: "", startedAt: Date.now(), lines: [], ahead: 0, active: "",
     detected: undefined, err: null, elapsedMs: 0,
   };
+  INSTALL_AT = a.id;
   INSTALL_LOG_OPEN = false;
   $("inst-log").textContent = "";
   $("inst-log").hidden = true;
@@ -115,24 +164,48 @@ function instOpen(a) {
 }
 
 function instDone(m) {
-  if (!INSTALL || INSTALL.id !== m.id) return;
+  const it = INSTALLS[m.id];
+  if (!it) return;
   // done 里带的新名单先应用：行和进度台在同一个事件里翻过来。
   if (m.catalog && typeof applyMagpie === "function" && MAGPIE) {
     applyMagpie(Object.assign({}, MAGPIE, { catalog: m.catalog }));
   }
-  INSTALL.state = m.ok ? "done" : "failed";
-  INSTALL.phase = INSTALL.state;
-  INSTALL.detected = m.detected;
-  INSTALL.err = m.ok ? null : errMsgOf(m);
-  INSTALL.elapsedMs = m.elapsedMs || (Date.now() - INSTALL.startedAt);
-  if (!m.ok) INSTALL_LOG_OPEN = true;
-  stopInstTicker();
+  it.state = m.ok ? "done" : "failed";
+  it.phase = it.state;
+  it.detected = m.detected;
+  it.err = m.ok ? null : errMsgOf(m);
+  it.elapsedMs = m.elapsedMs || (Date.now() - it.startedAt);
+  it.ahead = 0;
+  if (!m.ok && m.id === INSTALL_AT) INSTALL_LOG_OPEN = true;
+  if (!instRunning()) stopInstTicker();
   instPaint();
   renderDashAgents();
-  if (!m.ok) {
+  if (!m.ok && m.id === INSTALL_AT) {
     const log = $("inst-log");
     if (log) log.scrollTop = log.scrollHeight;
   }
+}
+
+/* 收起一个已完成的任务（×）；运行中的任务只能取消，不能收起。 */
+function instDrop(id) {
+  const it = INSTALLS[id];
+  if (!it || it.state === "running") return;
+  delete INSTALLS[id];
+  if (INSTALL_AT === id) {
+    const rest = instAll();
+    const next = rest.find((x) => x.state === "running") || rest[0];
+    INSTALL_AT = next ? next.id : "";
+  }
+  INSTALL_LOG_OPEN = false;
+  if (!instAll().length) {
+    stopInstTicker();
+    const box = $("dash-install");
+    if (box) box.hidden = true;
+    INSTALL_AT = "";
+  } else {
+    instPaint();
+  }
+  renderDashAgents();
 }
 
 function applyInstall(m) {
@@ -161,22 +234,37 @@ function applyInstall(m) {
     return;
   }
   if (m.type === "install.start") {
-    if (INSTALL && INSTALL.id === m.id) {
-      INSTALL.state = "running";
-      INSTALL.phase = "preparing";
-      INSTALL.source = m.source || "";
-      instPaint();
-    }
+    const it = instEnsure(m.id);
+    it.state = "running";
+    it.phase = "preparing";
+    it.source = m.source || "";
+    it.startedAt = m.at || Date.now();
+    it.ahead = 0;
+    it.active = "";
+    if (m.id === INSTALL_AT) instPaint();
+    renderDashAgents();
+    return;
+  }
+  if (m.type === "install.queued") {
+    const it = instEnsure(m.id);
+    it.state = "running";
+    it.phase = "queued";
+    it.source = m.source || it.source || "";
+    it.ahead = m.ahead | 0;
+    it.active = m.active || "";
+    if (m.id === INSTALL_AT) instPaint();
+    renderDashAgents();
     return;
   }
   if (m.type === "install.log") {
-    instLine(m.line || "");
+    instLine(m.id, m.line || "");
     return;
   }
   if (m.type === "install.phase") {
-    if (INSTALL && INSTALL.id === m.id) {
-      INSTALL.phase = m.phase || INSTALL.phase;
-      instPaint();
+    const it = INSTALLS[m.id];
+    if (it) {
+      it.phase = m.phase || it.phase;
+      if (m.id === INSTALL_AT) instPaint();
     }
     return;
   }
@@ -254,6 +342,17 @@ $("dash-agent-list").addEventListener("keydown", (e) => {
   acOpen(cb.dataset.agentcfg);
 });
 
+// 任务条：点名字切换面板；点 × 收起一个已完成的任务。
+$("inst-tasks").addEventListener("click", (e) => {
+  const x = e.target.closest("[data-instdrop]");
+  if (x) { instDrop(x.dataset.instdrop); return; }
+  const b = e.target.closest("[data-inst]");
+  if (!b) return;
+  INSTALL_AT = b.dataset.inst;
+  INSTALL_LOG_OPEN = !!(INSTALLS[INSTALL_AT] && INSTALLS[INSTALL_AT].state === "failed");
+  instPaint();
+});
+
 $("inst-log-toggle").addEventListener("click", () => {
   INSTALL_LOG_OPEN = !INSTALL_LOG_OPEN;
   instPaint();
@@ -262,17 +361,16 @@ $("inst-log-toggle").addEventListener("click", () => {
 });
 
 $("inst-cancel").addEventListener("click", () => {
-  if (!INSTALL || INSTALL.state !== "running") return;
-  INSTALL.phase = "cancelling";
+  const it = instCur();
+  if (!it || it.state !== "running") return;
+  it.phase = "cancelling";
   instPaint();
-  sendCtrl({ type: "install.cancel", id: INSTALL.id });
+  sendCtrl({ type: "install.cancel", id: it.id });
 });
 
 $("inst-close").addEventListener("click", () => {
-  stopInstTicker();
-  $("dash-install").hidden = true;
-  INSTALL = null;
-  INSTALL_LOG_OPEN = false;
-  renderDashAgents();
+  const it = instCur();
+  if (!it || it.state === "running") return;
+  instDrop(it.id);
 });
 

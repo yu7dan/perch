@@ -535,6 +535,10 @@
          装的是 CLI（配方只有官方 CLI 命令/包名），桌面端不在这里。 -->
     <div class="inst" id="dash-install" hidden>
       <div class="inst-card">
+        <!-- 多任务切换条：同时装几个 CLI 时，每个任务都有自己的状态和日志。
+             只有一个任务时收起来（display:none），保持原来的单任务形态。 -->
+        <div class="inst-tasks" id="inst-tasks" role="tablist"
+             aria-label="Install tasks" data-i18n-aria-label="inst.tasksAria" hidden></div>
         <div class="inst-head">
           <span class="dot" id="inst-dot"></span>
           <b id="inst-title" data-i18n="inst.installShort">安装</b>

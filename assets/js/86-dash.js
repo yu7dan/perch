@@ -582,7 +582,11 @@ function renderDashNeed() {
      · 今天走没走网关 —— magpie 的真实请求数（0 次也是证据）
    每组三列，30px 彩色 logo + 名称 + 厂商/今日流量 + 状态；未安装的**不压暗**
    （压暗会把 logo 一起吞掉）。 */
-let INSTALL = null; // { id, name, state:"running"|"done"|"failed", lines:[] }
+/* 安装台按 agent 分开记：{ [id]: {id,name,state,phase,source,lines,…} }。
+   同时点几个时每个都有自己的状态和日志；INSTALL_AT 只是"现在面板显示哪个"。
+   声明放在这里是因为 86 的名单行要先读它，88-install.js 负责行为。 */
+let INSTALLS = Object.create(null);
+let INSTALL_AT = "";
 
 /* "有没有下载"是用户 2026-10-17 定的分界线：已检测到的按「接没接进 Perch」
    分成两组；没检测到的收进 magpie 那个样式的折叠栏里。
@@ -640,15 +644,18 @@ function renderDashAgents() {
       ? t("dash.agents.detailCli", { vendor: a.vendor || "" })
       : t("dash.agents.detailPath", { path: a.path || a.vendor || "" });
     const calls = (a.calls | 0) > 0 ? t("dash.agents.calls", { n: dashNum(a.calls) }) : "";
-    const busy = INSTALL && INSTALL.id === a.id && INSTALL.state === "running";
+    const inst = INSTALLS[a.id];
+    const busy = inst && inst.state === "running";
     // 没有安装配方 ≠ 桌面应用：这份名单是**使用层**，只认 CLI 能不能装。
     // 没配方就给官方安装说明的出口；桌面客户端属于网关层，由 magpie 管，
     // 不在这份名单里（见 magpie.go 的 agentCatalogDefs 注释）。
     const action = gid === "missing"
       ? (a.install
           ? (busy
-              ? `<span class="st">${esc(typeof INSTALL !== "undefined" && INSTALL && INSTALL.phase === "scanning"
-                  ? t("dash.agents.installScanning") : t("dash.agents.installBusy"))}</span>`
+              ? `<span class="st">${esc(inst.phase === "scanning"
+                  ? t("dash.agents.installScanning")
+                  : inst.phase === "queued" ? t("dash.agents.installQueued")
+                  : t("dash.agents.installBusy"))}</span>`
               : `<button type="button" class="dl" data-install="${esc(a.id)}"` +
                 ` title="${esc(t("dash.agents.installTitle", { name: a.name || "" }))}">${esc(t("dash.agents.install"))}</button>`)
           : a.url

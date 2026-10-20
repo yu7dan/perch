@@ -251,6 +251,25 @@
       background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,0))}
 .inst[hidden]{display:none}
 .inst-card{min-width:0}
+/* 多任务切换条：每个任务一枚小 chip，状态点 + 名字；完成的 chip 带 ×。
+   只同时装几个时出现，单任务仍是原来那条面板。 */
+.inst-tasks{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:0 0 7px}
+.inst-tasks[hidden]{display:none}
+.inst-task{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 6px 0 7px;
+  border:1px solid transparent;border-radius:6px;background:none;color:var(--muted);
+  font-size:10.5px;cursor:pointer;min-width:0;max-width:220px}
+.inst-task:hover{color:var(--fg)}
+.inst-task.on{color:var(--fg);background:rgba(255,255,255,.06);border-color:var(--line)}
+.inst-task .dot{width:6px;height:6px;border-radius:50%;background:var(--faint);flex:none}
+.inst-task .dot.running{background:var(--accent);animation:inst-pulse 1.25s ease-in-out infinite}
+.inst-task .dot.on{background:var(--green)}
+.inst-task .dot.bad{background:var(--red)}
+.inst-task .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inst-task .x{flex:none;color:var(--faint);font-size:11px;line-height:1;padding:0 2px}
+.inst-task .x:hover{color:var(--fg)}
+@media (prefers-reduced-motion:reduce){
+  .inst-task .dot.running{animation:none}
+}
 .inst-head{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);
            min-width:0}
 .inst-head b{color:var(--fg);font-weight:600;white-space:nowrap}
