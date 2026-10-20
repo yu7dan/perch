@@ -31,6 +31,27 @@ func TestSettingsDefaultAgentNormalize(t *testing.T) {
 	}
 }
 
+func TestSettingsLanguageNormalize(t *testing.T) {
+	if got := Defaults().Language; got != "auto" {
+		t.Fatalf("默认语言应是 auto，实际 %q", got)
+	}
+
+	for _, tc := range []struct{ in, want string }{
+		{" EN ", "en"},
+		{"zh", "zh"},
+		{"AUTO", "auto"},
+		{"zh-CN", "auto"}, // 只收三个枚举值；系统语言由前端 auto 解析
+		{"fr", "auto"},
+		{"", "auto"},
+	} {
+		s := Defaults()
+		s.Language = tc.in
+		if got := s.Normalize().Language; got != tc.want {
+			t.Errorf("Language %q 应归一成 %q，实际 %q", tc.in, tc.want, got)
+		}
+	}
+}
+
 func TestNormalizeShortcut(t *testing.T) {
 	tests := []struct {
 		in   string

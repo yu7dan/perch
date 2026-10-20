@@ -52,6 +52,9 @@ type Settings struct {
 	TermFontFamily string `json:"termFontFamily"`
 	// StartView 是下次启动先落在哪："dash" | "workspace"。
 	StartView string `json:"startView"`
+	// Language 是界面语言："auto"（跟随系统）| "en" | "zh"。只影响 Perch
+	// 自己的 UI 文案，不碰 agent 输出，也不改 magpie 页面自己的语言。
+	Language string `json:"language"`
 	// DefaultAgent 是「新开一格」默认用谁；空 = 自动（优先有状态能力的已安装
 	// agent）。存的是 agent id，不是名字 —— 名字会变，id 不会。
 	DefaultAgent string `json:"defaultAgent"`
@@ -72,6 +75,7 @@ func Defaults() Settings {
 		TermFontSize:     14,
 		TermFontFamily:   "cascadia",
 		StartView:        "dash",
+		Language:         "auto",
 		NewAgentShortcut: "Ctrl+Alt+N",
 		ConfirmClose:     true,
 		ConfirmEndAgent:  true,
@@ -104,6 +108,17 @@ func (s Settings) Normalize() Settings {
 		s.StartView = "dash"
 	default:
 		s.StartView = d.StartView
+	}
+	// 语言只收 auto/en/zh；旧设置文件没有这个字段时落回 auto（跟随系统）。
+	switch strings.ToLower(strings.TrimSpace(s.Language)) {
+	case "auto":
+		s.Language = "auto"
+	case "en":
+		s.Language = "en"
+	case "zh":
+		s.Language = "zh"
+	default:
+		s.Language = d.Language
 	}
 	// 只认能启动的 agent id。空串是合法值 = 自动；认不出的（手改配置/卸载了）
 	// 落回自动 —— 别把一个不存在的 agent 当成“设置过”。
@@ -181,6 +196,7 @@ type Patch struct {
 	TermFontSize     *int    `json:"termFontSize,omitempty"`
 	TermFontFamily   *string `json:"termFontFamily,omitempty"`
 	StartView        *string `json:"startView,omitempty"`
+	Language         *string `json:"language,omitempty"`
 	DefaultAgent     *string `json:"defaultAgent,omitempty"`
 	NewAgentShortcut *string `json:"newAgentShortcut,omitempty"`
 	ConfirmClose     *bool   `json:"confirmClose,omitempty"`
@@ -190,8 +206,8 @@ type Patch struct {
 // Empty 表示这条请求什么都没提。
 func (p Patch) Empty() bool {
 	return p.DefaultCWD == nil && p.TermFontSize == nil && p.TermFontFamily == nil &&
-		p.StartView == nil && p.DefaultAgent == nil && p.NewAgentShortcut == nil &&
-		p.ConfirmClose == nil && p.ConfirmEndAgent == nil
+		p.StartView == nil && p.Language == nil && p.DefaultAgent == nil &&
+		p.NewAgentShortcut == nil && p.ConfirmClose == nil && p.ConfirmEndAgent == nil
 }
 
 // Store 是设置文件的持有者。零值不可用；用 Load 构造。
@@ -291,6 +307,9 @@ func (s *Store) Patch(p Patch) (Settings, error) {
 	}
 	if p.StartView != nil {
 		next.StartView = *p.StartView
+	}
+	if p.Language != nil {
+		next.Language = *p.Language
 	}
 	if p.DefaultAgent != nil {
 		v := strings.ToLower(strings.TrimSpace(*p.DefaultAgent))
