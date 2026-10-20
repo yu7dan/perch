@@ -47,7 +47,7 @@ import (
 // 一个事件到达前的猜测。
 //
 // 2026-10-19 Wave 2 又补了**收尾**的一组（Orca 的 managed hook 同一组事件，
-// _ref\orca\fetched\src\main\claude\claude-managed-hook-events.ts:9-72）：
+// src/main/claude/claude-managed-hook-events.ts:9-72）：
 //
 //	PostToolUse / PostToolUseFailure（matcher=*，async）
 //	    工具返回 = 这次等待有结局。没有它，用户答完批准/提问后如果这一轮还

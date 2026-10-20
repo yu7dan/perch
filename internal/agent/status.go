@@ -31,8 +31,8 @@ import (
 // 不要把计划要接的写进来——UI 会把它当成事实。
 // ---------------------------------------------------------------------------
 
-// 内部四态（照 Orca 的 AGENT_STATUS_STATES，_ref\orca\fetched\src\shared\
-// agent-status-types.ts:51-52）。wire 上的 busy/idle/waiting 只留给现有 UI：
+// 内部四态（照 Orca 的 AGENT_STATUS_STATES，src/shared/agent-status-types.ts:51-52）。
+// wire 上的 busy/idle/waiting 只留给现有 UI：
 //
 //	working  在跑
 //	blocked  卡在一个**具体提问**上（有 question 卡片可画；Pi 的 ask 工具、

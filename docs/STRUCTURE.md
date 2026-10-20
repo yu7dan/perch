@@ -9,6 +9,11 @@
 term/
   main.go                  进程入口、ctl 消息分发、PTY 启动
   *.go                     后端按职责分文件（见下）
+  agent_bridge.go          主程序与 internal/agent 之间的窄接口
+  internal/agent/          agent 适配器集合（能力矩阵 / Codex / Pi / OpenCode）
+  cmd/perch-hook/          hook 接收器（单独构建成 perch-hook.exe）
+  tools/hookprobe/         hook / PTY 探针（实测台）
+  tools/jobtest/           Job Object 行为实测台
   assets/
     index.html             唯一页面：DOM 结构 + 按序 defer 的经典脚本
     app.css                应用样式表（主界面）
@@ -16,11 +21,11 @@ term/
     js/                    前端域文件（经典脚本，共享全局作用域）
     js/gw/                 网关页（00-frame：内嵌 magpie 自己的界面）
     agent-icons/           agent / 供应商 / 产品图标（SVG 或 PNG）
-    fonts/                 等宽字体
+    fonts/                 等宽与界面字体
     xterm.js, addon-*.js   xterm 与官方 addon（原样引入）
     magpie.svg             magpie 品牌图标（仅网关页标识使用）
   docs/                    结构说明（本文件）与 README 截图（images/）
-  _tools/                  构建、截图、点击、按键等验证脚本
+  licenses/                第三方许可全文
 ```
 
 ## 前端：为什么是 classic script + defer
@@ -29,7 +34,7 @@ Wails 的运行时是 ESM，而业务代码原来是单文件、顶层 `await`�
 
 1. `index.html` 里先有一个 `type="module"` 的脚本，只做一件事：`import` Wails 运行时并挂到
    `window.__wails`。
-2. 其余 17 个文件都是 `<script defer src="/js/…">` 的**经典脚本**，按顺序执行。
+2. 其余 20 个文件都是 `<script defer src="/js/…">` 的**经典脚本**，按顺序执行。
 3. 它们共享同一个全局词法作用域。`const`/`let`/`function` 在后面的文件里直接可见。
 
 因此：
@@ -38,8 +43,7 @@ Wails 的运行时是 ESM，而业务代码原来是单文件、顶层 `await`�
   （`const` 有 TDZ，函数声明只在**同一个**脚本内提升，不会跨脚本提升）。
 - **经典脚本里不能有顶层 `await`**。需要异步的启动工作放在 `10-term.js` 的 `fontsReady`
   promise 里，或放进末尾的启动 IIFE（`await fontsReady;` 之后）。
-- 每个文件顶部有 `"use strict";` 和一段注释：本文件的域、以及从旧 `app.js` 切出来的源行范围。
-  改完代码后如果行范围失去意义，把注释里的"源行"删掉，别留错误的行号。
+- 每个文件顶部有 `"use strict";` 和一段注释：本文件的域、以及它负责的那一块界面。
 
 ### 文件与归属
 
@@ -50,10 +54,14 @@ Wails 的运行时是 ESM，而业务代码原来是单文件、顶层 `await`�
 | `20-ctl.js` | ctl 控制流、建格请求/应答、冷恢复、`sendCtrl` / `bootFact` | 新的后端消息类型、启动握手 |
 | `30-pages.js` | 并行网格与独立页、标签拖拽、关格/新格、选会话面板、IME 锚点 | 网格布局、页签交互 |
 | `40-chrome.js` | 自绘标题栏、左右栏宽度、终端收起、启动建格、群组看板 | 窗口 chrome、左栏、群组 |
-| `50-ask.js` | AskUserQuestion：选择器、点选项作答、按题跳转 | 提问/权限 UI |
+| `50-ask.js` | AskUserQuestion：选择器、点选项作答、按题跳转 | 提问 UI |
+| `55-perm.js` | 权限框就地作答：读终端里的批准框，点允许 / 拒绝或条件选项 | 权限框的字形与按键/点击映射 |
 | `60-shell.js` | 壳层数据、导航、项目/agent/已关闭行、菜单、重命名、卡片 | 左栏列表与项目池 |
 | `70-flow.js` | 会话卡片 HTML、右下对话流（live/历史）、跟随与折叠 | 对话流渲染 |
 | `80-live.js` | 复接/分叉动作、shell 推送应用、右栏「需要你/改动/流水/子代理」、实时读数 | shell 推送落点 |
+| `81-newspace.js` | 新建工作区卡片：文件夹选择器、Agent 选择、系统选择器回执 | 新建工作区的表单与手势 |
+| `82-file-icons.js` | 文件类型图标表：后缀 / 文件名 / 复合后缀 → 图标（Lucide） | 文件图标选型规则 |
+| `82-files.js` | 右栏「文件」：改动视图、目录树（`fs.list`）、只读预览（`fs.read`） | 文件模块的呈现与浏览 |
 | `83-settings-search.js` | 设置搜索的纯评分函数（节/标题/描述/关键词四档，不碰 DOM） | 搜索匹配规则、评分权重 |
 | `84-settings.js` | 设置页交互（搜索显隐、行、默认目录草稿、单选组方向键 / 漫游 tabindex）、确认框单例 `askConfirm`、关窗确认 | 设置页的行与手势、通用确认框 |
 | `85-dash.js` | 总览（读数、热力图、Agent 名单） | 总览页的任何 UI |
@@ -66,9 +74,9 @@ Wails 的运行时是 ESM，而业务代码原来是单文件、顶层 `await`�
 一条经验：**推送落点（apply\*）只做「把数据放进状态 + 决定重画哪几块」**，具体 HTML 留在对应域的
 文件里。这样"什么时候重画"和"画成什么样"不会缠在一起。
 
-## 图标规则（用户 2026-10-17 定）
+## 图标规则
 
-- **终端面板 / 标签页的身份**用星芒（Claude Code 的官方标记），因为那里代表"agent 终端"这个形态。
+- **终端面板 / 标签页的身份**用星芒，代表"agent 终端"这个形态。
 - **目录、名单、列表、卡片**用各产品的官方图标，从 `assets/agent-icons/` 取。
 - **品牌入口**（网关页的 magpie 标识）用 `magpie.svg`，官方形态。
 - 图标一律用上游现成的 SVG/PNG，**不要手画**，不要用 emoji 顶替。
@@ -79,11 +87,13 @@ Wails 的运行时是 ESM，而业务代码原来是单文件、顶层 `await`�
 | 文件 | 职责 |
 |---|---|
 | `main.go` | 进程入口、ctl 分发、PTY 启动与尺寸握手、窗口、关窗确认钩子 |
+| `agent_bridge.go` | 把 `internal/agent` 的公开类型/构造器接回主程序；提供 Host 实现 |
 | `panes.go` | 格子/会话记录、冷恢复、标题与状态 |
 | `projects.go` | 项目池与归属；默认工作目录的生效值（优先设置，失效回落内置） |
 | `settings.go` | Perch 自己的设置：落盘 `%APPDATA%\Perch\settings.json`、校验与原子写、ctl 增量 |
 | `store.go` | 会话库扫描与持久化 |
 | `transcript.go` | 转录文件跟踪与增量读取 |
+| `files.go` | 文件模块后端：`fs.list` / `fs.read` 的路径护栏、数量与大小上限 |
 | `magpie.go` | magpie 快照、状态、Agent 目录 |
 | `magpie_web.go` | 控制面 sidecar（`magpie web`）的启停、探活、HTTP；更新后按端口认领 re-exec 的进程 |
 | `magpie_update.go` | magpie 本体的版本/更新：转发它自己的 `GET /api/update`、check → install，进度推回前端 |
@@ -93,27 +103,46 @@ Wails 的运行时是 ESM，而业务代码原来是单文件、顶层 `await`�
 | `hooks.go` | hook 接收与 agent 状态 |
 | `resume.go` | `--resume` 计划与证据 |
 | `titles.go` | 左栏命名表 |
-| `status.go` | agent 状态机 |
+| `status.go` | Claude 的状态轮询（登记表这条腿） |
 | `job_windows.go` / `process_windows.go` / `instance_windows.go` | Windows 进程与单实例 |
 | `osc_color.go` / `pty_windows.go` | 终端颜色、ConPTY |
 
-`main.go` 仍然偏大（约 92KB）。下一步可以按 `app / ctl / window / sessions` 再切，但**切之前先
+`main.go` 仍然偏大（约 95KB）。下一步可以按 `app / ctl / window / sessions` 再切，但**切之前先
 确认调用关系**，别为了行数把一件事拆到两个文件里。
+
+### `internal/agent/`
+
+agent 适配器集合：`Def` / `ResumeIntent`、能力矩阵、归一化事件、Codex / Pi / OpenCode
+三种接入方式。主程序通过 `agent.Host` 提供四样宿主能力：绑定会话、写状态、推前端、找 exe。
+细节和「怎么加一个新 agent」见 [internal/agent/README.md](../internal/agent/README.md)。
+
+### `cmd/` 与 `tools/`
+
+| 目录 | 用途 | 构建 / 运行 |
+|---|---|---|
+| `cmd/perch-hook/` | hook 接收器；主程序按固定文件名找它 | `go build -o perch-hook.exe ./cmd/perch-hook` |
+| `tools/hookprobe/` | hook / PTY 探针，用来单独量事件与终端行为 | `go run ./tools/hookprobe` |
+| `tools/jobtest/` | Job Object 的两种子进程行为对照 | `go run ./tools/jobtest` |
 
 ## 改完必须做的事
 
 `assets/` 是 `go:embed` 进 exe 的。**任何 `assets/` 改动都要 `go build` 并且重启进程**，
 否则测的是旧代码（最坏会把真护栏测成"没生效"）。
 
-构建与验证脚本在 `_tools/`：`capture.ps1`（截图）、`z-drive.ps1`（按客户区坐标点击）、
-`keys.ps1`（按键/文本）、`crop.ps1`（放大看像素）。
+## 验证
 
-写操作的沙盒验收（**只测 codex，绝不碰 claude**）：
-`_tools/magpie-sandbox-test.ps1` 用隔离的 `USERPROFILE/APPDATA` + 显式清空
-`CLAUDE_CONFIG_DIR`/`CODEX_HOME` 起一个控制面，写之前先用只读 `/api/state`
-证明看不到 claude，再跑 `agent_cfg_sandbox_test.go` 的整圈
-（接入 → 改字段 → 重应用 → 预览 → 断开）。`install_magpie_sandbox_test.go`
-在隔离的 `LOCALAPPDATA` 里验安装脚本（feed + SHA-256，不执行下载物）。
+```powershell
+go test ./...
+```
+
+真机集成测试默认跳过，需要显式打开：
+
+- `PERCH_CODEX_LIVE=1` → `TestCodexLiveAppServer`（起真实 app-server + TUI）。
+- 写操作沙盒（只测 codex，绝不碰 claude）：用隔离的 `USERPROFILE/APPDATA` + 显式清空
+  `CLAUDE_CONFIG_DIR`/`CODEX_HOME` 起一个控制面，写之前先用只读 `/api/state`
+  证明看不到 claude，再跑 `agent_cfg_sandbox_test.go` 的整圈
+  （接入 → 改字段 → 重应用 → 预览 → 断开）。`install_magpie_sandbox_test.go`
+  在隔离的 `LOCALAPPDATA` 里验安装脚本（feed + SHA-256，不执行下载物）。
 
 ## 两条边界
 
@@ -123,16 +152,15 @@ Wails 的运行时是 ESM，而业务代码原来是单文件、顶层 `await`�
   只做首帧缓存，Go 的载荷一到就以 Go 为准。
 - **使用层只收 CLI agent**：`agentCatalogDefs` 里的条目都有 CLI 可执行名；
   **没有安装配方不等于桌面应用**（ZCode 这类只是还缺配方，给「安装说明」）。
-  网关层的桌面客户端（Claude Desktop、PI-Desktop 等）由 magpie 管理，可以出现在
-  `/api/state` 里；Perch 只透传/只读，不安装、不启动、不写它们的配置文件，也不停止
-  桌面 magpie。
+  网关层的桌面客户端由 magpie 管理，可以出现在 `/api/state` 里；Perch 只透传/只读，
+  不安装、不启动、不写它们的配置文件，也不停止桌面 magpie。
 - API key、账号密钥、提示词原文**不进日志、不回显、不落盘**；供应商表单只把 key 交给 magpie。
 - 网关页**不手写** magpie 的页面：`gwui.go` 在 127.0.0.1 的固定端口段上反代
   它的页面与 `/api/*`，key 由 Go 逐请求注入。本地监听用一次性 token 换 cookie，
   本机其他进程拿不到 token 会得到 403。
 - 内嵌页**只留网关的导航**（供应商 / 路由 / 网关 / 用量 / 插件）：`gwUIEmbed`
   在反代这一层把 `magpie.navLayout` 固定成顶部标签，并隐藏 Agents / Sessions /
-  Library / Settings。那些页面与 Perch 自己的总览、Agent 重复（用户 2026-10-18）。
+  Library / Settings。那些页面与 Perch 自己的总览、Agent 重复。
   不改 magpie 源码，也不写第二份前端。
 - 安装器只在用户**明确点击**后运行；下载物当不可信数据处理，装进 Perch 自己的目录，不就地执行。
 - Agent 配置（总览名单 → 右侧抽屉）**不另存一份**：读 magpie 的 `/api/state`，

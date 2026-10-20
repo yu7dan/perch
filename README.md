@@ -106,7 +106,7 @@ Perch 的使用层只安装、启动 CLI agent；桌面客户端不进终端，�
 
 ```powershell
 go build -o perch.exe .
-go build -o perch-hook.exe ./hookrecv   # ⚠️ hook 接收器：代码里按这个名字找它
+go build -o perch-hook.exe ./cmd/perch-hook   # ⚠️ hook 接收器：代码里按这个名字找它
 .\perch.exe
 ```
 

@@ -6,9 +6,9 @@ package main
 //
 //	读状态 → 接入 → 改字段 → 重新应用 → 断开预览 → 断开还原
 //
-// 默认跳过。由 _tools\magpie-sandbox-test.ps1 带上 PERCH_SANDBOX_* 才跑；
-// 脚本负责建沙盒、起控制面、在写之前用只读 /api/state 证明沙盒里只有
-// codex（出现 claude 就中止），结束后核对并清场。
+// 默认跳过，由外部沙盒脚本带上 PERCH_SANDBOX_* 才跑；脚本负责建沙盒、
+// 起控制面、在写之前用只读 /api/state 证明沙盒里只有 codex（出现 claude 就
+// 中止），结束后核对并清场。
 //
 // 为什么只测 codex：用户的 Claude Code 正在运行，任何写操作都可能换掉它
 // 的网关/模型。codex 是用户明确同意用来测试的。
@@ -85,7 +85,7 @@ func TestAgentSandboxCycle(t *testing.T) {
 		t.Fatalf("端口 %q：%v", portS, err)
 	}
 	if !gwPing(port, key) {
-		t.Fatalf("沙盒控制面 127.0.0.1:%d 没起来（先跑 _tools\\magpie-sandbox-test.ps1）", port)
+		t.Fatalf("沙盒控制面 127.0.0.1:%d 没起来（先让沙盒脚本起一个隔离控制面）", port)
 	}
 	// 直接指向沙盒：client 非空且 ping 通，gwEnsure 就不会去拉起任何进程。
 	gwConn = gwServer{port: port, key: key, client: gwClient()}

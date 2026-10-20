@@ -164,8 +164,10 @@ func main() {
 	// ── 阶段 1：SessionStart ────────────────────────────────────────
 	fmt.Println("---- 等 SessionStart ----")
 	if !waitFor("SessionStart", 30*time.Second, func() bool { return strings.Contains(events(), "SessionStart") }) {
-		fmt.Println("---- 事件文件 ----");  fmt.Println(events())
-		fmt.Println("---- 屏幕 ----"); fmt.Println(visibleTail(3000))
+		fmt.Println("---- 事件文件 ----")
+		fmt.Println(events())
+		fmt.Println("---- 屏幕 ----")
+		fmt.Println(visibleTail(3000))
 		return
 	}
 

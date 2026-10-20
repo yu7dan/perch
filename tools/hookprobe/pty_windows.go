@@ -79,8 +79,8 @@ func (p *ptySession) Write(b []byte) (int, error) {
 	defer p.wmu.Unlock()
 	return p.cpty.Write(b)
 }
-func (p *ptySession) Close() error                { return p.cpty.Close() }
-func (p *ptySession) Pid() int                    { return p.cpty.Pid() }
+func (p *ptySession) Close() error { return p.cpty.Close() }
+func (p *ptySession) Pid() int     { return p.cpty.Pid() }
 func (p *ptySession) Wait(ctx context.Context) (uint32, error) {
 	return p.cpty.Wait(ctx)
 }

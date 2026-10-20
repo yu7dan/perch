@@ -11,7 +11,8 @@
 //
 // 任何失败都必须静默 exit 0：hook 挂掉可以丢事件，但绝不能拖住 agent 的轮次。
 // （实测的 stdout 契约：SessionStart 的 exit-0 stdout **会进模型上下文**，
-//  Stop/Notification 的不显示；exit 2 在 Stop 上反而是"唤醒模型继续对话"。）
+//
+//	Stop/Notification 的不显示；exit 2 在 Stop 上反而是"唤醒模型继续对话"。）
 package main
 
 import (

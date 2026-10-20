@@ -1,21 +1,21 @@
 // jobtest —— 把 job_windows.go 里那两条"引自 Orca 的断言"在我们这台机器上量一遍。
 //
-// 为什么要单开一个程序（照本仓库 hookprobe 的先例，同模块的子目录）：这两条断言
+// 为什么要单开一个程序（照本仓库 tools/hookprobe 的先例，同模块的子目录）：这两条断言
 // 只能在一个**自己已经在 job 里**的进程上验，而主程序不是能随手改参数的实验台。
 // 这个程序干的事和 C3 开头那段一模一样（建 job、挂自己），然后往上面扔两种子进程。
 //
-//	go run ./jobtest           # 照 C3：KILL_ON_JOB_CLOSE | BREAKAWAY_OK
-//	go run ./jobtest -nobreak  # C3 的第一版：只设 KILL_ON_JOB_CLOSE
+//	go run ./tools/jobtest           # 照 C3：KILL_ON_JOB_CLOSE | BREAKAWAY_OK
+//	go run ./tools/jobtest -nobreak  # C3 的第一版：只设 KILL_ON_JOB_CLOSE
 //
 // 判据（父进程退出后由外面数）：
 //
-//	 ① plain 子进程必须死 —— job 的 kill-on-close 生效；
-//	 ② breakaway 子进程（显式 CREATE_BREAKAWAY_FROM_JOB）在带 BREAKAWAY_OK 时
-//	    **起得来**、父进程死后**还活着** —— 这就是「在 Windows Terminal 里打开」
-//	    那条路靠的东西（main.go 的 openInWindowsTerminal），也是那个标志存在的理由；
-//	 ③ 换成 -nobreak：同一个 breakaway 子进程**根本起不来**（CreateProcess 直接
-//	    ERROR_ACCESS_DENIED）。这一条是"不能只留 KILL_ON_JOB_CLOSE"的实证 ——
-//	    没有它，工具链里任何一个显式请求脱离的进程都会静默失败。
+//	① plain 子进程必须死 —— job 的 kill-on-close 生效；
+//	② breakaway 子进程（显式 CREATE_BREAKAWAY_FROM_JOB）在带 BREAKAWAY_OK 时
+//	   **起得来**、父进程死后**还活着** —— 这就是「在 Windows Terminal 里打开」
+//	   那条路靠的东西（main.go 的 openInWindowsTerminal），也是那个标志存在的理由；
+//	③ 换成 -nobreak：同一个 breakaway 子进程**根本起不来**（CreateProcess 直接
+//	   ERROR_ACCESS_DENIED）。这一条是"不能只留 KILL_ON_JOB_CLOSE"的实证 ——
+//	   没有它，工具链里任何一个显式请求脱离的进程都会静默失败。
 package main
 
 import (

@@ -293,7 +293,7 @@ svg{display:block;flex:none}
 #settings{grid-column:2 / -1;grid-row:2;display:none;flex-direction:column;
           position:relative;z-index:6;min-width:0;min-height:0;background:var(--bg);
           /* 最外 4px 留给窗口缩放边：设置页的滚动条不能压在边框上，
-             否则右沿拖不动（见 MEMORY frameless-resize-border-vs-dom）。 */
+             否则右沿拖不动（判据要真按真拖比 GetWindowRect，别用合成 WM_NCHITTEST）。 */
           margin-right:4px}
 #app.settings #settings{display:flex}
 
@@ -1062,7 +1062,7 @@ svg{display:block;flex:none}
    的计数角标，`min-width:14px;height:14px`）。我第一次就叫了它，于是这颗点
    被撑成 `14px × 6px` 的**橙药丸**压在标题上 —— 类名撞车是静默的：CSS 全都在，
    就是这几十个像素长错了。诊断靠的是探针读数（`左栏首行图标 … 角标槽=… 14x6`），
-   不是眼睛（同一个坑的另一种形态见 MEMORY 里 `borrowed-graphics-need-a-name-translation`）。 */
+   不是眼睛（同一个坑的另一种形态：搬来的图形沿用了对方的枚举名，规则会静默不生效）。 */
 .ricon .adot-slot{position:absolute;left:100%;bottom:-2px;width:6px;height:6px;
   pointer-events:none}
 .ricon .adot-slot .adot{width:6px;height:6px;background:transparent;box-shadow:none}
@@ -1128,7 +1128,7 @@ svg{display:block;flex:none}
    和 `.wc-glyph.off` 用的都是 `off` 这个类名，一条通用规则会把右栏整块抹掉。 */
 
 /* 池子读不出来时的横幅。**不做隐** —— 那会让人以为"项目都没了"（不可用的动作
-   做灰、做说明，不做隐，见 MEMORY）。 */
+   做灰、做说明，不做隐）。 */
 .poolerr{margin:0 10px 8px;padding:7px 9px;border-radius:var(--r-sm);
   background:#2b2418;border:1px solid #3d3320;color:#e8c98a;font-size:11.5px;line-height:1.5}
 /* 空态里那颗带字的按钮（「添加项目」）。左栏里只有它一个文字按钮 ——
@@ -2016,8 +2016,8 @@ svg{display:block;flex:none}
 
 /* 「它在等你答」——照 Orca 的 AwaitingInputRow：**两态同一行**，等待态和已答态
    长在同一个位置，答完之后那句话还在（能选中复制）。
-   ⚠️ 选项**能点**，但点它 = 往那一格的 PTY 写一个按键（实测：数字键直选，见记忆
-   claude-code-ask-picker-keys），所以它长得**仍然像一份可读的清单**、不像一排按钮：
+   ⚠️ 选项**能点**，但点它 = 往那一格的 PTY 写一个按键（实测：数字键直选，不需要回车），
+   所以它长得**仍然像一份可读的清单**、不像一排按钮：
    群里读的是"有哪些方案"，多一排按钮会把清单读成表单。可点这一件事由一个 hover
    说，外加 title 里那句"替你在这一格里按下 3"。 */
 /* 这张卡现在长在**行里**（不再是展开出来的那段流里）⇒ 左边缩进与第 ②③ 行对齐

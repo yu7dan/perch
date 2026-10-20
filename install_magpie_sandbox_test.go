@@ -9,8 +9,8 @@ package main
 //   - SHA-256 与 feed 一致，落盘的是 PE 文件
 //   - 脚本**不执行**下载物
 //
-// 默认跳过；由 _tools\magpie-install-sandbox.ps1 带上 PERCH_INSTALL_SANDBOX
-// 才跑。测试结束后文件保留在沙盒里，供 agent 链路测试当控制面用。
+// 默认跳过；由外部沙盒脚本带上 PERCH_INSTALL_SANDBOX 才跑。测试结束后文件
+// 保留在沙盒里，供 agent 链路测试当控制面用。
 
 import (
 	"bytes"

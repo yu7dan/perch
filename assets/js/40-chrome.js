@@ -907,7 +907,7 @@ function setTermCollapsed(on) {
 
 /* 收起期间那颗「展开右栏」会被 setRsbOpen 显形，而这时候右栏是被**我们**强制
    关着的 —— 点它会当场打架。按本仓立过的规矩（**不可用的动作做灰、不做禁、
-   不做隐**，见 MEMORY）：灰掉 + 说清原因 + 点击 no-op。
+   不做隐**）：灰掉 + 说清原因 + 点击 no-op。
    留着它还有个好处：.tabs-right 的布局不动，收起键的位置不跳。 */
 function rsbPaintOpen() {
   const b = $("rsb-open");

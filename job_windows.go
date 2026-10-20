@@ -56,7 +56,7 @@ package main
       宁可留一条**明说过的**缝：显式脱离的进程活得下来（那也是今天的现状），
       也不要让正常的进程起不来。
 
-      这一条不是照抄 —— `go run ./jobtest`（同模块里的实测台）在本机量过：
+      这一条不是照抄 —— `go run ./tools/jobtest`（同模块里的实测台）在本机量过：
         · `-nobreak`（只设 KILL_ON_JOB_CLOSE）→ 显式脱离的子进程
           `起不来: fork/exec C:\Windows\system32\cmd.exe: Access is denied.`
         · 照本文件（`|BREAKAWAY_OK`，实测 flags=0x2800）→ 它起得来、能在成员清单里
@@ -101,7 +101,7 @@ package main
       成员清单里没有刚起来的 claude。**"挂上了"和"系统说挂上了"是两件事**，
       所以复核这一步（问内核要成员清单）不是装饰，是它把 bug 抓出来的。
 
-   5. **断言单独量过一遍**：`go run ./jobtest`（同模块子目录，照 hookprobe 的先例）
+   5. **断言单独量过一遍**：`go run ./tools/jobtest`（同模块子目录，照 tools/hookprobe 的先例）
       是个只干"建 job、挂自己、扔两种子进程"的实验台，用来量文件头 ② 和边界里
       那两条引自 Orca 的话（带 / 不带 BREAKAWAY_OK 的对照）。改这里之前先跑它。
 
@@ -112,7 +112,7 @@ package main
        ⚠️ 这一条是**照 Orca 记的，我们没有量过**：本机没装 Git for Windows
        （实测 `C:\Program Files\Git\bin\bash.exe` 不存在，而 claude 的 `!` 走的也是
        PowerShell —— `sleep 400 &` 那次报的就是 PowerShell 不认 `&`），所以这类进程
-       眼下压根不会出现。等哪台机器上装了 Git Bash，要用 `go run ./jobtest` 那一路
+       眼下压根不会出现。等哪台机器上装了 Git Bash，要用 `go run ./tools/jobtest` 那一路
        法子重新量一遍，别把这条注释当结论。
      · 「在 Windows Terminal 里打开」（main.go 的 openInWindowsTerminal）是**交出去**，
        所以那边显式带 CREATE_BREAKAWAY_FROM_JOB —— 正是上面那个标志让它成为可能。

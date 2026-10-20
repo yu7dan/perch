@@ -17,7 +17,7 @@
  * 2026-10-19（Wave 1）：除了 ui_prompt_*，还认提问工具本身。Orca 的 Pi 归一化
  * 把 `tool_call`/`tool_execution_start` 上的提问工具记成 blocked（有具体问题
  * 卡片），把 ui_prompt_start 记成 waiting（泛化等待），见
- * _ref\orca\fetched\src\shared\agent-hook-listener\providers\pi-family-events.ts:58-94。
+ * src/shared/agent-hook-listener/providers/pi-family-events.ts:58-94。
  * 这里用同一个分法：工具 → blocked，ui prompt → waiting。
  */
 

@@ -16,22 +16,18 @@
 !/LICENSE
 !/licenses/
 
-# --- Go 源码（模块根 + agent 适配器集合 + 工具子目录）---
+# --- Go 源码（模块根 + agent 适配器集合 + 命令行工具）---
 !/go.mod
 !/go.sum
 !/*.go
 !/internal/
-# ⚠️ 这三行**不许在行尾写注释**：gitignore 里只有行首的 # 是注释，
-#    行尾的 # 会被当成模式的一部分（那样放行就静默失效，git status 里少三个目录）。
-!/hookrecv/
-!/hookprobe/
-!/jobtest/
+# ⚠️ 下面两行**不许在行尾写注释**：gitignore 里只有行首的 # 是注释，
+#    行尾的 # 会被当成模式的一部分（那样放行就静默失效）。
+!/cmd/
+!/tools/
 
 # --- 前端（没有打包器：一个 index.html + 资产，go:embed 直接进二进制）---
 !/assets/
-
-# --- Pi 观察扩展（go:embed 进二进制，启动时释放到 %APPDATA%\Perch\pi-ext）---
-!/pi/
 
 # --- 结构说明（docs/STRUCTURE.md：模块边界、图标规则、改动后必须重建）---
 !/docs/
