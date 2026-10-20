@@ -26,20 +26,10 @@ func startMagpieWatcher(push func(any)) {
 	gw.StartWatcher()
 }
 
-func gwConnect()             { gw.Connect() }
-func gwStop()                { gw.Stop() }
-func gwRefresh()             { gw.Refresh() }
-func gwProbe()               { gw.Probe() }
-func gwUIStart()             { gw.StartUI() }
-func gwMagpieUpdateGet()     { gw.MagpieUpdateGet() }
-func gwMagpieUpdateInstall() { gw.MagpieUpdateInstall() }
-func gwAgentState()          { gw.AgentState() }
-func gwAgentPrefetch()       { gw.AgentPrefetch() }
-func gwAgentDrift()          { gw.AgentDrift() }
-
-func gwAgentSet(id, field, value string) { gw.AgentSet(id, field, value) }
-func gwAgentAction(op, id string)        { gw.AgentAction(op, id) }
-func gwAgentPreview(id string)           { gw.AgentPreview(id) }
+func gwConnect() { gw.Connect() }
+func gwStop()    { gw.Stop() }
+func gwProbe()   { gw.Probe() }
+func gwUIStart() { gw.StartUI() }
 
 func gwUIHandler(assets http.Handler) http.Handler { return gw.UIHandler(assets) }
 

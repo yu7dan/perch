@@ -27,7 +27,3 @@ var installer = install.New(install.Deps{
 		}
 	},
 })
-
-func startAgentInstall(id string) { installer.Start(id) }
-
-func cancelAgentInstall(id string) { installer.Cancel(id) }

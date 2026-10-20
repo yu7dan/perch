@@ -2,18 +2,12 @@ package main
 
 // 会话层的旧名字接缝：实现在 internal/session，root 在 6b 收掉。
 
-import (
-	"strings"
-
-	"github.com/yu7dan/perch/internal/session"
-)
+import "github.com/yu7dan/perch/internal/session"
 
 type spawnSpec = session.SpawnSpec
 type tabHost = session.Tab
 type tabManager = session.Manager
-type tabView = session.LiveTab
 type titleStore = session.TitleStore
-type refusal = session.Refusal
 type startError = session.StartError
 
 const (
@@ -40,9 +34,6 @@ func newSessionManager() *tabManager {
 	})
 }
 
-// resumeRefusal 返回 nil = 放行。
-func resumeRefusal(spec spawnSpec) *refusal { return tabs.ResumeRefusal(spec) }
-
 // sessionFileExistsFor 是冷恢复/续接护栏的 agent 分派口。
 func sessionFileExistsFor(agentName, cwd, id string) bool {
 	return tabs.SessionFileExistsFor(agentName, cwd, id)
@@ -60,21 +51,4 @@ func hookEventCount() int { return len(session.HookEventTypes) }
 // applyRename 把标签上的改名落到会话（pid → sessionId 反查在 session 里）。
 func applyRename(stateDir string, titles *titleStore, pid int, name string) {
 	session.ApplyRename(stateDir, titles, pid, name)
-}
-
-// short 把 uuid 截成前 8 位 —— 日志里只要"能对上"就够，整条 uuid 是噪音。
-func short(s string) string {
-	if len(s) <= 8 {
-		return s
-	}
-	return s[:8]
-}
-
-// clip 截断长文本，并把换行压成可见记号（否则一行日志会被撑成很多行）。
-func clip(s string, n int) string {
-	r := []rune(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", " "), "\n", " "))
-	if len(r) <= n {
-		return string(r)
-	}
-	return string(r[:n]) + "…"
 }
