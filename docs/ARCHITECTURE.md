@@ -18,6 +18,7 @@ perch/
 │   ├── agentcatalog/         身份、元数据、安装配方、LaunchIDs、Defs()、Cards()
 │   ├── appdir/               Perch 配置目录、Claude 状态根、Documents\Perch
 │   ├── ctl/                  ctl 协议、按域拆分的 handlers、ShellPayload、关窗守卫
+│   ├── dsh/                  DeepSeek Harness 的 dsh-tui profile / 官方 hook 桥接入
 │   ├── files/                只读 fs.list / fs.read 与路径护栏
 │   ├── gateway/              magpie 快照/客户端/更新/内嵌页反代/Agent 接线
 │   ├── history/              Claude 会话索引、活动、历史尾部
@@ -46,7 +47,7 @@ perch/
 
 ```
 cmd/perch ──> ctl, stream, gateway, session, project, settings,
-              install, history, agentcatalog, agent, winproc, term,
+              install, history, agentcatalog, agent, dsh, winproc, term,
               panes, transcript, appdir
 ctl        ──> session, project, settings, gateway, install, files,
                 history, agentcatalog, uimsg
@@ -57,8 +58,9 @@ gateway    ──> agentcatalog, appdir, uimsg
 install    ──> agentcatalog, winproc, appdir, uimsg
 project    ──> settings, history, appdir, uimsg
 settings   ──> agentcatalog（只用静态 Has / LaunchIDs，不调 Defs()）, uimsg
-agentcatalog ──> agent, winproc, appdir
+agentcatalog ──> agent, dsh, winproc, appdir
 agent      ──> winproc
+dsh        ──> winproc
 uimsg      ──> 标准库
 叶子：panes, history, files, term, uimsg, winproc, appdir
 ```
@@ -107,7 +109,9 @@ uimsg      ──> 标准库
 5. 建格：`tab.new` → `session.Create` → Wails 流 → `stream.Serve` 首帧尺寸握手 →
    `session.StartTab` 起 ConPTY；读循环只有一条，`Send` 前复制字节。
 6. 状态三条腿：转录（磁盘 JSONL）、hook（`perch-hook.exe` 落盘）、屏幕（终端缓冲）。
-   三者互相印证，不单独下结论。
+   三者互相印证，不单独下结论。hook 有两个生产者：Claude 的 `--settings` 每格一份；
+   DSH 的官方桥是全局一份，接收器按环境变量 `PERCH_AGENT_PANE` 分流到同一个
+   `hook-events/t<N>.jsonl`（变量名不含 KEY/TOKEN，避免被 DSH 的 shell 剥掉）。
 
 启动顺序里每一条都是实测/源码约束（titles 先于 settings、settings 先于 project、锁先于
 panes、Job Object 早于 Wails/PTY、watcher 先同步扫一次再 Probe、`WindowClosing` 先 flush

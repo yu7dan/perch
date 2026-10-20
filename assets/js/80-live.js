@@ -863,11 +863,22 @@ function adoptSession(t, session, why) {
   seedTabTitles();
 }
 
+/* 工具名归一化（Orca agent-question-answered-intent.ts:19-22）：
+   Claude 用 AskUserQuestion，dsh/Pi 用 ask_user_question，Codex 用
+   request_user_input。去掉非字母数字后比较，别按某一家的大小写写死。 */
+function isAskUserQuestionToolName(name) {
+  const n = (name || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return n === "askuserquestion" || n === "requestuserinput";
+}
+
 function applyHook(m) {
   const tab = m.tab | 0;
   if (tab <= 0) return;                     // 对比窗口（wt）不是格子，不进这一列
   const t = liveTab(tab);
   if (!t) return;
+  // dsh 的 hook 形状和 Claude 一样（官方桥），但没有登记表/HTTP 那条腿：
+  // 所以它的 working/idle 必须由 hook 直接写入，不能等 700ms 轮询纠偏。
+  const isDsh = (m.agentType || "") === "dsh";
   /* 新格"还没开始"的门：除 SessionStart 外的任何 hook 都是活证据
      （用户发了提示 / 批准框 / 工具调用 / Stop …）。SessionStart 只是新进程的
      开场白，不代表用户派了活，所以不算。门一关就永久收起换 Agent 的入口。 */
@@ -893,6 +904,13 @@ function applyHook(m) {
     case "Stop":
       // 这轮结束了：hook 记下的“在等你”随之作废（理由见 leaveWaitingFromHook）。
       leaveWaitingFromHook(t, v, "hook Stop：这轮结束");
+      // dsh 没有登记表：Stop 是唯一可靠的“这一轮完了”信号。
+      if (isDsh) {
+        v.st = "idle";
+        v.state = "done";
+        v.evidence = "hook";
+        v.wait = null;
+      }
       // 只看没看着它。看着它跑完不是新闻（那是你等的结果，不是"有事找你"）。
       if (!watched) v.note = { kind: "stop", text: m.last || "", at };
       break;
@@ -930,26 +948,41 @@ function applyHook(m) {
       // 批准框出现。这是 perm 等待的第一手证据（比 Notification 早得多），
       // 带 tool_name。新版 Claude 也可能用它报 AskUserQuestion —— 那要算提问
       // （blocked + “在等你回答”），不能一律按批准框算。
-      const kind = m.tool === "AskUserQuestion" ? "ask" : "perm";
+      const kind = isAskUserQuestionToolName(m.tool) ? "ask" : "perm";
       enterWaitingFromHook(t, v, kind, m.tool || "", "PermissionRequest", m.tid, m.agent);
       break;
     }
-    case "PreToolUse":
-      // 只订阅了 AskUserQuestion（matcher 写死在 --settings 里）。这里再判一次
-      // 工具名：旧 --settings（订阅表是启动时写死的）万一送来别的工具，不能
-      // 把一次普通工具调用记成“在等你提问”。
-      if (!m.tool || m.tool === "AskUserQuestion") {
+    case "PreToolUse": {
+      // Claude 的订阅只收 AskUserQuestion（matcher 写死在 --settings 里）；
+      // dsh 的桥没有 matcher，所有工具都会来 —— 只有 ask_user_question 是
+      // “卡在等你”，其余是普通工具，按 working 处理（Orca 的 dsh-events.ts
+      // 同一口径；批准没有 hook，读成 working 是诚实答案）。
+      const ask = isAskUserQuestionToolName(m.tool);
+      if (ask || (!isDsh && (!m.tool || m.tool === "AskUserQuestion"))) {
         enterWaitingFromHook(t, v, "ask", m.tool || "", "PreToolUse", m.tid, m.agent);
+      } else if (isDsh) {
+        v.st = "busy";
+        v.state = "working";
+        v.evidence = "hook";
+        v.wait = null;
       }
       break;
+    }
     /* —— Wave 2 的收尾信号（Orca managed hook 同一组，见 hooks.go 文件头）——
        没有它们，「在等你」只能等 Stop 才销：用户答完批准后这一轮可能还要跑
        好几分钟，期间右栏一直挂着一条已经解决了的等待。 */
     case "UserPromptSubmit":
       // 用户又发了提示 ⇒ 之前那条等待一定已经是旧账。
-      // 不在这里置 busy：/compact 的续跑提示也会走这个事件（Orca 直接忽略它），
-      // 而登记表 700ms 内会报出真实的 busy。
+      // Claude 不在这里置 busy：/compact 的续跑提示也会走这个事件（Orca 直接
+      // 忽略它），而登记表 700ms 内会报出真实的 busy。dsh 没有登记表，事件
+      // 就是它唯一的忙信号。
       leaveWaitingFromHook(t, v, "hook UserPromptSubmit：用户发了新提示");
+      if (isDsh) {
+        v.st = "busy";
+        v.state = "working";
+        v.evidence = "hook";
+        v.wait = null;
+      }
       break;
     case "PostToolUse":
     case "PostToolUseFailure": {
@@ -987,8 +1020,16 @@ function applyHook(m) {
       // 新会话（含 /clear、/compact）⇒ 之前那条"等你"作废。
       v.note = null;
       v.wait = null;
-      v.state = "";
-      v.evidence = "";
+      if (isDsh) {
+        // dsh 没有登记表：新建/续接出来的会话先落到 idle，别让上一格的
+        // busy 一直挂着。SessionStart 不是 turn-end，但这里没有别的收尾腿。
+        v.st = "idle";
+        v.state = "done";
+        v.evidence = "hook";
+      } else {
+        v.state = "";
+        v.evidence = "";
+      }
       break;
     case "SessionEnd":
       v.note = null;
@@ -997,6 +1038,9 @@ function applyHook(m) {
       v.evidence = "";
       break;
     case "SubagentStart": case "SubagentStop": {
+      // Orca 对 dsh 直接忽略这两个事件：官方桥把子会话的 session id 当成
+      // 事件主体，子代理活动会把主格子翻回 working（dsh-events.ts:38-44）。
+      if (isDsh) break;
       // 钩子给的是 agent_id + agent_type，转录那边给的 Agent 工具调用里有**描述**
       // 和结果。两边靠 agentId 对得上（Go 侧填进 ActItem.Agent），
       // 所以这里只存 id/type，展示时去和流水 join —— 谁的信息更全就用谁的。

@@ -649,23 +649,38 @@ function renderDashAgents() {
     // 没有安装配方 ≠ 桌面应用：这份名单是**使用层**，只认 CLI 能不能装。
     // 没配方就给官方安装说明的出口；桌面客户端属于网关层，由 magpie 管，
     // 不在这份名单里（见 magpie.go 的 agentCatalogDefs 注释）。
-    const action = gid === "missing"
-      ? (a.install
-          ? (busy
-              ? `<span class="st">${esc(inst.phase === "scanning"
-                  ? t("dash.agents.installScanning")
-                  : inst.phase === "queued" ? t("dash.agents.installQueued")
-                  : t("dash.agents.installBusy"))}</span>`
-              : `<button type="button" class="dl" data-install="${esc(a.id)}"` +
-                ` title="${esc(t("dash.agents.installTitle", { name: a.name || "" }))}">${esc(t("dash.agents.install"))}</button>`)
-          : a.url
-            ? `<button type="button" class="dl" data-docs="${esc(a.id)}"` +
-              ` title="${esc(t("dash.agents.docsTitle", { name: a.name || "" }))}">${esc(t("dash.agents.docs"))}</button>`
-            : "")
-      : c.launch
-        ? `<button type="button" class="dl" data-launch="${esc(a.id)}"` +
-          ` title="${esc(t("dash.agents.openTitle", { name: a.name || "" }))}">${esc(t("dash.agents.open"))}</button>`
+    const busySpan = busy
+      ? `<span class="st">${esc(inst.phase === "scanning"
+          ? t("dash.agents.installScanning")
+          : inst.phase === "queued" ? t("dash.agents.installQueued")
+          : t("dash.agents.installBusy"))}</span>`
+      : "";
+    const installBtn = a.install
+      ? (busy
+          ? busySpan
+          : `<button type="button" class="dl" data-install="${esc(a.id)}"` +
+            ` title="${esc(t("dash.agents.installTitle", { name: a.name || "" }))}">${esc(t("dash.agents.install"))}</button>`)
+      : a.url
+        ? `<button type="button" class="dl" data-docs="${esc(a.id)}"` +
+          ` title="${esc(t("dash.agents.docsTitle", { name: a.name || "" }))}">${esc(t("dash.agents.docs"))}</button>`
         : "";
+    /* “只启动”那一类如果 Perch 知道怎么补状态（目前是 dsh），就在这里给一个
+       明确的入口。它和「打开」并排：点打开仍然只是开格，点接入状态才动用户
+       的 DSH 配置 —— 两个动作不混。 */
+    const setupBtn = (gid !== "missing" && a.setup && !busy)
+      ? `<button type="button" class="dl" data-setup="${esc(a.id)}"` +
+        ` title="${esc(t("dash.agents.setupTitle", { name: a.name || "" }))}">${esc(t("dash.agents.setup"))}</button>`
+      : "";
+    const openBtn = c.launch
+      ? `<button type="button" class="dl" data-launch="${esc(a.id)}"` +
+        ` title="${esc(t("dash.agents.openTitle", { name: a.name || "" }))}">${esc(t("dash.agents.open"))}</button>`
+      : "";
+    const action = gid === "missing"
+      ? installBtn
+      : c.launch
+        ? (busy && a.setup ? busySpan : setupBtn + openBtn)
+        // 已安装但还起不来：给安装配方一个出口（dsh 就是缺 dsh-tui profile）。
+        : installBtn;
     const stTitle = gid === "missing"
       ? t("dash.agents.stTitleMissing")
       : c.waiting

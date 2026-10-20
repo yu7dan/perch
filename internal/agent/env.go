@@ -38,10 +38,18 @@ var envBlocked = map[string]bool{
 // 从外面传进来，因为这个函数不该知道有几个 agent。
 func BuildEnv(extra map[string]string) []string {
 	parent := os.Environ()
+	// Windows 的环境变量名**大小写不敏感**：父进程里有 `Path`，extra 里再塞
+	// 一条 `PATH` 不会覆盖它，两个键都会传下去，最后用哪条取决于接收方。
+	// 表现是“我们明明加了 PATH，子进程还是找不到 node/npm”。所以 extra 里
+	// 出现的键要先从父环境里按大小写不敏感地删掉。
+	extraKeys := make(map[string]bool, len(extra))
+	for k := range extra {
+		extraKeys[strings.ToUpper(k)] = true
+	}
 	out := make([]string, 0, len(parent)+len(extra)+8)
 	for _, e := range parent {
 		k, _, _ := strings.Cut(e, "=")
-		if strings.HasPrefix(k, "CLAUDE") || envBlocked[strings.ToUpper(k)] {
+		if strings.HasPrefix(k, "CLAUDE") || envBlocked[strings.ToUpper(k)] || extraKeys[strings.ToUpper(k)] {
 			continue
 		}
 		out = append(out, e)

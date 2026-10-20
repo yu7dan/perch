@@ -180,6 +180,18 @@ func (m *Manager) Drop(id int) {
 	delete(m.tabs, id)
 }
 
+// AgentForTab 返回这一格启动时选的 agent id。hook 事件归一化要用它：
+// dsh 的 PreToolUse 和 Claude 的语义不同（dsh 的普通工具也算 working），
+// 不能只看事件名。
+func (m *Manager) AgentForTab(tab int) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if h := m.tabs[tab]; h != nil {
+		return h.Spec.Agent
+	}
+	return ""
+}
+
 // PaneIDFor：运行期的 tab id → **跨重启**的 paneId（登记表的身份）。
 func (m *Manager) PaneIDFor(tab int) int {
 	m.mu.Lock()
@@ -203,6 +215,7 @@ func (m *Manager) SetPID(id, pid int) {
 // 不和收包循环抢，也不用让整个轮询循环持着锁去读盘。
 type LiveTab struct {
 	ID         int
+	Agent      string
 	PID        int
 	SessionID  string
 	Status     string
@@ -218,7 +231,7 @@ func (m *Manager) Live() []LiveTab {
 	out := make([]LiveTab, 0, len(m.tabs))
 	for _, h := range m.tabs {
 		out = append(out, LiveTab{
-			ID: h.ID, PID: h.pid, SessionID: h.sessionID, Status: h.status,
+			ID: h.ID, Agent: h.Spec.Agent, PID: h.pid, SessionID: h.sessionID, Status: h.status,
 			Name: h.sessName, Transcript: h.transcript, CWD: m.EffectiveCWD(h.Spec),
 		})
 	}

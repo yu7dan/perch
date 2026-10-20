@@ -291,6 +291,7 @@ func (m *Manager) handleHookLine(line string, tabID int) {
 	if tab == 0 {
 		tab = m.TabForSession(ev.SessionID)
 	}
+	agentType := m.AgentForTab(tab)
 	// 顺带把关联钉下来：事件里的 session_id 是**第一时间**到达的那个，
 	// 比登记表轮询还早。绑定只在第一次生效，所以它和登记表那条路不会打架。
 	if tab != 0 && ev.SessionID != "" && m.BindSession(tab, ev.SessionID, "", ev.Source) {
@@ -343,6 +344,14 @@ func (m *Manager) handleHookLine(line string, tabID int) {
 	case "UserPromptSubmit":
 		// ⚠️ 不记 prompt 文本（用户定的隐私边界）：只记“用户发了一轮”。
 		log.Printf("[hook t%d] UserPromptSubmit session=%s", tab, short(ev.SessionID))
+		// dsh 的错误轮不会发 Stop（实测 0.2.1-rc.2）。如果只在 Stop 记
+		// Spoke，用户发了提示但这一轮失败的格子会被冷恢复误判成“从没说过话”
+		// 而开新会话。用户按下发送本身就是这条会话有内容的最早证据。
+		if agentType == "dsh" {
+			if id := m.PaneIDFor(tab); id > 0 && m.panes != nil {
+				m.panes.MarkSpoke(id, "dsh 用户已发提示 tab="+strconv.Itoa(tab))
+			}
+		}
 	case "PostCompact":
 		log.Printf("[hook t%d] PostCompact trigger=%s session=%s", tab, orNone(ev.Trigger), short(ev.SessionID))
 	case "SubagentStart", "SubagentStop":
@@ -352,20 +361,21 @@ func (m *Manager) handleHookLine(line string, tabID int) {
 	}
 
 	m.Push(map[string]any{
-		"type":    "hook",
-		"event":   ev.HookEventName,
-		"tab":     tab,
-		"session": ev.SessionID,
-		"ntype":   ev.NotificationType,
-		"msg":     ev.Message,
-		"last":    ev.LastAssistantMessage,
-		"agent":   ev.AgentID,
-		"agt":     ev.AgentType,
-		"reason":  ev.Reason,
-		"source":  ev.Source,
-		"tool":    ev.ToolName,
-		"tid":     ev.ToolUseID,
-		"trigger": ev.Trigger,
+		"type":      "hook",
+		"event":     ev.HookEventName,
+		"agentType": agentType,
+		"tab":       tab,
+		"session":   ev.SessionID,
+		"ntype":     ev.NotificationType,
+		"msg":       ev.Message,
+		"last":      ev.LastAssistantMessage,
+		"agent":     ev.AgentID,
+		"agt":       ev.AgentType,
+		"reason":    ev.Reason,
+		"source":    ev.Source,
+		"tool":      ev.ToolName,
+		"tid":       ev.ToolUseID,
+		"trigger":   ev.Trigger,
 		// 证据来源：前端拿它区分“活事件”和冷恢复时的重放（见 80-live.js
 		// 的 restoredUnconfirmed）。hook 永远算活事件。
 		"evidence": agent.EvidenceHook,

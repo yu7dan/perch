@@ -299,6 +299,17 @@ $("dash-agent-list").addEventListener("click", (e) => {
     }
     return;
   }
+  const sb = e.target.closest("[data-setup]");
+  if (sb) {
+    // “只启动” → “接入状态”：和安装共用同一个流式面板，但不动 CLI 本身。
+    const id = sb.dataset.setup;
+    const m = mg();
+    const a = ((m && m.catalog) || []).find((x) => x.id === id) || { id, name: id };
+    instOpen(a);
+    sendCtrl({ type: "agent.setup", id });
+    bootFact(`Agent 状态接入 → ${id}`);
+    return;
+  }
   const ib = e.target.closest("[data-install]");
   if (ib) {
     const id = ib.dataset.install;

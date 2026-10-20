@@ -1,6 +1,13 @@
 package agent
 
-import "context"
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/yu7dan/perch/internal/winproc"
+)
 
 // ResumeIntent 是「以什么姿态接上已有会话」。前端只声明意图，
 // 翻译成命令行是 agent 自己的事。
@@ -70,4 +77,69 @@ func AgyDef() Def {
 		return env, args, nil, nil
 	}
 	return d
+}
+
+// DshDef 是 DeepSeek Harness 的“Orca 式”接入：官方 dsh 没有交互式 TUI，
+// 社区的 @deepseek-harness-tui/dsh-tui 以 dsh profile 的形式提供终端界面。
+//
+//	launchCmd: dsh-tui .        （Orca tui-agent-config.ts）
+//	resume:    dsh-tui --resume [id]
+//	detect:    dsh-tui / dsh + profile
+//
+// 状态不靠这里：由 dsh.EnsureHooks 写入的官方 hook 桥提供。Prepare 只做两件
+// 每格才有的事：给 hook 接收器一个格子身份，以及让 dsh-tui 找得到 dsh/node/pnpm。
+func DshDef() Def {
+	d := GenericDef("dsh-tui")
+	d.Args = func(intent ResumeIntent, _ string) []string { return dshArgs(intent) }
+	d.Prepare = func(tag string, _ int, _ string) (map[string]string, []string, func(context.Context), error) {
+		return map[string]string{
+			// dsh 的 shell executor 会剥掉名字里含 KEY/TOKEN/SECRET/PASSWORD 的
+			// 环境变量（Orca 在 dsh-hook.cmd 里实测过）。这个变量名必须继续
+			// 不含这些词，否则 hook 会拿不到格子身份。
+			"PERCH_AGENT_PANE": tag,
+			// dsh-tui 的启动器用 `dsh --version` 探测官方 CLI；npm 的 shim 又要
+			// 找 node。GUI 进程的 PATH 常常比终端短，这里按事实补齐。
+			"PATH": dshChildPath(),
+		}, nil, nil, nil
+	}
+	return d
+}
+
+func dshArgs(intent ResumeIntent) []string {
+	switch intent.Kind {
+	case "exact":
+		if strings.TrimSpace(intent.ID) != "" {
+			return []string{"--resume", intent.ID}
+		}
+	case "latest":
+		return []string{"--resume"}
+	}
+	// fork 在 dsh-tui 里没有对应形态；按新会话开，别假装能复制。
+	// "." 是 Orca 的 launchCmd 里的工作区目标；Tab 的 cwd 已经是工作区。
+	return []string{"."}
+}
+
+func dshChildPath() string {
+	var parts []string
+	if appdata := strings.TrimSpace(os.Getenv("APPDATA")); appdata != "" {
+		parts = append(parts, filepath.Join(appdata, "npm"))
+	}
+	if node, ok := winproc.FindExe("node"); ok {
+		parts = append(parts, filepath.Dir(node))
+	} else {
+		for _, dir := range []string{
+			filepath.Join(os.Getenv("ProgramFiles"), "nodejs"),
+			filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "nodejs"),
+			filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "node"),
+		} {
+			if fi, err := os.Stat(filepath.Join(dir, "node.exe")); err == nil && !fi.IsDir() {
+				parts = append(parts, dir)
+				break
+			}
+		}
+	}
+	if p := os.Getenv("PATH"); p != "" {
+		parts = append(parts, p)
+	}
+	return strings.Join(parts, ";")
 }

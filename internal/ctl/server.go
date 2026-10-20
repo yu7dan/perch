@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yu7dan/perch/internal/agentcatalog"
 	"github.com/yu7dan/perch/internal/gateway"
 	"github.com/yu7dan/perch/internal/install"
 	"github.com/yu7dan/perch/internal/panes"
@@ -69,6 +70,12 @@ type Deps struct {
 
 	DefaultCWD    func() string
 	SessionExists func(agentName, cwd, id string) bool
+	// MergeCalls 把 magpie 的今日调用数合并进 agentcatalog.Cards 的结果，
+	// 让“接入状态”成功后推回去的名单和总览使用同一份数据。
+	MergeCalls func([]agentcatalog.Card)
+	// SetupAgent 是“只启动 → 接入状态”的动作（目前只有 dsh）。它是用户
+	// 点下按钮才跑的，不静默；失败由 ctl 折成 install.done(ok=false)。
+	SetupAgent func(id string, log func(string)) error
 	// CreateTab 在组合根里**先** app.HandleStream(host.Stream, …)、再返回 ——
 	// 顺序是硬约束：前端拿到 tab.ok 就会立刻去连那条流。
 	CreateTab func(session.SpawnSpec) *session.Tab
@@ -158,8 +165,8 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		"gw.agent.keep", "gw.agent.preview", "gw.agents.drift":
 		s.handleGateway(m)
 
-	// 安装器
-	case "install.agent", "install.magpie", "install.cancel":
+	// 安装器 / “只启动”agent 的状态接入
+	case "install.agent", "install.magpie", "install.cancel", "agent.setup":
 		s.handleInstall(m)
 
 	// 设置

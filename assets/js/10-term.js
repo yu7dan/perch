@@ -801,6 +801,7 @@ term.onWriteParsed(() => {
     // 就会把用户起的名字顶掉 —— 名字的优先级只该有一处（见 renderTabTitle）。
     renderTabTitle(T);
     T.agentState = "idle";
+    clearDshHookBusy(T);
     renderAgentDot(T);
   }, STALE_WORKING_TITLE_TIMEOUT_MS);
 });
@@ -1229,9 +1230,20 @@ function isGenericShellTitle(s) {
   const v = (s || "").trim().toLowerCase();
   return /^(administrator:\s*)?(windows powershell|command prompt|powershell|pwsh|cmd|cmd\.exe|conhost|terminal)$/.test(v);
 }
+/* DSH-TUI 的 OSC 标题是 `<状态符> 🐋 <会话名>`（Orca dsh-terminal-title.ts）。
+   鲸鱼是唯一不会被别的 agent 发出的字符 —— DSH 的 idle 符 ✦ 正好是 Gemini
+   的 working 符，所以要先认鲸鱼，再认状态符。
+   ⚠️ 状态判定用**原始标题**，这里只负责显示：把状态符和鲸鱼剥掉，留下会话名。
+   只剩一个鲸鱼时返回空串，交给 defaultTabTitle 显示产品名。 */
+const DSH_WHALE = "\u{1F40B}";
+function isDshTitle(s) { return (s || "").includes(DSH_WHALE); }
+function stripDshTitleWhale(s) {
+  return (s || "").replace(/^[\s\u{1F40B}]+/u, "").trim();
+}
 function realTabTitle(t) {
   if (t.liveTitle) return t.liveTitle;   // 用户起的名字永远压过 agent 报的
-  const v = stripLeadingAgentTitleDecoration(t.agentTitleRaw);
+  let v = stripLeadingAgentTitleDecoration(t.agentTitleRaw);
+  if (isDshTitle(v)) return stripDshTitleWhale(v);
   return (isExePathTitle(v) || isGenericShellTitle(v)) ? "" : v;
 }
 function runtimeTabTitle(t) {
@@ -1634,6 +1646,20 @@ function containsAgentSpinnerGlyph(t) {
 }
 function detectAgentStatusFromTitle(title) {
   if (!title) return null;
+  /* DSH 必须**先于**通用字形判断：它的 idle 前缀 ✦ 正好是 Gemini 的 working
+     符，而 working 帧是 Claude 通用的 braille（⠂/⠐）。认鲸鱼之后：
+       ✦ 🐋 …      → idle
+       ⠂/⠐ 🐋 …   → working
+     其它不带鲸鱼的标题不归 DSH 管。
+     ⚠️ Orca 的 resting 返回 null（它的 hook 状态优先于标题）；Perch 的
+     cellState 把“标题 working”和“hook busy”取或，所以必须给出 idle，才能把
+     上一轮留下的 braille working 熄灭 —— 否则一轮结束、标题回到 ✦ 之后，
+     格子还会一直转圈。 */
+  if (isDshTitle(title)) {
+    if (title.trimStart().startsWith("✦")) return "idle";
+    if (containsAgentSpinnerGlyph(title)) return "working";
+    return null;
+  }
   // 顺序照 Orca：idle 那一支在 working 前面（agent-title-status.ts:245 vs :257）。
   if (title.startsWith(CLAUDE_IDLE + " ") || title === CLAUDE_IDLE) return "idle";
   if (containsAgentSpinnerGlyph(title)) return "working";
@@ -1705,8 +1731,28 @@ function applyAgentTitleStatus(t, rawTitle) {
   // null 不清状态：Orca 的 tracker 只在判出非 null 时写 lastStatus
   // （agent-title-status.ts:107-109），否则一个只有 "Claude Code" 的标题
   // 会把 working 抹掉。
-  if (next !== null) t.agentState = next;
+  if (next !== null) {
+    t.agentState = next;
+    /* dsh 没有登记表，hook 的 busy 是纯事件推来的；一轮以错误收尾时官方桥
+       不会发 Stop（实测 0.2.1-rc.2：turn error 没有 Stop）。标题回到 ✦ 🐋
+       是这一刻最硬的“已经停了”证据。不把 hook 的 busy 一起销掉的话，
+       cellState 里 `v.st === "busy"` 会继续赢，格子永远转圈。 */
+    if (next === "idle") clearDshHookBusy(t);
+  }
   renderAgentDot(t);
+}
+
+// DSH 的标题回到 idle 时，把它自己留下的 hook busy 一起销掉。
+// 只对 dsh 生效：Claude/Codex 有登记表，标题 idle 不该抢在它们前面改状态。
+function clearDshHookBusy(t) {
+  if (!t || !t.spec || t.spec.agent !== "dsh" || typeof liveOf !== "function") return;
+  const v = liveOf(t.id);
+  if (v && v.st === "busy") {
+    v.st = "idle";
+    v.state = "done";
+    v.evidence = "title";
+    v.wait = null;
+  }
 }
 // clearWorkingIndicators（agent-title-status.ts:43-66）的 Claude 子集：
 // 把转圈字形从标题里抹掉。Orca 还要处理 Gemini/Pi/Grok 的记号，我们不需要。

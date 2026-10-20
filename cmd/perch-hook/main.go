@@ -18,17 +18,39 @@ package main
 import (
 	"io"
 	"os"
+	"path/filepath"
+	"regexp"
 	"time"
 )
 
-func main() {
-	dest := ""
-	if len(os.Args) > 1 {
-		dest = os.Args[1]
+// DSH 的 hook 配置是**全局一份**，不能像 Claude 的 --settings 那样把每个格子的
+// 事件路径写死。所以它用第二个参数 `--pane` 表示“目录模式”：接收器从环境变量
+// PERCH_AGENT_PANE 读出格子标签（t1、t2…），再拼出和 Claude 同名的
+// <hookDir>/t<N>.jsonl。轮询器因此完全不用改。
+var paneTagRE = regexp.MustCompile(`^t[0-9]+$`)
+
+func destFor(args []string, getenv func(string) string) string {
+	if len(args) > 2 && (args[2] == "--pane" || args[2] == "-pane") {
+		pane := getenv("PERCH_AGENT_PANE")
+		if !paneTagRE.MatchString(pane) {
+			return ""
+		}
+		return filepath.Join(args[1], pane+".jsonl")
 	}
+	if len(args) > 1 {
+		return args[1]
+	}
+	return ""
+}
+
+func main() {
+	dest := destFor(os.Args, os.Getenv)
 	body, _ := io.ReadAll(os.Stdin)
 
 	if dest == "" || len(body) == 0 {
+		os.Exit(0)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		os.Exit(0)
 	}
 

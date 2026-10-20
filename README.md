@@ -84,20 +84,23 @@ Providers, routing, usage, and plugins use magpie's own pages; the version and u
 
 ## Supported agents
 
-Perch's catalog contains CLI agents only. Desktop and web clients are not installed or launched by Perch; they belong to magpie's gateway layer. The catalog ships with 14 CLI agents, grouped by integration depth.
+Perch's catalog contains CLI agents only. Desktop and web clients are not installed or launched by Perch; they belong to magpie's gateway layer. The catalog ships with 15 CLI agents, grouped by integration depth.
 
 ### Full integration
 
-These four have dedicated adapters: structured status and exact session resume. They are also installable and launchable through the same Agent CLI list.
+These five have dedicated adapters: structured status and exact session resume. They are also installable and launchable through the same Agent CLI list.
 
 <table align="center">
 <tr>
-<td align="center" width="25%"><img src="assets/icons/agents/claudecode-color.svg" width="32" height="32" alt="Claude Code"><br><sub>Claude Code</sub></td>
-<td align="center" width="25%"><img src="assets/icons/agents/codex-color.svg" width="32" height="32" alt="Codex"><br><sub>Codex</sub></td>
-<td align="center" width="25%"><img src="assets/icons/agents/pi.svg" width="32" height="32" alt="Pi"><br><sub>Pi</sub></td>
-<td align="center" width="25%"><img src="assets/icons/agents/opencode.svg" width="32" height="32" alt="OpenCode"><br><sub>OpenCode</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/claudecode-color.svg" width="32" height="32" alt="Claude Code"><br><sub>Claude Code</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/codex-color.svg" width="32" height="32" alt="Codex"><br><sub>Codex</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/pi.svg" width="32" height="32" alt="Pi"><br><sub>Pi</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/opencode.svg" width="32" height="32" alt="OpenCode"><br><sub>OpenCode</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/deepseek-color.svg" width="32" height="32" alt="DeepSeek Harness"><br><sub>DeepSeek Harness</sub></td>
 </tr>
 </table>
+
+DeepSeek Harness is the non-official case: its official package ships no interactive TUI, so Perch installs the community `dsh-TUI` profile and connects status through the official `dsh-hooks-claude-code` bridge — the same terminal-first shape Orca uses. If the bridge is not installed yet, the catalog row offers **Connect status** instead of pretending the pane is fully wired.
 
 ### Install and launch
 
@@ -152,7 +155,7 @@ Two binaries are required: the main app and a separate hook receiver (the agent'
 
 - **Experimental**; interfaces will change.
 - Windows only (ConPTY and Job Objects).
-- Status parsing is currently sampled from Claude Code's terminal output. The rule table is extensible; other agents need their own rules.
+- Status comes from each agent's own structured source where one exists (hooks, an app-server, an extension, or a local HTTP API); terminal-title glyphs are the fallback. Agents without a structured source stay launch-only until one is wired.
 - Process names, the state directory, and the hook receiver are all `perch` / `Perch`; there are no machine-specific absolute paths. On another machine Perch uses that machine's own state root (`CLAUDE_CONFIG_DIR`, or `~/.claude` when unset).
 
 ## For contributors

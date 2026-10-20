@@ -103,6 +103,14 @@ var agentAdapterCaps = map[string]Caps{
 		Launch: true, Resume: true, Status: true, Waiting: true,
 		Mechanism: "app-server",
 	},
+	"dsh": {
+		// 非官方 TUI 的接入（照 Orca）：终端界面来自社区的 dsh-tui profile，
+		// 状态来自官方的 @deepseek-ai/dsh-hooks-claude-code 桥。
+		// Waiting 只覆盖 dsh 的 ask_user_question；批准没有 hook，按 Orca 的
+		// 口径算 working（harness 还在工具中间，不是 idle，也不假装看得见）。
+		Launch: true, Resume: true, Status: true, Waiting: true,
+		Mechanism: "hook",
+	},
 }
 
 // CapsFor 决定 Agent 名单上那一行该说什么。

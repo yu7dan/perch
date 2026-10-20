@@ -45,6 +45,20 @@ var Recipes = map[string]Recipe{
 		Source: `irm https://antigravity.google/cli/install.ps1 | iex`,
 		Script: `irm https://antigravity.google/cli/install.ps1 | iex`,
 	},
+	"dsh": {
+		// 官方 dsh + 社区终端界面。两个包一起装：dsh-tui 的 peer 依赖需要和
+		// 同一个 dsh 版本对齐。**不要**换成 npm 上的 dsh-tui@0.2.x —— 那是
+		// 另一个实现（要求已运行的 dsh web host + API cookie），不是 Orca
+		// 用的 @deepseek-harness-tui/dsh-tui。
+		Source: `npm install -g @deepseek-ai/dsh @deepseek-harness-tui/dsh-tui pnpm@11`,
+		NPM:    true,
+		Script: `npm.cmd install -g @deepseek-ai/dsh @deepseek-harness-tui/dsh-tui pnpm@11
+$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + (Join-Path $env:APPDATA 'npm')
+$dshTui = Join-Path $env:APPDATA 'npm\dsh-tui.cmd'
+if (-not (Test-Path $dshTui)) { throw 'dsh-tui.cmd 没有出现：npm 安装可能没有完成' }
+& $dshTui update
+`,
+	},
 	"cursor": {
 		Source: `irm 'https://cursor.com/install?win32=true' | iex`,
 		Script: `irm 'https://cursor.com/install?win32=true' | iex`,

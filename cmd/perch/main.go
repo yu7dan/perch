@@ -22,6 +22,7 @@ import (
 	"github.com/yu7dan/perch/internal/agentcatalog"
 	"github.com/yu7dan/perch/internal/appdir"
 	"github.com/yu7dan/perch/internal/ctl"
+	"github.com/yu7dan/perch/internal/dsh"
 	"github.com/yu7dan/perch/internal/gateway"
 	"github.com/yu7dan/perch/internal/install"
 	"github.com/yu7dan/perch/internal/panes"
@@ -140,6 +141,15 @@ func main() {
 	// 内嵌网关页的语言跟 Perch 的设置走：先记下偏好，控制面连上时再写进
 	// magpie（它自己的 settings.lang），见 internal/gateway/language.go。
 	a.gw.SetLanguage(a.prefs.Snapshot().Language)
+	// dsh 的“状态”不是启动时顺手能做的：它要写用户的 DSH home patch，
+	// 还要把官方 hook 桥和 peer 装进 dsh-tui profile。所以只放在两个
+	// **用户明确点下**的动作里（安装完成 / 名单里的「接入状态」），不静默跑。
+	setupAgent := func(id string, log func(string)) error {
+		if id != "dsh" {
+			return nil
+		}
+		return dsh.EnsureHooks(a.stateDir, session.HookDir(a.stateDir), session.HookExePath(), log)
+	}
 	a.installer = install.New(install.Deps{
 		Push: a.push.Push,
 		Cards: func() []agentcatalog.Card {
@@ -150,6 +160,7 @@ func main() {
 		ReloadPath:   winproc.ReloadPathFromRegistry,
 		ProbeVersion: winproc.ProbeVersion,
 		Home:         os.UserHomeDir,
+		Setup:        setupAgent,
 		OnInstalled: func(id string, ok bool) {
 			// 装完 magpie 自动接入控制面（用户 2026-10-17 定的）。
 			if id == "magpie" && ok {
@@ -300,6 +311,8 @@ func main() {
 		Transcript:     a.follower,
 		DefaultCWD:     a.defaultCWD,
 		SessionExists:  a.tabs.SessionFileExistsFor,
+		MergeCalls:     a.mergeCatalogCalls,
+		SetupAgent:     setupAgent,
 		// 顺序是硬约束：**先**注册流、**再**返回 —— ctl 接着就回 tab.ok，
 		// 前端拿到应答会立刻去连那条流（Wails 在连接建立时才按名字查 handler）。
 		CreateTab: func(spec session.SpawnSpec) *session.Tab {

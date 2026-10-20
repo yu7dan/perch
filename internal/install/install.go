@@ -52,7 +52,13 @@ func recipeScript(r agentcatalog.Recipe) string {
 		b.WriteString(`  $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')` + "\n")
 		b.WriteString(`}` + "\n")
 		b.WriteString(`if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { throw 'Node.js 安装后仍然找不到 npm.cmd' }` + "\n")
-		b.WriteString(`npm.cmd install -g ` + r.Pkg + "\n")
+		if r.Script != "" {
+			// 有些 agent（dsh）不是“一条 npm install”就完了：还要 bootstrap
+			// 一个 dsh profile。配方脚本仍然是写死的、可审计的官方/社区命令。
+			b.WriteString(r.Script + "\n")
+		} else {
+			b.WriteString(`npm.cmd install -g ` + r.Pkg + "\n")
+		}
 	} else {
 		b.WriteString(r.Script + "\n")
 	}
@@ -82,6 +88,10 @@ type Deps struct {
 	ProbeVersion func(bin string) string
 	Home         func() (string, error)
 	OnInstalled  func(id string, ok bool)
+	// Setup 在官方 CLI 安装成功后、收尾扫描前跑一次“接入状态”的准备工作
+	// （目前只有 dsh：写官方 hook 桥 / profile peer / home patch）。
+	// 失败只记日志，不把 CLI 安装判成失败 —— 终端仍然能开。
+	Setup func(id string, log func(string)) error
 }
 
 // Installer 串行化每个 agent 的安装，构建外部调用面。
@@ -264,6 +274,12 @@ func (in *Installer) runRecipe(id string, r agentcatalog.Recipe, job *run) {
 		}
 		werr = uimsg.NewParams("install.timeout", fmt.Sprintf("安装超时（%s 分钟）", minutes),
 			map[string]string{"minutes": minutes})
+	}
+	if werr == nil && !cancelled(ctx) && in.deps.Setup != nil {
+		if serr := in.deps.Setup(id, func(line string) { in.log(id, line) }); serr != nil {
+			// 终端已经装好了；状态钩子失败不影响开格，但必须让用户看见。
+			in.log(id, "状态接入没有完成："+serr.Error())
+		}
 	}
 	in.finish(id, werr == nil, code, werr, cancelled(ctx))
 }

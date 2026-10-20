@@ -251,6 +251,10 @@ function acBodyHTML(a, name) {
     // 不要让抽屉里只剩一个不能点的「接入网关」。
     html += `<div class="ac-hint">${esc(t("ac.noTerminal"))}</div>`;
   }
+  if (cat && cat.setup) {
+    // 只启动 → 接入状态：入口在总览那一行（data-setup），这里只告诉用户去哪点。
+    html += `<div class="ac-hint">${esc(t("ac.setupHint"))}</div>`;
+  }
 
   if (AC_CONFIRM) {
     html += acConfirmHTML(a);
