@@ -28,7 +28,10 @@ function settingsCurrentPath() {
 let CWD_DRAFT_DIRTY = false;
 let CWD_PENDING = false;
 let CWD_SKIP_BLUR = false;
-let CWD_ERR = "";
+/* CWD_ERR 存的是「怎么说」而不是「说出来的那句话」：
+   { key } = 前端自己的文案键；{ code, params, text } = 后端 uimsg。
+   切语言时只需重画（settingsCwdPaintError），旧语言的那句不会留在屏上。 */
+let CWD_ERR = null;
 let CWD_PENDING_TIMER = 0;
 /* 正在录快捷键时按住的那个键位。null = 没在录。录制器是**一次性的**：
    开始时装一个 capture keydown，结束（录到/取消/失焦）时连 blur 一起摘掉。 */
@@ -109,14 +112,21 @@ function syncDefaultAgentSelect() {
   sel.value = cur;
 }
 
+function cwdErrText() {
+  if (!CWD_ERR) return "";
+  if (CWD_ERR.key) return t(CWD_ERR.key);
+  return tMsg(CWD_ERR.code, CWD_ERR.params, CWD_ERR.text);
+}
+
 function settingsCwdPaintError() {
   const err = $("set-cwd-err");
   const line = document.querySelector(".set-cwd-line");
+  const text = cwdErrText();
   if (err) {
-    err.hidden = !CWD_ERR;
-    err.textContent = CWD_ERR;
+    err.hidden = !text;
+    err.textContent = text;
   }
-  if (line) line.classList.toggle("bad", !!CWD_ERR);
+  if (line) line.classList.toggle("bad", !!text);
 }
 
 function settingsCwdSetInput(value) {
@@ -127,7 +137,7 @@ function settingsCwdSetInput(value) {
 /* 丢掉还没提交的草稿，回到权威值（点选择器、按 Esc 时用）。 */
 function settingsCwdDiscardDraft() {
   CWD_DRAFT_DIRTY = false;
-  CWD_ERR = "";
+  CWD_ERR = null;
   settingsCwdSetInput(SETTINGS.defaultCwd || "");
   settingsCwdPaintError();
   settingsCwdPaintReset();
@@ -142,7 +152,7 @@ function settingsCwdCommit(v) {
   const value = String(v == null ? input.value : v).trim();
   if (value === SETTINGS.defaultCwd) {
     CWD_DRAFT_DIRTY = false;
-    CWD_ERR = "";
+    CWD_ERR = null;
     settingsCwdSetInput(SETTINGS.defaultCwd || "");
     settingsCwdPaintError();
     settingsCwdPaintReset();
@@ -150,14 +160,14 @@ function settingsCwdCommit(v) {
   }
   CWD_DRAFT_DIRTY = false;
   CWD_PENDING = true;
-  CWD_ERR = "";
+  CWD_ERR = null;
   settingsCwdPaintError();
   if (CWD_PENDING_TIMER) clearTimeout(CWD_PENDING_TIMER);
   CWD_PENDING_TIMER = setTimeout(() => {
     if (!CWD_PENDING) return;
     CWD_PENDING = false;
     CWD_DRAFT_DIRTY = true;
-    CWD_ERR = t("settings.defaultCwd.pendingError");
+    CWD_ERR = { key: "settings.defaultCwd.pendingError" };
     if (NAV_HERE === "settings") { syncSettingsUI(); settingsCwdPaintError(); }
   }, 5000);
   sendCtrl({ type: "settings.set", settings: { defaultCwd: value } });
@@ -174,11 +184,11 @@ function settingsMessageArrived(m) {
   if (CWD_PENDING_TIMER) { clearTimeout(CWD_PENDING_TIMER); CWD_PENDING_TIMER = 0; }
   if (failed) {
     CWD_DRAFT_DIRTY = true;
-    CWD_ERR = m.err;
+    CWD_ERR = { code: m.errCode, params: m.errParams, text: m.err };
     sendCtrl({ type: "log", msg: `设置：默认目录没改 —— ${m.err}` });
     return true;
   }
-  CWD_ERR = "";
+  CWD_ERR = null;
   // 请求发出后用户又改了字：保留新草稿，别被这次回来的旧值冲掉。
   if (!typedSinceSend) CWD_DRAFT_DIRTY = false;
   return false;
@@ -538,7 +548,7 @@ const CWD_INPUT = $("set-cwd-input");
 if (CWD_INPUT) {
   CWD_INPUT.addEventListener("input", () => {
     CWD_DRAFT_DIRTY = true;
-    if (CWD_ERR) CWD_ERR = "";
+    if (CWD_ERR) CWD_ERR = null;
     settingsCwdPaintError();
     settingsCwdPaintReset();
   });
@@ -668,6 +678,8 @@ function onLocaleChanged() {
   if (typeof renderDashTabs === "function") renderDashTabs();
   // 左栏（项目行、agent 行、已关闭行）是整表现画的：状态词、计数、菜单标题都随语言变。
   if (typeof renderLists === "function") renderLists();
+  // 池子错误横幅的文字来自后端 code（60-shell.js 的 poolErrText）。
+  if (typeof syncPoolBanner === "function") syncPoolBanner();
   // 格子头：默认标题、关闭键 title、换 Agent 的 aria/title、状态点 aria-label。
   if (typeof TAB_LIST !== "undefined") {
     for (const tab of TAB_LIST) {

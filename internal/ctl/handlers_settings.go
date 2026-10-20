@@ -12,13 +12,14 @@ import (
 	"log"
 
 	"github.com/yu7dan/perch/internal/settings"
+	"github.com/yu7dan/perch/internal/uimsg"
 )
 
 func (s *Server) handleSettings(m *Msg) {
 	switch m.Type {
 	case "settings.get":
 		// 进设置页时问一次权威值；也用于 shell 载荷没到时的补读。
-		s.pushSettings("")
+		s.pushSettings(nil)
 	case "settings.set":
 		if m.Settings == nil {
 			return
@@ -39,11 +40,12 @@ func (s *Server) pickDefaultCWD() {
 			return
 		}
 		if errors.Is(err, ErrNoWindow) {
-			s.pushSettings("窗口还没起来，选择器打不开")
+			s.pushSettings(uimsg.New("settings.noWindow", "窗口还没起来，选择器打不开"))
 			return
 		}
 		log.Printf("[settings] 默认目录选择器失败：%v", err)
-		s.pushSettings("选择器打不开：" + err.Error())
+		s.pushSettings(uimsg.Wrap(err, "settings.pickerFailed", "选择器打不开："+err.Error(),
+			map[string]string{"err": err.Error()}))
 		return
 	}
 	if trimSpace(sel) == "" {

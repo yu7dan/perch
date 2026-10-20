@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/yu7dan/perch/internal/appdir"
+	"github.com/yu7dan/perch/internal/uimsg"
 )
 
 // Project 是**落盘的那份形状**。算出来的东西（最近活动、会话数）不在这里 ——
@@ -133,27 +134,37 @@ func Load() *Pool {
 // 半截文件比旧文件糟得多，而 AppData 下的写随时可能被 AV / 同步工具撞上。
 func (p *Pool) saveLocked() error {
 	if p.broken {
-		return errors.New("池子文件解析失败过，拒绝覆盖它")
+		return uimsg.New("project.broken", "池子文件解析失败过，拒绝覆盖它")
 	}
 	if p.file == "" {
-		return errors.New("不知道池子写哪儿")
+		return uimsg.New("project.noFile", "不知道池子写哪儿")
 	}
 	if err := os.MkdirAll(filepath.Dir(p.file), 0o755); err != nil {
-		return err
+		return saveFailed(err)
 	}
 	b, err := json.MarshalIndent(struct {
 		Projects []Project `json:"projects"`
 		Roots    []string  `json:"roots"`
 	}{p.Projects, p.Roots}, "", "  ")
 	if err != nil {
-		return err
+		return saveFailed(err)
 	}
 	b = append(b, '\n')
 	tmp := p.file + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
+		return saveFailed(err)
 	}
-	return os.Rename(tmp, p.file)
+	if err := os.Rename(tmp, p.file); err != nil {
+		return saveFailed(err)
+	}
+	return nil
+}
+
+// saveFailed 把底层写盘错误包成带稳定 code 的消息；原文（通常是 OS 的
+// 本地化错误）作为 params 一起带过去，前端拼进当前语言的句子里。
+func saveFailed(err error) error {
+	return uimsg.Wrap(err, "project.saveFailed", fmt.Sprintf("项目池没写成：%v", err),
+		map[string]string{"err": err.Error()})
 }
 
 // Snapshot 返回项目与根的副本。
@@ -183,16 +194,18 @@ func (p *Pool) findLocked(path string) int {
 func (p *Pool) Add(path, name, source string) (Project, bool, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return Project{}, false, errors.New("空路径")
+		return Project{}, false, uimsg.New("project.emptyPath", "空路径")
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return Project{}, false, err
+		return Project{}, false, uimsg.Wrap(err, "project.badPath",
+			fmt.Sprintf("这个路径看不懂：%v", err), map[string]string{"err": err.Error()})
 	}
 	if st, err := os.Stat(abs); err != nil {
-		return Project{}, false, fmt.Errorf("这个路径读不到：%v", err)
+		return Project{}, false, uimsg.Wrap(err, "project.unreadable",
+			fmt.Sprintf("这个路径读不到：%v", err), map[string]string{"err": err.Error()})
 	} else if !st.IsDir() {
-		return Project{}, false, errors.New("不是目录")
+		return Project{}, false, uimsg.New("project.notDir", "不是目录")
 	}
 	if strings.TrimSpace(name) == "" {
 		name = filepath.Base(abs)

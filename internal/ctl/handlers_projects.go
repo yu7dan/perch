@@ -3,6 +3,8 @@ package ctl
 import (
 	"errors"
 	"log"
+
+	"github.com/yu7dan/perch/internal/uimsg"
 )
 
 func (s *Server) handleProjects(m *Msg) {
@@ -27,18 +29,19 @@ func (s *Server) handleProjects(m *Msg) {
 // 我们画一个只会更差。
 func (s *Server) projectAdd(m *Msg) {
 	if s.deps.Pool == nil {
-		s.Push(map[string]any{"type": "pool", "err": "项目池不可用（读配置目录失败）"})
+		m := map[string]any{"type": "pool"}
+		s.Push(withUIErr(m, uimsg.New("pool.unavailableRead", "项目池不可用（读配置目录失败）")))
 		return
 	}
 	if p := trimSpace(m.Path); p != "" {
 		pr, added, err := s.deps.Pool.Add(p, m.Name, m.Source)
 		if err != nil {
 			log.Printf("[pool] 加项目失败 %s：%v", p, err)
-			s.poolReply(err.Error())
+			s.poolReply(err)
 			return
 		}
 		log.Printf("[pool] 加项目 %q（%s）路径=%s 新增=%v", pr.Name, pr.Source, pr.Path, added)
-		s.poolReply("")
+		s.poolReply(nil)
 		return
 	}
 	// ⚠️ 选择器是**阻塞**的（用户可能盯着它想很久），所以这条必须换协程，
@@ -61,7 +64,8 @@ func (s *Server) pickProject() {
 			return
 		}
 		log.Printf("[pool] 文件夹选择器失败：%v", err)
-		s.poolReply("选择器打不开：" + err.Error())
+		s.poolReply(uimsg.Wrap(err, "pool.pickerFailed", "选择器打不开："+err.Error(),
+			map[string]string{"err": err.Error()}))
 		return
 	}
 	if trimSpace(sel) == "" {
@@ -72,11 +76,11 @@ func (s *Server) pickProject() {
 	pr, added, err := s.deps.Pool.Add(sel, "", "manual")
 	if err != nil {
 		log.Printf("[pool] 加项目失败 %s：%v", sel, err)
-		s.poolReply(err.Error())
+		s.poolReply(err)
 		return
 	}
 	log.Printf("[pool] 加项目 %q（选择器）路径=%s 新增=%v", pr.Name, pr.Path, added)
-	s.poolReplyPicked("", pr.Path)
+	s.poolReplyPicked(nil, pr.Path)
 }
 
 // projectRemove 只从池子里摘掉，**磁盘上一个字节都不动**（这一点必须做进
@@ -89,10 +93,10 @@ func (s *Server) projectRemove(m *Msg) {
 	}
 	if ok, err := s.deps.Pool.Remove(m.Path); err != nil {
 		log.Printf("[pool] 移除失败 %s：%v", m.Path, err)
-		s.poolReply(err.Error())
+		s.poolReply(err)
 	} else {
 		log.Printf("[pool] 移除项目 %s（只从池子里摘掉，磁盘未动）命中=%v", m.Path, ok)
-		s.poolReply("")
+		s.poolReply(nil)
 	}
 }
 
@@ -102,10 +106,10 @@ func (s *Server) projectPin(m *Msg) {
 	}
 	if ok, err := s.deps.Pool.SetPinned(m.Path, m.On); err != nil {
 		log.Printf("[pool] 置顶改动失败 %s：%v", m.Path, err)
-		s.poolReply(err.Error())
+		s.poolReply(err)
 	} else {
 		log.Printf("[pool] 置顶 %s = %v 命中=%v", m.Path, m.On, ok)
-		s.poolReply("")
+		s.poolReply(nil)
 	}
 }
 
@@ -116,9 +120,9 @@ func (s *Server) projectRename(m *Msg) {
 	}
 	if ok, err := s.deps.Pool.Rename(m.Path, m.Name); err != nil {
 		log.Printf("[pool] 改名失败 %s：%v", m.Path, err)
-		s.poolReply(err.Error())
+		s.poolReply(err)
 	} else {
 		log.Printf("[pool] 改名 %s → %q 命中=%v", m.Path, m.Name, ok)
-		s.poolReply("")
+		s.poolReply(nil)
 	}
 }

@@ -1797,10 +1797,14 @@ $("add-proj").addEventListener("click", () => {
 // Go 算的，前端没有"哪些行要挪"的局部信息。这条消息只在池子动作时来（低频）。
 function applyPool(m) {
   if (!m) return;
-  if (m.err) showToast(t("shell.pool.errorTitle"), m.err, "err");
+  if (m.err) showToast(t("shell.pool.errorTitle"), tMsg(m.errCode, m.errParams, m.err), "err");
   if (Array.isArray(m.projects)) STATE.projects = m.projects;
   if (m.assign && typeof m.assign === "object") STATE.assign = m.assign;
+  // 原文与 code 分开存：切语言时 poolErrText() 要按新语言重算，
+  // 不能把上一次渲染好的那句话留在 STATE 里。
   STATE.poolErr = m.err || "";
+  STATE.poolErrCode = m.errCode || "";
+  STATE.poolErrParams = m.errParams || null;
   // 新建工作区卡片正在等"选择其他文件夹"的结果时，先让它吃掉这次更新
   // （新路径落到卡片里，不把用户跳去工作区）。函数在 81-newspace.js 里；
   // 可能还没求值完（defer 顺序），只认它在不在。
@@ -1829,7 +1833,7 @@ function applyPool(m) {
 }
 
 function poolErrText() {
-  if (STATE?.poolErr) return STATE.poolErr;
+  if (STATE?.poolErr) return tMsg(STATE.poolErrCode, STATE.poolErrParams, STATE.poolErr);
   if (!Array.isArray(STATE?.projects)) return t("shell.pool.missing");
   return "";
 }

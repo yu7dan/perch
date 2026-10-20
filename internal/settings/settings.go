@@ -29,6 +29,7 @@ import (
 
 	"github.com/yu7dan/perch/internal/agentcatalog"
 	"github.com/yu7dan/perch/internal/appdir"
+	"github.com/yu7dan/perch/internal/uimsg"
 )
 
 const FileName = "settings.json"
@@ -289,11 +290,12 @@ func (s *Store) Patch(p Patch) (Settings, error) {
 		if v != "" {
 			abs, err := filepath.Abs(v)
 			if err != nil {
-				return old, fmt.Errorf("这个路径看不懂：%v", err)
+				return old, uimsg.Wrap(err, "settings.badPath",
+					fmt.Sprintf("这个路径看不懂：%v", err), map[string]string{"err": err.Error()})
 			}
 			fi, err := os.Stat(abs)
 			if err != nil || !fi.IsDir() {
-				return old, errors.New("这个目录不存在，或者不是一个文件夹")
+				return old, uimsg.New("settings.notDir", "这个目录不存在，或者不是一个文件夹")
 			}
 			v = abs
 		}
@@ -314,14 +316,15 @@ func (s *Store) Patch(p Patch) (Settings, error) {
 	if p.DefaultAgent != nil {
 		v := strings.ToLower(strings.TrimSpace(*p.DefaultAgent))
 		if v != "" && !agentcatalog.Has(v) {
-			return old, fmt.Errorf("不认识这个 agent：%s", v)
+			return old, uimsg.NewParams("settings.unknownAgent",
+				fmt.Sprintf("不认识这个 agent：%s", v), map[string]string{"agent": v})
 		}
 		next.DefaultAgent = v
 	}
 	if p.NewAgentShortcut != nil {
 		v, ok := NormalizeShortcut(*p.NewAgentShortcut)
 		if !ok {
-			return old, errors.New("快捷键格式不对：需要 Ctrl 或 Alt + 字母、数字或 F1–F12")
+			return old, uimsg.New("settings.badShortcut", "快捷键格式不对：需要 Ctrl 或 Alt + 字母、数字或 F1–F12")
 		}
 		next.NewAgentShortcut = v
 	}
@@ -345,24 +348,32 @@ func (s *Store) Patch(p Patch) (Settings, error) {
 // saveLocked 必须持锁调用。原子写：先写 .tmp 再 rename。
 func (s *Store) saveLocked(next Settings) error {
 	if s.broken {
-		return errors.New("设置文件解析失败过，拒绝覆盖它（先修好或删掉它）")
+		return uimsg.New("settings.broken", "设置文件解析失败过，拒绝覆盖它（先修好或删掉它）")
 	}
 	if s.file == "" {
-		return errors.New("不知道设置写哪儿（拿不到用户配置目录）")
+		return uimsg.New("settings.noFile", "不知道设置写哪儿（拿不到用户配置目录）")
 	}
 	if err := os.MkdirAll(filepath.Dir(s.file), 0o755); err != nil {
-		return err
+		return saveFailed(err)
 	}
 	b, err := json.MarshalIndent(next, "", "  ")
 	if err != nil {
-		return err
+		return saveFailed(err)
 	}
 	b = append(b, '\n')
 	tmp := s.file + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
+		return saveFailed(err)
 	}
-	return os.Rename(tmp, s.file)
+	if err := os.Rename(tmp, s.file); err != nil {
+		return saveFailed(err)
+	}
+	return nil
+}
+
+// saveFailed 把底层写盘错误包成带稳定 code 的消息；OS 原文作为 {err} 传给前端。
+func saveFailed(err error) error {
+	return uimsg.Wrap(err, "settings.saveFailed", err.Error(), map[string]string{"err": err.Error()})
 }
 
 // DefaultCWDUnavailable 说明用户选的那个目录**此刻**不在盘上（不是配置坏了）。

@@ -1016,6 +1016,30 @@ const PERCH_I18N = {
     "settings.toast.cwdDefaultNote": "The built-in default directory is in use.",
     "settings.toast.lightTitle": "The light theme is not ready",
     "settings.toast.lightNote": "Only the dark theme is available now; light will come in the next release.",
+
+    /* Backend messages with a stable code (internal/uimsg). Raw text stays the
+       fallback when a code is not in this dictionary. */
+    "msg.pool.unavailable": "The project pool is unavailable",
+    "msg.pool.unavailableRead": "The project pool is unavailable (could not read the config directory)",
+    "msg.pool.pickerFailed": "Could not open the folder picker: {err}",
+    "msg.project.emptyPath": "Empty path",
+    "msg.project.badPath": "Cannot understand this path: {err}",
+    "msg.project.unreadable": "This path cannot be read: {err}",
+    "msg.project.notDir": "Not a directory",
+    "msg.project.broken": "The project pool file failed to parse earlier, so Perch will not overwrite it",
+    "msg.project.noFile": "Cannot tell where to write the project pool",
+    "msg.project.saveFailed": "Could not save the project pool: {err}",
+
+    "msg.settings.storeUnavailable": "Settings storage is unavailable (no user config directory)",
+    "msg.settings.badPath": "Cannot understand this path: {err}",
+    "msg.settings.notDir": "That directory does not exist, or it is not a folder",
+    "msg.settings.unknownAgent": "Unknown agent: {agent}",
+    "msg.settings.badShortcut": "Invalid shortcut: use Ctrl or Alt plus a letter, digit, or F1–F12",
+    "msg.settings.broken": "The settings file failed to parse earlier, so Perch refuses to overwrite it (fix or delete it first)",
+    "msg.settings.noFile": "Cannot tell where to write settings (no user config directory)",
+    "msg.settings.saveFailed": "Could not save settings: {err}",
+    "msg.settings.noWindow": "The window is not ready yet, so the picker cannot open",
+    "msg.settings.pickerFailed": "Could not open the picker: {err}",
   },
 
   zh: {
@@ -1990,6 +2014,29 @@ const PERCH_I18N = {
     "settings.toast.cwdDefaultNote": "现在用的就是内置默认目录。",
     "settings.toast.lightTitle": "浅色主题还没做",
     "settings.toast.lightNote": "现在只有深色主题；浅色会在下一版提供。",
+
+    /* 后端带稳定 code 的消息（internal/uimsg）；字典里没有的 code 用原文兜底。 */
+    "msg.pool.unavailable": "项目池不可用",
+    "msg.pool.unavailableRead": "项目池不可用（读配置目录失败）",
+    "msg.pool.pickerFailed": "选择器打不开：{err}",
+    "msg.project.emptyPath": "空路径",
+    "msg.project.badPath": "这个路径看不懂：{err}",
+    "msg.project.unreadable": "这个路径读不到：{err}",
+    "msg.project.notDir": "不是目录",
+    "msg.project.broken": "池子文件解析失败过，拒绝覆盖它",
+    "msg.project.noFile": "不知道池子写哪儿",
+    "msg.project.saveFailed": "项目池没写成：{err}",
+
+    "msg.settings.storeUnavailable": "设置存储没起来（拿不到用户配置目录）",
+    "msg.settings.badPath": "这个路径看不懂：{err}",
+    "msg.settings.notDir": "这个目录不存在，或者不是一个文件夹",
+    "msg.settings.unknownAgent": "不认识这个 agent：{agent}",
+    "msg.settings.badShortcut": "快捷键格式不对：需要 Ctrl 或 Alt + 字母、数字或 F1–F12",
+    "msg.settings.broken": "设置文件解析失败过，拒绝覆盖它（先修好或删掉它）",
+    "msg.settings.noFile": "不知道设置写哪儿（拿不到用户配置目录）",
+    "msg.settings.saveFailed": "设置没写成：{err}",
+    "msg.settings.noWindow": "窗口还没起来，选择器打不开",
+    "msg.settings.pickerFailed": "选择器打不开：{err}",
   },
 };
 
@@ -2030,6 +2077,18 @@ function t(key, vars) {
       Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : m);
   }
   return s;
+}
+
+/* 后端发来的错误/提示：稳定 code + params + 原文兜底。
+   Go 侧用 internal/uimsg 产生 { err, errCode, errParams }；这里按当前语言渲染
+   msg.<code>。字典里没有这个 code（旧前端 / 新后端 / 没翻译的 OS 错误）就用
+   后端原文 —— 宁可显示一门语言，也不要把一个 key 甩给用户。 */
+function tMsg(code, params, fallback) {
+  const k = code ? "msg." + code : "";
+  if (k && (PERCH_I18N.en[k] !== undefined || PERCH_I18N.zh[k] !== undefined)) {
+    return t(k, params || {});
+  }
+  return fallback == null ? "" : String(fallback);
 }
 
 /* 带数量的句子：n === 1 时优先用 `${base}One`（只在当前语言里存在才用）。

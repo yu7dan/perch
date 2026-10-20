@@ -12,6 +12,7 @@ import (
 	"github.com/yu7dan/perch/internal/project"
 	"github.com/yu7dan/perch/internal/settings"
 	"github.com/yu7dan/perch/internal/transcript"
+	"github.com/yu7dan/perch/internal/uimsg"
 )
 
 // ShellPayload 是界面骨架的第一份全量载荷：会话库、历史流、项目池、偏好、
@@ -127,8 +128,8 @@ func (s *Server) customCWD() string {
 // 归属会随着"谁加了哪个项目"整体变），增量的差集要在两边各维护一份状态、
 // 迟早会漂。池子操作是低频动作，全量重算一次是毫秒级 —— 拿一次重扫换掉
 // 一整类"两边不一致"的毛病。会话数少的时候这笔买卖非常划算。
-func (s *Server) poolReply(errMsg string) {
-	s.poolReplyPicked(errMsg, "")
+func (s *Server) poolReply(err error) {
+	s.poolReplyPicked(err, "")
 }
 
 /*
@@ -139,9 +140,10 @@ poolReplyPicked 多带一个 picked = 这一次系统选择器最终指到哪个
 	卡片会一直停在"正在等系统文件夹选择器…"。选择器那条路没有应答帧，
 	这个字段就是它唯一的应答（见 81-newspace.js 的 newSpacePoolUpdate）。
 */
-func (s *Server) poolReplyPicked(errMsg, picked string) {
+func (s *Server) poolReplyPicked(err error, picked string) {
 	if s.deps.Pool == nil {
-		s.Push(map[string]any{"type": "pool", "err": "项目池不可用", "projects": []any{}, "assign": map[string]string{}})
+		m := map[string]any{"type": "pool", "projects": []any{}, "assign": map[string]string{}}
+		s.Push(withUIErr(m, uimsg.New("pool.unavailable", "项目池不可用")))
 		return
 	}
 	t0 := time.Now()
@@ -152,14 +154,15 @@ func (s *Server) poolReplyPicked(errMsg, picked string) {
 	sessions, _ := history.Scan(s.deps.StateDir, transcript.SystemTurn)
 	assign, recent, count := project.Stats(sessions, projects)
 	wire := project.WireProjects(projects, recent, count)
-	s.Push(map[string]any{
+	m := map[string]any{
 		"type":     "pool",
 		"projects": wire,
 		"assign":   assign,
 		"roots":    roots,
-		"err":      errMsg,
+		"err":      "",
 		"picked":   picked,
-	})
+	}
+	s.Push(withUIErr(m, err))
 	sum, nUn, nMain, nAll := project.Audit(sessions, assign, wire)
 	log.Printf("[pool] 推回前端：%d 个项目 / 归属 %d 条（Σ项目 %d + 未归类 %d = %d，主会话共 %d，全部 %d）；用时 %v",
 		len(wire), len(assign), sum, nUn, sum+nUn, nMain, nAll, time.Since(t0).Round(time.Millisecond))
@@ -199,12 +202,11 @@ func (s *Server) defaultAgentSetting() string {
 //	· defaultCwdMissing 用户选的目录此刻不在盘上（不代表配置坏了）
 //
 // 这三个数都由 Go 现算：前端自己拼路径会在「文档/Documents」这种地方分叉。
-func (s *Server) settingsWire(errMsg string) map[string]any {
+func (s *Server) settingsWire(err error) map[string]any {
 	m := map[string]any{"type": "settings"}
 	if s.deps.Prefs == nil {
 		m["settings"] = settings.Defaults()
-		m["err"] = "设置存储没起来（拿不到用户配置目录）"
-		return m
+		return withUIErr(m, uimsg.New("settings.storeUnavailable", "设置存储没起来（拿不到用户配置目录）"))
 	}
 	st := s.deps.Prefs.Snapshot()
 	builtin, _ := project.BuiltinDefaultWorkspacePath()
@@ -214,14 +216,11 @@ func (s *Server) settingsWire(errMsg string) map[string]any {
 	}
 	m["builtinCwd"] = builtin
 	m["defaultCwdMissing"] = s.deps.Prefs.DefaultCWDUnavailable()
-	if errMsg != "" {
-		m["err"] = errMsg
-	}
-	return m
+	return withUIErr(m, err)
 }
 
-func (s *Server) pushSettings(errMsg string) {
-	s.Push(s.settingsWire(errMsg))
+func (s *Server) pushSettings(err error) {
+	s.Push(s.settingsWire(err))
 }
 
 // applySettingsPatch 是 settings.set / settings.pickDefaultCWD 的共同落点。
@@ -229,24 +228,24 @@ func (s *Server) pushSettings(errMsg string) {
 // 重算一遍（合成的「默认工作区」那一行跟着换路径）。
 func (s *Server) applySettingsPatch(p settings.Patch, why string) {
 	if s.deps.Prefs == nil {
-		s.pushSettings("设置存储没起来（拿不到用户配置目录）")
+		s.pushSettings(uimsg.New("settings.storeUnavailable", "设置存储没起来（拿不到用户配置目录）"))
 		return
 	}
 	old := s.deps.Prefs.Snapshot()
 	next, err := s.deps.Prefs.Patch(p)
 	if err != nil {
 		log.Printf("[settings] %s 失败：%v（保持原值）", why, err)
-		s.pushSettings(err.Error())
+		s.pushSettings(err)
 		return
 	}
 	log.Printf("[settings] %s：默认目录=%s 字号=%d 字体=%s 启动=%s 语言=%s 默认 agent=%s 快捷键=%s 关窗确认=%v 结束确认=%v",
 		why, pick(next.DefaultCWD, "(内置)"), next.TermFontSize, next.TermFontFamily,
 		next.StartView, next.Language, pick(next.DefaultAgent, "(自动)"), pick(next.NewAgentShortcut, "(关闭)"),
 		next.ConfirmClose, next.ConfirmEndAgent)
-	s.pushSettings("")
+	s.pushSettings(nil)
 	if next.DefaultCWD != old.DefaultCWD {
 		project.EnsureDefaultWorkspace(s.customCWD)
-		s.poolReply("")
+		s.poolReply(nil)
 	}
 }
 
