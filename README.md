@@ -13,7 +13,7 @@
 </div>
 
 <p align="center">
-  <sub>总览截图待脱敏后重拍（旧图含本机路径与旧品牌，已从仓库移除）。</sub>
+  <img src="docs/images/overview.png" alt="Perch 总览：并行 agent 工作看板、网关用量与 Agent 名单" width="100%">
 </p>
 
 Perch 是面向"agent 终端"的 Windows 桌面网关，与 Orca 同属 **agent 开发环境**这一类。
@@ -33,37 +33,26 @@ Perch 把这些收进一个窗口：
 
 ## 界面
 
-<table>
-<tr>
-<td width="50%" valign="middle">
-
 ### Agent 接线与模型选择
 
 接入 / 断开 / 重新应用 / 保留现状；长模型列表变成可搜索的弹层，当前值自动带进视野。
 配置来自 magpie 的 `/api/state`，写操作也走同一组 API —— Perch 不另存一份。
 
-</td>
-<td width="50%">
-  <sub>Agent 抽屉截图待脱敏后重拍。</sub>
-</td>
-</tr>
-<tr>
-<td width="50%" valign="middle">
+<p align="center">
+  <img src="docs/images/agent-wiring.png" alt="Agent 配置抽屉：接入网关、模型与推理强度，长模型列表可搜索" width="100%">
+</p>
 
 ### 内嵌 magpie 网关
 
 供应商、路由、用量、插件用 magpie 自己的页面；版本与更新条由 Perch 接住。
 更新是 magpie 自己的 `check → install`，re-exec 之后 Perch 按端口认领新进程。
 
-</td>
-<td width="50%">
-  <sub>网关页截图待脱敏后重拍。</sub>
-</td>
-</tr>
-</table>
+<p align="center">
+  <img src="docs/images/gateway.png" alt="内嵌 magpie 网关：用量、会话、模型与 Agent 统计" width="100%">
+</p>
 
 <p align="center">
-  <sub>截图会在脱敏的演示 profile 上重拍；界面会继续变。</sub>
+  <sub>截图为脱敏的演示 profile，数据均为虚构；界面会继续变。</sub>
 </p>
 
 ## 支持的 agent
