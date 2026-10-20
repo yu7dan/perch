@@ -21,8 +21,9 @@ type Host interface {
 
 var host Host = defaultHost{}
 
-// SetHost 由主程序在 init 里调用。测试不调用时用 defaultHost：会话/状态
-// 写入是无操作，但可执行文件仍能按 PATH 解析。
+// SetHost 由组合根（cmd/perch）在构造会话表之后调用 —— 这是整个程序里
+// **唯一**保留的组合期注入点。测试不调用时用 defaultHost：会话/状态写入是
+// 无操作，但可执行文件仍能按 PATH 解析。
 func SetHost(h Host) {
 	if h != nil {
 		host = h
