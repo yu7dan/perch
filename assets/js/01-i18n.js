@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 /* 01-i18n.js —— Perch 自己的界面语言（不是 agent 输出，也不是 magpie 页面）。
 
    范围：只翻译 Perch 应用层 DOM 与 Perch 生成的用户可见文案；终端内容、
