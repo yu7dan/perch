@@ -14,7 +14,11 @@
 
    ⚠️ 全局翻译函数叫 t()，而别的脚本里大量有 `const t = activeTab` 这类
    局部变量。**在要调用全局 t() 的函数里，先把局部 t 改名**（例如 tab），
-   否则拿到的是标签对象、调用时报 "t is not a function"。 */
+   否则拿到的是标签对象、调用时报 "t is not a function"。
+
+   ⚠️ 增量渲染的缓存签名（g1/g2/g3、askBlockSig、permBlockSig、热力图骨架…）
+   必须把 PERCH_LOCALE 算进去：签名只比数据时，切语言后那些节点不会重画，
+   屏上会留下上一门语言（实测：群组的「格 1」在英文下仍是「Pane 1」）。 */
 
 const PERCH_I18N = {
   en: {
