@@ -49,6 +49,10 @@ func TestCapsForAgent(t *testing.T) {
 	if !claude.Resume || !claude.Status || !claude.Waiting || !claude.Actions {
 		t.Fatalf("claude 能力矩阵不对: %+v", claude)
 	}
+	// 深度适配器也不能绕过“这台机器上有没有可执行文件”。
+	if c := CapsFor("claude", false); c.Launch {
+		t.Fatalf("没装的 claude 不能标 launch: %+v", c)
+	}
 	oc := CapsFor("opencode", true)
 	if !oc.Launch || !oc.Status || !oc.Waiting {
 		t.Fatalf("opencode 能力矩阵不对: %+v", oc)

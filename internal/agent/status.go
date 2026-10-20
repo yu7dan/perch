@@ -113,6 +113,9 @@ var agentAdapterCaps = map[string]Caps{
 // 只看适配器表。
 func CapsFor(id string, canLaunch bool) Caps {
 	if c, ok := agentAdapterCaps[id]; ok {
+		// 深度适配器也只在这台机器上**真的能启动**时才说 Launch：
+		// 装没装是每台机器的事实，不能写进静态能力表。
+		c.Launch = c.Launch && canLaunch
 		return c
 	}
 	return Caps{Launch: canLaunch, Mechanism: "terminal"}
