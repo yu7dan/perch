@@ -34,6 +34,10 @@ import (
 	"github.com/yu7dan/perch/internal/winproc"
 )
 
+// buildVersion 由构建脚本通过 -ldflags "-X main.buildVersion=..." 注入；
+// 直接从源码 go build 时保持 "dev"。只用于日志里的可核对版本，不参与逻辑。
+var buildVersion = "dev"
+
 // perchApp 持有这一次运行的活状态。它只活在 main 的栈上 —— 没有可变包级
 // 单例：每个 store/service 都是构造出来、注入下去的，后台协程拿的是函数值。
 type perchApp struct {
@@ -60,6 +64,7 @@ func main() {
 		fallbackCWD: appdir.HomeOrDot(),
 		push:        &pushRelay{},
 	}
+	log.Printf("[perch] 版本 %s（pid %d）", buildVersion, os.Getpid())
 
 	// 状态根按 Claude Code 自己的规则取：环境里有 CLAUDE_CONFIG_DIR 就用它，
 	// 否则 <用户主目录>\.claude。仓库里不留任何本机绝对路径。

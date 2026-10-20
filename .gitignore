@@ -11,6 +11,7 @@
 /*
 !/.gitignore
 !/.gitattributes
+!/.editorconfig
 !/README.md
 !/THIRD-PARTY.md
 !/LICENSE
@@ -25,11 +26,13 @@
 #    行尾的 # 会被当成模式的一部分（那样放行就静默失效）。
 !/cmd/
 !/tools/
+!/scripts/
+!/.github/
 
 # --- 前端（没有打包器：一个 index.html + 资产，go:embed 直接进二进制）---
 !/assets/
 
-# --- 结构说明（docs/STRUCTURE.md：模块边界、图标规则、改动后必须重建）---
+# --- 文档（docs/ARCHITECTURE.md、docs/FRONTEND.md 与 README 截图）---
 !/docs/
 
 # assets 里还躺着改版前的备份

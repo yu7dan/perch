@@ -1,0 +1,64 @@
+﻿#Requires -Version 5.1
+<#
+.SYNOPSIS
+  构建 Perch 的两个产物到 build\：主程序与 hook 接收器。
+
+.DESCRIPTION
+  仓库根不是程序入口，主程序在 cmd\perch。hook 接收器的文件名写死在代码里
+  （hookExeName），两个 exe 必须并排放在同一目录。
+
+.PARAMETER Version
+  可选版本号，通过 -ldflags "-X main.buildVersion=..." 写进日志。
+
+.PARAMETER Release
+  可选：去掉符号表和调试信息（-s -w），产物更小。
+#>
+param(
+  [string]$Version = "",
+  [switch]$Release
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+$repo = Split-Path $PSScriptRoot -Parent
+$outDir = Join-Path $repo "build"
+
+$go = Get-Command go -ErrorAction SilentlyContinue
+if (-not $go) {
+  throw "找不到 go.exe。请先安装 Go 1.27+，或把 Go 的 bin 目录加进 PATH。"
+}
+
+New-Item -ItemType Directory -Force $outDir | Out-Null
+
+$ldflags = @()
+if ($Version) {
+  $ldflags += "-X main.buildVersion=$Version"
+}
+if ($Release) {
+  $ldflags += "-s"
+  $ldflags += "-w"
+}
+
+$common = @("build", "-trimpath")
+if ($ldflags.Count -gt 0) {
+  $common += @("-ldflags", ($ldflags -join " "))
+}
+
+Push-Location $repo
+try {
+  $env:CGO_ENABLED = "0"
+
+  & go @common -o (Join-Path $outDir "perch.exe") ./cmd/perch
+  if ($LASTEXITCODE -ne 0) { throw "构建 cmd/perch 失败（exit $LASTEXITCODE）" }
+
+  & go @common -o (Join-Path $outDir "perch-hook.exe") ./cmd/perch-hook
+  if ($LASTEXITCODE -ne 0) { throw "构建 cmd/perch-hook 失败（exit $LASTEXITCODE）" }
+}
+finally {
+  Pop-Location
+}
+
+Get-ChildItem $outDir -Filter *.exe |
+  Sort-Object Name |
+  ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB) }

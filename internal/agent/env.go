@@ -59,7 +59,7 @@ func BuildEnv(extra map[string]string) []string {
 		// 下面这几条是**我们对"自己是什么终端"的事实声明**，不是从宿主抄来的。
 		"TERM=xterm-256color",
 		"COLORTERM=truecolor",
-		"TERM_PROGRAM=ai-workbench",
+		"TERM_PROGRAM=perch",
 		// fg;bg 的 0-15 索引形式。有些工具只认这个、不做 OSC 查询。
 		// 我们的主题是深底 + 白字 → 15;0。底色 2026-10-15 改成 #0a0a0a 后
 		// **这条不用动**：索引 0 就是"黑"，任何近黑底都对得上。
