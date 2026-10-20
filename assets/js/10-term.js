@@ -1220,10 +1220,19 @@ function isImeOwnedKey(e) {
 function isExePathTitle(s) {
   return /^(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]*\.exe$/i.test((s || "").trim());
 }
+/* 还有一些 launch-only CLI 会把 OSC 标题设成**当前 shell 的名字**：
+   dsh 实测在启动后发 `Windows PowerShell`。那不是这一格的身份，拿来当标签名，
+   左栏和格子头就变成 "Windows PowerShell"，agent 的产品名反而轮不到。
+   只挡这几种固定的 shell 标题；真正的任务标题、路径不挡（上一段那个 exe
+   路径例外仍是单独一条，别合并成宽泛的"看起来像路径就丢"）。 */
+function isGenericShellTitle(s) {
+  const v = (s || "").trim().toLowerCase();
+  return /^(administrator:\s*)?(windows powershell|command prompt|powershell|pwsh|cmd|cmd\.exe|conhost|terminal)$/.test(v);
+}
 function realTabTitle(t) {
   if (t.liveTitle) return t.liveTitle;   // 用户起的名字永远压过 agent 报的
   const v = stripLeadingAgentTitleDecoration(t.agentTitleRaw);
-  return isExePathTitle(v) ? "" : v;
+  return (isExePathTitle(v) || isGenericShellTitle(v)) ? "" : v;
 }
 function runtimeTabTitle(t) {
   return realTabTitle(t) || defaultTabTitle(t);
