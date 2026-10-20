@@ -204,38 +204,38 @@ function answerNote(el, askId, k, text, qi) {
 
 /* 高亮挪到真实选项行上（只在它压在合成行上时才需要动）。
    `done("")` = 可以按了；`done(why)` = 没动成、别按。 */
-function stepHighlight(t, k, n, tries, done) {
-  const p = readPicker(t);
-  if (!p) return done("选择器不见了，没按");
+function stepHighlight(tab, k, n, tries, done) {
+  const p = readPicker(tab);
+  if (!p) return done(t("ask.note.noPicker"));
   const txt = p.opts[p.hi] || "";
   // 只有"确认高亮落在 1..N 的真实选项行上"才算安全。合成行（N+1 `Type something.`
   // 是输入框、N+2 `Chat about this`）和"❯ 根本读不到"都算没确认。
   const safe = p.hi >= 1 && p.hi <= n && !/^(Type something\.|Chat about this)$/.test(txt);
   if (safe) return done("");
-  if (tries >= 3) return done(`高亮挪不开（停在第 ${p.hi} 行「${txt.slice(0, 16)}」），没敢按`);
-  t.stream.send(enc.encode("\x1b[A"));       // ↑
+  if (tries >= 3) return done(t("ask.note.highlightStuck", { row: p.hi, text: txt.slice(0, 16) }));
+  tab.stream.send(enc.encode("\x1b[A"));       // ↑
   // 这一步要留痕：它是"本该打进去的字没被打进去"的唯一证据（没这条日志时，
   // 一次成功的作答分不出"高亮本来就在真实选项行上"和"挪开了才成功"）。
-  sendCtrl({ type: "log", msg: `答题 高亮挪开 tab=${t.id} 原在第${p.hi}行「${txt.slice(0, 16)}」` });
-  setTimeout(() => stepHighlight(t, k, n, tries + 1, done), 160);
+  sendCtrl({ type: "log", msg: `答题 高亮挪开 tab=${tab.id} 原在第${p.hi}行「${txt.slice(0, 16)}」` });
+  setTimeout(() => stepHighlight(tab, k, n, tries + 1, done), 160);
 }
 
 /* 按下去之后**等回声**：转录里那条 tool_use 拿到结果才算成。
    ⚠️ 等不到就**只说不重试** —— 重试可能重复作答（一次点击变成两票）。
    单问单选走这条（一击作答，转录当场翻）。多问/多选**不走这条**：转录要等整张
    提问收尾才落结果，中间那几步它在屏上，见 watchScreenStep。 */
-function watchAnswerEcho(t, askId, el, k, qi) {
+function watchAnswerEcho(tab, askId, el, k, qi) {
   const t0 = Date.now();
   const tick = () => {
-    const v = LIVE.get(t.id);
+    const v = LIVE.get(tab.id);
     const it = v && (v.acts || []).find((x) => x.id === askId);
     if (it && it.ok != null) {
-      sendCtrl({ type: "log", msg: `答题 回声 tab=${t.id} 按=${k} 有结果 用时=${Date.now() - t0}ms` });
+      sendCtrl({ type: "log", msg: `答题 回声 tab=${tab.id} 按=${k} 有结果 用时=${Date.now() - t0}ms` });
       return;
     }
     if (Date.now() - t0 < 2500) return void setTimeout(tick, 250);
-    answerNote(el, askId, k, `已经替你在这一格里按下 ${k}，但 2.5 秒里没等到结果 → 去这一格看看`, qi);
-    sendCtrl({ type: "log", msg: `答题 回声 tab=${t.id} 按=${k} 没等到结果（未重试）` });
+    answerNote(el, askId, k, t("ask.note.noEcho", { k }), qi);
+    sendCtrl({ type: "log", msg: `答题 回声 tab=${tab.id} 按=${k} 没等到结果（未重试）` });
   };
   setTimeout(tick, 300);
 }
@@ -246,17 +246,17 @@ function watchAnswerEcho(t, askId, el, k, qi) {
    askScreen 并立刻重画那一行（不等那 700ms 那一轮）。
    ⚠️ 同样**只说不重试**。屏没变还有一种可能是"这一步本来就没有屏变化"（比如数字落在
    已经勾上的那一项上），所以那句话写的是"屏上没变化"，不写成"没按成"。 */
-function watchScreenStep(t, askId, el, k, before, qi, info) {
+function watchScreenStep(tab, askId, el, k, before, qi, info) {
   const b0 = askScreenSig(before);
   const t0 = Date.now();
   const tick = () => {
-    const v = LIVE.get(t.id);
+    const v = LIVE.get(tab.id);
     const it = v && (v.acts || []).find((x) => x.id === askId);
     if (it && it.ok != null) {          // 整张提问当场收尾了（最后一问/提交）也算成
-      sendCtrl({ type: "log", msg: `答题 屏回执 tab=${t.id} 按=${k} 提问已收尾 用时=${Date.now() - t0}ms` });
+      sendCtrl({ type: "log", msg: `答题 屏回执 tab=${tab.id} 按=${k} 提问已收尾 用时=${Date.now() - t0}ms` });
       return;
     }
-    const m = screenModel(readPicker(t));
+    const m = screenModel(readPicker(tab));
     if (askScreenSig(m) !== b0) {
       askScreen.set(askId, m);
       /* 屏变 = 这一下确实落到了那一格上 ⇒ 把"这一问答的是什么"记下来（只记单问单选：
@@ -268,15 +268,15 @@ function watchScreenStep(t, askId, el, k, before, qi, info) {
         answerPick.set(askId, pk);
       }
       scheduleGroup();
-      sendCtrl({ type: "log", msg: `答题 屏回执 tab=${t.id} 按=${k} 变=问「${String((m && m.q) || "").slice(0, 16)}」` +
+      sendCtrl({ type: "log", msg: `答题 屏回执 tab=${tab.id} 按=${k} 变=问「${String((m && m.q) || "").slice(0, 16)}」` +
         ` 进度=${(m && m.steps || []).map((x) => x.join("")).join(" ") || "无"}` +
         ` 勾=${JSON.stringify((m && m.checks) || {})} 提交行=${!!(m && m.submitRow)} 提交屏=${!!(m && m.review)}` +
         ` 用时=${Date.now() - t0}ms` });
       return;
     }
     if (Date.now() - t0 < 2000) return void setTimeout(tick, 250);
-    answerNote(el, askId, k, `已经替你在这一格里按下 ${k}，但那一格的屏上没变化 → 去这一格看看`, qi);
-    sendCtrl({ type: "log", msg: `答题 屏回执 tab=${t.id} 按=${k} 屏上没变化（未重试）` });
+    answerNote(el, askId, k, t("ask.note.noScreenChange", { k }), qi);
+    sendCtrl({ type: "log", msg: `答题 屏回执 tab=${tab.id} 按=${k} 屏上没变化（未重试）` });
   };
   setTimeout(tick, 250);
 }
@@ -294,132 +294,132 @@ function watchScreenStep(t, askId, el, k, before, qi, info) {
 
    出发前先把高亮从合成行上挪开：`Type something.` 那一行是输入框，`←`/`→` 在它上面是
    **移动文本光标**而不是换问（复用 stepHighlight 那套 —— 它只在压在合成行上时才动）。 */
-function jumpToQuestion(t, el) {
+function jumpToQuestion(tab, el) {
   const qi = el.dataset.jstep | 0;
   const box = el.closest ? el.closest(".gask") : null;
   const askId = (box && box.dataset.ai) || "";
-  const v = LIVE.get(t.id);
+  const v = LIVE.get(tab.id);
   const it = v && (v.acts || []).find((x) => x.id === askId);
   // 闸①：那条提问还挂着（和作答同一道门）—— 它一有结果，"现在问第几问"就不存在了
-  if (!it || it.ok != null) return answerNote(el, askId, 0, "这条提问已经有结果了，没跳", 0);
-  if (!t.stream || !t.ready) return answerNote(el, askId, 0, "那一格的终端没连着，没跳", 0);
-  if (jumpBusy.has(t.id)) return;                     // 正在跳，忽略这一下
+  if (!it || it.ok != null) return answerNote(el, askId, 0, t("ask.note.doneNoJump"), 0);
+  if (!tab.stream || !tab.ready) return answerNote(el, askId, 0, t("ask.note.noStreamNoJump"), 0);
+  if (jumpBusy.has(tab.id)) return;                   // 正在跳，忽略这一下
   const qs = it.qs || [];
-  if (qs.length < 2 || !qs[qi]) return answerNote(el, askId, 0, "这一问已经不在转录里了，没跳", 0);
-  const p = readPicker(t);
-  if (!p) return answerNote(el, askId, 0, "那一格屏上没有选择器了，没跳", 0);
+  if (qs.length < 2 || !qs[qi]) return answerNote(el, askId, 0, t("ask.note.qGoneNoJump"), 0);
+  const p = readPicker(tab);
+  if (!p) return answerNote(el, askId, 0, t("ask.note.noPickerNoJump"), 0);
   // 闸②：提交屏上没有"问"可跳（那一屏只剩提交/取消两行）
-  if (p.submitScreen) return answerNote(el, askId, 0, "那一格已经走到提交那一步了，没跳", 0);
+  if (p.submitScreen) return answerNote(el, askId, 0, t("ask.note.reviewNoJump"), 0);
   /* 闸③：屏上正问的是哪一问 —— 跳问要靠它算方向。认不出来就**不猜**：
      宁可一个字节都不送，也不按"我以为在第 1 问"这个假设去走。 */
   const cur = qs.findIndex((q) => labelSame(p.q, q.q));
   if (cur < 0)
     return answerNote(el, askId, 0,
-      `认不出那一格现在问的是哪一问（屏上「${String(p.q || "").slice(0, 16)}」），没跳`, 0);
+      t("ask.note.unknownQ", { q: String(p.q || "").slice(0, 16) }), 0);
   if (cur === qi) return;                             // 就是这一问 —— 它本来也没有动作
-  jumpBusy.set(t.id, qi);
+  jumpBusy.set(tab.id, qi);
   scheduleGroup();                                    // 先把那一格画成 jmp（观感）
   const n = (qs[cur].opts || []).length;
   // 这条日志是这一整块的现场读数：方向、几格、屏上原话、高亮在第几行。
   // `应用光标态`也带上 —— ←/→ 的字节序列在两种模式下不一样（见 walkToQuestion）
-  sendCtrl({ type: "log", msg: `答题 跳问 tab=${t.id} 从第${cur + 1}问→第${qi + 1}问` +
+  sendCtrl({ type: "log", msg: `答题 跳问 tab=${tab.id} 从第${cur + 1}问→第${qi + 1}问` +
     `（${qi > cur ? "→" : "←"}×${Math.abs(qi - cur)}）屏上「${String(p.q || "").slice(0, 16)}」` +
-    ` 高亮第${p.hiNum || p.hi}行 应用光标态=${!!(t.term.modes && t.term.modes.applicationCursorKeysMode)}` });
-  stepHighlight(t, 0, n, 0, (why) => {
-    if (why) { jumpBusy.delete(t.id); scheduleGroup(); return answerNote(el, askId, 0, why, 0); }
-    walkToQuestion(t, askId, el, qs, cur, qi, 0, Date.now());
+    ` 高亮第${p.hiNum || p.hi}行 应用光标态=${!!(tab.term.modes && tab.term.modes.applicationCursorKeysMode)}` });
+  stepHighlight(tab, 0, n, 0, (why) => {
+    if (why) { jumpBusy.delete(tab.id); scheduleGroup(); return answerNote(el, askId, 0, why, 0); }
+    walkToQuestion(tab, askId, el, qs, cur, qi, 0, Date.now());
   });
 }
 
 /* 一步一步走过去：发一个 `←`/`→`、等屏上那句问题变成**下一问的原文**，再走下一步。
    三种情况都停手：走到别的问上（导航不是顺序的 —— 我没量过那种情况，所以不猜）、
    屏在 1.5 秒里没变（键没进去 / 那一格不在听）、屏上读不到选择器了。 */
-function walkToQuestion(t, askId, el, qs, cur, target, sent, t0) {
+function walkToQuestion(tab, askId, el, qs, cur, target, sent, t0) {
   const dir = target > cur ? 1 : -1;
   const next = cur + dir;
   const want = qs[next] || {};
-  const p = readPicker(t);
+  const p = readPicker(tab);
   const stop = (text, log) => {
-    jumpBusy.delete(t.id); scheduleGroup();
+    jumpBusy.delete(tab.id); scheduleGroup();
     if (log) sendCtrl({ type: "log", msg: log });
     answerNote(el, askId, 0, text, 0);
   };
   if (!p || p.submitScreen)
-    return stop("那一格的屏读不到选择器了（可能已经到提交那一步），没往下走", "");
+    return stop(t("ask.note.pickerGoneWalk"), "");
   if (labelSame(p.q, want.q))                        // 上一个键已经把它送到了（读得晚了一拍）
-    return walkArrived(t, askId, el, qs, next, target, sent, t0);
+    return walkArrived(tab, askId, el, qs, next, target, sent, t0);
   if (!labelSame(p.q, (qs[cur] || {}).q))
-    return stop(`跳到这一问没走上（那一格现在问的是「${String(p.q || "").slice(0, 16)}」）→ 去这一格看看`,
-      `答题 跳问 tab=${t.id} 停手：屏上是「${String(p.q || "").slice(0, 16)}」` +
+    return stop(t("ask.note.jumpWrongQ", { q: String(p.q || "").slice(0, 16) }),
+      `答题 跳问 tab=${tab.id} 停手：屏上是「${String(p.q || "").slice(0, 16)}」` +
       `，既不是出发那一问也不是下一问（走了 ${sent} 步）`);
   if (sent > qs.length + 1)                          // 理论上到不了（步数比问数还多）
-    return stop("跳到这一问没走上（走了太多步）→ 去这一格看看", "");
+    return stop(t("ask.note.jumpTooManySteps"), "");
   /* ⚠️ `\x1b[C`/`\x1b[D` 是**普通光标模式**下的 ←/→。这一格若是应用光标模式（DECCKM）
      就得换成 `\x1bOC`/`\x1bOD` —— 上一行日志里的"应用光标态"就是在说这件事。
      不在下面凭记忆写两个分支：本项目里送 ↑/↓ 用的也是普通序列（`\x1b[A`/`\x1b[B`），
      实测生效过，说明这一屏不是应用光标模式。 */
-  t.stream.send(enc.encode(dir > 0 ? "\x1b[C" : "\x1b[D"));
-  sendCtrl({ type: "log", msg: `答题 跳问 tab=${t.id} 第${sent + 1}步 ${dir > 0 ? "→" : "←"}` +
+  tab.stream.send(enc.encode(dir > 0 ? "\x1b[C" : "\x1b[D"));
+  sendCtrl({ type: "log", msg: `答题 跳问 tab=${tab.id} 第${sent + 1}步 ${dir > 0 ? "→" : "←"}` +
     ` 现第${cur + 1}问 预期变「${String(want.q || "").slice(0, 16)}」` });
   const t1 = Date.now();
   const tick = () => {
-    const q = readPicker(t);
+    const q = readPicker(tab);
     if (q && !q.submitScreen && labelSame(q.q, want.q))
-      return walkArrived(t, askId, el, qs, next, target, sent + 1, t0);
+      return walkArrived(tab, askId, el, qs, next, target, sent + 1, t0);
     if (Date.now() - t1 < 1500) return void setTimeout(tick, 120);
     /* 屏没变 ⇒ 停手，**不重试**：再送一个键就是跳两格。唯一实测过的"←/→ 不换问"的
        情况是高亮压在 `Type something.` 上（那时它是移动文本光标），那一步已经被
        stepHighlight 挡在出发之前了。 */
-    stop("跳到这一问没走上（那一格的屏在 1.5 秒里没变）→ 去这一格看看",
-      `答题 跳问 tab=${t.id} 停手：第${sent + 1}步按下去了，屏上没变化` +
+    stop(t("ask.note.jumpNoChange"),
+      `答题 跳问 tab=${tab.id} 停手：第${sent + 1}步按下去了，屏上没变化` +
       `（现「${String((q && q.q) || "").slice(0, 16)}」）用时=${Date.now() - t0}ms`);
   };
   setTimeout(tick, 150);
 }
 
 // 走完一步之后：到目标了就收工，没到就接着走（目标可能隔了好几问）
-function walkArrived(t, askId, el, qs, at, target, sent, t0) {
-  if (at !== target) return walkToQuestion(t, askId, el, qs, at, target, sent, t0);
-  const m = screenModel(readPicker(t));
+function walkArrived(tab, askId, el, qs, at, target, sent, t0) {
+  if (at !== target) return walkToQuestion(tab, askId, el, qs, at, target, sent, t0);
+  const m = screenModel(readPicker(tab));
   if (m) askScreen.set(askId, m);      // 刚认过的屏立刻用上，不等那 700ms 那一轮
-  jumpBusy.delete(t.id);
+  jumpBusy.delete(tab.id);
   scheduleGroup();
-  sendCtrl({ type: "log", msg: `答题 跳问 tab=${t.id} 到了第${target + 1}问 走=${sent}步` +
+  sendCtrl({ type: "log", msg: `答题 跳问 tab=${tab.id} 到了第${target + 1}问 走=${sent}步` +
     ` 屏上「${String((m && m.q) || "").slice(0, 16)}」` +
     ` 进度=${(m && m.steps || []).map((x) => x.join("")).join(" ") || "无"} 用时=${Date.now() - t0}ms` });
 }
 
 /* 点了一个选项。闸全过才写那一个字符（多问/多选各多一道，见闸⑤⑥）。 */
-function answerFromGroup(t, el) {
+function answerFromGroup(tab, el) {
   const k = el.dataset.aopt | 0;
   const qi = el.dataset.qidx | 0;              // 第几问（0 基）—— 单问恒为 0
   const box = el.closest(".gask");
   if (!k || !box) return;
   const askId = box.dataset.ai || "";
-  const v = LIVE.get(t.id);
+  const v = LIVE.get(tab.id);
   const it = v && (v.acts || []).find((x) => x.id === askId);
   /* 闸①：那条提问**还挂着**（转录说它还没结果）—— 结构化判据，比屏幕硬。
      这一条同时把"换了会话"覆盖掉：tracer 换代（/clear、resume）时 acts 是
      `replace` 整份换掉的，这条 ask 会跟着消失，所以不需要另记一份 sessionId 来比。
      ⚠️ 它管不到"这张提问里的**哪一问**" —— 那件事转录里没有，只在屏上（见闸⑤）。 */
-  if (!it || it.ok != null) return answerNote(el, askId, k, "这条提问已经有结果了，没按", qi);
+  if (!it || it.ok != null) return answerNote(el, askId, k, t("ask.note.doneNoPress"), qi);
   const qs = it.qs || [];
   const q = qs[qi];
-  if (!q) return answerNote(el, askId, k, "这一问已经不在转录里了，没按", qi);
+  if (!q) return answerNote(el, askId, k, t("ask.note.qGoneNoPress"), qi);
   const multi = !!q.multi, many = qs.length > 1 || multi;
   const want = (q.opts || [])[k - 1];
-  if (!want || !want.label) return answerNote(el, askId, k, "这一项已经不在转录里了，没按", qi);
+  if (!want || !want.label) return answerNote(el, askId, k, t("ask.note.optGoneNoPress"), qi);
   // 闸②：那一格还活着、PTY 还连着（写进去没地方去，就是白写）
-  if (!t.stream || !t.ready) return answerNote(el, askId, k, "那一格的终端没连着，没按", qi);
+  if (!tab.stream || !tab.ready) return answerNote(el, askId, k, t("ask.note.noStreamNoPress"), qi);
   /* 闸③：**屏上确实是这个问题**。转录与屏上是两个来源，只信一个就可能把键写到
      别的地方去（比如那一格已经走到下一个问题了）。判据取"不容易碰巧成立"的两样：
      屏上选项数（减掉合成的两项）与转录一致，且第 k 行文字与转录那个 label 对得上。 */
-  const p = readPicker(t);
-  if (!p) return answerNote(el, askId, k, "那一格屏上没有选择器了，没按", qi);
+  const p = readPicker(tab);
+  if (!p) return answerNote(el, askId, k, t("ask.note.noPickerNoPress"), qi);
   /* 闸⑥：**提交屏上没有选项可点**。那一屏只剩两行（`1. Submit answers` / `2. Cancel`），
      数字在那儿是"提交/取消"，送一个选项编号过去 = 丢掉整张答案或者取消掉。 */
   if (many && p.submitScreen)
-    return answerNote(el, askId, k, "那一格已经走到提交那一步了 —— 这一屏上的数字是「提交/取消」，点不动选项，按行里的「提交」", qi);
+    return answerNote(el, askId, k, t("ask.note.reviewNoOptions"), qi);
   /* 闸⑤（多问）：屏上现在问的必须是**这一问**。多问是一问一屏、编号每问从 1 重来 ——
      你点第 2 问的第 3 项时屏上若正问第 1 问，那个 `3` 会**答到第 1 问上去**，静默答错。
      单问（含"只有一问的多选"）没有这层歧义，不设这道闸。 */
@@ -427,25 +427,27 @@ function answerFromGroup(t, el) {
     const sm = askScreen.get(askId);
     if (!sm || !labelSame(sm.q, q.q))
       return answerNote(el, askId, k,
-        sm ? `那一格现在问的是「${String(sm.q || "").slice(0, 16)}」，不是这一问，没按`
-           : "还没读到那一格的屏，没按", qi);
+        sm ? t("ask.note.otherQ", { q: String(sm.q || "").slice(0, 16) })
+           : t("ask.note.noScreenModel"), qi);
   }
   const n = (q.opts || []).length;
   if (p.max !== n + 2)
-    return answerNote(el, askId, k, `屏上选项数对不上（屏上 ${Math.max(0, p.max - 2)} 项 / 转录 ${n} 项），没按`, qi);
+    return answerNote(el, askId, k, t("ask.note.optCountMismatch",
+      { screen: Math.max(0, p.max - 2), transcript: n }), qi);
   if (!labelSame(p.opts[k], want.label))
-    return answerNote(el, askId, k, `屏上第 ${k} 行与转录对不上（屏上「${(p.opts[k] || "").slice(0, 16)}」），没按`, qi);
+    return answerNote(el, askId, k, t("ask.note.rowMismatch",
+      { k, text: (p.opts[k] || "").slice(0, 16) }), qi);
   // 闸④：高亮别压在合成行上（见文件头那段：那一行是输入框，会把数字当打字吃掉）
-  stepHighlight(t, k, n, 0, (why) => {
+  stepHighlight(tab, k, n, 0, (why) => {
     if (why) return answerNote(el, askId, k, why, qi);
     // 多问/多选按下去之后屏会变，判据换成"屏变没变"（见 watchScreenStep），
     // 所以先把按之前那一屏读下来。
-    const before = many ? screenModel(readPicker(t)) : null;
-    t.stream.send(enc.encode(String(k)));
-    sendCtrl({ type: "log", msg: `答题 按=${k} tab=${t.id}「${want.label.slice(0, 24)}」问=「${String(q.q || "").slice(0, 24)}」` +
+    const before = many ? screenModel(readPicker(tab)) : null;
+    tab.stream.send(enc.encode(String(k)));
+    sendCtrl({ type: "log", msg: `答题 按=${k} tab=${tab.id}「${want.label.slice(0, 24)}」问=「${String(q.q || "").slice(0, 24)}」` +
       (multi ? "（多选：只切勾选，不前进）" : "") });
-    if (many) watchScreenStep(t, askId, el, k, before, qi, { label: want.label, multi });
-    else watchAnswerEcho(t, askId, el, k, qi);
+    if (many) watchScreenStep(tab, askId, el, k, before, qi, { label: want.label, multi });
+    else watchAnswerEcho(tab, askId, el, k, qi);
   });
 }
 
@@ -453,64 +455,64 @@ function answerFromGroup(t, el) {
      · 已经在提交屏上（多问答完自动停在那一屏 / 多选刚回车进来）⇒ 直接按
      · 多选、屏上还有那一项没编号的 `Submit` ⇒ 高亮走过去、回车进提交屏，再按
      · 多问、还没到提交屏 ⇒ **一个字节都不送**（那几问没答完，提交这一步还不存在） */
-function submitFromGroup(t, el) {
+function submitFromGroup(tab, el) {
   const box = el.closest(".gask");
   const askId = (box && box.dataset.ai) || "";
-  const v = LIVE.get(t.id);
+  const v = LIVE.get(tab.id);
   const it = v && (v.acts || []).find((x) => x.id === askId);
-  if (!it || it.ok != null) return answerNote(el, askId, 0, "这条提问已经有结果了，没按", 0);
-  if (!t.stream || !t.ready) return answerNote(el, askId, 0, "那一格的终端没连着，没按", 0);
+  if (!it || it.ok != null) return answerNote(el, askId, 0, t("ask.note.doneNoPress"), 0);
+  if (!tab.stream || !tab.ready) return answerNote(el, askId, 0, t("ask.note.noStreamNoPress"), 0);
   const qs = it.qs || [];
   const multi = qs.some((x) => x && x.multi);
-  const p = readPicker(t);
-  if (!p) return answerNote(el, askId, 0, "那一格屏上没有选择器了，没按", 0);
-  if (p.submitScreen) return pressSubmit(t, askId, el, p);
-  if (!multi) return answerNote(el, askId, 0, "这一屏上还没有提交那一步（把这几问答完，它自己会停在提交那一步）", 0);
-  gotoSubmitRow(t, askId, el, 0);
+  const p = readPicker(tab);
+  if (!p) return answerNote(el, askId, 0, t("ask.note.noPickerNoPress"), 0);
+  if (p.submitScreen) return pressSubmit(tab, askId, el, p);
+  if (!multi) return answerNote(el, askId, 0, t("ask.note.noSubmitYet"), 0);
+  gotoSubmitRow(tab, askId, el, 0);
 }
 
 /* 多选：把高亮走到那一项**没有编号的 `Submit`** 上，再回车进提交屏（实测的走法
    `1→2→…→Type something→Submit→Chat about this`，所以一路 ↓ 会先撞上 Submit）。
    ⚠️ ↓ 到最下面会**夹住**，那时改按 ↑ 换条路找 —— ↑/↓ 只是移动，按错也不会作答。 */
-function gotoSubmitRow(t, askId, el, tries) {
-  const p = readPicker(t);
-  if (!p) return answerNote(el, askId, 0, "那一格的屏读不到了，没按", 0);
-  if (p.submitScreen) return pressSubmit(t, askId, el, p);
+function gotoSubmitRow(tab, askId, el, tries) {
+  const p = readPicker(tab);
+  if (!p) return answerNote(el, askId, 0, t("ask.note.screenGoneSubmit"), 0);
+  if (p.submitScreen) return pressSubmit(tab, askId, el, p);
   if (p.hiSubmit) {
-    t.stream.send(enc.encode("\r"));         // 回车 = 进提交屏
-    sendCtrl({ type: "log", msg: `答题 提交 tab=${t.id} 高亮已在 Submit 行，送回車` });
-    return waitSubmitScreen(t, askId, el, 0);
+    tab.stream.send(enc.encode("\r"));       // 回车 = 进提交屏
+    sendCtrl({ type: "log", msg: `答题 提交 tab=${tab.id} 高亮已在 Submit 行，送回車` });
+    return waitSubmitScreen(tab, askId, el, 0);
   }
-  if (tries >= 8) return answerNote(el, askId, 0, `高亮走不到「Submit」那一行（停在第 ${p.hi} 行），没按`, 0);
+  if (tries >= 8) return answerNote(el, askId, 0, t("ask.note.submitRowUnreachable", { row: p.hi }), 0);
   // 每一步都要留痕：这一路是往活着的 agent 里敲的键，事后必须能数出来敲了哪几下
   // （没有这条日志时，"高亮本来就在 Submit 上"和"走了四步才到"读起来一模一样）
-  sendCtrl({ type: "log", msg: `答题 提交 tab=${t.id} 挪高亮 第${tries + 1}步 现第${p.hi}行` +
+  sendCtrl({ type: "log", msg: `答题 提交 tab=${tab.id} 挪高亮 第${tries + 1}步 现第${p.hi}行` +
     `（${p.hi >= p.max ? "已在末行，↑" : "↓"}）` });
-  t.stream.send(enc.encode(p.hi >= p.max ? "\x1b[A" : "\x1b[B"));
-  setTimeout(() => gotoSubmitRow(t, askId, el, tries + 1), 180);
+  tab.stream.send(enc.encode(p.hi >= p.max ? "\x1b[A" : "\x1b[B"));
+  setTimeout(() => gotoSubmitRow(tab, askId, el, tries + 1), 180);
 }
 
 /* 回车之后等提交屏出现。那一屏是**屏上的事实**（`Review your answers`），读一眼就知道；
    读不到就停在这儿说实话，绝不往下猜着送键。 */
-function waitSubmitScreen(t, askId, el, tries) {
-  const p = readPicker(t);
-  if (p && p.submitScreen) return pressSubmit(t, askId, el, p);
-  if (tries >= 10) return answerNote(el, askId, 0, "回车之后那一格没走到提交屏 → 去这一格看看", 0);
-  setTimeout(() => waitSubmitScreen(t, askId, el, tries + 1), 200);
+function waitSubmitScreen(tab, askId, el, tries) {
+  const p = readPicker(tab);
+  if (p && p.submitScreen) return pressSubmit(tab, askId, el, p);
+  if (tries >= 10) return answerNote(el, askId, 0, t("ask.note.enterNoReview"), 0);
+  setTimeout(() => waitSubmitScreen(tab, askId, el, tries + 1), 200);
 }
 
 /* 按提交。**每一步都先读屏**：认得出"第 1 行是提交"才送那一个 `1`（实测数字键在提交屏
    上是直接生效的）；认不出来就什么都不送 —— 那一屏只剩"提交/取消"两行，送错一个数字
    就是丢掉整张答案或者把手填的答案取消掉。 */
-function pressSubmit(t, askId, el, p) {
-  p = p || readPicker(t);
-  if (!p || !p.submitScreen) return answerNote(el, askId, 0, "那一格已经不在提交屏上了，没按", 0);
+function pressSubmit(tab, askId, el, p) {
+  p = p || readPicker(tab);
+  if (!p || !p.submitScreen) return answerNote(el, askId, 0, t("ask.note.notOnReview"), 0);
   const sub = Object.keys(p.opts).map(Number).find((x) => /^Submit/.test(p.opts[x] || ""));
   if (sub !== 1)
-    return answerNote(el, askId, 0, `提交屏上没认出一行是「提交」（第 1 行是「${(p.opts[1] || "").slice(0, 16)}」），没按`, 0);
-  t.stream.send(enc.encode("1"));
-  sendCtrl({ type: "log", msg: `答题 提交 tab=${t.id} 提交屏第1行「${(p.opts[1] || "").slice(0, 20)}」送=1` });
-  watchAnswerEcho(t, askId, el, 1, 0);      // 这一步的判据回到转录：整张提问当场收尾
+    return answerNote(el, askId, 0, t("ask.note.noSubmitRow", { text: (p.opts[1] || "").slice(0, 16) }), 0);
+  tab.stream.send(enc.encode("1"));
+  sendCtrl({ type: "log", msg: `答题 提交 tab=${tab.id} 提交屏第1行「${(p.opts[1] || "").slice(0, 20)}」送=1` });
+  watchAnswerEcho(tab, askId, el, 1, 0);    // 这一步的判据回到转录：整张提问当场收尾
 }
 
 /* 转录里落下来的答案长什么样：单选是那一项 label 原样，多选是 `"Red, Blue"`
@@ -527,11 +529,11 @@ function answerLabels(v, multi) {
 /* 能点吗？—— 这是**渲染那一刻**就判得出来的部分（剩下那些闸要读屏，见上面）。
    多问/多选现在也做了，但"哪一问此刻是活的、到没到提交那一步"只在屏上，这一层答不了
    ⇒ 这里只管"这一块能不能有活的东西"，逐行的死活交给 askHTML 的 `cur`/`atReview`。 */
-function askClickable(a, t) {
+function askClickable(a, tab) {
   const qs = a.qs || [];
   if (a.ok != null) return { on: false, why: "" };         // 已回答：什么都不必说
   if (!qs.length) return { on: false, why: "" };           // 没有结构化选项，只有原文
-  if (!t || !t.stream || !t.ready) return { on: false, why: "那一格的终端没连着" };
+  if (!tab || !tab.stream || !tab.ready) return { on: false, why: t("ask.why.noStream") };
   return { on: true, why: "" };
 }
 
@@ -550,11 +552,11 @@ function askClickable(a, t) {
 
    `open` = 用户亲手点开过这一张（见 askOpen）。**默认收着**（`.hd`，只出表头那一行
    `在等你答 · 问题原文` + 一颗「作答」），他点开过的那张才摊开（`.usr`，正身可见）。 */
-function askHTML(a, t, open) {
+function askHTML(a, tab, open) {
   const qs = a.qs || [];
   const done = a.ok != null;
   const ans = a.answers || {};
-  const clk = askClickable(a, t);
+  const clk = askClickable(a, tab);
   const many = qs.length > 1 || !!(qs[0] && qs[0].multi);
   const multi = qs.some((q) => q && q.multi);
   // 屏上读数（正问哪一问 / 哪几项勾着 / 进度条 / 到没到提交）—— 转录里这些一概没有
@@ -587,7 +589,9 @@ function askHTML(a, t, open) {
       // 灰的那一行把为什么写在 title 上（本仓库的规矩：不可用的动作做灰、不做禁 ——
       // 禁了 title 不弹）。
       const attrs = mode === "cur"
-        ? ` data-aopt="${i + 1}" data-qidx="${qi}" title="替你按 ${i + 1}（在这一格里等同选这一项${q.multi ? "，多选：点上/点掉" : ""}）"`
+        ? ` data-aopt="${i + 1}" data-qidx="${qi}" title="${esc(q.multi
+            ? t("ask.opt.titleMulti", { k: i + 1 })
+            : t("ask.opt.title", { k: i + 1 }))}"`
         : (mode === "off" && why ? ` title="${esc(why)}"` : "");
       const hit = !!err && err.k === i + 1 && (err.qi | 0) === qi;
       if (hit) shown = true;
@@ -611,13 +615,12 @@ function askHTML(a, t, open) {
      ⚠️ 它们在这一格里**点不成**：送 `N+1` 这个编号的语义没实测过（高亮压在 Type 上时
      那一行会把字符当打字吃掉），所以不猜。做灰 + 点它 = 进那一格自己写
      （不可用的动作做灰、不做禁、不做隐）。 */
-  const SYNTH = [["自己写一个答案", "Type something."], ["顺便说一句", "Chat about this."]];
-  const synthHTML = (qi) => SYNTH.map(([t, en], j) => {
+  const SYNTH = [["ask.synth.write", "Type something."], ["ask.synth.chat", "Chat about this."]];
+  const synthHTML = (qi) => SYNTH.map(([key, en], j) => {
     const n = ((qs[qi] || {}).opts || []).length + 1 + j;
-    return `<div class="gopt syn" data-go="1" title="终端里这一问还有第 ${n} 项：${en}` +
-      ` —— 它只能在那格上敲（自己写答案 / 接一句话），点这里进那一格">` +
-      `<div class="lb">${esc(t)}<span class="en">${esc(en)}</span>` +
-      `<span class="hint">→ 去这一格写</span></div></div>`;
+    return `<div class="gopt syn" data-go="1" title="${esc(t("ask.synth.title", { n, en }))}">` +
+      `<div class="lb">${esc(t(key))}<span class="en">${esc(en)}</span>` +
+      `<span class="hint">${esc(t("ask.synth.hint"))}</span></div></div>`;
   }).join("");
 
   // 屏上正问的是第几问（读不到屏，或屏上那句对不上，就退成"第一个还没答的"，再退成第一问）
@@ -631,7 +634,7 @@ function askHTML(a, t, open) {
   };
   const curQ = curIdx(), cur = qs[curQ] || null;
   const curWhy = clk.why ||
-    (atReview ? "那一格已经走到提交那一步了（这一屏上的数字是「提交/取消」）" : "");
+    (atReview ? t("ask.reviewNote") : "");
   const canClick = !done && clk.on && !atReview;
   /* "有结果"和"答上了"是两件事（实测）：在提交屏上选「2. Cancel」= 拒答并**打断整个
      回合**，转录里落的是 `toolUseResult:"User rejected tool use"` + 一条
@@ -639,7 +642,7 @@ function askHTML(a, t, open) {
      就是界面在撒谎（同"答了 No 不算完成"那条产品规则）。 */
   const declined = done && !Object.keys(ans).length;
   const dNote = declined
-    ? `<div class="gnote">它没被答掉 —— 那一轮被打断了（或者是在那一格里拒绝作答）</div>` : "";
+    ? `<div class="gnote">${esc(t("ask.declinedNote"))}</div>` : "";
   // 一问一行的「问 → 答」
   /* 「（没答）」和「（没读到）」是两件事：进度条上那一格的标记说了这一问答过没有
      （☐ 没答 / ☒ 答过）—— **分得出来就不能混着说**。实测里在提交屏上就见过这个形状：
@@ -655,7 +658,7 @@ function askHTML(a, t, open) {
        对 question 不截断（transcript.go:829 只 TrimSpace）⇒ 转录里没有这一问的键 =
        它**没被答**，不是"我们没读到"。两句话混用就是在替界面认一个它并不缺的知识
        （实测就是：只答了第 3 问，前两问明明没答，却在写"没读到"）。 */
-    const miss = (done || notAsked(qi)) ? "（没答）" : "（没读到）";
+    const miss = (done || notAsked(qi)) ? t("ask.miss") : t("ask.unread");
     return `<div class="qa"><span class="qi">${esc(q.q || "")}</span>` +
       `<span class="qv">${v ? md(v) : miss}</span></div>`;
   }).join("");
@@ -664,7 +667,7 @@ function askHTML(a, t, open) {
   if (done && many) {
     // 多问答完：一问一行「问 → 答」（要看的是结果），原文与选项收进 <details>
     body = dNote + qaRows() +
-      `<details class="grec"><summary>看原文与选项（${qs.length} 问）</summary>` +
+      `<details class="grec"><summary>${esc(tCount("ask.details", qs.length))}</summary>` +
       qs.map((q, qi) => qBlock(q, qi, "plain", "")).join("") + `</details>`;
   } else if (done) {
     // 一问答完：块本来就小，就照旧（问题 + 选项，选中的那项带 ✓）—— 收起来反而要把
@@ -691,50 +694,54 @@ function askHTML(a, t, open) {
         return `<span class="gstep${isCur ? " cur" : ""}${m !== "☐" ? " ok" : ""}` +
           `${jump ? " go" : ""}${jmpTo === i ? " jmp" : ""}"` +
           (jump ? ` data-jstep="${i}"` : "") + ` title="` +
-          esc(isCur ? "正在问这一问"
-            : (jump ? `跳到这一问（在那一格里按 ←/→ 走过去${v ? `；它已经答过：${v}，走过去可以让它重答` : ""}）`
-                    : v ? `已经答过：${v}` : m !== "☐" ? "已经答过" : "还没问到这里")) +
+          esc(isCur ? t("ask.step.current")
+            : (jump ? (v ? t("ask.step.jumpAnswered", { v }) : t("ask.step.jump"))
+                    : v ? t("ask.step.answered", { v })
+                      : m !== "☐" ? t("ask.step.answeredShort") : t("ask.step.notYet"))) +
           `">${esc(m)} ${esc(label)}</span>`;
       }).join("") + `</div>`;
     } else {
-      body += `<div class="gnote">还没读到那一格的屏（它一问一屏，这里跟着那一格刷新）</div>`;
+      body += `<div class="gnote">${esc(t("ask.noScreenSteps"))}</div>`;
     }
     body += atReview
-      ? `<div class="qt">已经在提交那一步了</div>` + qaRows()
+      ? `<div class="qt">${esc(t("ask.reviewTitle"))}</div>` + qaRows()
       // 提交屏上没有那两项合成项（那儿只有"提交/取消"两行），别在那儿画
       : (cur ? qBlock(cur, curQ, canClick ? "cur" : "off", curWhy) + synthHTML(curQ) : "");
   } else {
     body = cur ? qBlock(cur, 0, canClick ? "cur" : "off", curWhy) + synthHTML(0)
-               : `<div class="qt">${esc(a.text || "它有一件事要问你")}</div>`;
+               : `<div class="qt">${esc(a.text || t("ask.fallbackText"))}</div>`;
   }
-  if (!body) body = `<div class="qt">${esc(a.text || "它有一件事要问你")}</div>`;
+  if (!body) body = `<div class="qt">${esc(a.text || t("ask.fallbackText"))}</div>`;
   // 行尾那颗「提交」：多问/多选才有这一步。能不能按由**屏上的进度**定 ——
   // 到提交屏了（多问答完自己停在那儿 / 多选刚回车进来）就能按；不能按就做灰 + title。
   let subBtn = "";
   if (!done && many) {
     const usable = !!sm && (atReview || (multi && sm.submitRow));
     const why = usable ? "" :
-      !sm ? "还没读到那一格的屏（多问/多选要跟着屏上的进度走）"
-        : multi ? "那一屏上还没有「Submit」那一行"
-        : "这几问还没答完（答完它自己会停在提交那一步）";
+      !sm ? t("ask.submit.noScreen")
+        : multi ? t("ask.submit.noRow")
+        : t("ask.submit.notDone");
     subBtn = `<button class="go sub${usable ? "" : " mute"}"` +
       (usable ? ` data-submit-ask="${esc(a.id || "")}"` : (why ? ` title="${esc(why)}"` : "")) +
-      `>提交</button>`;
+      `>${esc(t("ask.submit"))}</button>`;
   }
   /* 收起来的那一态（`.hd`）：表头必须**带着问题原文** —— 否则整张卡只剩
      "在等你答"一行，看不出它在问什么。取屏上正问的那一问（读不到就退成第一问）。 */
   const hodQ = (cur && cur.q) || (qs[0] && qs[0].q) || a.text || "";
   return `<div class="gask${done ? " done" : ""}${open ? " usr" : " hd"}" data-ai="${esc(a.id || "")}">` +
-    `<div class="qh"><span>${done ? (declined ? "没被答掉" : "已回答") : "在等你答"}</span>` +
-      (many ? `<span>· ${qs.length} 问${multi ? "，多选" : ""}</span>` : "") +
+    `<div class="qh"><span>${esc(done ? (declined ? t("ask.state.declined") : t("ask.state.done"))
+      : t("ask.state.waiting"))}</span>` +
+      (many ? `<span>${esc(tCount("ask.many", qs.length,
+        { multi: multi ? t("ask.multiSuffix") : "" }))}</span>` : "") +
       // 摊开的时候问题在正身里（.qt），收起来的时候搬到这儿 —— 同一个事实只画一处
       `<span class="hdq">· ${esc(clamp(hodQ, 90))}</span>` +
       /* 「作答 ▾」/「收起 ▴」：**纯本地**的一颗键（不碰终端），所以不守"有选中文本
          时不动作"那条（那条是给"往活着的 agent 里写键"用的）。CSS 决定它什么时候
          露面：收着（.hd）或用户自己摊开的（.usr）才露。 */
       (!done ? `<button class="open" data-ask-open="${esc(a.id || "")}"` +
-        ` title="这一块摊开来有点高，先收着 —— 点它摊开（不碰终端）">` +
-        `<span class="t-exp">作答 ▾</span><span class="t-col">收起 ▴</span></button>` : "") +
+        ` title="${esc(t("ask.open.title"))}">` +
+        `<span class="t-exp">${esc(t("ask.open.expand"))}</span>` +
+        `<span class="t-col">${esc(t("ask.open.collapse"))}</span></button>` : "") +
     `</div>` +
     `<div class="qb">${body}</div>` +
     // 对不上任何选项行的那句话（比如"提交"那一步没过闸）落到**块尾** —— 不落的话
@@ -745,7 +752,7 @@ function askHTML(a, t, open) {
       // 值得去 —— 答完之后还写着"去回答"就是界面在撒谎。
       subBtn +
       `<button class="go" data-go-ask="${esc(a.id || "")}">` +
-        (done ? "去这一格 →" : "去这一格回答 →") +
+        esc(done ? t("ask.goDone") : t("ask.go")) +
       `</button>` +
     `</div></div>`;
 }

@@ -40,10 +40,10 @@ const permNorm = (s) => String(s == null ? "" : s).toLowerCase().replace(/[^\p{L
      {amend:true}    框在「Tab 补充说明」的输入态（页脚那句 `Tab to amend` 不见了）
      {…}             读到了（yesN=0 表示这一屏没有单独的 `Yes`，比如计划确认那类）
    ⚠️ 只扫**视口**：滚上去看历史时读不到当前框，这时按钮做灰是诚实的。 */
-function readPermDialog(t) {
-  const b = t && t.term && t.term.buffer.active;
+function readPermDialog(tab) {
+  const b = tab && tab.term && tab.term.buffer.active;
   if (!b) return null;
-  const R = t.term.rows || 50;
+  const R = tab.term.rows || 50;
   const lo = Math.max(0, b.viewportY), hi = Math.min(b.length - 1, lo + R - 1);
   const at = (i) => {
     const ln = b.getLine(i);
@@ -124,7 +124,7 @@ function readPermDialog(t) {
     yesCount: yes.length,
     hiN, q,
     region: region.join("\n"),
-    why: seq ? "" : "屏上的选项编号对不上（不是 1..N），没按",
+    why: seq ? "" : t("perm.why.badNumbering"),
   };
 }
 
@@ -153,16 +153,16 @@ function permScreenMatches(region, a) {
 /* 渲染那一刻的可用性：`ok` 是"这一屏读到了、且确实是转录里那一件事"；
    允许（单独的 Yes）、其他选项（按编号）、拒绝（Esc）各自再判一次。
    读屏本身是便宜的（视口 60 行），每 400ms 跟着行重画读一遍没问题。 */
-function permState(a, t) {
+function permState(a, tab) {
   if (!a) return null;
-  const busy = !!permBusy.get(t && t.id);
+  const busy = !!permBusy.get(tab && tab.id);
   const deny0 = (why) => ({ ok: false, deny: false, yesN: 0, opts: [], q: "", why, busy });
-  if (!t || !t.stream || !t.ready) return deny0("那一格的终端没连着");
-  const p = readPermDialog(t);
-  if (!p) return deny0("那一格屏上没有权限框（可能已经答过了）");
-  if (p.amend) return deny0("那一格的权限框在「Tab 补充说明」的输入态 —— 去这一格退出后再点");
+  if (!tab || !tab.stream || !tab.ready) return deny0(t("perm.why.noStream"));
+  const p = readPermDialog(tab);
+  if (!p) return deny0(t("perm.why.noDialog"));
+  if (p.amend) return deny0(t("perm.why.amend"));
   if (!permScreenMatches(p.region, a))
-    return deny0("屏上这一屏和转录对不上（可能已经换成另一件事了）—— 去这一格看看");
+    return deny0(t("perm.why.mismatch"));
   const opts = [];
   for (let n = 1; n <= p.n; n++) opts.push({ n, label: p.opts[n] || "" });
   return {
@@ -170,29 +170,29 @@ function permState(a, t) {
   };
 }
 
-/* 选项在卡片上一律说中文。常见模板给准确短标签；认不出的不硬翻，
+/* 选项在卡片上说**当前界面语言**。常见模板给准确短标签；认不出的不硬翻，
    退成「允许（附加条件）/拒绝（附加条件）」—— 完整英文原文只放 title（hover）
    和日志里，卡片上不出现半句中文半句英文。发键只认编号（数字键与高亮无关）。 */
-function permZh(label) {
+function permLabel(label) {
   const s = String(label == null ? "" : label).trim();
-  const t = s.toLowerCase();
-  if (t.indexOf("yes, and switch to accept edits") === 0) return "切到自动接受编辑";
-  if (t.indexOf("yes, auto-accept edits") === 0) return "自动接受编辑";
-  if (t.indexOf("yes, manually approve edits") === 0) return "手动确认编辑";
-  if (t.indexOf("no, keep planning") === 0) return "继续规划";
-  if (t.indexOf("no, and tell claude") === 0) return "换一种做法";
-  if (t.indexOf("yes, and always allow access to ") === 0) {
+  const low = s.toLowerCase();
+  if (low.indexOf("yes, and switch to accept edits") === 0) return t("perm.opt.acceptEdits");
+  if (low.indexOf("yes, auto-accept edits") === 0) return t("perm.opt.autoAccept");
+  if (low.indexOf("yes, manually approve edits") === 0) return t("perm.opt.manualApprove");
+  if (low.indexOf("no, keep planning") === 0) return t("perm.opt.keepPlanning");
+  if (low.indexOf("no, and tell claude") === 0) return t("perm.opt.otherApproach");
+  if (low.indexOf("yes, and always allow access to ") === 0) {
     let x = s.slice("Yes, and always allow access to ".length);
     x = x.replace(/\s+from this project\s*$/i, "").trim();
-    return x ? `始终允许访问 ${x}` : "始终允许访问";
+    return x ? t("perm.opt.alwaysAllowTo", { x }) : t("perm.opt.alwaysAllow");
   }
-  if (t.indexOf("yes, and always allow") === 0) return "始终允许";
-  if (t.indexOf("yes, and don't ask again") === 0) return "不再询问";
-  if (t.indexOf("yes, and don’t ask again") === 0) return "不再询问";
-  if (t.indexOf("no, and don't ask again") === 0) return "不再询问（拒绝）";
-  if (t.indexOf("yes") === 0) return "允许（附加条件）";
-  if (t.indexOf("no") === 0) return "拒绝（附加条件）";
-  return "选项";
+  if (low.indexOf("yes, and always allow") === 0) return t("perm.opt.alwaysAllow");
+  if (low.indexOf("yes, and don't ask again") === 0) return t("perm.opt.dontAsk");
+  if (low.indexOf("yes, and don’t ask again") === 0) return t("perm.opt.dontAsk");
+  if (low.indexOf("no, and don't ask again") === 0) return t("perm.opt.dontAskDeny");
+  if (low.indexOf("yes") === 0) return t("perm.opt.yesConditional");
+  if (low.indexOf("no") === 0) return t("perm.opt.noConditional");
+  return t("perm.opt.generic");
 }
 
 /* 附加选项超过 3 个时收起成「更多 N 项 ▾」，展开状态按 act id 记 ——
@@ -216,6 +216,8 @@ function permHash(label) {
 
 function permBlockSig(a, ps) {
   return "perm:" + (a.id || "") + ":" + (a.ok == null ? "pending" : "done") +
+    // 卡里每个字都是现画的（Allow/Deny/更多…）：切语言时签名要变才会重画。
+    ":" + PERCH_LOCALE +
     ":" + String(a.tool || "") + ":" + String(a.text || "") +
     ":" + (ps ? [ps.ok ? 1 : 0, ps.deny ? 1 : 0, ps.yesN | 0,
                  ps.q || "", ps.why || "", ps.busy ? 1 : 0,
@@ -231,64 +233,64 @@ function permBlockSig(a, ps) {
      拒绝 = 按 Esc（与高亮/编号无关，等同选 No，这一轮继续）—— 右侧无边框红字
    动作区一律不显示编号：编号是给发键用的（title 里写着「第 N 项」，日志里有），
    不占这一行的版面。不可用时做灰、不做禁、不做隐 —— 为什么不可用写在 title 上。 */
-function permHTML(a, t, ps) {
+function permHTML(a, tab, ps) {
   const err = permErr.get(a.id) || null;
   const busy = !!(ps && ps.busy);
   const ok = !!(ps && ps.ok) && !busy;
-  const why = busy ? "已经替你在这一格里按了一下，正在等那一格的反应" : ((ps && ps.why) || "");
+  const why = busy ? t("perm.why.busy") : ((ps && ps.why) || "");
   const yesOn = ok && !!(ps && ps.yesN);
   const denyOn = !!(ps && ps.deny) && !busy;
   // 屏上那句问题最具体；读不到就退回转录里那句描述
-  const q = (ps && ps.q) || a.text || a.tool || "它有一件事要你批准";
+  const q = (ps && ps.q) || a.text || a.tool || t("perm.fallbackQuestion");
   const yesTitle = yesOn
-    ? `替你按「Yes」（屏上第 ${ps.yesN} 项 —— 只在它确实是单独的 Yes 时才按）`
-    : (why || "这一屏上没有单独的「Yes」—— 用旁边带条件的选项，或去这一格选");
+    ? t("perm.yes.title", { n: ps.yesN })
+    : (why || t("perm.yes.none"));
   const denyTitle = denyOn
-    ? "替你按 Esc（等同选 No：拒绝这一次，这一轮继续）"
-    : (why || "现在按不了");
+    ? t("perm.deny.title")
+    : (why || t("perm.cantNow"));
   /* 纯 Yes/No 不上动作位：Yes 就是「允许」，No 由「拒绝」(Esc) 覆盖。
      其余（带条件的）排成 pill；太多就收起来，行里不会堆成一面墙。 */
   const extras = ((ps && ps.opts) || []).filter((o) => o.label !== "Yes" && o.label !== "No");
   const many = extras.length > 3;
   const open = many && permOpen.has(a.id);
   const optTitle = (o) => ok
-    ? `按第 ${o.n} 项：${permZh(o.label)}\n原文：${o.label}`
-    : (why || "现在按不了");
+    ? t("perm.opt.title", { n: o.n, label: permLabel(o.label), raw: o.label })
+    : (why || t("perm.cantNow"));
   let extraHTML = "";
   let listHTML = "";
   if (!many) {
     for (const o of extras) {
       extraHTML += `<button class="go extra${ok ? "" : " mute"}" data-perm="opt"` +
         ` data-n="${o.n}" data-h="${permHash(o.label)}"` +
-        ` title="${esc(optTitle(o))}">${esc(permZh(o.label))}</button>`;
+        ` title="${esc(optTitle(o))}">${esc(permLabel(o.label))}</button>`;
     }
   } else if (open) {
     listHTML = `<div class="pmore">` + extras.map((o) =>
       `<button class="gopt${ok ? "" : " mute"}" data-perm="opt" data-n="${o.n}"` +
       ` data-h="${permHash(o.label)}" title="${esc(optTitle(o))}">` +
-      `${esc(permZh(o.label))}</button>`).join("") +
+      `${esc(permLabel(o.label))}</button>`).join("") +
       `</div>`;
   }
   const moreHTML = many
     ? `<button class="go more" data-perm-more="${esc(a.id || "")}"` +
-      ` title="${open ? "收起附加选项" : `展开 ${extras.length} 个带条件的选项`}">` +
-      `${open ? "收起选项 ▴" : `更多 ${extras.length} 项 ▾`}</button>`
+      ` title="${esc(open ? t("perm.more.collapse") : t("perm.more.expand", { n: extras.length }))}">` +
+      `${esc(open ? t("perm.more.collapseLabel") : t("perm.more.expandLabel", { n: extras.length }))}</button>`
     : "";
   return `<div class="gperm" data-pi="${esc(a.id || "")}">` +
-    `<div class="ph"><span>要你批权限</span>` +
+    `<div class="ph"><span>${esc(t("perm.header"))}</span>` +
       `<span class="px" title="${esc(a.text || a.tool || "")}">· ${esc(clamp(a.text || a.tool || "", 90))}</span>` +
     `</div>` +
     `<div class="pq">${esc(clamp(q, 300))}</div>` +
     listHTML +
     `<div class="pf">` +
       `<button class="go allow${yesOn ? "" : " mute"}" data-perm="allow"` +
-        ` title="${esc(yesTitle)}">允许</button>` +
+        ` title="${esc(yesTitle)}">${esc(t("perm.allow"))}</button>` +
       moreHTML +
       extraHTML +
       `<button class="go deny${denyOn ? "" : " mute"}" data-perm="deny"` +
-        ` title="${esc(denyTitle)}">拒绝</button>` +
+        ` title="${esc(denyTitle)}">${esc(t("perm.deny"))}</button>` +
       `<span class="tm" data-at="${esc(a.at || "")}" title="${esc(absTime(a.at))}">${esc(rel(a.at))}</span>` +
-      `<button class="go" data-go="${t.id}">去这一格 →</button>` +
+      `<button class="go" data-go="${tab.id}">${esc(t("perm.go"))}</button>` +
     `</div>` +
     (err ? `<div class="perr">${esc(err.text)}</div>` : "") +
   `</div>`;
@@ -309,59 +311,59 @@ function permNote(el, id, act, text) {
 /* 按下去之后**等回声**：转录里那条工具调用拿到结果、或者这一格已经离开 waiting
    （Wave 2 的 PostToolUse 比转录早）都算成。
    ⚠️ 等不到就**只说不重试**：补一下可能把数字打进输入框（框已经没了的时候）。 */
-function watchPermEcho(t, id, el, act, label) {
+function watchPermEcho(tab, id, el, act, label, logLabel) {
   const t0 = Date.now();
   const tick = () => {
-    const v = LIVE.get(t.id);
+    const v = LIVE.get(tab.id);
     const it = v && (v.acts || []).find((x) => x.id === id);
     if (it && it.ok != null) {
-      permBusy.delete(t.id);
+      permBusy.delete(tab.id);
       permOpen.delete(id);
-      sendCtrl({ type: "log", msg: `批权限 回声 tab=${t.id} 按=${label} 转录有结果 用时=${Date.now() - t0}ms` });
+      sendCtrl({ type: "log", msg: `批权限 回声 tab=${tab.id} 按=${logLabel} 转录有结果 用时=${Date.now() - t0}ms` });
       scheduleGroup();
       return;
     }
     if (v && v.st !== "waiting") {
-      permBusy.delete(t.id);
+      permBusy.delete(tab.id);
       permOpen.delete(id);
-      sendCtrl({ type: "log", msg: `批权限 回声 tab=${t.id} 按=${label} 已离开等待 用时=${Date.now() - t0}ms` });
+      sendCtrl({ type: "log", msg: `批权限 回声 tab=${tab.id} 按=${logLabel} 已离开等待 用时=${Date.now() - t0}ms` });
       scheduleGroup();
       return;
     }
     if (Date.now() - t0 < 2500) return void setTimeout(tick, 250);
-    permBusy.delete(t.id);
-    permNote(el, id, act,
-      `已经替你在这一格里按下「${label}」，但 2.5 秒里没等到结果 → 去这一格看看`);
-    sendCtrl({ type: "log", msg: `批权限 回声 tab=${t.id} 按=${label} 没等到结果（未重试）` });
+    permBusy.delete(tab.id);
+    permNote(el, id, act, t("perm.note.noEcho", { label }));
+    sendCtrl({ type: "log", msg: `批权限 回声 tab=${tab.id} 按=${logLabel} 没等到结果（未重试）` });
   };
   setTimeout(tick, 300);
 }
 
 /* 点「允许 / 拒绝 / 带条件的选项」。闸全过才写字节；任何一条不过就什么都不送。 */
-function permFromGroup(t, el) {
+function permFromGroup(tab, el) {
   const box = el.closest ? el.closest(".gperm") : null;
   const id = (box && box.dataset.pi) || "";
   const how = (el && el.dataset && el.dataset.perm) || "";
   const act = how === "deny" ? "deny" : how === "opt" ? "opt" : "allow";
   const wantN = +((el && el.dataset && el.dataset.n) || 0);
-  const label = act === "deny" ? "拒绝" : act === "opt" ? `选项${wantN}` : "允许";
-  const v = LIVE.get(t.id);
+  const label = act === "deny" ? t("perm.deny")
+    : act === "opt" ? t("perm.optN", { n: wantN }) : t("perm.allow");
+  const logLabel = act === "deny" ? "拒绝" : act === "opt" ? `选项${wantN}` : "允许";
+  const v = LIVE.get(tab.id);
   const it = v && (v.acts || []).find((x) => x.id === id);
   // 闸①：那条工具调用还挂着（结构化判据，比屏幕硬）
-  if (!it || it.ok != null) return permNote(el, id, act, "这条权限框已经有结果了，没按");
-  if (it.tool === "AskUserQuestion") return permNote(el, id, act, "这是提问框，不归这里按，没按");
+  if (!it || it.ok != null) return permNote(el, id, act, t("perm.note.done"));
+  if (it.tool === "AskUserQuestion") return permNote(el, id, act, t("perm.note.askBox"));
   // 闸②：那一格活着、PTY 还连着
-  if (!t.stream || !t.ready) return permNote(el, id, act, "那一格的终端没连着，没按");
+  if (!tab.stream || !tab.ready) return permNote(el, id, act, t("perm.note.noStream"));
   // 闸③：已经按过一下、还在等回声 ⇒ 忽略连点（再送一下可能打进已经空出来的输入框）
-  if (permBusy.has(t.id)) return;
+  if (permBusy.has(tab.id)) return;
   // 闸④：屏上**现在**确实是一个权限框，而且没有进 Tab 输入态
-  const p = readPermDialog(t);
-  if (!p) return permNote(el, id, act, "那一格屏上没有权限框了，没按");
-  if (p.amend) return permNote(el, id, act,
-    "那一格的权限框在「Tab 补充说明」的输入态 —— 去这一格退出后再点，没按");
+  const p = readPermDialog(tab);
+  if (!p) return permNote(el, id, act, t("perm.note.noDialog"));
+  if (p.amend) return permNote(el, id, act, t("perm.note.amend"));
   // 闸⑤：屏上这一屏必须是转录里那一条（挡住"答到下一件事上"）
   if (!permScreenMatches(p.region, it))
-    return permNote(el, id, act, "屏上这一屏和转录对不上（可能已经换成另一件事了），没按");
+    return permNote(el, id, act, t("perm.note.mismatch"));
 
   let send, k, pick = "";
   if (act === "deny") {
@@ -371,30 +373,29 @@ function permFromGroup(t, el) {
   } else if (act === "opt") {
     // 闸⑥：这一项**现在**还在屏上，而且文字和卡片上那颗一致（见 permHash）
     if (!(wantN >= 1) || !p.opts[wantN])
-      return permNote(el, id, act, "屏上已经没有这一项了（可能换了件事），没按");
+      return permNote(el, id, act, t("perm.note.optGone"));
     if (permHash(p.opts[wantN]) !== String((el.dataset && el.dataset.h) || ""))
-      return permNote(el, id, act, "屏上的选项和刚才看到的不一样了（可能换了件事），没按");
+      return permNote(el, id, act, t("perm.note.optChanged"));
     k = String(wantN);
     send = k;
     pick = p.opts[wantN];
   } else {
     // 闸⑥：屏上必须**恰好**有一行标签是 `Yes`（`Yes, and …` 变体不算）
     if (!p.yesN) return permNote(el, id, act,
-      p.yesCount ? "屏上有不止一个「Yes」，认不准，没按"
-                 : "这一屏上没有单独的「Yes」（只有带条件的是）—— 去这一格选，没按");
+      p.yesCount ? t("perm.note.manyYes") : t("perm.note.noLoneYes"));
     k = String(p.yesN);
     send = k;
     pick = p.opts[p.yesN] || "";
   }
   permErr.delete(id);
-  permBusy.set(t.id, { id, act });
-  t.stream.send(enc.encode(send));
+  permBusy.set(tab.id, { id, act });
+  tab.stream.send(enc.encode(send));
   scheduleGroup();                      // 立刻把动作做灰（连点的第一道挡）
   sendCtrl({ type: "log", msg:
-    `批权限 按=${label} tab=${t.id} 送=${k}` +
+    `批权限 按=${logLabel} tab=${tab.id} 送=${k}` +
     `${act === "deny" ? "" :
       ` 屏上第${act === "opt" ? wantN : p.yesN}行=「${String(pick).slice(0, 28)}」` +
       (act === "allow" ? `高亮第${p.hiN || 0}行` : "")}` +
     ` 「${String(it.text || it.tool || "").slice(0, 40)}」` });
-  watchPermEcho(t, id, el, act, label);
+  watchPermEcho(tab, id, el, act, label, logLabel);
 }
