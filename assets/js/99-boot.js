@@ -32,8 +32,12 @@ $("dash-heat").addEventListener("mouseover", (e) => {
   const metric = cell.dataset.metric;
   tip.innerHTML = `<b>${cell.dataset.day}</b><span>` +
     (metric === "calls"
-      ? (v ? `${dashNum(v)} 次请求${extra ? ` · ${dashNum(extra)} 失败` : ""}` : "没有请求")
-      : (v ? `${dashNum(v)} 轮 · ${extra} 个会话` : "没有活动")) + `</span>`;
+      ? (v ? tCount("dash.heat.tip.calls", v, { n: dashNum(v) }) +
+          (extra ? t("dash.heat.tip.failed", { n: dashNum(extra) }) : "")
+        : esc(t("dash.heat.tip.noCalls")))
+      : (v ? tCount("dash.heat.tip.turns", v,
+        { n: dashNum(v), sessions: dashNum(extra) }) :
+        esc(t("dash.heat.tip.noActivity")))) + `</span>`;
   tip.hidden = false;
   const card = cell.closest(".console-main").getBoundingClientRect();
   const r = cell.getBoundingClientRect();

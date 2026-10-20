@@ -35,30 +35,32 @@ let AC_PICK = null;
 /* 抽屉开着时的漂移轮询（15s，和 magpie 自己的窗口一样）。0 = 没在跑。 */
 let AC_DRIFT_TIMER = 0;
 
-/* 字段名 → 中文。magpie 的 label 是英文（"opus effort"），这里只翻译
+/* 字段名 → i18n key。magpie 的 label 是英文（"opus effort"），这里只翻译
    Claude Code 这套（见 magpie internal/agent/claude.go），别的 agent 的
    字段照 magpie 的 label 原样显示 —— 不猜。 */
-const AC_FIELD_CN = {
-  model: "模型", effort: "推理强度", thinking: "思考", ultracode: "Ultracode",
-  opus: "Opus 档", sonnet: "Sonnet 档", haiku: "Haiku 档", fable: "Fable 档",
-  subagent: "子代理", subagent_model: "子代理模型",
-  opus_effort: "Opus 推理强度", sonnet_effort: "Sonnet 推理强度",
-  haiku_effort: "Haiku 推理强度", fable_effort: "Fable 推理强度",
-  subagent_effort: "子代理推理强度",
-  login: "登录方式", small: "小模型", large: "大模型",
-  executor: "执行模型", planner: "规划模型", tiers: "分档",
-  memories: "记忆整理模型", slow: "慢模型", smol: "小模型",
+const AC_FIELD_KEYS = {
+  model: "ac.field.model", effort: "ac.field.effort", thinking: "ac.field.thinking",
+  ultracode: "ac.field.ultracode",
+  opus: "ac.field.opus", sonnet: "ac.field.sonnet", haiku: "ac.field.haiku",
+  fable: "ac.field.fable",
+  subagent: "ac.field.subagent", subagent_model: "ac.field.subagent_model",
+  opus_effort: "ac.field.opus_effort", sonnet_effort: "ac.field.sonnet_effort",
+  haiku_effort: "ac.field.haiku_effort", fable_effort: "ac.field.fable_effort",
+  subagent_effort: "ac.field.subagent_effort",
+  login: "ac.field.login", small: "ac.field.small", large: "ac.field.large",
+  executor: "ac.field.executor", planner: "ac.field.planner", tiers: "ac.field.tiers",
+  memories: "ac.field.memories", slow: "ac.field.slow", smol: "ac.field.smol",
 };
-/* magpie 的推理强度是裸值（low/high/xhigh…），没有 label。中文取自它自己的
-   i18n.js（"low": 低 / "xhigh": 很高 / "max": 最高）。 */
-const AC_EFFORT_CN = {
-  off: "关闭", none: "无", minimal: "最低", low: "低", medium: "中",
-  high: "高", xhigh: "很高", max: "最高",
+/* magpie 的推理强度是裸值（low/high/xhigh…），没有 label。 */
+const AC_EFFORT_KEYS = {
+  off: "ac.effort.off", none: "ac.effort.none", minimal: "ac.effort.minimal",
+  low: "ac.effort.low", medium: "ac.effort.medium", high: "ac.effort.high",
+  xhigh: "ac.effort.xhigh", max: "ac.effort.max",
 };
-/* 选项 label 的中文（magpie 的 sign-in 选项）。 */
-const AC_OPT_CN = { "magpie's key": "magpie 的密钥" };
-/* 选项 group 的中文。 */
-const AC_GROUP_CN = { "Routing groups": "路由分组" };
+/* 选项 label 的本地化（magpie 的 sign-in 选项）。 */
+const AC_OPT_KEYS = { "magpie's key": "ac.opt.magpieKey" };
+/* 选项 group 的本地化。 */
+const AC_GROUP_KEYS = { "Routing groups": "ac.group.routing" };
 /* 这些字段值空 = 跟随主模型（magpie 的 Field.Follows 不进 /api/state，
    所以按 key 认；Claude Code 的分档与子代理就是这个语义）。 */
 const AC_FOLLOWS = { opus: "model", sonnet: "model", haiku: "model", fable: "model", subagent: "model" };
@@ -80,15 +82,19 @@ function gwAgentsPrefetch() {
 }
 
 function acFieldLabel(f) {
-  return AC_FIELD_CN[f.key] || f.label || f.key;
+  const k = AC_FIELD_KEYS[f.key];
+  return k ? t(k) : (f.label || f.key);
 }
 
 function acOptName(f, o) {
-  if (o.label) return AC_OPT_CN[o.label] || o.label;
-  if (AC_EFFORT_CN[o.value]) return AC_EFFORT_CN[o.value];
-  if (f.key === "ultracode" && o.value === "on") return "开启";
+  if (o.label) {
+    const k = AC_OPT_KEYS[o.label];
+    return k ? t(k) : o.label;
+  }
+  if (AC_EFFORT_KEYS[o.value]) return t(AC_EFFORT_KEYS[o.value]);
+  if (f.key === "ultracode" && o.value === "on") return t("ac.opt.on");
   if (o.note) return o.note;
-  return o.value || "默认";
+  return o.value || t("ac.opt.default");
 }
 
 function acOptionName(f, value) {
@@ -98,14 +104,16 @@ function acOptionName(f, value) {
 
 // 空值的说法：分档 / 子代理 = 跟随主模型，推理强度 = 跟随会话，其余 = agent 默认。
 function acDefaultLabel(a, f) {
-  if (f.key === "ultracode") return "关闭";
+  if (f.key === "ultracode") return t("ac.effort.off");
   const follow = AC_FOLLOWS[f.key];
   if (follow) {
     const m = (a.fields || []).find((x) => x.key === follow);
-    return m && m.value ? `跟随主模型（${acOptionName(m, m.value)}）` : "跟随主模型";
+    return m && m.value
+      ? t("ac.default.followModelWith", { model: acOptionName(m, m.value) })
+      : t("ac.default.followModel");
   }
-  if (/_effort$/.test(f.key)) return "跟随会话的推理强度";
-  return "agent 默认";
+  if (/_effort$/.test(f.key)) return t("ac.default.followEffort");
+  return t("ac.default.agent");
 }
 
 /* 预览里的配置行可能带 magpie 写进去的 token/key；打码后再进 DOM。
@@ -194,37 +202,37 @@ function renderAgentDrawer() {
 
 function acBodyHTML(a, name) {
   if (!a && !GW_AGENTS && !GW_AGENTS_ERR) {
-    return `<div class="ac-loading"><span class="spin"></span>正在读取 magpie 的 Agent 配置…</div>`;
+    return `<div class="ac-loading"><span class="spin"></span>${esc(t("ac.loading"))}</div>`;
   }
   if (!a) {
     return `<div class="ac-empty">` +
-      `magpie 的 Agent 列表里没有 ${esc(name)}。它可能没装，或者 magpie 还不支持它的配置。<br>` +
-      `<span>${esc(GW_AGENTS_ERR || "读到的列表：" + ((GW_AGENTS || []).length) + " 个 agent")}</span>` +
+      `${esc(t("ac.empty", { name }))}<br>` +
+      `<span>${esc(GW_AGENTS_ERR || t("ac.empty.count", { n: (GW_AGENTS || []).length }))}</span>` +
       `</div>` + acReloadHTML();
   }
 
   const busy = !!AC_BUSY;
   const b = (act, label, cls) =>
     `<button type="button" class="ac-btn${cls ? " " + cls : ""}" data-ac="${act}"` +
-    `${busy ? " disabled" : ""}>${label}</button>`;
-  const busyText = AC_BUSY === "connect" ? "正在接入网关…"
-    : AC_BUSY === "disconnect" ? "正在断开并还原…"
-    : AC_BUSY === "reapply" ? "正在重新应用…"
-    : AC_BUSY === "keep" ? "正在保留现状…"
-    : AC_BUSY.startsWith("set:") ? "正在写入…" : "";
+    `${busy ? " disabled" : ""}>${esc(label)}</button>`;
+  const busyText = AC_BUSY === "connect" ? t("ac.busy.connect")
+    : AC_BUSY === "disconnect" ? t("ac.busy.disconnect")
+    : AC_BUSY === "reapply" ? t("ac.busy.reapply")
+    : AC_BUSY === "keep" ? t("ac.busy.keep")
+    : AC_BUSY.startsWith("set:") ? t("ac.busy.set") : "";
 
   let html = `<div class="ac-status">` +
     `<span class="dot${a.wired ? " on" : ""}"></span>` +
-    `<b>${a.wired ? "已接入 magpie 网关" : "未接入 magpie 网关"}</b>` +
-    (a.failover ? `<span class="ac-chip">账号故障转移</span>` : "") +
-    (busyText ? `<span class="ac-busy"><span class="spin"></span>${busyText}</span>` : "") +
-    `<span class="ac-sp"></span>` + b("reload", "刷新", "quiet") +
+    `<b>${esc(a.wired ? t("ac.status.wired") : t("ac.status.unwired"))}</b>` +
+    (a.failover ? `<span class="ac-chip">${esc(t("ac.chip.failover"))}</span>` : "") +
+    (busyText ? `<span class="ac-busy"><span class="spin"></span>${esc(busyText)}</span>` : "") +
+    `<span class="ac-sp"></span>` + b("reload", t("ac.reload"), "quiet") +
     `</div>`;
 
   if (a.drift) html += acDriftHTML(a, a.drift);
   if (a.stale > 0) {
     html += `<div class="ac-note">` +
-      `${a.stale} 个正在运行的 ${esc(a.name)} 仍用启动时的配置，重开后生效。</div>`;
+      `${esc(t("ac.stale", { n: a.stale, name: a.name }))}</div>`;
   }
   if (GW_AGENTS_NOTICE) {
     html += `<div class="ac-note">${esc(GW_AGENTS_NOTICE)}</div>`;
@@ -236,12 +244,11 @@ function acBodyHTML(a, name) {
   } else {
     html += `<div class="ac-actions">` +
       (a.wired
-        ? b("reapply", "重新应用") + b("disconnect", "断开并还原", "danger")
-        : b("connect", "接入网关", "primary")) +
+        ? b("reapply", t("ac.action.reapply")) + b("disconnect", t("ac.action.disconnect"), "danger")
+        : b("connect", t("ac.action.connect"), "primary")) +
       `</div>`;
     if (!a.wired) {
-      html += `<div class="ac-hint">接入后这个 agent 的请求会经过 magpie 的路由；` +
-        `下面选 magpie 的模型也会顺带把它接上。</div>`;
+      html += `<div class="ac-hint">${esc(t("ac.hint.unwired"))}</div>`;
     }
   }
 
@@ -251,7 +258,7 @@ function acBodyHTML(a, name) {
 
 function acReloadHTML() {
   return `<div class="ac-actions"><button type="button" class="ac-btn" data-ac="reload"` +
-    `${AC_BUSY ? " disabled" : ""}>重试读取</button></div>`;
+    `${AC_BUSY ? " disabled" : ""}>${esc(t("ac.retry"))}</button></div>`;
 }
 
 function acDriftHTML(a, d) {
@@ -261,61 +268,60 @@ function acDriftHTML(a, d) {
   // 显示名（DeepSeek-V4.1-Flash），和上面的模型行对得上 —— magpie 的
   // driftFix 也是这么做的。
   const df = (a.fields || []).find((x) => x.key === d.field);
-  const want = df && d.want ? acOptionName(df, d.want) : (d.want || "模型");
-  const why = {
-    unwired: `${who} 已不经过 magpie：配置被改过`,
-    replaced: `${who} 已在 magpie 之外换掉了 ${want}`,
-    bypassed: `${who} 最近绕过了 magpie，重新应用后请重启`,
-    unreachable: `${who} 已设好，但它连 magpie 用的地址没有回应`,
-    proxied: `${who} 经代理连 magpie，但这个代理没把请求转过去`,
-  }[d.kind] || `${who} 的配置和 magpie 写的不一致`;
+  const want = df && d.want ? acOptionName(df, d.want) : (d.want || t("ac.field.model"));
+  const whyKey = {
+    unwired: "ac.drift.unwired",
+    replaced: "ac.drift.replaced",
+    bypassed: "ac.drift.bypassed",
+    unreachable: "ac.drift.unreachable",
+    proxied: "ac.drift.proxied",
+  }[d.kind] || "ac.drift.generic";
+  const why = t(whyKey, { who, want });
   // 「保留现状」只在 replaced 时给（和 magpie 的行菜单一样）：意思是
   // "这份配置是我有意改的"，magpie 把 applied 记录删掉、漂移随之消失。
   // 其余几种（没接上 / 绕过 / 地址不通）保留现状等于把问题藏起来，不给。
   const keep = d.kind === "replaced"
     ? `<div class="ac-drift-acts">` +
       `<button type="button" class="ac-btn" data-ac="keep"${AC_BUSY ? " disabled" : ""}` +
-      ` title="把现在这份配置当作 magpie 设定的样子；漂移提示消失，之后断开也不再还原它">` +
-      `保留现状</button><span>配置保持原样，不再提示这次漂移。</span></div>`
+      ` title="${esc(t("ac.keep.title"))}">` +
+      `${esc(t("ac.keep"))}</button><span>${esc(t("ac.keep.note"))}</span></div>`
     : "";
   return `<div class="ac-drift"><b>${esc(why)}</b>` +
     (d.detail ? `<span>${esc(d.detail)}</span>` : "") + keep + `</div>`;
 }
 
 function acConfirmHTML(a) {
-  const name = esc(a.name || a.id);
+  const name = a.name || a.id;
   return `<div class="ac-confirm">` +
-    `<b>断开 ${name}？</b>` +
-    `<p>${name} 会回到接入 magpie 之前的样子；magpie 的供应商与账号不受影响。</p>` +
+    `<b>${esc(t("ac.confirm.title", { name }))}</b>` +
+    `<p>${esc(t("ac.confirm.body", { name }))}</p>` +
     acChangesHTML(AC_PREVIEW) +
     `<div class="ac-actions">` +
       `<button type="button" class="ac-btn" data-ac="disconnect-cancel"` +
-        `${AC_BUSY ? " disabled" : ""}>取消</button>` +
+        `${AC_BUSY ? " disabled" : ""}>${esc(t("common.cancel"))}</button>` +
       `<button type="button" class="ac-btn danger" data-ac="disconnect-go"` +
-        `${AC_BUSY ? " disabled" : ""}>断开并还原</button>` +
+        `${AC_BUSY ? " disabled" : ""}>${esc(t("ac.action.disconnect"))}</button>` +
     `</div>` +
     `</div>`;
 }
 
 function acChangesHTML(p) {
   if (!p) {
-    return `<div class="ac-hint">正在读取会改动哪些文件…</div>`;
+    return `<div class="ac-hint">${esc(t("ac.changes.loading"))}</div>`;
   }
   const list = Array.isArray(p.changes) ? p.changes : [];
   const err = p.error ? String(p.error) : "";
   if (!list.length) {
     return `<div class="ac-hint">` +
-      (err
-        ? `读不到这次的文件改动（${esc(err)}）；断开仍会把 magpie 写进去的配置拿掉、还原接入前的值。`
-        : `magpie 会把写进这个 agent 配置里的地址、密钥与模型拿掉，还原接入前的值。`) +
+      esc(err ? t("ac.changes.err", { err }) : t("ac.changes.plain")) +
       `</div>`;
   }
-  let html = `<div class="ac-hint">这些位置会被还原成接入前的样子：</div><div class="ac-diff">`;
+  let html = `<div class="ac-hint">${esc(t("ac.changes.heading"))}</div><div class="ac-diff">`;
   for (const c of list) {
     html += `<div class="ac-diff-file"><div class="ac-diff-path">` +
       `<span>${esc(c.path || "")}</span>` +
-      (c.removed ? `<span class="ac-tag del">删除</span>` : "") +
-      (c.created ? `<span class="ac-tag">新建</span>` : "") +
+      (c.removed ? `<span class="ac-tag del">${esc(t("ac.changes.removed"))}</span>` : "") +
+      (c.created ? `<span class="ac-tag">${esc(t("ac.changes.created"))}</span>` : "") +
       `</div>`;
     const lines = Array.isArray(c.lines) ? c.lines : [];
     for (const l of lines.slice(0, 6)) {
@@ -324,7 +330,7 @@ function acChangesHTML(p) {
         `<code>${esc(acMaskLine(l.text))}</code></div>`;
     }
     if (lines.length > 6) {
-      html += `<div class="ac-hint">… 其余 ${lines.length - 6} 行</div>`;
+      html += `<div class="ac-hint">${esc(t("ac.changes.more", { n: lines.length - 6 }))}</div>`;
     }
     html += `</div>`;
   }
@@ -333,20 +339,19 @@ function acChangesHTML(p) {
 
 function acFieldsHTML(a, busy) {
   const fields = Array.isArray(a.fields) ? a.fields : [];
-  if (!fields.length) return `<div class="ac-hint">magpie 没有这个 agent 的可调字段。</div>`;
-  let html = `<div class="ac-sec"><span class="ac-sec-title">配置</span>` +
-    `<span class="ac-sec-sub">${fields.length} 项 · 空值 = agent 自己的默认</span></div>` +
+  if (!fields.length) return `<div class="ac-hint">${esc(t("ac.fields.none"))}</div>`;
+  let html = `<div class="ac-sec"><span class="ac-sec-title">${esc(t("ac.fields.title"))}</span>` +
+    `<span class="ac-sec-sub">${esc(t("ac.fields.sub", { n: fields.length }))}</span></div>` +
     `<div class="ac-fields">` + fields.map((f) => acFieldHTML(a, f, busy)).join("") + `</div>`;
   // OpenCode 的推理档位叫 variant，选在它自己的 TUI 里（默认 Ctrl+T，
   // 实测 1.19.3 的 keybind 就是它）。magpie 接线时只把每个模型的 variants
   // 写进配置，没有把“默认档位”暴露成字段；这里给一条只读说明，不去直写
   // opencode.json —— 配置归 magpie。
   if (a.id === "opencode") {
-    html += `<div class="ac-hint">OpenCode 的推理档位叫 variant，在它自己的 TUI 里按 ` +
-      `<kbd>Ctrl+T</kbd> 循环切换；可选哪几档由当前模型决定。Perch 这里不另设默认值。</div>`;
+    // 这一句里有 <kbd>，按受控 HTML 插入（键位是界面元素，不是用户数据）。
+    html += `<div class="ac-hint">${t("ac.opencode.hint")}</div>`;
   }
-  html += `<div class="ac-hint">改动写进 agent 自己的配置文件，由 magpie 完成；` +
-    `已打开的会话重开后生效。</div>`;
+  html += `<div class="ac-hint">${esc(t("ac.fields.footer"))}</div>`;
   return html;
 }
 
@@ -376,7 +381,7 @@ function acFieldHTML(a, f, busy) {
         `${esc(acOptName(f, o))}</option>`;
     }).join("");
     inner += grp.g
-      ? `<optgroup label="${esc(AC_GROUP_CN[grp.g] || grp.g)}">${items}</optgroup>`
+      ? `<optgroup label="${esc(AC_GROUP_KEYS[grp.g] ? t(AC_GROUP_KEYS[grp.g]) : grp.g)}">${items}</optgroup>`
       : items;
   }
   // 当前值不在选项里（magpie 新版本、或配置里是手写的值）：也让它显示出来，
@@ -384,7 +389,7 @@ function acFieldHTML(a, f, busy) {
   if (f.value && !known) {
     inner += `<option value="${esc(f.value)}" selected>${esc(f.value)}</option>`;
   }
-  const title = opts.length ? "" : ` title="接入网关并选好主模型后才有可选项"`;
+  const title = opts.length ? "" : ` title="${esc(t("ac.field.noOptions"))}"`;
   // 长列表（模型类字段）换成可搜索的弹层：原生 select 几十项只能滚，
   // magpie 自己的选择器就是带搜索的。短列表仍用原生 select，行为最稳。
   const long = opts.length >= 12;
@@ -434,13 +439,13 @@ function acPickListHTML(a, f) {
   for (const o of opts) {
     const g = o.group || "";
     if (g !== grp && g) {
-      html += `<div class="ac-pop-grp">${esc(AC_GROUP_CN[g] || g)}</div>`;
+      html += `<div class="ac-pop-grp">${esc(AC_GROUP_KEYS[g] ? t(AC_GROUP_KEYS[g]) : g)}</div>`;
     }
     grp = g;
     html += acPickItemHTML(o.value, acOptName(f, o), "", o.value === f.value, o.label && o.note ? o.note : "");
   }
   if (f.value && !known) {
-    html += acPickItemHTML(f.value, f.value, "", true, "当前值不在 magpie 的选项里，原样保留");
+    html += acPickItemHTML(f.value, f.value, "", true, t("ac.pick.keepCurrent"));
   }
   return html;
 }
@@ -487,8 +492,9 @@ function acPickOpen(field) {
 
   const pop = document.createElement("div");
   pop.className = "ac-pop";
+  const find = t("ac.pick.search", { field: acFieldLabel(f) });
   pop.innerHTML = `<input class="ac-pop-find" type="search" autocomplete="off"` +
-    ` placeholder="搜索${esc(acFieldLabel(f))}…" aria-label="搜索${esc(acFieldLabel(f))}">` +
+    ` placeholder="${esc(find)}" aria-label="${esc(find)}">` +
     `<div class="ac-pop-list" role="listbox">${acPickListHTML(a, f)}</div>`;
   pop.style.visibility = "hidden";
   document.body.appendChild(pop);

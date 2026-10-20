@@ -26,17 +26,17 @@ function instElapsed() {
 function instPhaseText() {
   if (!INSTALL) return "";
   if (INSTALL.state === "failed") {
-    return "失败" + (INSTALL.err ? " · " + INSTALL.err : "");
+    return INSTALL.err ? t("inst.failedWith", { err: INSTALL.err }) : t("inst.failed");
   }
   if (INSTALL.state === "done") {
-    if (INSTALL.detected === true) return "完成 · 已检测到";
-    if (INSTALL.detected === false) return "完成 · 暂未检测到";
-    return "完成 · 已重新扫描名单";
+    if (INSTALL.detected === true) return t("inst.doneDetected");
+    if (INSTALL.detected === false) return t("inst.doneNotDetected");
+    return t("inst.doneRescanned");
   }
-  if (INSTALL.phase === "scanning") return "重新检测 CLI…";
-  if (INSTALL.phase === "cancelling") return "正在取消…";
-  if (INSTALL.phase === "preparing") return "准备中…";
-  return "安装中…";
+  if (INSTALL.phase === "scanning") return t("inst.phase.scanning");
+  if (INSTALL.phase === "cancelling") return t("inst.phase.cancelling");
+  if (INSTALL.phase === "preparing") return t("inst.phase.preparing");
+  return t("inst.phase.installing");
 }
 
 function startInstTicker() {
@@ -57,7 +57,7 @@ function instPaint() {
   const box = $("dash-install");
   if (!box) return;
   box.hidden = false;
-  $("inst-title").textContent = "安装 " + INSTALL.name;
+  $("inst-title").textContent = t("inst.title", { name: INSTALL.name });
   $("inst-source").textContent = INSTALL.source || "CLI";
   $("inst-state").textContent = instPhaseText();
   $("inst-time").textContent = instElapsed();
@@ -72,12 +72,12 @@ function instPaint() {
   if (last) {
     last.textContent = INSTALL.lines.length
       ? INSTALL.lines[INSTALL.lines.length - 1]
-      : "等待安装命令输出…";
+      : t("inst.waitingOutput");
   }
   const log = $("inst-log");
   if (log) log.hidden = !INSTALL_LOG_OPEN;
   const lt = $("inst-log-toggle");
-  if (lt) lt.textContent = INSTALL_LOG_OPEN ? "收起日志" : "查看日志";
+  if (lt) lt.textContent = INSTALL_LOG_OPEN ? t("inst.logHide") : t("inst.logShow");
   $("inst-cancel").hidden = INSTALL.state !== "running";
   $("inst-close").hidden = INSTALL.state === "running";
 }
@@ -206,7 +206,8 @@ $("dash-agent-list").addEventListener("click", (e) => {
     const label = $("dash-agent-more-label");
     if (label) {
       const n = ((mg() && mg().catalog) || []).filter((a) => !a.installed).length;
-      label.textContent = agentsFoldOpen ? "收起" : `显示 ${n} 个未检测到的`;
+      label.textContent = agentsFoldOpen ? t("dash.agents.foldHide")
+        : t("dash.agents.foldShow", { n });
     }
     return;
   }

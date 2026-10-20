@@ -111,17 +111,17 @@ function gwCoverHTML(m) {
   const running = !!(st && st.state === "running");
   const installed = !!(m && m.state !== "absent");
   const version = (GW && GW.version) || (m && m.version) || "";
-  const state = !m ? "读取中"
-    : !installed ? "未安装"
-    : GW_BUSY === "connect" ? "正在接入控制面…"
-    : "已安装 · 控制面未接入";
+  const state = !m ? t("gw.state.reading")
+    : !installed ? t("gw.state.absent")
+    : GW_BUSY === "connect" ? t("gw.state.connecting")
+    : t("gw.state.installed");
   const dot = running ? " warn" : installed ? " warn" : "";
   return `<div class="console-bar">` +
       `<span class="brand">${magpieLogo()}<b>magpie</b></span>` +
       (version ? `<span>${esc(version)}</span><span class="sep">·</span>` : "") +
       `<span class="dot${dot}"></span><span>${esc(state)}</span>` +
       `<span class="right gw-actions">` +
-        `<button type="button" class="gw-btn sm" data-gw-act="refresh">刷新</button>` +
+        `<button type="button" class="gw-btn sm" data-gw-act="refresh">${esc(t("gw.refresh"))}</button>` +
       `</span>` +
     `</div>` +
     gwInstallCard(m) +
@@ -139,29 +139,30 @@ function gwInstallCard(m) {
   const failed = !!(st && st.state === "failed");
   if (!absent && !running) {
     return `<div class="gw-connect">` +
-      `<b>${GW_BUSY === "connect" ? "正在接入 magpie 控制面…" : "magpie 已安装，控制面还没接上"}</b>` +
+      `<b>${esc(GW_BUSY === "connect" ? t("gw.connecting.title") : t("gw.installedOff.title"))}</b>` +
       `<p>${GW_BUSY === "connect"
-        ? "Perch 正在拉起一个独立的 <code>magpie web</code> 进程（只监听 127.0.0.1）—— 接上之后 magpie 的界面会出现在这一页里。"
-        : "Perch 会自动重试几次；如果一直不行，点「重试接入」。桌面 magpie 和网关都不受 Perch 开关影响。"}</p>` +
-      `<div class="row"><button type="button" class="gw-btn" data-gw-act="retry">重试接入</button></div>` +
+        ? t("gw.connecting.body")
+        : esc(t("gw.installedOff.body"))}</p>` +
+      `<div class="row"><button type="button" class="gw-btn" data-gw-act="retry">${esc(t("gw.retry"))}</button></div>` +
       (GW && GW.err ? `<p style="color:var(--red)">${esc(GW.err)}</p>` : ``) +
       `</div>`;
   }
   return `<div class="gw-connect">` +
-    `<b>${running ? "正在安装 magpie…" : failed ? "上次安装没有完成" : "还没有安装 magpie"}</b>` +
+    `<b>${esc(running ? t("gw.installing.title") : failed ? t("gw.installFailed.title")
+      : t("gw.notInstalled.title"))}</b>` +
     `<p>${running
-      ? "从 GitHub 官方 release 下载到 <code>%LOCALAPPDATA%\\Perch\\magpie</code>，校验后落盘；装完自动接入。"
-      : "这一页就是 magpie 自己的界面（供应商 / 订阅 / 路由 / 用量 / 插件）。点下面的按钮会真的下载并安装官方 release —— 不弹浏览器。"}</p>` +
+      ? t("gw.installing.body")
+      : esc(t("gw.notInstalled.body"))}</p>` +
     `<div class="row">` +
       (running
-        ? `<button type="button" class="gw-btn" data-gw-act="install-magpie-cancel">取消</button>`
+        ? `<button type="button" class="gw-btn" data-gw-act="install-magpie-cancel">${esc(t("common.cancel"))}</button>`
         : `<button type="button" class="gw-btn primary" data-gw-act="install-magpie">` +
-          (failed ? "重新下载安装" : "下载并安装 magpie") + `</button>`) +
+          esc(failed ? t("gw.install.redownload") : t("gw.install.download")) + `</button>`) +
     `</div>` +
     (GW && GW.err && !GW_INSTALL ? `<p style="color:var(--red)">${esc(GW.err)}</p>` : ``) +
     (st && st.lines && st.lines.length
       ? `<pre class="gw-inst-log" id="gw-inst-log">${esc(st.lines.join("\n"))}</pre>` : ``) +
-    (failed ? `<p style="color:var(--red)">${esc(st.err || "安装失败")}</p>` : ``) +
+    (failed ? `<p style="color:var(--red)">${esc(st.err || t("gw.install.failed"))}</p>` : ``) +
     `</div>`;
 }
 
@@ -171,27 +172,27 @@ function gwInstallCard(m) {
 
 function gwUpdateHTML() {
   const u = GW_UPD;
-  if (GW_UPD_ERR) return `<span class="err">magpie 版本读取失败：${esc(GW_UPD_ERR)}</span>`;
+  if (GW_UPD_ERR) return `<span class="err">${esc(t("gw.update.readErr", { err: GW_UPD_ERR }))}</span>`;
   if (!u) return "";
   const cur = u.current || "";
   const latest = u.latest || "";
   const upd = !!latest && latest !== cur;
   const pct = u.total > 0 ? Math.min(99, Math.floor((u.done | 0) * 100 / u.total)) : 0;
   if (GW_UPD_BUSY) {
-    const what = GW_UPD_BUSY === "restarting" ? "正在重启控制面…"
+    const what = GW_UPD_BUSY === "restarting" ? t("gw.update.restarting")
       : GW_UPD_BUSY === "downloading"
-        ? (u.total > 0 ? `正在下载更新 ${pct}%…` : "正在下载更新…")
-        : "正在检查更新…";
+        ? (u.total > 0 ? t("gw.update.downloadingPct", { pct }) : t("gw.update.downloading"))
+        : t("gw.update.checking");
     return `<span>magpie${cur ? " " + esc(cur) : ""}</span>` +
       `<span class="sep">·</span><span class="upd">${esc(what)}</span>`;
   }
   if (!cur) return "";
   let html = `<span>magpie ${esc(cur)}</span>`;
   if (upd) {
-    html += `<span class="sep">·</span><span class="upd">可更新 ${esc(latest)}</span>` +
-      `<button type="button" class="gw-btn sm" data-gw-act="update-magpie">更新</button>`;
+    html += `<span class="sep">·</span><span class="upd">${esc(t("gw.update.available", { v: latest }))}</span>` +
+      `<button type="button" class="gw-btn sm" data-gw-act="update-magpie">${esc(t("gw.update.button"))}</button>`;
   } else if (latest) {
-    html += `<span class="sep">·</span><span>已是最新</span>`;
+    html += `<span class="sep">·</span><span>${esc(t("gw.update.latest"))}</span>`;
   }
   return html;
 }
