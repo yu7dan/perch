@@ -149,7 +149,7 @@ func buildShellPayload(stateDir, cwd string, titles map[string]string) ShellPayl
 	// prefsStore 在 main() 里先于第一次 buildShellPayload 初始化；
 	// 万一某条测试路径没初始化，给默认值而不是零值（零值会让确认默认变成关）。
 	if prefsStore != nil {
-		p.Settings = prefsStore.snapshot()
+		p.Settings = prefsStore.Snapshot()
 	} else {
 		p.Settings = settingsDefaults()
 	}
@@ -171,7 +171,7 @@ func buildShellPayload(stateDir, cwd string, titles map[string]string) ShellPayl
 	// pool 为 nil = 池子没初始化（读盘失败），这时**不发 projects 字段**，
 	// 让前端自己走"池子不可用"那条路，而不是收到一个空池子就以为用户没项目。
 	if pool != nil {
-		projects, roots := pool.snapshot()
+		projects, roots := pool.Snapshot()
 		// 合成的默认工作区（见 projects.go）：并进这份副本，池子本身不动。
 		// 少了这一句，"未归类"里那些落在 Documents\Perch 的会话就永远没有归属。
 		projects = withDefaultWorkspace(projects)

@@ -671,7 +671,7 @@ func poolReplyPicked(errMsg, picked string) {
 		return
 	}
 	t0 := time.Now()
-	projects, roots := pool.snapshot()
+	projects, roots := pool.Snapshot()
 	// 合成的默认工作区只并进这一份**内存列表**（归属计算和 wire 都吃它）——
 	// 池子本身照旧，落盘的还是用户自己攒的那些（见 withDefaultWorkspace）。
 	projects = withDefaultWorkspace(projects)
@@ -713,7 +713,7 @@ func defaultAgentSetting() string {
 	if prefsStore == nil {
 		return ""
 	}
-	return prefsStore.snapshot().DefaultAgent
+	return prefsStore.Snapshot().DefaultAgent
 }
 
 func handleCtl(c *application.StreamConn) {
@@ -1045,7 +1045,7 @@ func handleCtl(c *application.StreamConn) {
 				continue
 			}
 			if p := strings.TrimSpace(m.Path); p != "" {
-				pr, added, err := pool.add(p, m.Name, m.Source)
+				pr, added, err := pool.Add(p, m.Name, m.Source)
 				if err != nil {
 					log.Printf("[pool] 加项目失败 %s：%v", p, err)
 					poolReply(err.Error())
@@ -1084,7 +1084,7 @@ func handleCtl(c *application.StreamConn) {
 					log.Printf("[pool] 选择器被取消（没有加任何项目）")
 					return
 				}
-				pr, added, err := pool.add(sel, "", "manual")
+				pr, added, err := pool.Add(sel, "", "manual")
 				if err != nil {
 					log.Printf("[pool] 加项目失败 %s：%v", sel, err)
 					poolReply(err.Error())
@@ -1101,7 +1101,7 @@ func handleCtl(c *application.StreamConn) {
 			if pool == nil {
 				continue
 			}
-			if ok, err := pool.remove(m.Path); err != nil {
+			if ok, err := pool.Remove(m.Path); err != nil {
 				log.Printf("[pool] 移除失败 %s：%v", m.Path, err)
 				poolReply(err.Error())
 			} else {
@@ -1112,7 +1112,7 @@ func handleCtl(c *application.StreamConn) {
 			if pool == nil {
 				continue
 			}
-			if ok, err := pool.setPinned(m.Path, m.On); err != nil {
+			if ok, err := pool.SetPinned(m.Path, m.On); err != nil {
 				log.Printf("[pool] 置顶改动失败 %s：%v", m.Path, err)
 				poolReply(err.Error())
 			} else {
@@ -1124,7 +1124,7 @@ func handleCtl(c *application.StreamConn) {
 			if pool == nil {
 				continue
 			}
-			if ok, err := pool.rename(m.Path, m.Name); err != nil {
+			if ok, err := pool.Rename(m.Path, m.Name); err != nil {
 				log.Printf("[pool] 改名失败 %s：%v", m.Path, err)
 				poolReply(err.Error())
 			} else {
@@ -1382,7 +1382,7 @@ func main() {
 		if closeConfirmed.Load() {
 			return
 		}
-		if prefsStore == nil || !prefsStore.snapshot().ConfirmClose {
+		if prefsStore == nil || !prefsStore.Snapshot().ConfirmClose {
 			return
 		}
 		if !ctlConnected() {
