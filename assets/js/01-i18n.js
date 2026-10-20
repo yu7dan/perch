@@ -1064,6 +1064,8 @@ const PERCH_I18N = {
     "msg.refusal.livePane": "That session is being run by pane {pane} — two claudes writing the same session file would destroy it. Close that pane, or use Fork (fork writes a new file).",
     "msg.refusal.unknownKind": "Unknown resume intent: \"{kind}\"",
 
+    "project.defaultName": "Default workspace",
+
     "msg.gw.notRunning": "Gateway is not running",
     "msg.gw.notDetected": "No local gateway was detected",
     "msg.gw.exeMissing": "Could not find the magpie executable (install or open magpie once)",
@@ -2118,6 +2120,8 @@ const PERCH_I18N = {
     "msg.refusal.liveProcess": "这条会话正被一个 claude 进程跑着（pid={pid}）—— 两个进程同时写同一份会话文件会毁掉它。先停掉那一个，或者用「另起分支」（fork 写的是新文件）。",
     "msg.refusal.livePane": "这条会话正被格子 {pane} 跑着 —— 两条 claude 同时写同一份会话文件会毁掉它。先关掉那一格，或者用「另起分支」（fork 写的是新文件）。",
     "msg.refusal.unknownKind": "未知的续接意图：\"{kind}\"",
+
+    "project.defaultName": "默认工作区",
 
     "msg.gw.notRunning": "网关未运行",
     "msg.gw.notDetected": "没有检测到本地网关",

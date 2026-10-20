@@ -688,7 +688,7 @@ function renderOpWs() {
     opWSPath = projs[0].path;
   }
   $("op-ws").innerHTML = projs.map((p) =>
-    `<option value="${esc(p.path)}">${esc(p.name)}</option>`).join("");
+    `<option value="${esc(p.path)}">${esc(projectName(p))}</option>`).join("");
   $("op-ws").value = opWSPath;
   $("op-ws").disabled = opAllWs;
   $("op-newpath").textContent = opWSPath || t("pages.defaultWorkdir");

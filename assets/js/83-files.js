@@ -119,13 +119,14 @@ function filesModeBtn() {
 
 function filesRootOptions(root) {
   const projs = filesProjects();
-  const sig = projs.map((p) => `${p.path}\u0000${p.name}`).join("\u0001") + "\u0002" + FU.root;
+  // 显示名算进签名：切语言后「默认工作区」要重画（Phase 3 的签名规则）。
+  const sig = projs.map((p) => `${p.path}\u0000${projectName(p)}`).join("\u0001") + "\u0002" + FU.root;
   const sel = $("files-root");
   if (!sel) return;
   if (sig !== FS.rootOptSig) {
     FS.rootOptSig = sig;
     sel.innerHTML = `<option value="">${esc(t("files.rootFollow"))}</option>` + projs.map((p) =>
-      `<option value="${esc(p.path)}">${esc(p.name)}</option>`).join("");
+      `<option value="${esc(p.path)}">${esc(projectName(p))}</option>`).join("");
   }
   // 固定的根已经不在池子里时，FU.root 会在 filesRootPath 里被忽略；
   // 下拉显示"跟随当前格"才不会撒一个不存在的值。

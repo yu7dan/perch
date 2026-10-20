@@ -405,7 +405,7 @@ function projRowHTML(p, tabs, kind, total, closed, forceOpen) {
   let acts = "";
   if (kind === "proj" || syn) {
     acts = `<span class="pg"><button class="cardbtn" data-pact="new" title="${esc(t("shell.proj.newTitle", {
-      name: p.name || "", tip: newAgentShortcutTip(),
+      name: projectName(p), tip: newAgentShortcutTip(),
     }))}">${ICON_PLUS}</button></span>`
          + `<button class="cardbtn" data-pact="menu" title="${esc(t("shell.proj.more"))}">${ICON_DOTS}</button>`;
   } else if (kind === "adopt") {
@@ -443,7 +443,7 @@ function projRowHTML(p, tabs, kind, total, closed, forceOpen) {
     // 第二行放目录提示 + agent 数。名字不再和行尾动作抢同一段宽度。
     + `<span class="pbody">`
     + `<span class="nml">`
-    + `<span class="nm ell">${esc(p.name)}</span>`
+    + `<span class="nm ell">${esc(projectName(p))}</span>`
     + (kind === "proj" && p.pinned && !syn ? `<span class="pin" title="${esc(t("shell.pinned"))}">${ICON_PIN}</span>` : "")
     + `</span>`
     + `<span class="meta">`
@@ -534,12 +534,19 @@ function agentRowName(tab) { // 参数别叫 t：会遮住 i18n 的 t()
   return tab.connDown ? t("shell.agent.stoppedLabel") : t("shell.agent.newLabel");
 }
 
+/* 项目显示名：Go 合成的「默认工作区」只有一份兜底名字（落盘外的合成条目），
+   它必须跟着界面语言走；用户自己加的项目一律用他起的名字。 */
+function projectName(p) {
+  if (!p) return "";
+  return p.synthetic ? t("project.defaultName") : (p.name || "");
+}
+
 /* 这个 agent 在哪个工作区 —— 对话流头上那一行用（它取代了原来的「格 N」）。
    判据和 `tabsInProject` 是**同一处**（insidePath，方向相反），不另写一套路径比较。 */
 function workspaceNameFor(t) {
   const cwd = effCwd(t);
   const p = (STATE?.projects || []).find((x) => x.path && insidePath(cwd, x.path));
-  if (p) return p.name;
+  if (p) return projectName(p);
   return cwd ? (cwd.split(/[\\/]/).filter(Boolean).pop() || "") : "";
 }
 /* 行尾那个状态词。空闲不出词（一列「空闲 · 昨天」比只写时间更吵）；停了必须出
@@ -660,7 +667,8 @@ function renderWorkspaceView(key) {
     // 「已关闭」那几条同理（它们没有 tab id，按 paneId 记账）。
     mine.forEach((t) => used.add(t.id));
     cmine.forEach((r) => usedClosed.add(r.paneId));
-    const selfHit = !!key && `${p.name} ${p.path}`.toLowerCase().includes(key);
+    const selfHit = !!key &&
+      `${projectName(p)} ${p.name} ${p.path}`.toLowerCase().includes(key);
     const shown = (key && !selfHit) ? mine.filter((t) => tabMatch(t, key)) : mine;
     const shownClosed = (key && !selfHit) ? cmine.filter((r) => closedMatch(r, key)) : cmine;
     if (key && !selfHit && !shown.length && !shownClosed.length) continue;
@@ -1241,7 +1249,7 @@ function adoptDir(path) {
    路径/写盘出问题时才报错；那一刻会再起一张错误卡，两张叠着，不互相顶掉。 */
 function removeProj(p) {
   poolSend({ type: "project.remove", path: p.path });
-  showToast(t("shell.toast.removedTitle"), t("shell.toast.removedNote", { name: p.name }), "ok");
+  showToast(t("shell.toast.removedTitle"), t("shell.toast.removedNote", { name: projectName(p) }), "ok");
 }
 
 // ---------------------------------------------------------------------------
@@ -1312,9 +1320,9 @@ function openProjMenu(row, anchor, alignRight) {
   cardMenuAgent = null;              // 同一个 #cardmenu，身份只能有一个
   cardMenuClosed = null;
   cardMenuRowEl = null;
-  cardMenuProj = { path, name: p.name, pinned: !!p.pinned, inPool, synthetic: !!p.synthetic };
+  cardMenuProj = { path, name: projectName(p), pinned: !!p.pinned, inPool, synthetic: !!p.synthetic };
   const head = `<div class="mhead" title="${esc(p.path || t("shell.projects.noCwd"))}">`
-    + `${esc(p.name)}</div>`;
+    + `${esc(projectName(p))}</div>`;
   showMenuAt(head, projMenuItems(p, inPool), r, alignRight !== false,
     `项目 ${p.name} 路径=${p.path}`);
 }
@@ -1566,7 +1574,7 @@ function beginProjRename(path) {
   input.className = "tab-input";
   input.placeholder = t("shell.rename.placeholder");
   input.setAttribute("aria-label", t("shell.rename.aria"));
-  input.value = p ? p.name : nm.textContent;
+  input.value = p ? projectName(p) : nm.textContent;
   input.addEventListener("keydown", (e) => {
     // ⚠️ 中文输入法确认候选词的那个 Enter 不是"提交"（同标签重命名）。
     if (isImeOwnedKey(e)) return;

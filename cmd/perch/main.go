@@ -354,6 +354,26 @@ func main() {
 }
 
 // customCWD 把设置里的「默认目录」注入项目池；空串 = 用内置目录。
+// termMsg 是写进 PTY 的兜底提示。终端内容不归前端 i18n runtime 管（那是
+// PTY 的字节流，不是页面 DOM），所以这里只能后端自己选词：显式 en/zh 跟设置
+// 走；auto 给双语 —— 后端看不到 navigator.languages，猜错一门比两门都写出来
+// 更糟。detail 里是进程/系统的原文，不再翻译。
+func (a *perchApp) termMsg(en, zh, detail string) []byte {
+	text := en + " / " + zh
+	if a.prefs != nil {
+		switch a.prefs.Snapshot().Language {
+		case "en":
+			text = en
+		case "zh":
+			text = zh
+		}
+	}
+	if detail != "" {
+		text += ": " + detail
+	}
+	return []byte("\r\n\x1b[31m[perch] " + text + "\x1b[0m\r\n")
+}
+
 func (a *perchApp) customCWD() string { return a.prefs.Snapshot().DefaultCWD }
 
 // defaultCWD 是「新格没指定目录时落在哪」的**唯一**答案。
@@ -461,17 +481,17 @@ func (a *perchApp) handleTab(c *application.StreamConn, host *session.Tab) {
 			switch se.Stage {
 			case session.StageUnknownAgent:
 				log.Printf("[perch] tab=%d 未知 agent %q", host.ID, se.Agent)
-				_ = c.Send([]byte("\r\n\x1b[31m[perch] 未知 agent: " + se.Agent + "\x1b[0m\r\n"))
+				_ = c.Send(a.termMsg("Unknown agent", "未知 agent", se.Agent))
 			case session.StagePrepare:
 				log.Printf("[perch] tab=%d 启动准备失败: %v", host.ID, se.Err)
-				_ = c.Send([]byte("\r\n\x1b[31m[perch] 启动准备失败: " + se.Err.Error() + "\x1b[0m\r\n"))
+				_ = c.Send(a.termMsg("Start preparation failed", "启动准备失败", se.Err.Error()))
 			default:
 				log.Printf("[perch] tab=%d 启动失败: %v", host.ID, se.Err)
-				_ = c.Send([]byte("\r\n\x1b[31m[perch] 启动失败: " + se.Err.Error() + "\x1b[0m\r\n"))
+				_ = c.Send(a.termMsg("Start failed", "启动失败", se.Err.Error()))
 			}
 		} else {
 			log.Printf("[perch] tab=%d 启动失败: %v", host.ID, err)
-			_ = c.Send([]byte("\r\n\x1b[31m[perch] 启动失败: " + err.Error() + "\x1b[0m\r\n"))
+			_ = c.Send(a.termMsg("Start failed", "启动失败", err.Error()))
 		}
 		return
 	}

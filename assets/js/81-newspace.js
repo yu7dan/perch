@@ -100,7 +100,7 @@ function renderNewSpace() {
   }
   const sel = $("ns-folder");
   sel.innerHTML = projs.map((p) =>
-    `<option value="${esc(p.path)}">${esc(p.name)}</option>`).join("");
+    `<option value="${esc(p.path)}">${esc(projectName(p))}</option>`).join("");
   if (NS.folder && !projs.some((p) => p.path === NS.folder)) {
     // 刚加进来的路径还没出现在这次渲染的池子里（下一条池子推送会补上）——
     // 先把它作为一条临时选项摆着，别让用户看到下拉跳回别的目录。
