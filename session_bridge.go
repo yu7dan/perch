@@ -14,8 +14,13 @@ type tabManager = session.Manager
 type tabView = session.LiveTab
 type titleStore = session.TitleStore
 type refusal = session.Refusal
+type startError = session.StartError
 
-const sessionHookExeName = session.HookExeName
+const (
+	sessionHookExeName     = session.HookExeName
+	startStageUnknownAgent = session.StageUnknownAgent
+	startStagePrepare      = session.StagePrepare
+)
 
 // loadTitleStore 只算名字表的落点；读写都在 session.TitleStore。
 func loadTitleStore(path string) *titleStore { return session.LoadTitleStore(path) }
@@ -42,9 +47,6 @@ func resumeRefusal(spec spawnSpec) *refusal { return tabs.ResumeRefusal(spec) }
 func sessionFileExistsFor(agentName, cwd, id string) bool {
 	return tabs.SessionFileExistsFor(agentName, cwd, id)
 }
-
-// effectiveCWD 是一份 spec 的**生效 cwd** = 落盘那份记录里该记的值。
-func effectiveCWD(spec spawnSpec) string { return tabs.EffectiveCWD(spec) }
 
 // buildHookSettings 造那份只对一格生效的 --settings。
 func buildHookSettings(tag string) string { return session.BuildHookSettings(claudeStateDir, tag) }

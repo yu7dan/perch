@@ -1345,79 +1345,31 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 		return
 	}
 
-	def, ok := agentDefs[host.Spec.Agent]
-	if !ok {
-		log.Printf("[perch] tab=%d 未知 agent %q", host.ID, host.Spec.Agent)
-		_ = c.Send([]byte("\r\n\x1b[31m[perch] 未知 agent: " + host.Spec.Agent + "\x1b[0m\r\n"))
-		return
-	}
-	tag := fmt.Sprintf("t%d", host.ID)
-	// 「新格没指定目录时落在哪」只有这一个答案（见 effectiveCWD / defaultCWD）——
-	// 2026-10-16 起是默认工作区，不是 fallbackCWD。这也正是记进登记表的那个值。
-	// Prepare 也要它：Codex 的 app-server 必须和 TUI 在同一个目录里起来。
-	cwd := effectiveCWD(host.Spec)
-	// Prepare 是“这一格才有的”启动准备（OpenCode 的端口/口令、Codex 的
-	// app-server 都是它给的）。
-	var prepEnv map[string]string
-	var prepArgs []string
-	var observe func(context.Context)
-	if def.Prepare != nil {
-		var perr error
-		prepEnv, prepArgs, observe, perr = def.Prepare(tag, host.ID, cwd)
-		if perr != nil {
-			log.Printf("[perch] tab=%d 启动准备失败: %v", host.ID, perr)
-			_ = c.Send([]byte("\r\n\x1b[31m[perch] 启动准备失败: " + perr.Error() + "\x1b[0m\r\n"))
-			return
-		}
-	}
-	// hooks 是**每格子一份**：事件文件路径写死进这一份 --settings 里，
-	// 于是"这条事件属于哪个格子"由文件名决定，不需要任何反查（见 hooks.go 末尾那段）。
-	// 只有 Claude 用这份 --settings；别的 agent 传空串。
-	settings := ""
-	if host.Spec.Agent == "claude" {
-		settings = buildHookSettings(tag)
-	}
-	// 每次开格重新解析一次（见 agentDef.Bin 的注释）：装完/更新完不用重启 Perch。
-	exe, prefix := def.Exe, def.Prefix
-	if def.Bin != "" {
-		exe, prefix = resolveAgentExe(def.Bin)
-	}
-	args := append(append([]string{}, prefix...), def.Args(host.Spec.Resume, settings)...)
-	args = append(args, prepArgs...)
-
-	env := make(map[string]string, len(def.Env)+len(prepEnv))
-	for k, v := range def.Env {
-		env[k] = v
-	}
-	for k, v := range prepEnv {
-		env[k] = v
-	}
-	sess, err := startPTY(exe, args, cwd, buildEnv(env), cols, rows)
+	running, err := tabs.StartTab(host, cols, rows)
 	if err != nil {
-		// Prepare 可能已经在外面起了东西（Codex 的 app-server）。PTY 没起来
-		// 就没有“流的寿命”来取消观察者 —— 给它一个已取消的 ctx 让它自己收尾，
-		// 否则那个 server 会一直留到 Perch 退出。
-		if observe != nil {
-			octx, ocancel := context.WithCancel(context.Background())
-			ocancel()
-			go observe(octx)
+		var se *startError
+		if errors.As(err, &se) {
+			switch se.Stage {
+			case startStageUnknownAgent:
+				log.Printf("[perch] tab=%d 未知 agent %q", host.ID, se.Agent)
+				_ = c.Send([]byte("\r\n\x1b[31m[perch] 未知 agent: " + se.Agent + "\x1b[0m\r\n"))
+			case startStagePrepare:
+				log.Printf("[perch] tab=%d 启动准备失败: %v", host.ID, se.Err)
+				_ = c.Send([]byte("\r\n\x1b[31m[perch] 启动准备失败: " + se.Err.Error() + "\x1b[0m\r\n"))
+			default:
+				log.Printf("[perch] tab=%d 启动失败: %v", host.ID, se.Err)
+				_ = c.Send([]byte("\r\n\x1b[31m[perch] 启动失败: " + se.Err.Error() + "\x1b[0m\r\n"))
+			}
+		} else {
+			log.Printf("[perch] tab=%d 启动失败: %v", host.ID, err)
+			_ = c.Send([]byte("\r\n\x1b[31m[perch] 启动失败: " + err.Error() + "\x1b[0m\r\n"))
 		}
-		log.Printf("[perch] tab=%d 启动失败: %v", host.ID, err)
-		_ = c.Send([]byte("\r\n\x1b[31m[perch] 启动失败: " + err.Error() + "\x1b[0m\r\n"))
 		return
 	}
-	defer sess.Close()
-	// pid 是「格子 ↔ 会话」那条链子的起点（登记表按 pid 命名，见 status.go）。
-	tabs.SetPID(host.ID, sess.Pid())
-
+	defer running.Close()
 	// 状态观察者跟着这条 PTY 的生命周期走：流一断/进程一关，ctx 就取消。
-	// observe 自己负责“server 还没起来就等”，不阻塞这里的启动。
-	if observe != nil {
-		octx, ocancel := context.WithCancel(context.Background())
-		defer ocancel()
-		go func() { <-done; ocancel() }()
-		go observe(octx)
-	}
+	defer running.StopObserve()
+	sess := running.Session
 
 	// 「这一格停了」的唯一可靠信号。
 	// 2026-10-17 实测：格内 /exit 之后 claude.exe 已经没了（Get-CimInstance 查不到），
@@ -1437,10 +1389,6 @@ func handleTab(c *application.StreamConn, host *tabHost) {
 		_ = c.Send([]byte("\r\n\x1b[33m[perch] 进程已退出\x1b[0m\r\n"))
 		_ = c.Close() // 让收包循环醒过来、前端看到 onclose
 	}()
-	// 注意日志里**打印参数**会把整份 --settings JSON 也打出来（几 KB）。
-	// 这里改打长度：那串东西对读日志的人是噪音，长度足够判断"注进去了没有"。
-	log.Printf("[perch] tab=%d 已启动 pid=%d exe=%s 参数%d个(settings=%d字节) cwd=%s resume=%s",
-		host.ID, sess.Pid(), exe, len(args), len(settings), cwd, host.Spec.Resume.Kind)
 	// C3 的观察腿（格子起来这一端）：这一格的 claude 是靠**继承**进 job 的
 	// （我们从没单独 assign 过它）—— 这句话是不是真的，问内核拿清单看。
 	logJobInventory(fmt.Sprintf("tab=%d pid=%d 起来后", host.ID, sess.Pid()))
