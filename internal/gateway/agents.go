@@ -64,30 +64,73 @@ func (g *Gateway) agentPushState(op, id string, b []byte) {
 			return
 		}
 	}
-	var rows []struct {
-		ID     string `json:"id"`
-		Wired  bool   `json:"wired"`
-		Launch string `json:"launch"`
-	}
+	// 保留 magpie 的原始行（抽屉的字段/漂移/图标都在里面），只补一个
+	// **上游没说**的已知边界：普通 Cursor CLI 不能接（见 AgentAction 的 preflight）。
+	// 用 map 而不是结构体，免得以后 magpie 加字段被我们吃掉。
+	var rows []map[string]json.RawMessage
 	_ = json.Unmarshal(st.Agents, &rows)
 	wired := 0
 	launches := make(map[string]string, len(rows))
 	for _, r := range rows {
-		if r.Wired {
+		var rid string
+		_ = json.Unmarshal(r["id"], &rid)
+		var w bool
+		_ = json.Unmarshal(r["wired"], &w)
+		if w {
 			wired++
 		}
-		if r.Launch != "" {
-			launches[r.ID] = r.Launch
+		var launch string
+		_ = json.Unmarshal(r["launch"], &launch)
+		if launch != "" {
+			launches[rid] = launch
+		}
+		if _, ok := r["connectable"]; !ok && rid == "cursor" {
+			r["connectable"] = json.RawMessage("false")
 		}
 	}
+	agentsJSON, _ := json.Marshal(rows)
 	// 启动环境只认最新一份 state：断开 agy 后，旧的 launch 不能继续被
 	// 下一次开格捡到。
 	g.setAgentLaunch(launches)
 	log.Printf("[agentcfg] %s%s：%d 个 agent，已接网关 %d", op, agentLogID(id), len(rows), wired)
 	g.emit(map[string]any{
-		"type": "gw.agents", "op": op, "id": id, "agents": st.Agents,
+		"type": "gw.agents", "op": op, "id": id, "agents": json.RawMessage(agentsJSON),
 		"notice": st.Notice, "at": nowISO(),
 	})
+}
+
+// agentConnectable 是 connect 之前的只读预检：magpie 的 state 行里有
+// connectable 就用它；没有的话按已知上游边界判（普通 Cursor CLI）。
+// 预检失败（读不到 state）不阻塞 —— 让 POST 去回答，错误会被分类。
+func (g *Gateway) agentConnectable(id string) (bool, bool) {
+	b, err := g.API("GET", "/api/state", nil)
+	if err != nil {
+		return false, false
+	}
+	var st struct {
+		Agents []struct {
+			ID          string `json:"id"`
+			Connectable *bool  `json:"connectable"`
+		} `json:"agents"`
+	}
+	if json.Unmarshal(b, &st) != nil {
+		return false, false
+	}
+	for _, r := range st.Agents {
+		if r.ID != id {
+			continue
+		}
+		if r.Connectable != nil {
+			return *r.Connectable, true
+		}
+		if id == "cursor" {
+			// 实测（2026-10-21）：magpie 的 cursor agent 只有 model=auto，
+			// connect() 直接返回 "Cursor CLI can't be connected to magpie"。
+			return false, true
+		}
+		return true, true
+	}
+	return false, true // 列表里没有它 = 不是 magpie 管的 agent
 }
 
 // AgentPrefetch 总览进入时的预取。只在用户以前用过网关（key 文件在）时才碰
@@ -156,6 +199,18 @@ func (g *Gateway) AgentAction(op, id string) {
 	if err := g.Ensure(); err != nil {
 		g.agentPushErr(op, id, err)
 		return
+	}
+	// 接入前先读一次只读 state：magpie 明确不能接的 agent（普通 Cursor CLI）
+	// **不发 POST**。用户看到的是一句解释，而不是一个 HTTP 400 正文。
+	if op == "connect" {
+		if ok, known := g.agentConnectable(id); known && !ok {
+			text := "magpie 不能接入这个 agent（该 agent 没有可路由的 provider 选项）"
+			if id == "cursor" {
+				text = "magpie 不能接入普通 Cursor CLI（Cursor CLI can't be connected to magpie）"
+			}
+			g.agentPushErr(op, id, uimsg.New("gw.agentNotConnectable", text))
+			return
+		}
 	}
 	b, err := g.API("POST", "/api/agents/"+op+"/"+url.PathEscape(id), map[string]any{})
 	if err != nil {

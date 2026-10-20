@@ -20,6 +20,8 @@ import (
 	perchassets "github.com/yu7dan/perch"
 	"github.com/yu7dan/perch/internal/agent"
 	"github.com/yu7dan/perch/internal/agentcatalog"
+	"github.com/yu7dan/perch/internal/agentstate"
+	"github.com/yu7dan/perch/internal/agy"
 	"github.com/yu7dan/perch/internal/appdir"
 	"github.com/yu7dan/perch/internal/ctl"
 	"github.com/yu7dan/perch/internal/dsh"
@@ -50,6 +52,8 @@ type perchApp struct {
 	pool   *project.Pool
 	panes  *panes.Store
 	tabs   *session.Manager
+	// agentState 是每个 agent 的接入进度（不是能力表）。
+	agentState *agentstate.Store
 
 	defs map[string]agent.Def
 
@@ -108,6 +112,22 @@ func main() {
 	}
 	a.panes.Warn()
 
+	/* 接入记录（每个 agent 从零走到哪一步）。和 panes.json 一样放在 Perch 自己的
+	   配置目录，**不**写进任何 agent 的状态根。第二个实例只读：两个实例各写一份
+	   会互相覆盖对方的最后一次。 */
+	if f, err := appdir.PerchFile("agent-state.json"); err != nil {
+		log.Printf("[agentstate] 拿不到用户配置目录：%v", err)
+		a.agentState = agentstate.Open("")
+	} else {
+		a.agentState = agentstate.Open(f)
+	}
+	if secondInstance {
+		a.agentState.SetReadOnly("已经有一个我在跑（步 7 的单实例闸）")
+	}
+	a.agentState.SetOnChange(func(rec map[string]agentstate.Record) {
+		a.push.Push(map[string]any{"type": "agent.state", "agents": rec})
+	})
+
 	// C3：第一个动作就是给自己上"随进程退出清理整棵树"的保险 ——
 	// 必须早于任何子进程（窗口的 WebView2、每个格子的 ConPTY 都在这之后才起）。
 	// 挂一次宿主，此后所有进程靠继承覆盖，不需要每格再管一次。
@@ -124,7 +144,8 @@ func main() {
 		Push:         a.push.Push,
 		// 能力矩阵要"能否启动"这条静态清单，由组合根注入 ——
 		// 会话层不反过来认识 agent 名单。
-		Caps: func(id string) agent.Caps { return agent.CapsFor(id, agentcatalog.Has(id)) },
+		Caps:       func(id string) agent.Caps { return agent.CapsFor(id, agentcatalog.Has(id)) },
+		AgentState: a.agentState,
 	})
 	// 步 8：适配器此后拿到的就是真正的会话表（绑定/状态/推送/Exe 解析）。
 	agent.SetHost(a.tabs)
@@ -145,10 +166,14 @@ func main() {
 	// 还要把官方 hook 桥和 peer 装进 dsh-tui profile。所以只放在两个
 	// **用户明确点下**的动作里（安装完成 / 名单里的「接入状态」），不静默跑。
 	setupAgent := func(id string, log func(string)) error {
-		if id != "dsh" {
-			return nil
+		switch id {
+		case "dsh":
+			return dsh.EnsureHooks(a.stateDir, session.HookDir(a.stateDir), session.HookExePath(), log)
+		case "agy":
+			// 只写 ~/.gemini/config/hooks.json 里一个命名条目；保留用户其它 hook。
+			return agy.EnsureHooks(session.HookExePath(), session.HookDir(a.stateDir), log)
 		}
-		return dsh.EnsureHooks(a.stateDir, session.HookDir(a.stateDir), session.HookExePath(), log)
+		return nil
 	}
 	a.installer = install.New(install.Deps{
 		Push: a.push.Push,
@@ -309,6 +334,7 @@ func main() {
 		Gateway:        a.gw,
 		Installer:      a.installer,
 		Transcript:     a.follower,
+		AgentState:     a.agentState,
 		DefaultCWD:     a.defaultCWD,
 		SessionExists:  a.tabs.SessionFileExistsFor,
 		MergeCalls:     a.mergeCatalogCalls,

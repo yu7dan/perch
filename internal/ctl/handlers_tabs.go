@@ -87,7 +87,8 @@ func (s *Server) panesQuery(c Conn) {
 		reply, _ := json.Marshal(map[string]any{
 			"type": "panes.list", "panes": []any{},
 			"agents": s.bootAgentCards(), "defaultAgent": s.defaultAgentSetting(),
-			"err": "已经有一个我在跑（单实例闸）—— 这一轮不恢复任何会话",
+			"agentState": s.agentStateSnapshot(),
+			"err":        "已经有一个我在跑（单实例闸）—— 这一轮不恢复任何会话",
 		})
 		_ = c.Send(reply)
 		return
@@ -96,6 +97,7 @@ func (s *Server) panesQuery(c Conn) {
 		reply, _ := json.Marshal(map[string]any{
 			"type": "panes.list", "panes": []any{}, "err": "登记表不可用",
 			"agents": s.bootAgentCards(), "defaultAgent": s.defaultAgentSetting(),
+			"agentState": s.agentStateSnapshot(),
 		})
 		_ = c.Send(reply)
 		return
@@ -104,6 +106,7 @@ func (s *Server) panesQuery(c Conn) {
 	reply, err := json.Marshal(map[string]any{
 		"type": "panes.list", "panes": plan.Views,
 		"agents": s.bootAgentCards(), "defaultAgent": s.defaultAgentSetting(),
+		"agentState": s.agentStateSnapshot(),
 	})
 	if err != nil {
 		log.Printf("[panes] 冷恢复清单序列化失败（前端会走无应答那条兜底）：%v", err)

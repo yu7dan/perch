@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/yu7dan/perch/internal/agent"
+	"github.com/yu7dan/perch/internal/agentstate"
 	"github.com/yu7dan/perch/internal/panes"
 )
 
@@ -23,6 +24,8 @@ type Deps struct {
 	// Caps 是能力矩阵（它需要 agentcatalog 的"能否启动"），由组合根注入，
 	// 免得会话层反过来认识 agent 名单。
 	Caps func(id string) agent.Caps
+	// AgentState 记录每个 agent 的接入进度。nil 合法（测试/无状态工具）。
+	AgentState *agentstate.Store
 }
 
 // Manager 发放标签 id、维护运行期表与 bySession 反查，并实现 agent.Host。
@@ -40,6 +43,7 @@ type Manager struct {
 	processAlive func(pid int) bool
 	push         func(any)
 	caps         func(id string) agent.Caps
+	agentState   *agentstate.Store
 
 	defsMu sync.RWMutex
 	defs   map[string]agent.Def
@@ -64,6 +68,7 @@ func New(d Deps) *Manager {
 		processAlive: d.ProcessAlive,
 		push:         d.Push,
 		caps:         d.Caps,
+		agentState:   d.AgentState,
 	}
 }
 
@@ -190,6 +195,19 @@ func (m *Manager) AgentForTab(tab int) string {
 		return h.Spec.Agent
 	}
 	return ""
+}
+
+// AgentForPane 是 agent.readiness 的复核：前端报的是一个 paneId，这里问
+// “这一格现在跑的是谁”。查不到（格子已关）就不写记录。
+func (m *Manager) AgentForPane(paneID int) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, h := range m.tabs {
+		if h.PaneID == paneID && paneID > 0 {
+			return h.Spec.Agent, true
+		}
+	}
+	return "", false
 }
 
 // PaneIDFor：运行期的 tab id → **跨重启**的 paneId（登记表的身份）。
@@ -460,6 +478,34 @@ func (m *Manager) SetStatus(id int, st string) (string, bool) {
 	prev := h.status
 	h.status = st
 	return prev, true
+}
+
+// RecordStatus 实现 agent.Host：状态适配器产生第一条真实事件时，把“状态这条腿
+// 已接上”写进接入记录。Evidence 只放 tab（可公开的短证据）。
+func (m *Manager) RecordStatus(tabID int, mechanism string) {
+	if m.agentState == nil || mechanism == "" {
+		return
+	}
+	m.mu.Lock()
+	h := m.tabs[tabID]
+	if h == nil {
+		m.mu.Unlock()
+		return
+	}
+	agentID := h.Spec.Agent
+	m.mu.Unlock()
+	m.agentState.SetStep(agentID, agentstate.StepStatus, agentstate.Step{
+		State:     agentstate.StepDone,
+		Mechanism: mechanism,
+		Source:    "event",
+		Verified:  true,
+		Evidence:  fmt.Sprintf("tab=%d", tabID),
+	})
+	// hook / app-server 只在 agent 真的跑起来之后才会发事件；这条状态本身就是
+	// “已过登录/就绪”的一个合理证据（来源写清楚，不是拿它冒充 whoami）。
+	if mechanism == agent.EvidenceHook || mechanism == agent.EvidenceAppServer {
+		m.agentState.RecordReadiness(agentID, "ready", "status")
+	}
 }
 
 // TabForSession 反查：这条 hook 事件是哪个格子发出来的。

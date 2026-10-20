@@ -129,6 +129,11 @@ The other nine have a one-click install recipe — the official installer or an 
 
 **Install** means Perch runs the agent's official installer or npm package after you click "Install". **Launch** means Perch can start it in a pane. Desktop clients are outside this list; any client that can point at a custom base URL can use the magpie gateway.
 
+Two of these go further than install/launch:
+
+- **Antigravity CLI** has session resume wired (`--conversation <id>` / `--continue`). Its native terminal title carries no state (it is the executable path), so Perch offers a one-click **Connect status** action that installs lifecycle hooks (`SessionStart` / `PreInvocation` / `Stop`). Until those hooks are installed the row says, honestly, that there is no status source. Waiting-for-approval is not subscribed: `PreToolUse` is a permission gate and an observer must not answer it.
+- **Cursor** has `--resume <chatId>` / `--continue` resume wired, but the regular `cursor-agent` CLI has no status source and cannot be routed through magpie (`Cursor CLI can't be connected to magpie`). The drawer says so, keeps the gateway action visibly unavailable, and points to native use, `cursor-agent login`, or Cursor Private Inference instead of sending a request that returns HTTP 400.
+
 ## Where the data comes from
 
 Three legs, from hardest to softest — the order is deliberate:

@@ -59,6 +59,31 @@ func OpenCodeDef() Def { return openCodeDef() }
 // PiDef 是每格一个观察扩展 + JSONL tail 的适配器。
 func PiDef() Def { return piDef() }
 
+// CursorDef 是 Cursor CLI 的启动/续接。
+//
+// 实测（2026-10-21，cursor-agent --help）：
+//
+//	--resume [chatId]  指定会话
+//	--continue         继续上一条
+//
+// `--resume` 不带 id 时会打开会话选择器；Perch 只在手上有 id 时传 id。
+func CursorDef() Def {
+	d := GenericDef("cursor-agent")
+	d.Args = func(intent ResumeIntent, _ string) []string {
+		switch intent.Kind {
+		case "exact":
+			if intent.ID != "" {
+				return []string{"--resume", intent.ID}
+			}
+			return []string{"--continue"}
+		case "latest":
+			return []string{"--continue"}
+		}
+		return nil
+	}
+	return d
+}
+
 // AgyDef 是 Antigravity CLI 的启动适配。
 //
 // agy 接进 magpie 之后，modelProvider="gemini" 写在 settings.json 里，但
@@ -69,10 +94,31 @@ func PiDef() Def { return piDef() }
 // 没接线时 WireLaunch 返回 ok=false，退回 GenericDef 的普通启动。
 func AgyDef() Def {
 	d := GenericDef("agy")
-	d.Prepare = func(_ string, _ int, _ string) (map[string]string, []string, func(context.Context), error) {
-		env, args, ok := host.WireLaunch("agy")
+	// 实测（2026-10-21，agy --help）：--conversation <id> 精确续接，
+	// --continue 继续最近一条。没 id 时用 latest，绝不打开交互选择器。
+	d.Args = func(intent ResumeIntent, _ string) []string {
+		switch intent.Kind {
+		case "exact":
+			if intent.ID != "" {
+				return []string{"--conversation", intent.ID}
+			}
+			return []string{"--continue"}
+		case "latest":
+			return []string{"--continue"}
+		}
+		return nil
+	}
+	d.Prepare = func(tag string, _ int, _ string) (map[string]string, []string, func(context.Context), error) {
+		// hooks.json 是全局一份，事件里没有格子 id：格子归属只能靠这个环境变量
+		// （perch-hook --agy 从 PERCH_AGENT_PANE 拼 t<N>.jsonl）。无论有没有接
+		// magpie 都要设。
+		env := map[string]string{"PERCH_AGENT_PANE": tag}
+		wenv, args, ok := host.WireLaunch("agy")
 		if !ok {
-			return nil, nil, nil, nil
+			return env, nil, nil, nil
+		}
+		for k, v := range wenv {
+			env[k] = v
 		}
 		return env, args, nil, nil
 	}

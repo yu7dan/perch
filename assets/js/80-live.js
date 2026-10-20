@@ -564,6 +564,9 @@ const shell = Stream("shell");
 let pendingShell = null;
 function applyShell(p) {
   STATE = p;
+  // 接入记录随壳层首帧下来（同一次 ShellPayload）。它是“上次走到哪一步”的
+  // 唯一事实；总览/抽屉读 AGENT_STATE，不读 STATE 里的静态名单。
+  if (p.agentState && typeof p.agentState === "object") applyAgentState(p.agentState);
   $("s-index").textContent = t("status.index", {
     sessions: STATE.sessions?.length ?? 0,
     projects: (STATE.projects || []).length,
@@ -615,6 +618,9 @@ function applyLibrary(p) {
   // 总览的每日活动也在这份载荷里（同一次扫描算的，见 store.go 的 scanSessions）——
   // 不跟着换的话，"重扫会话库"之后热力图还是旧的。
   if (Array.isArray(p.activity)) STATE.activity = p.activity;
+  // 接入记录也在重扫载荷里（同一次 ShellPayload）：盘上手动装/删过 agent
+  // 之后点「重扫会话库」，卡片上的“下一步”要跟着变。
+  if (p.agentState && typeof p.agentState === "object") AGENT_STATE = p.agentState;
   // 设置也在这份载荷里（同一次 buildShellPayload）。重扫不该改设置，但
   // 手改过 settings.json 的人点一次「重扫」就能看到盘上的值 —— 顺手对齐。
   if (p.settings) applySettings(p.settings, { fromGo: true, effectiveCwd: p.cwd });
@@ -882,7 +888,9 @@ function applyHook(m) {
   /* 新格"还没开始"的门：除 SessionStart 外的任何 hook 都是活证据
      （用户发了提示 / 批准框 / 工具调用 / Stop …）。SessionStart 只是新进程的
      开场白，不代表用户派了活，所以不算。门一关就永久收起换 Agent 的入口。 */
-  if (m.event && m.event !== "SessionStart") freshCellStarted(t, `hook ${m.event}`);
+  if (m.event && m.event !== "SessionStart" && m.event !== "AgySessionStart") {
+    freshCellStarted(t, `hook ${m.event}`);
+  }
   /* 「这一格跑的是哪条会话」—— 左栏那条腿就认它（tabForSession）：点会话行时
      "它在跑 ⇒ 跳过去"、行上那句「正在第 N 格里跑」、还有那行的选中高亮，全靠
      这一个字段。在此之前**没有任何地方写过它**，于是那三件事全是死的 ——
@@ -1014,6 +1022,30 @@ function applyHook(m) {
         v.state = "done";
         v.evidence = "hook";
         v.wait = null;
+      }
+      break;
+    case "AgySessionStart":
+      // agy 没有登记表：会话起来先落 idle，别让上一格的 busy 挂着。
+      v.note = null;
+      v.wait = null;
+      v.st = "idle";
+      v.state = "done";
+      v.evidence = "hook";
+      break;
+    case "AgyWorking":
+      v.st = "busy";
+      v.state = "working";
+      v.evidence = "hook";
+      v.wait = null;
+      break;
+    case "AgyIdle":
+      v.st = "idle";
+      v.state = "done";
+      v.evidence = "hook";
+      v.wait = null;
+      // ERROR 收尾要留下一条 fail note（和 Claude 的 StopFailure 同一语义）。
+      if (m.failed && !watchedNow(t)) {
+        v.note = { kind: "fail", text: m.reason || "", at };
       }
       break;
     case "SessionStart":
@@ -1152,6 +1184,43 @@ function applyAgent(m) {
     }
   }
   if (prev !== v.st) scheduleLive();
+}
+
+/* 标题等待（弱信号，2026-10-21）。
+   有些 agent 没有结构化状态源，只有终端标题能说明“我在等人”
+   （Cursor 的 `cursor - action required`、agy 的 action required/permission）。
+   这种等待进**同一条**「需要你」管线，但必须说清楚它弱在哪：
+     · kind 固定 ask、text 为空、answerable:false —— 我们看不到问的是什么，
+       也画不出可点的回答按钮；用户要去终端里回答；
+     · evidence 写 title，标题一离开等待就销账。
+   它不会覆盖结构化等待：只有当前那条等待本身就是标题来的，才由标题销账。 */
+function applyTitleWaiting(t) {
+  if (!t) return;
+  const v = liveOf(t.id);
+  const at = new Date().toISOString();
+  const was = v.st === "waiting" && !!(v.wait && v.wait.title);
+  v.st = "waiting";
+  v.state = "waiting";
+  v.evidence = "title";
+  v.at = at;
+  v.wait = { kind: "ask", text: "", at, id: "", agent: "", title: true, answerable: false };
+  if (!was && !watchedNow(t) && !v.note) {
+    v.note = { kind: "ask", text: "", at };
+    sendCtrl({ type: "log", msg: `记未读 tab=${t.id} 因=标题进入等待（弱信号，需在终端回答）` });
+  }
+  scheduleLive();
+}
+
+function clearTitleWaiting(t) {
+  if (!t) return;
+  const v = LIVE.get(t.id);
+  if (!v || !(v.wait && v.wait.title)) return;
+  const had = v.st === "waiting";
+  v.wait = null;
+  if (had) { v.st = "idle"; v.state = "done"; }
+  v.evidence = "title";
+  if (v.note && v.note.kind === "ask") ackNote(t, "标题离开等待");
+  scheduleLive();
 }
 
 function applyActs(m) {

@@ -70,9 +70,16 @@ const (
 )
 
 type Caps struct {
-	Launch    bool   `json:"launch"`    // Perch 能在终端里启动它
-	Resume    bool   `json:"resume"`    // 能按会话续接
-	Status    bool   `json:"status"`    // 能给出忙/闲
+	Launch bool `json:"launch"` // Perch 能在终端里启动它
+	Resume bool `json:"resume"` // 能按会话续接
+	// ResumeKind 是续接的精度：exact = 能接回指定那条；latest = 只能接
+	// “这个目录里最新那条”。空 = 没有接入。前端据此写「续接：精确/最新」，
+	// 不拿一个布尔冒充两件事。
+	ResumeKind string `json:"resumeKind,omitempty"`
+	Status     bool   `json:"status"` // 能给出忙/闲
+	// Title 表示状态来自终端标题（弱信号）。它和 Status 分开：UI 必须能写出
+	// “标题（弱）”，不能让用户以为我们看见了提问内容/批准按钮。
+	Title     bool   `json:"title,omitempty"`
 	Waiting   bool   `json:"waiting"`   // 能给出“卡在等你”（提问/批准）
 	Actions   bool   `json:"actions"`   // 能给出工具/文件/子代理等动作
 	Approvals bool   `json:"approvals"` // 能从 Perch 里回答批准/提问（后续）
@@ -81,7 +88,7 @@ type Caps struct {
 
 var agentAdapterCaps = map[string]Caps{
 	"claude": {
-		Launch: true, Resume: true, Status: true, Waiting: true, Actions: true,
+		Launch: true, Resume: true, ResumeKind: "exact", Status: true, Waiting: true, Actions: true,
 		Mechanism: "hook",
 	},
 	"opencode": {
@@ -92,7 +99,7 @@ var agentAdapterCaps = map[string]Caps{
 		// 状态/等待来自 pi -e 挂进去的观察扩展（internal/agent/pi/observer.ts）。
 		// 等待是**条件性**的：Pi 没有内建审批，只有扩展的 ctx.ui 提示才会
 		// 出现 waiting；没有扩展提问时不会等 —— 这是能力边界，不假装。
-		Launch: true, Resume: true, Status: true, Waiting: true,
+		Launch: true, Resume: true, ResumeKind: "exact", Status: true, Waiting: true,
 		Mechanism: "extension",
 	},
 	"codex": {
@@ -100,7 +107,7 @@ var agentAdapterCaps = map[string]Caps{
 		// thread/status/changed 的 activeFlags（waitingOnApproval /
 		// waitingOnUserInput）。批准本身仍然在 TUI 里回答（Approvals=false）：
 		// 实测 0.163.0 的批准请求只发给 TUI，不发给旁路观察者。
-		Launch: true, Resume: true, Status: true, Waiting: true,
+		Launch: true, Resume: true, ResumeKind: "exact", Status: true, Waiting: true,
 		Mechanism: "app-server",
 	},
 	"dsh": {
@@ -108,8 +115,22 @@ var agentAdapterCaps = map[string]Caps{
 		// 状态来自官方的 @deepseek-ai/dsh-hooks-claude-code 桥。
 		// Waiting 只覆盖 dsh 的 ask_user_question；批准没有 hook，按 Orca 的
 		// 口径算 working（harness 还在工具中间，不是 idle，也不假装看得见）。
-		Launch: true, Resume: true, Status: true, Waiting: true,
+		Launch: true, Resume: true, ResumeKind: "exact", Status: true, Waiting: true,
 		Mechanism: "hook",
+	},
+	// ⚠️ 2026-10-21 实测改口：这两个 agent **没有可用的原生标题状态**。
+	//   Cursor CLI 的 OSC 标题是 `cmd.exe`（它是 .cmd 启动器），它的
+	//   `cursor ready` / `cursor - action required` 是 Orca 自己用 hooks
+	//   合成出来的，不是 cursor-agent 会写的东西；
+	//   agy 的标题是 exe 路径（实测隔离 HOME：`"C:\...\agy.exe"`）。
+	// 所以不把 Title 写进能力表 —— 没接 hooks 时状态就是「无来源」，不假装。
+	// agy 的结构化状态在 hooks 接上之后由 agentcatalog 把 Status 打开。
+	"agy": {
+		Launch: true, Resume: true, ResumeKind: "exact",
+	},
+	"cursor": {
+		// 普通 Cursor CLI 没有状态源；网关侧也不能接（见 gateway/agents.go）。
+		Launch: true, Resume: true, ResumeKind: "exact",
 	},
 }
 
@@ -220,6 +241,12 @@ func emitAgentStatus(ev agentEvent) {
 	stateChanged := ev.State != "" && ev.State != prevState
 	evidenceChanged := ev.Evidence != "" && ev.Evidence != prevEvidence
 
+	// 第一条真实状态事件 = 这个 agent 的“状态”这条腿有证据了。落盘在会话层，
+	// 只在机制变化时写一次（Store.SetStep 去重），不会每条状态刷盘。
+	switch ev.Evidence {
+	case EvidenceHook, EvidenceHTTP, EvidenceAppServer, EvidenceExtension:
+		host.RecordStatus(ev.Tab, ev.Evidence)
+	}
 	prev, changed := host.SetStatus(ev.Tab, ev.Status)
 	if !changed && !(ev.Status == "waiting" && noteChanged) && !stateChanged && !evidenceChanged {
 		return

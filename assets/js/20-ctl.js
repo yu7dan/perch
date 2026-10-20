@@ -33,6 +33,22 @@ const RESTORE = { state: "init", panes: [], err: "", asked: false };
    scanAgentCatalog），前端只读，不自己再探一遍。 */
 let BOOT_AGENTS = [];
 let BOOT_DEFAULT_AGENT = "";
+/* 接入记录：agent id → internal/agentstate.Record。它是“打开之后走到哪一步”的
+   唯一一份事实；总览/抽屉都读它，不许再从静态 caps 自己推“完整”。
+   panes.list、shell 首帧、agent.state 三条路都会更新它。 */
+let AGENT_STATE = {};
+function applyAgentState(agents) {
+  AGENT_STATE = agents && typeof agents === "object" ? agents : {};
+  // 目前只有总览和抽屉读它；两条路都重画一次（数据低频，不值得做增量）。
+  if (typeof NAV_HERE !== "undefined" && NAV_HERE === "dash" &&
+      typeof renderDashAgents === "function") {
+    renderDashAgents();
+  }
+  if (typeof AC_ID !== "undefined" && AC_ID &&
+      typeof renderAgentDrawer === "function") {
+    renderAgentDrawer();
+  }
+}
 let restoreTimer = 0;
 function askRestorePlan() {
   if (RESTORE.asked) { ctl.send({ type: "log", msg: "冷恢复：已经问过了，不重问（重问可能让同一批会话被接两遍）" }); return; }
@@ -425,6 +441,8 @@ function dispatchCtl(m) {
          defaultAgentId）。它和总览的 catalog 是同一份 Go 探测结果。 */
       BOOT_AGENTS = Array.isArray(m.agents) ? m.agents : [];
       BOOT_DEFAULT_AGENT = typeof m.defaultAgent === "string" ? m.defaultAgent : "";
+      // 建第一格之前就要有的第二份事实：每个 agent 上次走到哪一步。
+      AGENT_STATE = m.agentState && typeof m.agentState === "object" ? m.agentState : {};
       const installed = BOOT_AGENTS.filter((a) => a && a.installed).length;
       const launchable = BOOT_AGENTS.filter((a) => a && a.installed &&
         a.caps && a.caps.launch).length;
@@ -461,6 +479,7 @@ function dispatchCtl(m) {
       }
       return;
     }
+    case "agent.state": applyAgentState(m.agents); return;
     case "hook":  applyHook(m);  return;
     case "agent": applyAgent(m); return;
     case "acts":  applyActs(m);  return;

@@ -394,13 +394,32 @@ func (g *Gateway) API(method, path string, body any) ([]byte, error) {
 		return nil, requestFailed(err)
 	}
 	if res.StatusCode/100 != 2 {
-		msg := strings.TrimSpace(string(data))
-		if len(msg) > 400 {
-			msg = msg[:400]
+		// 错误正文可能是一整段 JSON。用户看到的应该是**原因**，不是响应体：
+		// 先取 {"error": "…"} 里那句；取不出来才退到截断后的原文。
+		// 已知的上游边界给稳定码（前端有本地化文案），不再把英文正文抛上去。
+		var je struct {
+			Error string `json:"error"`
+		}
+		body := strings.TrimSpace(string(data))
+		reason := ""
+		if json.Unmarshal(data, &je) == nil {
+			reason = strings.TrimSpace(je.Error)
+		}
+		if reason == "" {
+			reason = body
+			if len(reason) > 240 {
+				reason = reason[:240]
+			}
+		}
+		status := strconv.Itoa(res.StatusCode)
+		if strings.Contains(strings.ToLower(reason), "can't be connected") {
+			return nil, uimsg.NewParams("gw.agentNotConnectable",
+				"magpie 不能接入这个 agent（该 agent 没有可路由的 provider 选项）",
+				map[string]string{"status": status})
 		}
 		return nil, uimsg.NewParams("gw.httpError",
-			fmt.Sprintf("magpie 回答 HTTP %d：%s", res.StatusCode, msg),
-			map[string]string{"status": strconv.Itoa(res.StatusCode), "body": msg})
+			fmt.Sprintf("magpie 回答 HTTP %d：%s", res.StatusCode, reason),
+			map[string]string{"status": status, "reason": reason})
 	}
 	return data, nil
 }

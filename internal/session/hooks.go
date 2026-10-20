@@ -188,6 +188,7 @@ type hookEvent struct {
 	ToolName             string `json:"tool_name"`              // PreToolUse / PermissionRequest / PostToolUse
 	ToolUseID            string `json:"tool_use_id"`            // 工具调用的身份：销等待时靠它对准
 	Trigger              string `json:"trigger"`                // PostCompact: manual / auto
+	Failed               bool   `json:"failed,omitempty"`       // agy: Stop 以 ERROR 收尾
 }
 
 // resetHookDir 启动时清空事件目录：这是**实时信号**不是历史，
@@ -292,6 +293,11 @@ func (m *Manager) handleHookLine(line string, tabID int) {
 		tab = m.TabForSession(ev.SessionID)
 	}
 	agentType := m.AgentForTab(tab)
+	// 结构化 hook 的第一条事件 = 这个 agent 的状态腿有证据了（机制 hook）。
+	// Claude/dsh 都走这一条；Title 那条腿由前端 agent.status 上报。
+	if tab != 0 && (agentType == "claude" || agentType == "dsh") {
+		m.RecordStatus(tab, "hook")
+	}
 	// 顺带把关联钉下来：事件里的 session_id 是**第一时间**到达的那个，
 	// 比登记表轮询还早。绑定只在第一次生效，所以它和登记表那条路不会打架。
 	if tab != 0 && ev.SessionID != "" && m.BindSession(tab, ev.SessionID, "", ev.Source) {
@@ -311,8 +317,23 @@ func (m *Manager) handleHookLine(line string, tabID int) {
 		// 「需要你」的正主：官方的人机信号，类型就在 payload 里。
 		log.Printf("[hook t%d] Notification type=%s session=%s msg=%q",
 			tab, ev.NotificationType, short(ev.SessionID), clip(ev.Message, 120))
-	case "SessionStart":
-		log.Printf("[hook t%d] SessionStart source=%s session=%s cwd=%s", tab, ev.Source, short(ev.SessionID), ev.CWD)
+	case "AgyWorking":
+		// agy 的 PreInvocation：模型这一轮开始了。它没有登记表，事件就是唯一
+		// 的忙信号；来源仍写 hook，UI 会显示「hooks」而不是「标题」。
+		log.Printf("[hook t%d] AgyWorking session=%s", tab, short(ev.SessionID))
+		if tab != 0 {
+			m.SetStatus(tab, "busy")
+			m.RecordStatus(tab, "hook")
+		}
+	case "AgyIdle":
+		log.Printf("[hook t%d] AgyIdle session=%s failed=%v reason=%s",
+			tab, short(ev.SessionID), ev.Failed, orNone(ev.Reason))
+		if tab != 0 {
+			m.SetStatus(tab, "idle")
+			m.RecordStatus(tab, "hook")
+		}
+	case "SessionStart", "AgySessionStart":
+		log.Printf("[hook t%d] %s source=%s session=%s cwd=%s", tab, ev.HookEventName, ev.Source, short(ev.SessionID), ev.CWD)
 		// transcript_path 是**路径的权威来源**：不要自己去 projects\<有损slug>\ 下面拼
 		// （那个 slug 中文和连字符都还原不回来）。「改动/流水」那条腿就跟着这个文件走。
 		if tab != 0 {
@@ -376,6 +397,7 @@ func (m *Manager) handleHookLine(line string, tabID int) {
 		"tool":      ev.ToolName,
 		"tid":       ev.ToolUseID,
 		"trigger":   ev.Trigger,
+		"failed":    ev.Failed,
 		// 证据来源：前端拿它区分“活事件”和冷恢复时的重放（见 80-live.js
 		// 的 restoredUnconfirmed）。hook 永远算活事件。
 		"evidence": agent.EvidenceHook,

@@ -211,6 +211,17 @@
 .ag .st{font-size:10.5px;color:var(--muted);white-space:nowrap;flex:none}
 .ag .st.ok{color:var(--green)}
 .ag .st.off{color:var(--faint)}
+/* 五条腿的短标记（L 启动 / S 状态 / R 续接 / G 网关 / A 登录）。颜色即状态：
+   它们是同一条接入链路的浓缩，不另起一套“完整/基础”的说法。 */
+.ag .ag-legs{display:inline-flex;gap:2px;flex:none}
+.ag .ag-leg{font:8px/1 var(--mono);font-style:normal;width:11px;height:14px;
+  display:inline-flex;align-items:center;justify-content:center;border-radius:3px;
+  color:var(--faint);background:rgba(255,255,255,.04)}
+.ag .ag-leg.done{color:var(--green);background:rgba(134,239,172,.10)}
+.ag .ag-leg.doing{color:var(--accent);background:rgba(96,165,250,.12)}
+.ag .ag-leg.failed{color:var(--red);background:rgba(255,101,104,.10)}
+.ag .ag-leg.unsupported{color:#d8b46a;background:rgba(234,179,8,.10)}
+.ag .ag-leg.not_applicable{opacity:.55}
 .ag .dl{font-size:10.5px;color:var(--fg2);border:1px solid var(--line);
         border-radius:6px;padding:3px 9px;background:var(--card);flex:none}
 .ag .dl:hover{border-color:var(--fg2);color:var(--fg)}

@@ -271,7 +271,22 @@ function applyInstall(m) {
   if (m.type === "install.done") instDone(m);
 }
 
+// 这个 agent 现在有没有活着的格子（进程还在、流没断）。
+// 总览的「打开」在它已经跑着时应该**聚焦**，不能再建一格 —— 那正是
+// “点一下多出一个重复 agent”的来源。
+function liveAgentTab(id) {
+  return TAB_LIST.find((t) => t && t.id > 0 && t.spec && t.spec.agent === id &&
+    !t.connDown && !t.resumeRefused) || null;
+}
+
 async function launchAgent(id) {
+  const live = liveAgentTab(id);
+  if (live) {
+    setActive(live);
+    setNavView("workspace");
+    sendCtrl({ type: "log", msg: `从 Agent 接线台查看 ${id} → 聚焦已有 tab=${live.id}` });
+    return;
+  }
   const m = mg();
   const a = ((m && m.catalog) || []).find((x) => x.id === id);
   const t = await createTab({ agent: id, cwd: "", resume: { kind: "new", id: "" } }, { fresh: true });
@@ -338,6 +353,37 @@ $("dash-agent-list").addEventListener("click", (e) => {
     bootFact(`Agent 打开 → ${lb.dataset.launch}`);
     return;
   }
+  /* 网关那一格的动作：只有模型说“可以接”时才直接发 connect。
+     没读到 magpie 的名单、或模型给的是 unsupported，就先开抽屉 ——
+     绝不让一个已知会 400 的请求发出去（Cursor 普通 CLI 就是这样）。 */
+  const gb = e.target.closest("[data-gwconnect]");
+  if (gb) {
+    const id = gb.dataset.gwconnect;
+    const m = mg();
+    const a = ((m && m.catalog) || []).find((x) => x.id === id);
+    const v = a ? dashAgentView(a) : null;
+    if (!Array.isArray(GW_AGENTS) || !v || v.primary.action !== "connect") {
+      acOpen(id);
+      sendCtrl({ type: "gw.agents" });
+      return;
+    }
+    sendCtrl({ type: "gw.agent.connect", id });
+    bootFact(`Agent 接入网关 → ${id}`);
+    return;
+  }
+  /* magpie 没装/没在跑：去网关页（那里有安装/连接入口），不在这里拉起进程。 */
+  const gsb = e.target.closest("[data-gwsettings]");
+  if (gsb) {
+    setNavView("dash");
+    const tab = [...document.querySelectorAll("[data-dtab]")]
+      .find((x) => x.dataset.dtab === "gateway");
+    if (tab) tab.click();
+    bootFact(`Agent 网关设置 → ${gsb.dataset.gwsettings}`);
+    return;
+  }
+  // 「无状态源 / 网关不支持」：打开抽屉把原因和原生用法说清楚，不只留三个字。
+  const ub = e.target.closest("[data-usage]");
+  if (ub) { acOpen(ub.dataset.usage); return; }
   // 行本身 = 打开右侧配置抽屉（89-agent-cfg.js）。安装/打开按钮在上面已经
   // 各自处理并 return，所以点按钮不会顺带打开抽屉。
   const cb = e.target.closest("[data-agentcfg]");

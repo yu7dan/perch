@@ -16,10 +16,12 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -44,20 +46,113 @@ func destFor(args []string, getenv func(string) string) string {
 }
 
 func main() {
+	/* agy 模式：`perch-hook.exe --agy <hookDir> <Event>`。
+	   agy 的 hooks.json 是**全局一份**（~/.gemini/config），事件里没有格子 id；
+	   格子归属仍由环境变量 PERCH_AGENT_PANE 决定（Perch 开格时注入）。
+	   ⚠️ agy 要求每个 hook 在 stdout 上输出一个 JSON 对象：`{}` = 不注入、
+	   不改变 Stop 的默认决策。任何情况下都必须把这行写出去。 */
+	if len(os.Args) > 3 && os.Args[1] == "--agy" {
+		runAgy(os.Args[2], os.Args[3], os.Getenv)
+		return
+	}
+
 	dest := destFor(os.Args, os.Getenv)
 	body, _ := io.ReadAll(os.Stdin)
 
 	if dest == "" || len(body) == 0 {
 		os.Exit(0)
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		os.Exit(0)
-	}
+	appendLine(dest, body)
+}
 
+func runAgy(hookDir, event string, getenv func(string) string) {
+	body, _ := io.ReadAll(os.Stdin)
+	if dest := paneDest(hookDir, getenv); dest != "" && len(body) > 0 {
+		if line := normalizeAgy(event, body); line != nil {
+			appendLine(dest, line)
+		}
+	}
+	os.Stdout.WriteString("{}\n")
+}
+
+func paneDest(dir string, getenv func(string) string) string {
+	pane := getenv("PERCH_AGENT_PANE")
+	if !paneTagRE.MatchString(pane) {
+		return ""
+	}
+	return filepath.Join(dir, pane+".jsonl")
+}
+
+type agyInput struct {
+	ConversationID    string   `json:"conversationId"`
+	WorkspacePaths    []string `json:"workspacePaths"`
+	TranscriptPath    string   `json:"transcriptPath"`
+	TerminationReason string   `json:"terminationReason"`
+	FullyIdle         *bool    `json:"fullyIdle"`
+	Error             string   `json:"error"`
+}
+
+// normalizeAgy 把 agy 的 camelCase payload 折成和 Claude 同一组事件名，
+// 轮询器/前端就不用认识第二套 schema。
+//
+// ⚠️ 只保留状态分类需要的字段：**不写 prompt / 工具参数 / 错误正文**。
+// transcriptPath 是文件路径（会话身份），和 Claude 那条腿一样要。
+func normalizeAgy(event string, body []byte) []byte {
+	var in agyInput
+	if json.Unmarshal(body, &in) != nil {
+		return nil
+	}
+	var name string
+	failed := false
+	switch event {
+	case "SessionStart":
+		name = "AgySessionStart"
+	case "PreInvocation":
+		name = "AgyWorking"
+	case "Stop":
+		if strings.EqualFold(strings.TrimSpace(in.TerminationReason), "ERROR") ||
+			strings.TrimSpace(in.Error) != "" {
+			name, failed = "AgyIdle", true
+		} else if in.FullyIdle != nil && !*in.FullyIdle {
+			// 还有后台任务没跑完：Stop 只说明执行循环结束，不等于空闲。
+			name = "AgyWorking"
+		} else {
+			name = "AgyIdle"
+		}
+	default:
+		return nil
+	}
+	cwd := ""
+	if len(in.WorkspacePaths) > 0 {
+		cwd = in.WorkspacePaths[0]
+	}
+	out := map[string]any{
+		"hook_event_name": name,
+		"session_id":      in.ConversationID,
+		"cwd":             cwd,
+		"transcript_path": in.TranscriptPath,
+		"source":          "agy",
+		"agy_event":       event,
+		"reason":          in.TerminationReason,
+	}
+	if failed {
+		out["failed"] = true
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func appendLine(dest string, body []byte) {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return
+	}
 	// 一次 Write 追加：Windows 上单次写入是原子的，多个 hook 并发不会互相切碎行。
 	f, err := os.OpenFile(dest, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		os.Exit(0)
+		return
 	}
 	defer f.Close()
 	// 前缀本地时间，方便和 TUI 屏幕上的时间对。

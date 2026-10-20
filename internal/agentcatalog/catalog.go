@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/yu7dan/perch/internal/agent"
+	"github.com/yu7dan/perch/internal/agy"
 	"github.com/yu7dan/perch/internal/dsh"
 	"github.com/yu7dan/perch/internal/winproc"
 )
@@ -189,6 +190,8 @@ func Defs(stateDir string) map[string]agent.Def {
 	// agy 只有「启动」是深度适配：网关地址/密钥必须按 magpie 的 launch
 	// 命令在每次开格时注入（见 internal/agent/def.go 的 AgyDef）。
 	defs["agy"] = agent.AgyDef()
+	// Cursor CLI 的续接参数（--resume <id> / --continue）在这一层。
+	defs["cursor"] = agent.CursorDef()
 	// dsh 的终端界面是 dsh-tui profile，不是裸 dsh；启动/续接/状态身份都
 	// 在这一层（见 internal/agent/def.go 的 DshDef）。
 	defs["dsh"] = agent.DshDef()
@@ -226,6 +229,18 @@ func Cards(home string) []Card {
 			caps.Status = false
 			caps.Waiting = false
 			setup = true
+		}
+		// agy 的标题实测只是可执行文件路径（没有忙闲词，也没有 agy token），
+		// 所以它的结构化状态只有 hooks。没接时如实留在「标题（弱）」；
+		// 接上之后 Status/hook 取代 Title。
+		if d.ID == "agy" && canLaunch {
+			if agy.HooksReady() {
+				caps.Status = true
+				caps.Title = false
+				caps.Mechanism = "hook"
+			} else {
+				setup = true
+			}
 		}
 		_, canInstall := Recipes[d.ID]
 		c := Card{

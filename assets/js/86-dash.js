@@ -594,30 +594,142 @@ let INSTALL_AT = "";
    看到完整清单；要收起是他们自己的动作（同一个会话里不会被重画弹回去）。 */
 let agentsFoldOpen = true;
 
+/* 当前 magpie 那份读数（给接入模型）。“读到了 agent 列表”与“网关在不在”
+   是两件事：前者决定能不能说「magpie 不支持它」，后者决定去不去设置。
+   GW_AGENTS 在 89-agent-cfg.js 里声明；本函数只在启动闸打开后被调用。 */
+function dashMagpieState() {
+  const m = mg();
+  return {
+    state: m ? (m.state || "unknown") : "unknown",
+    agentsKnown: Array.isArray(GW_AGENTS),
+  };
+}
+
+/* 一行的接入视图。所有判断都在 08-agent-model.js 的纯函数里 —— 这里只把
+   三份外部事实拼起来：名单（探测）、magpie 的接线行、落盘的接入记录。 */
+function dashAgentView(a) {
+  const gw = typeof gwInfoFor === "function" ? gwInfoFor(a.id) : null;
+  return agentIntegrationView(a, gw, AGENT_STATE[a.id] || null, dashMagpieState());
+}
+
+/* 主行动 → 一颗按钮。动作名来自模型，不在这里重新判断“该不该出现”。 */
+function dashAgentAction(a, v, busy) {
+  const name = a.name || "";
+  const id = esc(a.id);
+  if (busy) {
+    const inst = INSTALLS[a.id];
+    return `<span class="st">${esc(inst.phase === "scanning"
+      ? t("dash.agents.installScanning")
+      : inst.phase === "queued" ? t("dash.agents.installQueued")
+      : t("dash.agents.installBusy"))}</span>`;
+  }
+  switch (v.primary.action) {
+    case "install":
+      return a.install
+        ? `<button type="button" class="dl" data-install="${id}"` +
+          ` title="${esc(t("dash.agents.installTitle", { name }))}">${esc(t("dash.agents.install"))}</button>`
+        : a.url
+          ? `<button type="button" class="dl" data-docs="${id}"` +
+            ` title="${esc(t("dash.agents.docsTitle", { name }))}">${esc(t("dash.agents.docs"))}</button>`
+          : "";
+    case "docs":
+      return a.url
+        ? `<button type="button" class="dl" data-docs="${id}"` +
+          ` title="${esc(t("dash.agents.docsTitle", { name }))}">${esc(t("dash.agents.docs"))}</button>`
+        : "";
+    case "open": {
+      const live = typeof liveAgentTab === "function" && liveAgentTab(a.id);
+      const key = live ? "dash.agents.view" : "dash.agents.open";
+      const titleKey = live ? "dash.agents.viewTitle" : "dash.agents.openTitle";
+      return `<button type="button" class="dl" data-launch="${id}"` +
+        ` title="${esc(t(titleKey, { name }))}">${esc(t(key))}</button>`;
+    }
+    case "setup":
+      return `<button type="button" class="dl" data-setup="${id}"` +
+        ` title="${esc(t("dash.agents.setupTitle", { name }))}">${esc(t("dash.agents.setup"))}</button>`;
+    case "connect":
+      return `<button type="button" class="dl" data-gwconnect="${id}"` +
+        ` title="${esc(t("dash.agents.connectTitle", { name }))}">${esc(t("dash.agents.connect"))}</button>`;
+    case "settings":
+      return `<button type="button" class="dl" data-gwsettings="${id}"` +
+        ` title="${esc(t("dash.agents.gwSettingsTitle", { name }))}">${esc(t("dash.agents.gwSettings"))}</button>`;
+    case "usage":
+      return `<button type="button" class="dl" data-usage="${id}"` +
+        ` title="${esc(t("dash.agents.usageTitle", { name }))}">${esc(t("dash.agents.usage"))}</button>`;
+    case "drawer":
+      return `<button type="button" class="dl" data-usage="${id}"` +
+        ` title="${esc(t("dash.agents.configTitle", { name }))}">${esc(t("dash.agents.config"))}</button>`;
+    default:
+      return "";
+  }
+}
+
+/* 行上那句状态：分组名之外，还要说“下一步是什么”。用户不需要知道
+   “完整状态”这个抽象词；他需要看到「已安装 · 下一步：打开」。 */
+function dashAgentStatus(a, v, gid) {
+  if (gid === "missing") {
+    return a.windows === false ? t("dash.agents.macOnly") : t("dash.agents.notDetected");
+  }
+  if (v.group === "complete" || v.group === "native") {
+    return t("dash.agents.group." + v.group);
+  }
+  if (v.group === "launch") return t("dash.agents.group.launch");
+  if (v.group === "nolaunch") return t("dash.agents.group.nolaunch");
+  const step = v.primary.step || v.nextStep;
+  const key = {
+    detect: "dash.agents.next.install",
+    install: "dash.agents.next.install",
+    launch: "dash.agents.next.open",
+    auth: "dash.agents.next.auth",
+    status: v.primary.action === "setup" ? "dash.agents.next.setup" : "dash.agents.next.status",
+    resume: "dash.agents.next.resume",
+    gateway: v.primary.action === "settings" ? "dash.agents.next.magpie" : "dash.agents.next.gateway",
+  }[step];
+  return key ? t(key) : t("dash.agents.levelNone");
+}
+
+/* 五条腿的小标记（L 启动 / S 状态 / R 续接 / G 网关 / A 登录）。它们是
+   同一份步骤状态的另一种排布，不是第二套判断。 */
+function dashAgentLegs(v) {
+  const letter = { launch: "L", status: "S", resume: "R", gateway: "G", auth: "A" };
+  return `<span class="ag-legs" aria-hidden="true">` +
+    v.legs.map((l) =>
+      `<i class="ag-leg ${esc(l.state)}" title="${esc(t("agent.leg.title", {
+        step: t("agent.step." + l.key), state: t("agent.step.state." + l.state),
+      }))}">` + `${letter[l.key] || "?"}</i>`).join("") +
+    `</span>`;
+}
+
 function renderDashAgents() {
   const host = $("dash-agent-list");
   if (!host) return;
   const m = mg();
   const list = m && (m.catalog || []).length ? m.catalog : [];
   const sub = $("dash-agent-sub");
-  // caps 是权威；老 magpie 还没有这个字段时退回 adapter（只认结构化状态）。
-  const capsOf = (a) => a.caps || {
-    launch: !!a.adapter, status: !!a.adapter, waiting: !!a.adapter,
-  };
-  const installed = list.filter((a) => a.installed);
-  const full = installed.filter((a) => capsOf(a).waiting);
-  const basic = installed.filter((a) => capsOf(a).status && !capsOf(a).waiting);
-  const launchOnly = installed.filter((a) => capsOf(a).launch && !capsOf(a).status);
-  const noLaunch = installed.filter((a) => !capsOf(a).launch);
-  const missing = list.filter((a) => !a.installed);
+
+  // 每个 agent 只落一个组（08-agent-model 里保证互斥）。这里不再用三个
+  // 独立的布尔过滤 —— 旧写法会让同一个 agent 同时出现在「完整」和「仅启动」。
+  const groups = Object.create(null);
+  for (const g of AGENT_GROUPS) groups[g] = [];
+  const views = new Map();
+  for (const a of list) {
+    const v = dashAgentView(a);
+    views.set(a.id, v);
+    groups[v.group].push(a);
+  }
+  const total = AGENT_GROUPS.reduce((n, g) => n + groups[g].length, 0);
+  if (list.length && total !== list.length) {
+    // 真出现的话，屏上会少行；这条日志是唯一抓得住它的证人。
+    bootFact(`Agent 名单分组不变量被破坏：${list.length} 个 agent 只落进 ${total} 个组`);
+  }
+
   const routed = list.filter((a) => (a.calls | 0) > 0);
   if (sub) {
     const bits = [];
-    if (full.length) bits.push(t("dash.agents.sumFull", { n: full.length }));
-    if (basic.length) bits.push(t("dash.agents.sumBasic", { n: basic.length }));
-    if (launchOnly.length) bits.push(t("dash.agents.sumLaunch", { n: launchOnly.length }));
-    if (noLaunch.length) bits.push(t("dash.agents.sumNone", { n: noLaunch.length }));
-    bits.push(t("dash.agents.sumMissing", { n: missing.length }));
+    for (const g of ["complete", "native", "action", "launch", "nolaunch", "missing"]) {
+      if (!groups[g].length) continue;
+      bits.push(t("dash.agents.sum." + g, { n: groups[g].length }));
+    }
     sub.textContent = list.length
       ? bits.join(" · ") + (routed.length ? t("dash.agents.sumRouted", { n: routed.length }) : "")
       : t("dash.agents.scanning");
@@ -628,86 +740,34 @@ function renderDashAgents() {
   }
 
   const row = (a, gid) => {
-    const c = capsOf(a);
-    const level = c.waiting ? t("dash.agents.levelFull")
-      : c.status ? t("dash.agents.levelBasic")
-      : c.launch ? t("dash.agents.levelLaunch")
-      : t("dash.agents.levelNone");
-    // 没探测到 ≠ 没装：GUI 进程的 PATH 常常比终端里短，有的 agent 也把配置
-    // 放在别处。所以写「未检测到」，不写「未安装」——前者说的是我们的证据。
-    const st = gid === "missing"
-      ? (a.windows === false ? t("dash.agents.macOnly") : t("dash.agents.notDetected"))
-      : level;
-    const stClass = c.status ? " ok" : (gid === "missing" || !c.launch) ? " off" : "";
+    const v = views.get(a.id);
+    const cfg = gid !== "missing";
+    const st = dashAgentStatus(a, v, gid);
+    const stateCls = v.complete ? " ok"
+      : v.group === "missing" || v.group === "nolaunch" || v.group === "launch" ? " off" : "";
     // 这份名单只列 CLI agent：每行副标题都带 CLI，和网关层的桌面客户端分开。
     const detail = gid === "missing"
       ? t("dash.agents.detailCli", { vendor: a.vendor || "" })
       : t("dash.agents.detailPath", { path: a.path || a.vendor || "" });
     const calls = (a.calls | 0) > 0 ? t("dash.agents.calls", { n: dashNum(a.calls) }) : "";
     const inst = INSTALLS[a.id];
-    const busy = inst && inst.state === "running";
-    // 没有安装配方 ≠ 桌面应用：这份名单是**使用层**，只认 CLI 能不能装。
-    // 没配方就给官方安装说明的出口；桌面客户端属于网关层，由 magpie 管，
-    // 不在这份名单里（见 magpie.go 的 agentCatalogDefs 注释）。
-    const busySpan = busy
-      ? `<span class="st">${esc(inst.phase === "scanning"
-          ? t("dash.agents.installScanning")
-          : inst.phase === "queued" ? t("dash.agents.installQueued")
-          : t("dash.agents.installBusy"))}</span>`
-      : "";
-    const installBtn = a.install
-      ? (busy
-          ? busySpan
-          : `<button type="button" class="dl" data-install="${esc(a.id)}"` +
-            ` title="${esc(t("dash.agents.installTitle", { name: a.name || "" }))}">${esc(t("dash.agents.install"))}</button>`)
-      : a.url
-        ? `<button type="button" class="dl" data-docs="${esc(a.id)}"` +
-          ` title="${esc(t("dash.agents.docsTitle", { name: a.name || "" }))}">${esc(t("dash.agents.docs"))}</button>`
-        : "";
-    /* “只启动”那一类如果 Perch 知道怎么补状态（目前是 dsh），就在这里给一个
-       明确的入口。它和「打开」并排：点打开仍然只是开格，点接入状态才动用户
-       的 DSH 配置 —— 两个动作不混。 */
-    const setupBtn = (gid !== "missing" && a.setup && !busy)
-      ? `<button type="button" class="dl" data-setup="${esc(a.id)}"` +
-        ` title="${esc(t("dash.agents.setupTitle", { name: a.name || "" }))}">${esc(t("dash.agents.setup"))}</button>`
-      : "";
-    const openBtn = c.launch
-      ? `<button type="button" class="dl" data-launch="${esc(a.id)}"` +
-        ` title="${esc(t("dash.agents.openTitle", { name: a.name || "" }))}">${esc(t("dash.agents.open"))}</button>`
-      : "";
-    const action = gid === "missing"
-      ? installBtn
-      : c.launch
-        ? (busy && a.setup ? busySpan : setupBtn + openBtn)
-        // 已安装但还起不来：给安装配方一个出口（dsh 就是缺 dsh-tui profile）。
-        : installBtn;
-    const stTitle = gid === "missing"
-      ? t("dash.agents.stTitleMissing")
-      : c.waiting
-        ? t("dash.agents.stTitleFull")
-        : c.status
-          ? t("dash.agents.stTitleBasic")
-          : c.launch
-            ? t("dash.agents.stTitleLaunch")
-            : t("dash.agents.stTitleNone");
-    // 已检测到的行可以点开右侧配置抽屉（89-agent-cfg.js）。网关那个点只有
-    // 读到 magpie 的 agent 列表之后才画 —— 没读到时不假装"未接入"。
-    const cfg = gid !== "missing";
-    const ga = cfg && typeof gwAgentOf === "function" ? gwAgentOf(a.id) : null;
+    const busy = !!(inst && inst.state === "running");
+    const ga = typeof gwInfoFor === "function" ? gwInfoFor(a.id) : null;
     const gdot = ga
       ? `<span class="gwdot${ga.wired ? " on" : ""}" title="${esc(ga.wired
           ? t("dash.agents.wired") : t("dash.agents.notWired"))}"></span>`
       : "";
+    // 状态那句的 title 说“为什么”：模型给的 noteKey 是稳定的，文案在这边翻。
+    const why = v.reason ? t(v.reason, { name: a.name || "" }) : "";
     return `<div class="ag${cfg ? " cfg" : ""}"` +
       (cfg ? ` data-agentcfg="${esc(a.id)}" role="button" tabindex="0"` +
         ` aria-label="${esc(t("dash.agents.configAria", { name: a.name || "" }))}"` : "") + `>` +
       iconHTML(a.icon) +
       `<span class="who"><span class="nm">${esc(a.name)}${gdot}</span>` +
       `<span class="sub" title="${esc(detail + calls)}">${esc(detail + calls)}</span></span>` +
-      `<span class="st${stClass}"` +
-      (stTitle ? ` title="${esc(stTitle)}"` : "") +
-      `>${st}</span>` +
-      action +
+      dashAgentLegs(v) +
+      `<span class="st${stateCls}"${why ? ` title="${esc(why)}"` : ""}>${esc(st)}</span>` +
+      dashAgentAction(a, v, busy) +
       (cfg ? `<span class="ag-cfg-chev" aria-hidden="true">›</span>` : "") +
       `</div>`;
   };
@@ -716,23 +776,23 @@ function renderDashAgents() {
     `<div class="roster">${items.map((a) => row(a, gid)).join("")}</div>`;
 
   let html = "";
-  if (full.length) html += group(t("dash.agents.levelFull"), full, "full");
-  if (basic.length) html += group(t("dash.agents.levelBasic"), basic, "basic");
-  if (launchOnly.length) html += group(t("dash.agents.levelLaunch"), launchOnly, "launch");
-  if (noLaunch.length) html += group(t("dash.agents.levelNone"), noLaunch, "nolaunch");
-  if (!installed.length) {
+  for (const gid of ["complete", "native", "action", "launch", "nolaunch"]) {
+    if (!groups[gid].length) continue;
+    html += group(t("dash.agents.group." + gid), groups[gid], gid);
+  }
+  if (!list.some((a) => a.installed)) {
     html += `<div class="gw-empty">${esc(t("dash.agents.emptyAll"))}</div>`;
   }
-  if (missing.length) {
+  if (groups.missing.length) {
     html +=
       `<button type="button" class="agent-more${agentsFoldOpen ? " open" : ""}"` +
       ` id="dash-agent-more" data-agents-fold>` +
       `<span id="dash-agent-more-label">${esc(agentsFoldOpen
         ? t("dash.agents.foldHide")
-        : t("dash.agents.foldShow", { n: missing.length }))}</span>` +
+        : t("dash.agents.foldShow", { n: groups.missing.length }))}</span>` +
       `<span class="chev" aria-hidden="true">▾</span></button>` +
       `<div class="agent-fold${agentsFoldOpen ? " open" : ""}" id="dash-agent-fold"><div>` +
-      group(t("dash.agents.notDetected"), missing, "missing") +
+      group(t("dash.agents.group.missing"), groups.missing, "missing") +
       `</div></div>`;
   }
   host.innerHTML = html;

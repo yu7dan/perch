@@ -59,6 +59,7 @@ func (r *Running) StopObserve() {
 func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 	def, ok := m.defFor(tab.Spec.Agent)
 	if !ok {
+		m.recordLaunch(tab, false, StageUnknownAgent)
 		return nil, &StartError{Stage: StageUnknownAgent, Agent: tab.Spec.Agent}
 	}
 	tag := fmt.Sprintf("t%d", tab.ID)
@@ -75,6 +76,7 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 		var perr error
 		prepEnv, prepArgs, observe, perr = def.Prepare(tag, tab.ID, cwd)
 		if perr != nil {
+			m.recordLaunch(tab, false, StagePrepare)
 			return nil, &StartError{Stage: StagePrepare, Agent: tab.Spec.Agent, Err: perr}
 		}
 	}
@@ -110,10 +112,15 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 			ocancel()
 			go observe(octx)
 		}
+		m.recordLaunch(tab, false, StagePTY)
 		return nil, &StartError{Stage: StagePTY, Agent: tab.Spec.Agent, Err: err}
 	}
 	// pid 是「格子 ↔ 会话」那条链子的起点（登记表按 pid 命名）。
 	m.SetPID(tab.ID, sess.Pid())
+	// 启动成功本身就是一条接入证据：这个 agent 在这台机器上真的能开起来。
+	m.recordLaunch(tab, true, "")
+	// 有只读命令能问“登录了吗”的 agent，异步问一次（不阻塞启动）。
+	m.probeReadiness(tab)
 
 	// 状态观察者跟着这条 PTY 的生命周期走：流一断/进程一关，ctx 就取消。
 	// observe 自己负责“server 还没起来就等”，不阻塞这里的启动。
@@ -128,4 +135,12 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 	log.Printf("[perch] tab=%d 已启动 pid=%d exe=%s 参数%d个(settings=%d字节) cwd=%s resume=%s",
 		tab.ID, sess.Pid(), exe, len(args), len(settings), cwd, tab.Spec.Resume.Kind)
 	return r, nil
+}
+
+// recordLaunch 记一次启动结果。错误码只用 Stage* 稳定码 —— 错误正文可能有
+// 本机路径，不进接入记录。
+func (m *Manager) recordLaunch(tab *Tab, ok bool, code string) {
+	if m.agentState != nil {
+		m.agentState.RecordLaunch(tab.Spec.Agent, tab.PaneID, ok, code)
+	}
 }

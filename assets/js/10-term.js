@@ -320,6 +320,12 @@ async function createTab(spec, opts) {
     // 任何活证据到了就确认，见 80-live.js 的 confirmRestored / needModel。
     restoredUnconfirmed: !!(spec && spec.restored),
     waitUnconfirmed: false,
+    // 首屏就绪分类只上报一次（ready / needs-login / needs-key）。
+    // 它是“打开之后走到哪一步”的证据，不是能力声明。
+    readinessSent: false,
+    readinessLast: "",
+    // 标题状态只上报一次（“标题这条腿有证据了”）；之后的忙闲仍照常走标题。
+    titleStatusSent: false,
     // —— WebGL：装在一个**容器**里而不是两个散变量。上下文丢失时 addon 会被
     //    置回 null，那份改动必须被外面（状态栏那格读数）看见。
     gfx: { addon: null, on: false },
@@ -664,6 +670,9 @@ installImeAnchor(T);
     return T;
   }
   T.streamName = streamName;
+  // 首屏就绪分类（打开 → 登录 → 就绪 这条链的第 3 步）。异步、只上报一次；
+  // 认不出来就继续等下一次探测，不猜 ready。
+  scheduleReadinessProbe(T);
 
   /* ---- 步 6：把"这一格为什么不是上次那条会话"说出来 ----
      ⚠️ 落点必须在 ③（撤格那条）**之后**：被拒且非冷恢复的格子会就地收掉，
@@ -759,7 +768,13 @@ if (term.textarea) {
   term.textarea.addEventListener("paste", () => freshCellStarted(T, "粘贴"));
   term.textarea.addEventListener("compositionend", () => freshCellStarted(T, "输入法提交"));
 }
-term.onData((d) => { if (ready) stream.send(enc.encode(d)); });
+term.onData((d) => {
+  // 用户在终端里动手了：标题带来的“在等你”当场作废（他正在回答）。
+  if (ready) {
+    if (typeof clearTitleWaiting === "function") clearTitleWaiting(T);
+    stream.send(enc.encode(d));
+  }
+});
 
 // 每次 xterm 改变列宽都会**折行重排**已有内容，而 xterm 会在这一步把上一帧的
 // 残留顶进回滚缓冲 —— 用户看到的"滚动时好几个吉祥物"就是这么来的。
@@ -791,7 +806,8 @@ term.onWriteParsed(() => {
   const hadTitle = titleInThisChunk;
   titleInThisChunk = false;
   if (hadTitle) return;
-  if (!T.agentTitleRaw || detectAgentStatusFromTitle(T.agentTitleRaw) !== "working") return;
+  if (!T.agentTitleRaw ||
+      detectAgentTitleStatus(T.spec.agent, T.agentTitleRaw) !== "working") return;
   clearTimeout(staleTimer);
   staleTimer = setTimeout(() => {
     staleTimer = 0;
@@ -1666,6 +1682,140 @@ function detectAgentStatusFromTitle(title) {
   return null;   // 既没 idle 符也没转圈符 → 判断不了，别硬塞一个状态
 }
 
+/* ---------------------------------------------------------------------------
+   首屏就绪分类（打开 → 登录 → 就绪 这条链的第 3 步）
+   ---------------------------------------------------------------------------
+   只认两种**高置信**信号：
+     · 登录/密钥页的固定短语（Not logged in / Sign in with / API key…）；
+     · agent 自己的输入提示符（Claude 的 ❯、Codex 的 ›…）。
+   认不出来就返回空串，等下一次探测 —— **不猜 ready**：把登录页写成“已就绪”
+   比不写更糟，用户会以为自己已经能用了。
+
+   Cursor 不走这条：`cursor-agent whoami` 是它自己的只读答案，Go 侧探测
+   （internal/session/readiness.go）。标题状态是运行期忙闲，不是这里的就绪。
+   --------------------------------------------------------------------------- */
+const READINESS_LOGIN_RE =
+  /(not logged in|not signed in|signed out|login required|sign in to|log in to|press any key to log in|select login method|sign in with|log in with|authentication required)/i;
+const READINESS_KEY_RE =
+  /(api key is required|enter (your )?api key|paste (your )?api key|missing api key|invalid api key)/i;
+// agy 首次打开会先进 onboarding（选配色），屏幕上也有 `> terminal` 这种行首
+// `>`—— 光看提示符会把“还没登录”读成 ready（实测踩到）。所以 agy 不参与
+// 通用提示符判断，只认 onboarding/登录短语；ready 由 hooks 事件给出。
+const READINESS_AGY_ONBOARD_RE = /(welcome to antigravity cli|choose your color scheme)/i;
+const READINESS_PROMPT_RE = {
+  claude: /(^|\n)\s*❯/,
+  dsh: /(^|\n)\s*❯/,
+  codex: /(^|\n)\s*›/,
+  pi: /(^|\n)\s*[›>]\s/,
+  opencode: /(^|\n)\s*[›>]\s/,
+};
+
+function screenTail(T, n) {
+  const b = T && T.term && T.term.buffer && T.term.buffer.active;
+  if (!b) return "";
+  const out = [];
+  const start = Math.max(0, b.length - (n || 60));
+  for (let i = start; i < b.length; i++) {
+    const line = b.getLine(i);
+    if (line) out.push(line.translateToString(true));
+  }
+  return out.join("\n");
+}
+
+function classifyReadiness(agent, text) {
+  const s = String(text || "");
+  if (s.trim().length < 12) return "";
+  if (agent === "agy" && READINESS_AGY_ONBOARD_RE.test(s)) return "needs-setup";
+  // 密钥页比登录页更具体，先判。
+  if (READINESS_KEY_RE.test(s)) return "needs-key";
+  if (READINESS_LOGIN_RE.test(s)) return "needs-login";
+  const re = READINESS_PROMPT_RE[agent];
+  return re && re.test(s) ? "ready" : "";
+}
+
+function scheduleReadinessProbe(T) {
+  if (!T || !T.term || T.readinessSent) return;
+  // 登录可能发生在打开后的任何时刻（用户去浏览器 OAuth），所以这不是
+  // “三次快照”，而是一段**有界观察**：每 15 秒看一次，最多 3 分钟；
+  // 认成 ready 就停。needs-login/needs-key 只上报变化，不重复刷。
+  let tries = 0;
+  const probe = () => {
+    if (!TAB_LIST.includes(T) || T.readinessSent) return;
+    const readiness = classifyReadiness(T.spec.agent, screenTail(T, 60));
+    if (readiness && T.paneID && readiness !== T.readinessLast) {
+      T.readinessLast = readiness;
+      if (ctlReady) {
+        try {
+          ctl.send({
+            type: "agent.readiness", pane: T.paneID, agent: T.spec.agent,
+            readiness, source: "screen",
+          });
+        } catch (e) { jserr("agent.readiness", e); }
+      }
+      bootFact(`首屏就绪：tab=${T.id} pane=${T.paneID} agent=${T.spec.agent} ` +
+        `→ ${readiness}（来源=screen）`);
+    }
+    if (readiness === "ready") { T.readinessSent = true; return; }
+    if (++tries < 12) setTimeout(probe, 15000);
+  };
+  // 首屏刚画完先看一次，再进入 15 秒的观察节奏。
+  setTimeout(probe, 2500);
+}
+
+/* agent 专属的标题规则（Orca agent-title-status.ts / agent-title-core.ts）。
+   ⚠️ 标题是**弱信号**：只在规则明确命中时给状态，命中不了返回 null 让调用方
+   保留上一次状态 —— 绝不能拿“没认出来”冒充 idle。
+
+   Cursor 是封闭词表（Orca 的 isCursorAgentTitle）：`cursor agent` 只是身份，
+   不产生状态；任务标题里提到 cursor 不算。agy 先认 `agy` 名字 token，再按
+   Orca 的关键词阶梯（action required/permission/waiting → 等待；
+   ready/idle/done → 空闲；working/thinking/running/转圈 → 工作中）。 */
+const AGY_NAME_RE = /(?<![\w./\\-])agy(?![\w./\\-])/i;
+// 当前**没有** agent 把标题当作能力表里的状态源（实测见 agent/status.go）。
+// 规则留着是为了将来真有 agent 写这些标题；但不上报“状态已接入”，
+// 免得把一条从不出现的标题信号写成完成。
+const TITLE_STATUS_AGENTS = {};
+
+function detectAgentTitleStatus(agent, title) {
+  const raw = String(title || "").trim();
+  if (!raw) return null;
+  if (agent === "cursor") {
+    const lower = raw.toLowerCase();
+    if (lower === "cursor - action required") return "waiting";
+    if (lower === "cursor ready") return "idle";
+    if (lower === "cursor agent") return null;                  // 身份，不是状态
+    if (/^[⠀-⣿] Cursor Agent$/.test(raw)) return "working";
+    return null;
+  }
+  if (agent === "agy") {
+    // 身份门照 Orca：标题里没有 `agy` 名字 token 就不按 agy 的关键词判
+    // （否则任务摘要里的 “ready” 会被读成空闲）。
+    if (!AGY_NAME_RE.test(raw)) return null;
+    if (/(action required|permission|waiting)/i.test(raw)) return "waiting";
+    if (/(?<![\w./\\-])(ready|idle|done)(?![\w-])/i.test(raw)) return "idle";
+    if (containsAgentSpinnerGlyph(raw)) return "working";
+    if (/(?<![\w./\\-])(working|thinking|running)(?![\w-])/i.test(raw)) return "working";
+    if (raw.startsWith(". ")) return "working";
+    if (raw.startsWith("* ")) return "idle";
+    return "idle";                                              // Orca 的 name-only 兜底
+  }
+  return detectAgentStatusFromTitle(raw);
+}
+
+// 标题这条腿“有证据了”只记一次；之后忙闲照旧由标题驱动。
+function noteTitleStatus(t) {
+  if (!t || t.titleStatusSent || !t.paneID) return;
+  t.titleStatusSent = true;
+  if (ctlReady) {
+    try {
+      ctl.send({
+        type: "agent.status", pane: t.paneID, agent: t.spec.agent, mechanism: "title",
+      });
+    } catch (e) { jserr("agent.status", e); }
+  }
+  bootFact(`标题状态：tab=${t.id} pane=${t.paneID} agent=${t.spec.agent}（来源=title，弱信号）`);
+}
+
 // Orca terminal-output-side-effects.ts:29
 const STALE_WORKING_TITLE_TIMEOUT_MS = 3000;
 
@@ -1727,17 +1877,26 @@ function renderAgentDot(t) {
 function applyAgentTitleStatus(t, rawTitle) {
   if (!t) return;
   clearTimeout(t.staleTimer); t.staleTimer = 0;
-  const next = detectAgentStatusFromTitle(rawTitle);
+  const next = detectAgentTitleStatus(t.spec.agent, rawTitle);
   // null 不清状态：Orca 的 tracker 只在判出非 null 时写 lastStatus
   // （agent-title-status.ts:107-109），否则一个只有 "Claude Code" 的标题
   // 会把 working 抹掉。
   if (next !== null) {
-    t.agentState = next;
-    /* dsh 没有登记表，hook 的 busy 是纯事件推来的；一轮以错误收尾时官方桥
-       不会发 Stop（实测 0.2.1-rc.2：turn error 没有 Stop）。标题回到 ✦ 🐋
-       是这一刻最硬的“已经停了”证据。不把 hook 的 busy 一起销掉的话，
-       cellState 里 `v.st === "busy"` 会继续赢，格子永远转圈。 */
-    if (next === "idle") clearDshHookBusy(t);
+    if (next === "waiting") {
+      // 标题只能说明“它在等人”，看不到问的是什么：进同一条等待管线，
+      // 但标成弱信号、不给回答按钮（见 80-live 的 applyTitleWaiting）。
+      t.agentState = "idle";
+      if (typeof applyTitleWaiting === "function") applyTitleWaiting(t);
+    } else {
+      t.agentState = next;
+      if (typeof clearTitleWaiting === "function") clearTitleWaiting(t);
+      /* dsh 没有登记表，hook 的 busy 是纯事件推来的；一轮以错误收尾时官方桥
+         不会发 Stop（实测 0.2.1-rc.2：turn error 没有 Stop）。标题回到 ✦ 🐋
+         是这一刻最硬的“已经停了”证据。不把 hook 的 busy 一起销掉的话，
+         cellState 里 `v.st === "busy"` 会继续赢，格子永远转圈。 */
+      if (next === "idle") clearDshHookBusy(t);
+    }
+    if (TITLE_STATUS_AGENTS[t.spec.agent]) noteTitleStatus(t);
   }
   renderAgentDot(t);
 }

@@ -148,6 +148,11 @@
                   border-radius:6px;padding:4px 10px;background:var(--card);cursor:pointer}
 #agentcfg .ac-btn:hover:not(:disabled){border-color:var(--fg2);color:var(--fg)}
 #agentcfg .ac-btn:disabled{opacity:.45;cursor:default}
+/* 不可用的动作做灰、不做 disabled：disabled 的按钮不弹 title，用户就问不到
+   “为什么不能接”。aria-disabled 保住焦点环和 tooltip，点击仍有解释。 */
+#agentcfg .ac-btn[aria-disabled="true"]{color:var(--faint);border-color:var(--line-soft);
+  background:transparent;cursor:not-allowed}
+#agentcfg .ac-btn[aria-disabled="true"]:hover{border-color:var(--line-soft);color:var(--faint)}
 #agentcfg .ac-btn.primary{background:var(--accent);border-color:transparent;color:#fff}
 #agentcfg .ac-btn.primary:hover:not(:disabled){filter:brightness(1.14)}
 #agentcfg .ac-btn.danger{color:var(--red);border-color:rgba(255,101,104,.35)}
@@ -179,6 +184,25 @@
 #agentcfg .ac-sec-title{font-size:11px;font-weight:600;color:var(--muted);
                         letter-spacing:.05em;text-transform:uppercase}
 #agentcfg .ac-sec-sub{font-size:10px;color:var(--faint)}
+/* 七步时间线：状态点 + 步骤名 + 状态 + 机制/证据。它是抽屉的第一块 ——
+   “打开之后走到哪一步”必须先于 magpie 的字段回答。 */
+#agentcfg .ac-steps{display:flex;flex-direction:column;margin:2px 0}
+#agentcfg .ac-step{display:grid;grid-template-columns:7px 78px 58px minmax(0,1fr);
+  align-items:center;gap:7px;padding:3px 0;font-size:11px;min-width:0}
+#agentcfg .ac-step-dot{width:6px;height:6px;border-radius:50%;background:var(--faint)}
+#agentcfg .ac-step-dot.done{background:var(--green)}
+#agentcfg .ac-step-dot.doing{background:var(--accent)}
+#agentcfg .ac-step-dot.failed{background:var(--red)}
+#agentcfg .ac-step-dot.unsupported{background:#d8b46a}
+#agentcfg .ac-step-dot.not_applicable{background:transparent;border:1px solid var(--line)}
+#agentcfg .ac-step-k{color:var(--fg2);white-space:nowrap}
+#agentcfg .ac-step-v{color:var(--muted);white-space:nowrap}
+#agentcfg .ac-step.done .ac-step-v{color:var(--green)}
+#agentcfg .ac-step.failed .ac-step-v{color:var(--red)}
+#agentcfg .ac-step.unsupported .ac-step-v{color:#d8b46a}
+#agentcfg .ac-step-note{color:var(--faint);font-size:10px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+#agentcfg .ac-next{font-size:10.5px;color:var(--muted);padding:4px 0 2px}
 #agentcfg .ac-fields{display:flex;flex-direction:column;gap:1px}
 #agentcfg .ac-field{display:flex;align-items:center;gap:10px;padding:4px 0}
 #agentcfg .ac-k{flex:none;width:106px;font-size:11px;color:var(--fg2);

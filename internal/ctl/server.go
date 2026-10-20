@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/yu7dan/perch/internal/agentcatalog"
+	"github.com/yu7dan/perch/internal/agentstate"
 	"github.com/yu7dan/perch/internal/gateway"
 	"github.com/yu7dan/perch/internal/install"
 	"github.com/yu7dan/perch/internal/panes"
@@ -67,6 +68,7 @@ type Deps struct {
 	Gateway    *gateway.Gateway
 	Installer  *install.Installer
 	Transcript *transcript.Follower
+	AgentState *agentstate.Store
 
 	DefaultCWD    func() string
 	SessionExists func(agentName, cwd, id string) bool
@@ -140,6 +142,10 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		s.paneClose(m)
 	case "pane.forget":
 		s.paneForget(m)
+	case "agent.readiness":
+		s.agentReadiness(m)
+	case "agent.status":
+		s.agentStatus(m)
 	case "title.set":
 		s.titleSet(m)
 	case "lib.reload":

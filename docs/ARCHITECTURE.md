@@ -16,6 +16,8 @@ perch/
 ├── internal/
 │   ├── agent/                agent 适配器运行时（Def / Host / Codex / Pi / OpenCode）
 │   ├── agentcatalog/         身份、元数据、安装配方、LaunchIDs、Defs()、Cards()
+│   ├── agentstate/           每个 agent 的七步接入记录（%APPDATA%\Perch\agent-state.json）
+│   ├── agy/                  Antigravity CLI 的全局 hooks.json 接入（perch-status）
 │   ├── appdir/               Perch 配置目录、Claude 状态根、Documents\Perch
 │   ├── ctl/                  ctl 协议、按域拆分的 handlers、ShellPayload、关窗守卫
 │   ├── dsh/                  DeepSeek Harness 的 dsh-tui profile / 官方 hook 桥接入

@@ -70,6 +70,32 @@ function gwAgentOf(id) {
   return GW_AGENTS.find((a) => a.id === id) || null;
 }
 
+/* 已知的 magpie 上游边界：普通 Cursor CLI 不能被路由。
+   实测 400 `Cursor CLI can't be connected to magpie`；magpie 的 cursor agent
+   只有 model=auto 一个字段，connect() 找不到可写的 provider 选项。这是上游
+   事实，不是猜的 —— 但仍然只标**这一件事**：其他 agent 不预设不可接，
+   没读到 connectable 就是“未知”，不是“可以”。
+   Phase 2 会由 Go 的 preflight 提供同一份判断；届时删掉这张静态表。 */
+const GW_NOT_CONNECTABLE = {
+  cursor: "agent.note.cursorCliNotConnectable",
+};
+
+/* 一行的网关信息 = magpie 的原始行 + 已知的“不可 connect”标注。
+   模型只读这个形状；它不直接读 GW_AGENTS。 */
+function gwInfoFor(id) {
+  const a = gwAgentOf(id);
+  if (!a) return null;
+  // 上游（magpie / Perch 的 Go preflight）给了就听它的 —— 将来 magpie 支持
+  // Cursor 之后，这里不需要改一行前端。
+  if (typeof a.connectable === "boolean") {
+    return a.connectable ? a
+      : Object.assign({}, a, { reasonKey: GW_NOT_CONNECTABLE[id] || "agent.note.gatewayNotConnectable" });
+  }
+  const reasonKey = GW_NOT_CONNECTABLE[id];
+  if (!reasonKey) return a;
+  return Object.assign({}, a, { connectable: false, reasonKey });
+}
+
 /* 进总览时预取一次接线状态，让名单上的网关绿点在"打开抽屉之前"就是准的。
    后端（gwAgentPrefetch）只在用户以前用过网关时才碰控制面，所以这里不用再
    判断 GW.connected。最多试 3 次（进入总览会重画）：控制面没起来时不让它
@@ -200,12 +226,50 @@ function renderAgentDrawer() {
   box.setAttribute("aria-hidden", "false");
 }
 
+/* 七步时间线：不管 magpie 有没有这个 agent，都要能回答“我走到哪、下一步是什么”。
+   旧抽屉在没有 magpie 行时直接显示空状态 —— 那正是用户说的“打开之后不知道为什么
+   没被录入完整”。 */
+function acIntegrationHTML(cat, v) {
+  if (!cat || !v) return "";
+  const rows = v.steps.map((s) => {
+    const mech = s.mechanism ? t("agent.mech." + s.mechanism) : "";
+    const note = s.noteKey ? t(s.noteKey, { name: cat.name || "" }) : "";
+    const detail = [mech, note].filter(Boolean).join(" · ");
+    return `<div class="ac-step ${esc(s.state)}" data-step="${esc(s.key)}">` +
+      `<span class="ac-step-dot ${esc(s.state)}" aria-hidden="true"></span>` +
+      `<span class="ac-step-k">${esc(t("agent.step." + s.key))}</span>` +
+      `<span class="ac-step-v">${esc(t("agent.step.state." + s.state))}</span>` +
+      (detail ? `<span class="ac-step-note" title="${esc(detail)}">${esc(detail)}</span>` : "") +
+      `</div>`;
+  }).join("");
+  const complete = v.complete
+    ? t(v.completeKind === "gateway" ? "agent.complete.gateway" : "agent.complete.native")
+    : t("agent.complete.pending");
+  const next = v.primary.step && v.primary.action !== "none" &&
+      v.group !== "launch" && v.group !== "nolaunch" && v.group !== "missing"
+    ? `<div class="ac-next">${esc(t("ac.integration.next", {
+        step: t("agent.step." + v.primary.step),
+        action: t("agent.action." + v.primary.action),
+      }))}</div>`
+    : "";
+  return `<div class="ac-sec"><span class="ac-sec-title">${esc(t("ac.integration.title"))}</span>` +
+    `<span class="ac-sec-sub">${esc(complete)}</span></div>` +
+    `<div class="ac-steps">${rows}</div>` + next;
+}
+
 function acBodyHTML(a, name) {
+  const cat = ((mg() && mg().catalog) || []).find((x) => x.id === (a ? a.id : AC_ID)) || null;
+  const v = cat
+    ? agentIntegrationView(cat, gwInfoFor(cat.id), AGENT_STATE[cat.id] || null, dashMagpieState())
+    : null;
+  const integration = acIntegrationHTML(cat, v);
+
   if (!a && !GW_AGENTS && !GW_AGENTS_ERR) {
-    return `<div class="ac-loading"><span class="spin"></span>${esc(t("ac.loading"))}</div>`;
+    return (integration ? integration : "") +
+      `<div class="ac-loading"><span class="spin"></span>${esc(t("ac.loading"))}</div>`;
   }
   if (!a) {
-    return `<div class="ac-empty">` +
+    return integration + `<div class="ac-empty">` +
       `${esc(t("ac.empty", { name }))}<br>` +
       `<span>${esc(msgText(GW_AGENTS_ERR) || t("ac.empty.count", { n: (GW_AGENTS || []).length }))}</span>` +
       `</div>` + acReloadHTML();
@@ -221,7 +285,7 @@ function acBodyHTML(a, name) {
     : AC_BUSY === "keep" ? t("ac.busy.keep")
     : AC_BUSY.startsWith("set:") ? t("ac.busy.set") : "";
 
-  let html = `<div class="ac-status">` +
+  let html = integration + `<div class="ac-status">` +
     `<span class="dot${a.wired ? " on" : ""}"></span>` +
     `<b>${esc(a.wired ? t("ac.status.wired") : t("ac.status.unwired"))}</b>` +
     (a.failover ? `<span class="ac-chip">${esc(t("ac.chip.failover"))}</span>` : "") +
@@ -241,10 +305,13 @@ function acBodyHTML(a, name) {
 
   // 能力边界要说出来，而不是只在「仅启动」两个字上停住：Perch 能开一格，
   // 但没有状态适配器；agy 这种接了网关的，还要靠启动时注入环境变量。
-  const cat = ((mg() && mg().catalog) || []).find((x) => x.id === a.id) || null;
   const caps = (cat && cat.caps) || {};
-  if (caps.launch && !caps.status) {
+  if (caps.launch && !caps.status && !caps.title) {
+    // 真正没有状态源才说“仅启动”；有标题弱信号的不再套这句旧话。
     html += `<div class="ac-hint">${esc(t("ac.launchOnly"))}</div>`;
+    if (a.launch) html += `<div class="ac-hint">${esc(t("ac.launch.viaGateway"))}</div>`;
+  } else if (caps.launch && caps.title) {
+    html += `<div class="ac-hint">${esc(t("ac.titleOnly"))}</div>`;
     if (a.launch) html += `<div class="ac-hint">${esc(t("ac.launch.viaGateway"))}</div>`;
   } else if (!caps.launch && cat && cat.installed) {
     // 装了但 Perch 还没有为它接入终端启动：把边界说清楚，
@@ -256,8 +323,25 @@ function acBodyHTML(a, name) {
     html += `<div class="ac-hint">${esc(t("ac.setupHint"))}</div>`;
   }
 
+  const gwStep = v ? v.steps.find((s) => s.key === "gateway") : null;
+  const gwUnsupported = !!(gwStep && gwStep.state === "unsupported");
+  const gwWhy = gwStep && gwStep.noteKey ? t(gwStep.noteKey, { name: a.name || a.id }) : "";
+
   if (AC_CONFIRM) {
     html += acConfirmHTML(a);
+  } else if (gwUnsupported) {
+    /* 上游明确不支持（普通 Cursor CLI 就是）：**不 POST**、不给一个点了报 400
+       的按钮。按钮照旧占位但做灰（aria-disabled，不是 disabled —— 禁掉的按钮
+       title 不弹），原因和原生用法写在下面。 */
+    html += `<div class="ac-actions">` +
+      `<button type="button" class="ac-btn" aria-disabled="true" data-ac="gw-unavailable"` +
+      ` title="${esc(gwWhy)}">${esc(t("ac.action.connect"))}</button>` +
+      `</div>`;
+    html += `<div class="ac-hint">${esc(gwWhy)}</div>`;
+    html += `<div class="ac-hint">${esc(t("ac.gw.nativePath"))}</div>`;
+    if (a.id === "cursor") {
+      html += `<div class="ac-hint">${esc(t("ac.gw.cursorNative"))}</div>`;
+    }
   } else {
     html += `<div class="ac-actions">` +
       (a.wired
@@ -266,6 +350,9 @@ function acBodyHTML(a, name) {
       `</div>`;
     if (!a.wired) {
       html += `<div class="ac-hint">${esc(t("ac.hint.unwired"))}</div>`;
+      if (gwStep && gwStep.noteKey && gwStep.noteKey !== "agent.note.gatewayAvailable") {
+        html += `<div class="ac-hint">${esc(t(gwStep.noteKey, { name: a.name || a.id }))}</div>`;
+      }
     }
   }
 
@@ -617,6 +704,19 @@ $("ac-body").addEventListener("click", (e) => {
   const b = e.target.closest("[data-ac]");
   if (!b || !AC_ID) return;
   const act = b.dataset.ac;
+  if (act === "gw-unavailable") {
+    // 灰色按钮也要有回应：把“为什么不能接、还能怎么用”再说一遍。
+    const cat = ((mg() && mg().catalog) || []).find((x) => x.id === AC_ID) || null;
+    const v = cat
+      ? agentIntegrationView(cat, gwInfoFor(cat.id), AGENT_STATE[cat.id] || null, dashMagpieState())
+      : null;
+    const step = v ? v.steps.find((s) => s.key === "gateway") : null;
+    const why = step && step.noteKey
+      ? t(step.noteKey, { name: (cat && cat.name) || AC_ID })
+      : t("msg.gw.agentNotConnectable");
+    showToast(t("ac.gw.unsupportedTitle"), why + " " + t("ac.gw.nativePath"), "info");
+    return;
+  }
   if (act === "reload") {
     AC_ERR = null;
     renderAgentDrawer();
