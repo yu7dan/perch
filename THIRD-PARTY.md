@@ -8,8 +8,10 @@
 | 部件 | 用途 | 许可 | 许可全文 |
 |---|---|---|---|
 | [Wails v3](https://github.com/wailsapp/wails) | 桌面外壳（WebView2 承载前端） | MIT | 随 Go 模块分发（`go.mod`） |
-| [xterm.js](https://github.com/xtermjs/xterm.js) + 官方 addon（fit / webgl / image / ligatures / search / serialize / unicode11 / web-links） | 终端渲染 | MIT | `licenses/MIT-xterm.txt` |
+| [xterm.js](https://github.com/xtermjs/xterm.js) + 官方 addon（fit / webgl / image / ligatures / serialize / unicode11 / web-links） | 终端渲染 | MIT | `licenses/MIT-xterm.txt` |
 | [ConPTY](https://github.com/UserExistsError/conpty) | Windows 伪终端 | MIT | 随 Go 模块分发 |
+| [lobe-icons](https://github.com/lobehub/lobe-icons) | Agent 品牌图标（`assets/agent-icons/`） | MIT | `licenses/MIT-lobe-icons.txt` |
+| [Lucide](https://lucide.dev/) | 文件类型与界面图标 | ISC | `licenses/ISC-lucide.txt` |
 | Cascadia Code / Cascadia Mono | 界面等宽字体 | SIL OFL 1.1 | `licenses/OFL-1.1.txt` |
 | JetBrains Mono | 终端等宽字体 | SIL OFL 1.1 | `licenses/OFL-1.1.txt` |
 | Geist | 界面无衬线字体 | SIL OFL 1.1 | `licenses/OFL-1.1.txt` |
