@@ -23,7 +23,7 @@ const { Stream, JSONStream, Window, Events } = window.__wails || {};
 // document.title 传到原生窗口标题，标题始终是应用名。写它只是留个保险，
 // 别再把排查希望寄托在它上面。
 function jserr(what, e) {
-  const msg = `JS错误 ${what}: ${(e && (e.message || e.reason || e)) || "?"}`;
+  const msg = t("term.jsError", { what, err: (e && (e.message || e.reason || e)) || "?" });
   try { document.title = msg; } catch {}
   try { window.__bootErr.push(msg); } catch (_) {}
   try { sendCtrl({ type: "log", msg }); } catch {}
@@ -192,8 +192,8 @@ function bannerForRefusal(r) {
   return {
     kind: conflict ? "conflict" : "unavailable",
     text: conflict
-      ? "上次那条会话正被别的格子跑着，没能接回来 —— 这一格起的是新会话"
-      : "接不回上次那条会话 —— 这一格起的是新会话",
+      ? t("term.banner.conflict")
+      : t("term.banner.unavailable"),
     // sub 直接用 Go 那句话：它本来就是写给人看的（同一句话在左边栏点「接上」
     // 被拒时是那条 toast）。**不另写一份** —— 两份说法迟早会不一致。
     sub: r.msg || ("（" + r.code + "）"),
@@ -203,27 +203,27 @@ function bannerForRefusal(r) {
 /* 把一条横幅挂到某一格上。**幂等**：同一种 kind 已经挂着就什么都不做
    （mismatch 可能被 Go 连着推两次：hook 和登记表两条路都可能先到）。
    返回是否真的改动过 —— 调用方靠它决定要不要落一条事实。 */
-function showCellBanner(t, info) {
-  if (!t || !t.cellBody || !info || !info.kind) return false;
-  const old = t.cellBody.querySelector(".cellbanner");
+function showCellBanner(tab, info) {
+  if (!tab || !tab.cellBody || !info || !info.kind) return false;
+  const old = tab.cellBody.querySelector(".cellbanner");
   if (old && old.dataset.kind === info.kind) return false;
   if (old) old.remove();
   const el = document.createElement("div");
   el.className = "cellbanner k-" + info.kind;
   el.dataset.kind = info.kind;
-  el.title = (info.sub ? info.sub + "\n" : "") + "点一下收掉这一条（记录不受影响）";
+  el.title = (info.sub ? info.sub + "\n" : "") + t("term.banner.dismissHint");
   el.innerHTML =
     `<span class="ic">${lucide(LUCIDE_TRIANGLE_ALERT, 12)}</span>` +
     `<span class="tx"></span>` +
-    `<button class="x" title="收掉这一条">×</button>`;
+    `<button class="x" title="${esc(t("term.banner.dismiss"))}">×</button>`;
   // ⚠️ 走 textContent 不走 innerHTML：text 里可能有 Go 给的原话（含会话 id、路径），
   // 那是**数据**不是标记。细节（sub）只进 title —— 一行放不下，见 CSS 那条。
   el.querySelector(".tx").textContent = info.text;
   el.addEventListener("click", (e) => { e.stopPropagation(); el.remove(); });
   // ⚠️ 必须插在 .cellbody 里（它是 position:relative），**不能**插成 .termhost 的
   // 兄弟 —— 理由见 CSS 里那条（会改布局 → 触发 refit → 恢复出来的 TUI 立刻重画）。
-  t.cellBody.appendChild(el);
-  bootFact(`格内横幅 tab=${t.id} pane=${(t.spec && t.spec.paneId) || 0} kind=${info.kind}：${info.text}`);
+  tab.cellBody.appendChild(el);
+  bootFact(`格内横幅 tab=${tab.id} pane=${(tab.spec && tab.spec.paneId) || 0} kind=${info.kind}：${info.text}`);
   return true;
 }
 
@@ -251,16 +251,16 @@ function freshAgentLabel(t) {
 }
 
 /* 这一格开始干活了：头上的换人箭头由蓝转灰。返回是否真的改过（日志判据）。 */
-function freshCellStarted(t, why) {
-  if (!t || !t.fresh) return false;
-  t.fresh = false;
-  t.freshStartedBy = why || "";
-  if (t.freshBtn) {
-    t.freshBtn.classList.remove("live");
-    t.freshBtn.title = "换 Agent（这一格已经开始干活；要换请新开一格）";
+function freshCellStarted(tab, why) {
+  if (!tab || !tab.fresh) return false;
+  tab.fresh = false;
+  tab.freshStartedBy = why || "";
+  if (tab.freshBtn) {
+    tab.freshBtn.classList.remove("live");
+    tab.freshBtn.title = t("term.fresh.changeStarted");
   }
-  if (t.cellEl) t.cellEl.classList.remove("fresh");
-  bootFact(`新格开始干活 tab=${t.id || 0} agent=${(t.spec && t.spec.agent) || "?"} ` +
+  if (tab.cellEl) tab.cellEl.classList.remove("fresh");
+  bootFact(`新格开始干活 tab=${tab.id || 0} agent=${(tab.spec && tab.spec.agent) || "?"} ` +
     `触发=${why || "?"} → 换 Agent 箭头转灰`);
   return true;
 }
@@ -271,17 +271,17 @@ function freshCellStarted(t, why) {
    新格"，给它们一条换人提示只会变成噪音。
    ⚠️ 不再建任何格内 DOM：2026-10-20 用户否掉了那条 24px 横幅。
    状态只在标签对象上（t.fresh）+ 格子头的 class 上（.cell.fresh）。 */
-function armFreshCell(t, why) {
-  if (!t || !t.freshEligible || !TAB_LIST.includes(t)) return;
-  if (t.fresh || t.freshStartedBy || !t.id) return;
-  t.fresh = true;
-  if (t.cellEl) t.cellEl.classList.add("fresh");
-  if (t.freshBtn) {
-    t.freshBtn.classList.add("live");
-    t.freshBtn.title = `换一个 Agent（${freshAgentLabel(t)} 还没开始干活）`;
+function armFreshCell(tab, why) {
+  if (!tab || !tab.freshEligible || !TAB_LIST.includes(tab)) return;
+  if (tab.fresh || tab.freshStartedBy || !tab.id) return;
+  tab.fresh = true;
+  if (tab.cellEl) tab.cellEl.classList.add("fresh");
+  if (tab.freshBtn) {
+    tab.freshBtn.classList.add("live");
+    tab.freshBtn.title = t("term.fresh.changeFresh", { name: freshAgentLabel(tab) });
   }
-  sendCtrl({ type: "log", msg: `新格提示 tab=${t.id || 0} pane=${t.paneID || 0} ` +
-    `agent=${(t.spec && t.spec.agent) || "?"} 未开始，可换 Agent（${why || "新开"}）` });
+  sendCtrl({ type: "log", msg: `新格提示 tab=${tab.id || 0} pane=${tab.paneID || 0} ` +
+    `agent=${(tab.spec && tab.spec.agent) || "?"} 未开始，可换 Agent（${why || "新开"}）` });
 }
 
 // createTab：建一个标签。**它是 async，但在第一个 await 之前就把终端建好、
@@ -381,15 +381,15 @@ async function createTab(spec, opts) {
   T.tabEl = document.createElement("div");
   T.tabEl.className = "tab cellhead";
   T.tabEl.innerHTML =
-    `<span class="adot" data-state="idle" role="img" aria-label="空闲"></span>` +
+    `<span class="adot" data-state="idle" role="img" aria-label="${esc(t("state.idle"))}"></span>` +
     `<span class="tab-ico"></span>` +
     `<span class="nm ell"></span>` +
     // **常驻**的下拉箭头（用户 2026-10-20 确认：未开始蓝、开始后灰）：
     // 它就是"换 Agent"的入口，不再另起一条横幅。放在 × 左边 ——
     // 它是"改这一格"，不是"关这一格"，两个动作不能挨着读错。
-    `<button class="aswap" type="button" aria-label="换 Agent" ` +
-      `title="换 Agent">${AGENT_SWAP_SVG}</button>` +
-    `<span class="x" title="关闭">×</span>`;
+    `<button class="aswap" type="button" aria-label="${esc(t("term.fresh.label"))}" ` +
+      `title="${esc(t("term.fresh.label"))}">${AGENT_SWAP_SVG}</button>` +
+    `<span class="x" title="${esc(t("term.tab.close"))}">×</span>`;
   T.dotEl = T.tabEl.querySelector(".adot");
   T.icoEl = T.tabEl.querySelector(".tab-ico");
   T.nmEl  = T.tabEl.querySelector(".nm");
@@ -653,11 +653,11 @@ installImeAnchor(T);
        下一步能做什么，见 resumeClosedPane）—— 这里别再叠一张更含糊的卡。 */
     if (!(T.spec && T.spec.closedResume)) {
       showToast({
-        agent_session_conflict: "这条会话正被跑着",
-        unavailable: "盘上找不到这条会话",
-        bad_id: "会话 id 不对",
-      }[T.resumeRefused.code] || "接不上",
-        T.resumeRefused.msg || `拒绝码 ${T.resumeRefused.code}`, "err");
+        agent_session_conflict: t("term.resume.conflict"),
+        unavailable: t("term.resume.unavailable"),
+        bad_id: t("term.resume.badId"),
+      }[T.resumeRefused.code] || t("term.resume.failed"),
+        T.resumeRefused.msg || t("term.resume.refusedCode", { code: T.resumeRefused.code }), "err");
     }
     return T;
   }
@@ -676,8 +676,8 @@ installImeAnchor(T);
     // （没说过话的格子不出横幅：它盘上本来就没有 jsonl，见 panes.Pane.Spoke。）
     showCellBanner(T, {
       kind: "unavailable",
-      text: "上次那条会话在盘上找不到了 —— 这一格起的是新会话",
-      sub: "会话可能被删了、或者在别的机器上。记录里那条 id 不动，下次重开还会再试它",
+      text: t("term.banner.missingSession"),
+      sub: t("term.banner.missingSessionSub"),
     });
   }
 
@@ -1047,11 +1047,11 @@ function paintGridStatus() {
      也**不能**把藏起来那几格的旧 cols 一起取 min：它们没在屏幕上。 */
   if (soloTab) {
     const c = soloTab.term && soloTab.term.cols > 0 ? soloTab.term.cols : 0;
-    el.textContent = c > 0 ? `独立页 · ${c} 列` : "独立页";
+    el.textContent = c > 0 ? t("term.grid.soloCols", { c }) : t("term.grid.solo");
     el.classList.toggle("warn", c > 0 && c < PANE_MIN_COLS);
     el.title = c > 0 && c < PANE_MIN_COLS
-      ? `这张页只有 ${c} 列，低于 Claude Code 开场介绍框需要的 ${PANE_MIN_COLS} 列 —— 把窗口拉宽。`
-      : `独立页显示这一个 agent，占满整块主区（其余 ${TAB_LIST.length - 1} 格还在并行里跑，只是没显示）。`;
+      ? t("term.grid.soloNarrow", { c, min: PANE_MIN_COLS })
+      : tCount("term.grid.soloWide", TAB_LIST.length - 1);
     return;
   }
   const n = TAB_LIST.length;
@@ -1062,13 +1062,17 @@ function paintGridStatus() {
   // 不拿一个算出来的数冒充量出来的数 —— 状态栏上这条读数的全部意义
   // 就是"屏幕上是多少"，不是"本来应该是多少"。
   const measured = TAB_LIST.map((t) => (t.term && t.term.cols > 0 ? t.term.cols : 0)).filter((c) => c > 0);
-  if (!measured.length) { el.textContent = `${n} 格`; el.classList.remove("warn"); return; }
+  if (!measured.length) {
+    el.textContent = tCount("term.grid.panes", n);
+    el.classList.remove("warn");
+    return;
+  }
   const perCell = Math.min(...measured);
-  el.textContent = `${n} 格 · ${perCell} 列/格`;
+  el.textContent = tCount("term.grid.perCell", n, { cols: perCell });
   el.classList.toggle("warn", perCell < PANE_MIN_COLS);
   el.title = perCell < PANE_MIN_COLS
-    ? `每格只有 ${perCell} 列，低于 Claude Code 开场介绍框需要的 ${PANE_MIN_COLS} 列 —— 会折行，不是渲染坏了。把某几格拎成独立页、或者把窗口拉宽（也可以收窄右栏）。`
-    : `并行 ${n} 格，每格约 ${perCell} 列`;
+    ? t("term.grid.narrow", { cols: perCell, min: PANE_MIN_COLS })
+    : tCount("term.grid.wide", n, { cols: perCell });
 }
 
 // 连接状态那一格同理 —— 每个标签一条 stream，各自可能连上/断开。
@@ -1087,14 +1091,14 @@ $("restore").addEventListener("click", () => {
     // 页面里没有控制台可看，而且它现在是个只有图标的浮出按钮 ——
     // "无快照"这件事走日志通道留痕，界面上用 title 临时说一句。
     sendCtrl({ type: "log", msg: "restore: 无快照" });
-    $("restore").title = "没有可恢复的快照";
-    setTimeout(() => { $("restore").title = "把上次的输出恢复到这个面板"; }, 2000);
+    $("restore").title = t("term.restore.noSnap");
+    setTimeout(() => { $("restore").title = t("term.restore.title"); }, 2000);
     return;
   }
-  const t = activeTab;
-  if (!t) return;
-  t.term.write("\r\n\x1b[90m[已恢复上次的输出快照]\x1b[0m\r\n");
-  t.term.write(s, () => t.term.scrollToBottom());
+  const tab = activeTab;
+  if (!tab) return;
+  tab.term.write("\r\n\x1b[90m" + t("term.restore.done") + "\x1b[0m\r\n");
+  tab.term.write(s, () => tab.term.scrollToBottom());
 });
 setInterval(() => {
   // 快照是**页面级**的一份：一个 localStorage 键放不下 N 个标签的回滚缓冲。
@@ -1163,12 +1167,12 @@ function stripLeadingAgentTitleDecoration(title) {
    ⚠️ 2026-10-17 之前这里是写死的 `"claude · ai工作台"`（开发占位符）——
    Codex 启动失败、还没来得及发 OSC 标题，格子头就顶着 Claude 的名字，
    用户看到的是"Codex 的图标 + Claude 的字"。默认名只能由 spec.agent 推。 */
-function defaultTabTitle(t) {
-  const id = (t && t.spec && t.spec.agent) || "";
+function defaultTabTitle(tab) {
+  const id = (tab && tab.spec && tab.spec.agent) || "";
   const cat = (typeof mg === "function" && mg() && mg().catalog) || [];
   const a = cat.find((x) => x.id === id);
   if (a && a.name) return a.name;
-  return id || "新 agent";
+  return id || t("term.defaultTitle");
 }
 
 // 用户给会话起的名字（`T.liveTitle`，空 = 用 agent 自己写的）**挂在标签上**，
@@ -1295,7 +1299,7 @@ function mountRenameInput(el, initial, ariaLabel) {
   const input = document.createElement("input");
   input.type = "text";
   input.className = "tab-input";
-  input.placeholder = "会话名";
+  input.placeholder = t("term.rename.placeholder");
   input.setAttribute("aria-label", ariaLabel);
   input.value = initial;
   input.addEventListener("input", () => { renameValue = input.value; });
@@ -1346,9 +1350,9 @@ function mountRenameInput(el, initial, ariaLabel) {
   return true;
 }
 
-function openRename(t) {
-  if (tabEditing || !t) return;
-  renameTab = t;
+function openRename(tab) {
+  if (tabEditing || !tab) return;
+  renameTab = tab;
   renameSess = null;
   renameSeq++;
   renameSubmitted = false;
@@ -1356,12 +1360,12 @@ function openRename(t) {
   // 这一下 blur 不是用户的意思（Orca 的 renameBlurCommitEnabledRef）。
   renameBlurCommitEnabled = false;
   renameUserWantsBlur = false;
-  renameValue = t.liveTitle;   // 快照，编辑期间 OSC 的标题变化不许覆盖草稿
+  renameValue = tab.liveTitle;   // 快照，编辑期间 OSC 的标题变化不许覆盖草稿
   tabEditing = true;
   // 挂不上（比如这一格刚被关掉，格子头的元素已经摘下来了）⇒ 这一次编辑**没开始**，
   // 把状态整个退回去 —— 留在"看起来在编辑"的空上就会变成幽灵编辑器，
   // 理由见 mountRenameInput 开头那段。
-  if (!mountRenameInput(t.nmEl, renameValue, "重命名这个会话")) closeRename();
+  if (!mountRenameInput(tab.nmEl, renameValue, t("term.rename.ariaTab"))) closeRename();
 }
 
 /* 「这条会话**现在**在界面上是哪一行的标题元素」。
@@ -1409,7 +1413,7 @@ function openSessionRename(s, el) {
   renameValue = (STATE && STATE.titles && STATE.titles[s.id]) || "";
   tabEditing = true;
   // 同上：挂不上就把状态退回去，别留一个"看不见、却在吃掉后面每一次改名"的空。
-  if (!mountRenameInput(el, renameValue, "给这条会话起个名字")) closeRename();
+  if (!mountRenameInput(el, renameValue, t("term.rename.ariaRow"))) closeRename();
 }
 
 function closeRename() {
@@ -1643,7 +1647,7 @@ function dotGlyph(s) { return s === "ask" ? G_ASK : s === "unread" ? G_BELL : s 
 // 把一个状态画进**已经存在**的 .adot 元素。
 function paintDot(el, s) {
   if (!el) return;
-  const label = DOT_LABEL[s] || s;
+  const label = DOT_STATES.has(s) ? t("state." + s) : s;
   const glyph = dotGlyph(s);
   el.dataset.state = s;
   el.classList.toggle("glyph", !!glyph);
@@ -1657,7 +1661,7 @@ function paintDot(el, s) {
 // HTML 拼出来的，没有"已经存在的元素"可以 paintDot。两版都从上面那两点取，
 // 所以不会出现"列表里是问号、格子上是实心点"。
 function dotHTML(s) {
-  const label = DOT_LABEL[s] || s;
+  const label = DOT_STATES.has(s) ? t("state." + s) : s;
   const glyph = dotGlyph(s);
   return `<span class="adot${glyph ? " glyph" : ""}" data-state="${esc(s)}" role="img"` +
     ` aria-label="${esc(label)}" title="${esc(label)}"` +

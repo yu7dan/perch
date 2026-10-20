@@ -42,14 +42,14 @@ function md(src) {
 
 function rel(iso) {
   if (!iso) return "";
-  const t = Date.parse(iso);
-  if (isNaN(t)) return "";
-  const s = Math.max(0, (Date.now() - t) / 1000);
-  if (s < 60) return "刚刚";
-  if (s < 3600) return `${Math.floor(s / 60)}分钟前`;
-  if (s < 86400) return `${Math.floor(s / 3600)}小时前`;
-  if (s < 86400 * 30) return `${Math.floor(s / 86400)}天前`;
-  return new Date(t).toLocaleDateString("zh-CN");
+  const ms = Date.parse(iso); // 别叫 t：会遮住 i18n 的 t()
+  if (isNaN(ms)) return "";
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 60) return t("rel.now");
+  if (s < 3600) return t("rel.minutes", { n: Math.floor(s / 60) });
+  if (s < 86400) return t("rel.hours", { n: Math.floor(s / 3600) });
+  if (s < 86400 * 30) return t("rel.days", { n: Math.floor(s / 86400) });
+  return new Date(ms).toLocaleDateString(PERCH_LOCALE === "zh" ? "zh-CN" : "en-US");
 }
 /* hover 出来的**绝对**时间（相对时间是给它旁边那行的，绝对时间挂在 title 上 ——
    两者都要有：一个回答"多久以前"，一个回答"到底是几点"）。
@@ -356,7 +356,7 @@ function rememberLastAgent(dir, agent) {
 /* 「+」的 title / 菜单 hint 里那半句：快捷键存在时才说，否则别占地方。 */
 function newAgentShortcutTip() {
   const k = SETTINGS.newAgentShortcut;
-  return k ? `\n快捷键 ${k}：直接开这个文件夹上次用的 Agent（不弹选择）` : "";
+  return k ? t("shell.shortcutTip", { key: k }) : "";
 }
 // ---------------------------------------------------------------------------
 // 行的 HTML
@@ -400,19 +400,23 @@ function projRowHTML(p, tabs, kind, total, closed, forceOpen) {
   // 2026-10-17：「已关闭」的 agent 也算这个工作区的东西（关格 ≠ 删），所以
   // total 由调用方把两边加起来；这里兜底时也把 closed 算上。
   const nAll = (total == null) ? tabs.length + (closed ? closed.length : 0) : total;
-  const sum = `${nAll} agent`;
+  const sum = tCount("shell.proj.sum", nAll);
   const syn = kind === "proj" && !!p.synthetic;
   let acts = "";
   if (kind === "proj" || syn) {
-    acts = `<span class="pg"><button class="cardbtn" data-pact="new" title="在 ${esc(p.name)} 里新开一个 agent${esc(newAgentShortcutTip())}">${ICON_PLUS}</button></span>`
-         + `<button class="cardbtn" data-pact="menu" title="更多动作">${ICON_DOTS}</button>`;
+    acts = `<span class="pg"><button class="cardbtn" data-pact="new" title="${esc(t("shell.proj.newTitle", {
+      name: p.name || "", tip: newAgentShortcutTip(),
+    }))}">${ICON_PLUS}</button></span>`
+         + `<button class="cardbtn" data-pact="menu" title="${esc(t("shell.proj.more"))}">${ICON_DOTS}</button>`;
   } else if (kind === "adopt") {
-    acts = `<span class="pg"><button class="cardbtn" data-pact="adopt" title="把这个目录收进项目池：${esc(p.path)}">${ICON_PLUS}</button></span>`
-         + `<button class="cardbtn" data-pact="menu" title="更多动作">${ICON_DOTS}</button>`;
+    acts = `<span class="pg"><button class="cardbtn" data-pact="adopt" title="${esc(t("shell.proj.adoptTitle", {
+      path: p.path || "",
+    }))}">${ICON_PLUS}</button></span>`
+         + `<button class="cardbtn" data-pact="menu" title="${esc(t("shell.proj.more"))}">${ICON_DOTS}</button>`;
   }
   let tip = p.path;
-  if (kind === "adopt") tip = `${p.path}\n（未归类 —— 这个目录还不在项目池里）`;
-  else if (syn) tip = `${p.path}\n（默认工作区 —— 没归到别的项目里的东西都落在这儿。它不是一个可以删掉的条目，所以「从列表移除」是灰的）`;
+  if (kind === "adopt") tip = t("shell.proj.unclassifiedTip", { path: p.path || "" });
+  else if (syn) tip = t("shell.proj.defaultTip", { path: p.path || "" });
   // 「无工作目录」那一组没有可折叠的东西（它不是目录，没有 path 可记展开态），
   // 所以它不画那颗箭头 —— 画了就是一颗点了没反应的东西。
   // ⚠️ 永远画**同一个** chevron-right：展开态由 `.proj.open .tw svg` 转 90°。
@@ -440,7 +444,7 @@ function projRowHTML(p, tabs, kind, total, closed, forceOpen) {
     + `<span class="pbody">`
     + `<span class="nml">`
     + `<span class="nm ell">${esc(p.name)}</span>`
-    + (kind === "proj" && p.pinned && !syn ? `<span class="pin" title="置顶">${ICON_PIN}</span>` : "")
+    + (kind === "proj" && p.pinned && !syn ? `<span class="pin" title="${esc(t("shell.pinned"))}">${ICON_PIN}</span>` : "")
     + `</span>`
     + `<span class="meta">`
     + (p.path ? `<span class="path ell" title="${esc(p.path)}">${esc(projPathHint(p.path))}</span>` : "")
@@ -466,9 +470,11 @@ function agentRowsHTML(tabs, path, kind, closed, open) {
   const closedBlock = crows.length
     ? `<button type="button" class="closed-toggle${copen ? " open" : ""}" data-ctoggle="1" `
       + `aria-expanded="${copen ? "true" : "false"}" `
-      + `title="${copen ? "收起已关闭的 agent" : `展开 ${crows.length} 个已关闭的 agent`}">`
+      + `title="${esc(copen
+          ? t("shell.closed.toggleCollapse")
+          : t("shell.closed.toggleExpand", { n: crows.length }))}">`
       + `<span class="fchev">${svg('<path d="M9 6l6 6-6 6"/>', 10, 2)}</span>`
-      + `<span class="ctlabel">已关闭</span><span class="ctcount">${crows.length}</span></button>`
+      + `<span class="ctlabel">${esc(t("shell.closed.label"))}</span><span class="ctcount">${crows.length}</span></button>`
       + `<div class="agroup closed-list" data-path="${esc(path)}" data-kind="${kind}"`
       + `${copen ? "" : " hidden"}>`
       + crows.map(closedRowHTML).join("") + `</div>`
@@ -497,21 +503,19 @@ function closedRowHTML(r) {
   /* 接不上的那一条：行尾先说「接不上」，title 里把**为什么**说全。
      不做成 disabled —— 点它照样有回应（弹一张解释卡），只是不假装能接上。 */
   const dead = closedUnresumable(r);
-  const tip = [nm, `${dead ? "接不上" : "已关闭"} · ${typ}`, dir].filter(Boolean).join("\n")
-    + (dead
-        ? "\n" + closedWhy(r)
-        : "\n点一下 = 在原座位接上它上次的对话（它只是被关掉了，没有删）");
+  const stateWord = dead ? t("shell.closed.deadShort") : t("shell.closed.state");
+  const tip = [nm, `${stateWord} · ${typ}`, dir].filter(Boolean).join("\n")
+    + (dead ? "\n" + closedWhy(r) : t("shell.closed.tipResume"));
   return `<div class="arow closed${dead ? " dead" : ""}" data-pane="${r.paneId | 0}"`
     + ` data-sid="${esc(r.sessionId || "")}" role="button" tabindex="0" title="${esc(tip)}">`
     + `<span class="ricon">${lucide(AGENT_GLYPH[typ] || LIST_ICON.term, 14)}</span>`
     + `<span class="nm ell">${esc(nm)}</span>`
-    + `<span class="sw">${dead ? "接不上" : "已关闭"}</span>`
+    + `<span class="sw">${esc(stateWord)}</span>`
     + (at ? `<span class="tm" data-at="${esc(at)}" title="${esc(absTime(at))}">${esc(rel(at))}</span>` : "")
     + `<span class="sacts">`
     + `<span class="pg"><button class="cardbtn" data-aact="resume"`
-    + ` title="${dead ? "接不上：盘上没有它上次那条会话（点一下看原因）"
-                     : "接上这个 agent：同一座位、同一份对话（paneId 不变）"}">${ICON_PLAY}</button></span>`
-    + `<button class="cardbtn" data-aact="menu" title="更多动作">${ICON_DOTS}</button>`
+    + ` title="${esc(dead ? t("shell.closed.tipDead") : t("shell.closed.tipResumeTitle"))}">${ICON_PLAY}</button></span>`
+    + `<button class="cardbtn" data-aact="menu" title="${esc(t("shell.proj.more"))}">${ICON_DOTS}</button>`
     + `</span>`
     + `</div>`;
 }
@@ -519,15 +523,15 @@ function closedRowHTML(r) {
 /* agent 的名字：用户起的 > agent 自己报的（OSC 标题，通常就是当前任务）> 兜底。
    ⚠️ 兜底**不能**用 `runtimeTabTitle`：它末尾补的是产品名，一列 agent 全写着
    同一个产品名是假话。一个还没说话的新格就叫「新 agent」。 */
-function agentRowName(t) {
-  const live = realTabTitle(t);
+function agentRowName(tab) { // 参数别叫 t：会遮住 i18n 的 t()
+  const live = realTabTitle(tab);
   if (live) return live;
   // 进程会把标题清空（claude 退出前发一条 OSC 0 空标题），还没报过标题的新格
   // 也是空的。这一格的身份**不该跟着进程一起消失** —— 用盘上那条会话的标题
   // 兜底，于是「已停止」的 agent 仍然叫它上次的名字，而不是「新 agent」。
-  const s = t.sessionID ? findSess(t.sessionID) : null;
+  const s = tab.sessionID ? findSess(tab.sessionID) : null;
   if (s) return sessionTitle(s);
-  return t.connDown ? "已停止的 agent" : "新 agent";
+  return tab.connDown ? t("shell.agent.stoppedLabel") : t("shell.agent.newLabel");
 }
 
 /* 这个 agent 在哪个工作区 —— 对话流头上那一行用（它取代了原来的「格 N」）。
@@ -541,9 +545,9 @@ function workspaceNameFor(t) {
 /* 行尾那个状态词。空闲不出词（一列「空闲 · 昨天」比只写时间更吵）；停了必须出
    —— 那是这一行和"在跑的 agent"最要紧的区别。 */
 function agentStateWord(st) {
-  if (st === "off") return "已停止";
+  if (st === "off") return t("state.off");
   if (!st || st === "idle") return "";
-  return DOT_LABEL[st] || st;
+  return DOT_STATES.has(st) ? t("state." + st) : st;
 }
 /* 这一格"最近一次有动静"是什么时候。三元式照群组看板 g3 那一处（:5910）——
    两条面说的是同一件事，不能一处取 ask、一处取别的。`v.at` 都没有时退到
@@ -586,18 +590,18 @@ const AGENT_GLYPH = {
 function agentGlyph(t) {
   return AGENT_GLYPH[(t.spec && t.spec.agent) || "claude"] || LIST_ICON.term;
 }
-function agentRowHTML(t) {
-  const st = cellState(t);
+function agentRowHTML(tab) { // 参数别叫 t：会遮住 i18n 的 t()
+  const st = cellState(tab);
   const stopped = st === "off";
-  const nm = agentRowName(t);
-  const at = tabActivityAt(t);
+  const nm = agentRowName(tab);
+  const at = tabActivityAt(tab);
   const w = agentStateWord(st);
-  const typ = (t.spec && t.spec.agent) || "claude";
-  const tip = [nm, [agentStateWord(st) || (stopped ? "已停止" : "空闲"), typ].join(" · "), effCwd(t)]
+  const typ = (tab.spec && tab.spec.agent) || "claude";
+  const tip = [nm, [agentStateWord(st) || (stopped ? t("state.off") : t("state.idle")), typ].join(" · "), effCwd(tab)]
     .filter(Boolean).join("\n")
-    + (stopped ? "\n点一下 = 在原座位接上它上次的对话" : `\n点一下 = 进第 ${t.id} 格`);
-  return `<div class="arow${t === activeTab ? " sel" : ""}" data-tab="${t.id}"`
-    + ` data-sid="${esc(t.sessionID || "")}" data-stopped="${stopped ? 1 : 0}"`
+    + (stopped ? t("shell.agent.tipResume") : t("shell.agent.tipOpen", { id: tab.id }));
+  return `<div class="arow${tab === activeTab ? " sel" : ""}" data-tab="${tab.id}"`
+    + ` data-sid="${esc(tab.sessionID || "")}" data-stopped="${stopped ? 1 : 0}"`
     + ` role="button" tabindex="0" title="${esc(tip)}">`
     + `<span class="ricon">${lucide(agentGlyph(t), 14)}`
     + `<span class="adot-slot">${dotHTML(st)}</span></span>`
@@ -606,8 +610,8 @@ function agentRowHTML(t) {
     + (at ? `<span class="tm" data-at="${esc(at)}" title="${esc(absTime(at))}">${esc(rel(at))}</span>` : "")
     + `<span class="sacts">`
     + (stopped ? `<span class="pg"><button class="cardbtn" data-aact="resume"`
-        + ` title="接上这个 agent：同一座位、同一份对话（paneId 不变）">${ICON_PLAY}</button></span>` : "")
-    + `<button class="cardbtn" data-aact="menu" title="更多动作">${ICON_DOTS}</button>`
+        + ` title="${esc(t("shell.closed.tipResumeTitle"))}">${ICON_PLAY}</button></span>` : "")
+    + `<button class="cardbtn" data-aact="menu" title="${esc(t("shell.proj.more"))}">${ICON_DOTS}</button>`
     + `</span>`
     + `</div>`;
 }
@@ -621,11 +625,10 @@ function agentRowHTML(t) {
 // 没项目也能开终端，一整屏落地页会把能干的事挡掉（Orca 需要它是因为它空着的
 // 时候主区真的没内容）。
 function poolEmptyHTML(key) {
-  if (key) return `<div class="empty">没有匹配的项目。</div>`;
-  return `<div class="empty">还没有项目。`
-    + `<div><button class="btn" data-pact="add">${ICON_PLUS}<span>添加项目</span></button></div>`
-    + `<div style="margin-top:8px">项目 = 盘上的一个目录。加进来之后，`
-    + `在它里面开的 agent 会自动归到它名下。</div></div>`;
+  if (key) return `<div class="empty">${esc(t("shell.projects.emptyMatch"))}</div>`;
+  return `<div class="empty">${esc(t("shell.projects.empty"))}`
+    + `<div><button class="btn" data-pact="add">${ICON_PLUS}<span>${esc(t("shell.projects.add"))}</span></button></div>`
+    + `<div style="margin-top:8px">${esc(t("shell.projects.note"))}</div></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -698,12 +701,12 @@ function renderWorkspaceView(key) {
     .filter((g) => !key || g.shown.length || g.shownClosed.length)
     .sort((a, b) => b.total - a.total);
   if (!ug.length) { $("un-view").innerHTML = ""; return; }
-  let uh = `<div class="grp">未归类<span class="b">${unAll.length + unClosed.length}</span></div>`;
+  let uh = `<div class="grp">${esc(t("shell.projects.unclassified"))}<span class="b">${unAll.length + unClosed.length}</span></div>`;
   for (const { cwd, shown, shownClosed, total } of ug) {
     if (!cwd) {
       // 连生效 cwd 都没有（项目池还没到）：池子里放的是目录，它没有可收编的东西 ——
       // 不给动作键（不是"灰着点不动"，是这里根本没有那个动作）。
-      uh += projRowHTML({ path: "", name: "（没有工作目录）", pinned: false }, shown, "bare", total, shownClosed, !!key);
+      uh += projRowHTML({ path: "", name: t("shell.projects.noCwd"), pinned: false }, shown, "bare", total, shownClosed, !!key);
       continue;
     }
     uh += projRowHTML({ path: cwd, name: shortPath(cwd), pinned: false }, shown, "adopt", total, shownClosed, !!key);
@@ -755,7 +758,8 @@ function renderSideList(side) {
   side.sort((a, b) => (sideSt.get(a.id) === "run" ? 0 : 1) - (sideSt.get(b.id) === "run" ? 0 : 1));
   const sideRun = Array.from(sideSt.values()).filter((v) => v === "run").length;
   const cap = $("side-cap");
-  if (cap) cap.textContent = `会话库里的子代理 · ${side.length}` + (sideRun ? `（${sideRun} 个在跑）` : "");
+  if (cap) cap.textContent = t("shell.side.cap", { n: side.length }) +
+    (sideRun ? t("shell.side.running", { n: sideRun }) : "");
   const list = $("side-list");
   if (list) list.innerHTML = side.map(cardHTML).join("");
 }
@@ -888,48 +892,49 @@ async function waitFreshPane(t, timeoutMs) {
   return (t && (t.paneID | 0)) || 0;
 }
 
-async function switchFreshAgent(t, agentId) {
-  if (!t || !TAB_LIST.includes(t) || !t.fresh || t.freshSwitching) return;
+async function switchFreshAgent(tab, agentId) { // 参数别叫 t：会遮住 i18n 的 t()
+  if (!tab || !TAB_LIST.includes(tab) || !tab.fresh || tab.freshSwitching) return;
   const a = opAgentById(agentId);
   if (!opLaunchable(a)) {
-    showToast("换不了", `${(a && a.name) || agentId} 现在不可用（未安装/不能启动）。`, "err");
-    sendCtrl({ type: "log", msg: `新格换 Agent 拒绝：${agentId} 不可启动 tab=${t.id || 0}` });
+    showToast(t("shell.toast.switchUnavailableTitle"),
+      t("shell.toast.switchUnavailableNote", { name: (a && a.name) || agentId }), "err");
+    sendCtrl({ type: "log", msg: `新格换 Agent 拒绝：${agentId} 不可启动 tab=${tab.id || 0}` });
     return;
   }
-  const cur = (t.spec && t.spec.agent) || "";
+  const cur = (tab.spec && tab.spec.agent) || "";
   if (cur === agentId) {
-    sendCtrl({ type: "log", msg: `新格换 Agent：已经是 ${agentId}，不动 tab=${t.id}` });
+    sendCtrl({ type: "log", msg: `新格换 Agent：已经是 ${agentId}，不动 tab=${tab.id}` });
     return;
   }
-  t.freshSwitching = true;
+  tab.freshSwitching = true;
   // 正常情况下 newTabIn 是在 tab.ok 之后才 arm 的，paneId 已经在；这里防的是
   // "tab.ok 超时但格子留着"那条路（见 spawnTab 的兜底注释）。
-  const pane = (t.paneID | 0) || await waitFreshPane(t, 5000);
+  const pane = (tab.paneID | 0) || await waitFreshPane(tab, 5000);
   // 等待期间用户可能打了字（门已关），也可能把格子关了 —— 两种都不许再动手。
-  if (!TAB_LIST.includes(t) || !t.fresh) {
+  if (!TAB_LIST.includes(tab) || !tab.fresh) {
     sendCtrl({ type: "log", msg:
-      `新格换 Agent 放弃 tab=${t.id || 0}：等待期间已开始工作或被关掉` });
+      `新格换 Agent 放弃 tab=${tab.id || 0}：等待期间已开始工作或被关掉` });
     return;
   }
   if (!pane) {
-    t.freshSwitching = false;
-    showToast("还换不了", "这一格还没拿到座位号（PTY 还在启动或没有应答）。稍等一下再试。", "err");
-    sendCtrl({ type: "log", msg: `新格换 Agent 放弃 tab=${t.id || 0}：没有 paneId` });
+    tab.freshSwitching = false;
+    showToast(t("shell.toast.switchPendingTitle"), t("shell.toast.switchPendingNote"), "err");
+    sendCtrl({ type: "log", msg: `新格换 Agent 放弃 tab=${tab.id || 0}：没有 paneId` });
     return;
   }
-  const at = TAB_LIST.indexOf(t);
-  const cwd = (t.spec && t.spec.cwd) || "";
-  sendCtrl({ type: "log", msg: `新格换 Agent tab=${t.id} pane=${pane} ` +
+  const at = TAB_LIST.indexOf(tab);
+  const cwd = (tab.spec && tab.spec.cwd) || "";
+  sendCtrl({ type: "log", msg: `新格换 Agent tab=${tab.id} pane=${pane} ` +
     `${cur} → ${agentId} cwd=${cwd || "(默认)"} 座位序=${at}` });
   /* forget = 删掉刚起的空座位；reseat = 别发 lib.reload（那是一次同步重扫，
      会把紧接着的 tab.new 顶掉两秒多，见 closeTab 末尾那段实测）。 */
-  closeTab(t, { forget: true, reseat: true, why: `新格换 Agent → ${agentId}` });
+  closeTab(tab, { forget: true, reseat: true, why: `新格换 Agent → ${agentId}` });
   const nt = await createTab({ agent: agentId, cwd,
     resume: { kind: "new", id: "" } }, { fresh: true });
   if (!nt || !TAB_LIST.includes(nt)) {
     // 旧格已经关了，这一步失败没有退路 —— 必须说出来，不能静默丢一格。
-    showToast("换 Agent 没成", "这一格已经关掉，旧座位也清掉了；再新开一格试试。", "err");
-    sendCtrl({ type: "log", msg: `新格换 Agent 失败：旧 tab=${t.id} 已关，新格没起来（agent=${agentId}）` });
+    showToast(t("shell.toast.switchFailedTitle"), t("shell.toast.switchFailedNote"), "err");
+    sendCtrl({ type: "log", msg: `新格换 Agent 失败：旧 tab=${tab.id} 已关，新格没起来（agent=${agentId}）` });
     return;
   }
   // 插回原来的座位序（网格的列序就是 TAB_LIST 序；关掉之后原下标正好是新插入点）。
@@ -969,14 +974,15 @@ function runNewAgentShortcut() {
   const nameOf = (id) => (cat.find((a) => a && a.id === id) || {}).name || id;
   if (remembered && !avail.some((a) => a.id === remembered)) {
     sendCtrl({ type: "log", msg: `快捷键：文件夹记忆 ${remembered} 不可用 → 打开选择卡片 cwd=${cwd || "(默认)"}` });
-    showToast("上次的 Agent 不可用", `${nameOf(remembered)} 现在起不来；先选一个再建。`, "err");
+    showToast(t("shell.toast.lastUnavailableTitle"),
+      t("shell.toast.lastUnavailableNote", { name: nameOf(remembered) }), "err");
     openNewSpace({ folder: cwd, why: "快捷键（上次的 Agent 不可用）" });
     return;
   }
   const agent = remembered || defaultAgentId();
   if (!avail.some((a) => a.id === agent)) {
     sendCtrl({ type: "log", msg: `快捷键：没有可启动的 Agent（尝试 ${agent}）→ 打开选择卡片` });
-    showToast("没有可启动的 Agent", "先安装一个，或选「不启动 Agent」。", "err");
+    showToast(t("shell.toast.noAgentTitle"), t("shell.toast.noAgentNote"), "err");
     openNewSpace({ folder: cwd, why: "快捷键（没有可启动的 Agent）" });
     return;
   }
@@ -1071,48 +1077,54 @@ async function resumeAgentInSeat(t) {
    拦腰截断，而磁盘上那份对话正是这个产品的持久化本体。
    退出之后由 Go 的进程监看关流（见 main.go handleTab 里那段），前端 onclose →
    connDown → 行翻「已停止」+ ▶。这里**不自己改状态**：状态的唯一来源是流。 */
-function stopAgent(t) {
-  if (!t || t.connDown) return;
-  if (!t.ready || !t.stream) { showToast("停不了", "这一格的终端还没连上。", "err"); return; }
+function stopAgent(tab) { // 参数别叫 t：会遮住 i18n 的 t()
+  if (!tab || tab.connDown) return;
+  if (!tab.ready || !tab.stream) {
+    showToast(t("shell.toast.cannotStopTitle"), t("shell.toast.cannotStopNote"), "err");
+    return;
+  }
   /* ⚠️ 文字和回车**分两次写**。实测（Codex 0.163.0 TUI，2026-10-19）：同一次写入
      里到达的 `/exit\r` 只被当成"输入 /exit，再换一行" —— composer 里留下一个
      多行草稿，命令根本不提交；单独一次 Enter 才真的退出。Claude 两种写法都认，
      所以统一按人的手势拆开，不在通用路径里按 agent 分叉。
      300ms 是 live 测试里验证过能稳定提交的间隔（文字与回车分开写那一段）。 */
-  const st = t.stream;
+  const st = tab.stream;
   try { st.send(enc.encode("/exit")); }
-  catch (e) { jserr("stopAgent", e); showToast("停止失败", "终端通道断了。", "err"); return; }
+  catch (e) {
+    jserr("stopAgent", e);
+    showToast(t("shell.toast.stopFailedTitle"), t("shell.toast.stopFailedNote"), "err");
+    return;
+  }
   setTimeout(() => {
     try { st.send(enc.encode("\r")); }
     catch (e) { jserr("stopAgent", e); }
   }, 300);
-  showToast("已让它退出", "正在跑的那一轮会先收尾。", "ok");
-  sendCtrl({ type: "log", msg: `停止 agent tab=${t.id} pane=${t.paneID || 0}（发 /exit）` });
+  showToast(t("shell.toast.stopSentTitle"), t("shell.toast.stopSentNote"), "ok");
+  sendCtrl({ type: "log", msg: `停止 agent tab=${tab.id} pane=${tab.paneID || 0}（发 /exit）` });
 }
 
 /* 「结束这个 agent」= 用户明确不要它了：**座位和记录一起删**（forget）。
    磁盘上的对话文件一个字节都不动 —— 这句话要同时出现在菜单的 title 里和
    结果提示里（动手前说一次、动完之后再说一次，理由同 removeProj）。 */
-async function endAgent(t) {
-  if (!t) return;
+async function endAgent(tab) { // 参数别叫 t：会遮住 i18n 的 t()
+  if (!tab) return;
   if (SETTINGS.confirmEndAgent) {
     const ok = await askConfirm({
-      title: "结束这个 agent？",
-      body: `「${currentTabTitle(t)}」这一格会关掉，它的座位记录也会删掉。\n` +
-            "磁盘上的对话文件一个字节都不动，以后还能从会话库里接回来。",
-      ok: "结束",
+      title: t("shell.end.title"),
+      body: t("shell.end.paneBody", { name: currentTabTitle(tab) }),
+      ok: t("shell.end.ok"),
       danger: true,
     });
     if (!ok) {
-      sendCtrl({ type: "log", msg: `结束 agent tab=${t.id}：用户在确认框里取消了` });
+      sendCtrl({ type: "log", msg: `结束 agent tab=${tab.id}：用户在确认框里取消了` });
       return;
     }
   }
-  const pane = t.paneID | 0;
-  closeTab(t, { forget: true, why: "左栏「结束这个 agent」" });
+  const pane = tab.paneID | 0;
+  closeTab(tab, { forget: true, why: "左栏「结束这个 agent」" });
   armRailRebuild();
-  showToast("已结束这个 agent", "座位和记录都删了；磁盘上的对话文件一个字节没动。", "ok");
-  sendCtrl({ type: "log", msg: `结束 agent tab=${t.id} pane=${pane}（记录已摘，会话文件未动）` });
+  showToast(t("shell.end.donePane"), t("shell.end.donePaneNote"), "ok");
+  sendCtrl({ type: "log", msg: `结束 agent tab=${tab.id} pane=${pane}（记录已摘，会话文件未动）` });
 }
 
 /* 「接上这个已关闭的 agent」：用户点 × 只是收起来，记录还在（paneId + 会话 id）。
@@ -1125,7 +1137,7 @@ async function resumeClosedPane(r) {
   /* 已经知道接不上（盘上没有会话文件）：**别装作试一下**，直接把原因和出路
      说清楚。用户最容易困惑的正是这一下 —— "点了没反应/报个看不懂的错"。 */
   if (closedUnresumable(r)) {
-    showToast("这个 agent 接不上", closedWhy(r), "err");
+    showToast(t("shell.closed.resumeFailTitle"), closedWhy(r), "err");
     sendCtrl({ type: "log", msg: `已关闭的 agent 接不上 pane=${r.paneId}（盘上没有会话文件，未发起接上）` });
     return;
   }
@@ -1134,7 +1146,8 @@ async function resumeClosedPane(r) {
   const lv = r.sessionId ? tabForSession(r.sessionId) : null;
   if (lv) {
     jumpInto(lv, "这条会话已经在跑");
-    showToast("它已经开着了", `这条会话现在就在第 ${lv.id} 格跑着，已经切过去了。`, "info");
+    showToast(t("shell.closed.alreadyRunningTitle"),
+      t("shell.closed.alreadyRunningNote", { id: lv.id }), "info");
     return;
   }
   r.busy = true;
@@ -1163,10 +1176,11 @@ async function resumeClosedPane(r) {
       // 盘上已经没有那条会话了：把这一行翻成「接不上」，下一次点它先说原因。
       r.onDisk = false;
       armRailRebuild();
-      showToast("这个 agent 接不上", closedWhy(r), "err");
+      showToast(t("shell.closed.resumeFailTitle"), closedWhy(r), "err");
       sendCtrl({ type: "log", msg: `已关闭的 agent 接不上 pane=${pane}：${ref.msg}` });
     } else if (ref) {
-      showToast("接不上这个 agent", (ref.msg || ref.code) + " 记录和这一行都留着。", "err");
+      showToast(t("shell.closed.resumeFailTitle"),
+        t("shell.closed.resumeFailNote", { msg: ref.msg || ref.code }), "err");
     }
     return;
   }
@@ -1182,10 +1196,9 @@ async function endClosedPane(r) {
   if (!r) return;
   if (SETTINGS.confirmEndAgent) {
     const ok = await askConfirm({
-      title: "结束这个 agent？",
-      body: `「${closedRowName(r)}」的记录会删掉，` +
-            "左栏这一行也会消失。\n磁盘上的对话文件一个字节都不动。",
-      ok: "结束",
+      title: t("shell.end.title"),
+      body: t("shell.end.closedBody", { name: closedRowName(r) }),
+      ok: t("shell.end.ok"),
       danger: true,
     });
     if (!ok) {
@@ -1196,7 +1209,7 @@ async function endClosedPane(r) {
   CLOSED_PANES.delete(r.paneId | 0);
   sendCtrl({ type: "pane.forget", pane: r.paneId | 0 });
   armRailRebuild();
-  showToast("已结束这个 agent", "它的记录摘掉了；磁盘上的对话文件一个字节都没动。", "ok");
+  showToast(t("shell.end.donePane"), t("shell.end.doneClosedNote"), "ok");
   sendCtrl({ type: "log", msg: `结束已关闭的 agent pane=${r.paneId}（记录已摘，会话文件未动）` });
 }
 
@@ -1226,7 +1239,7 @@ function adoptDir(path) {
    路径/写盘出问题时才报错；那一刻会再起一张错误卡，两张叠着，不互相顶掉。 */
 function removeProj(p) {
   poolSend({ type: "project.remove", path: p.path });
-  showToast("已从列表移除", `${p.name} —— 磁盘上的目录一个字节都没动。`, "ok");
+  showToast(t("shell.toast.removedTitle"), t("shell.toast.removedNote", { name: p.name }), "ok");
 }
 
 // ---------------------------------------------------------------------------
@@ -1240,48 +1253,49 @@ function projMenuItems(p, inPool) {
      ⚠️ 「从列表移除」这一项**做灰不做隐**（不可用的动作做灰、不做禁、不做隐 ——
      禁了 title 不弹，隐了用户以为功能没了）。它在这里出现的作用是把
      "为什么没有这个动作"说出来，像 Claude / Codex 桌面端对它们那个默认项目一样。 */
+  const newHere = () => ({
+    act: "new", icon: ICON_PLAY, label: t("shell.menu.newHere"),
+    hint: t("shell.menu.newHereHint", { path: p.path || "", tip: newAgentShortcutTip() }),
+  });
   if (p && p.synthetic) {
     return [
-      { act: "new", icon: ICON_PLAY, label: "在这个目录新开一个 agent",
-        hint: `先打开新建卡片选 Agent（会预选这个文件夹上次用的）：${p.path}` + newAgentShortcutTip() },
+      newHere(),
       { sep: true },
-      { act: "opendir", icon: ICON_DIR, label: "打开这个目录", hint: p.path },
-      { act: "reveal", icon: ICON_DIR, label: "在资源管理器里定位", hint: p.path },
-      { act: "copy", icon: ICON_COPY, label: "复制路径", hint: p.path },
+      { act: "opendir", icon: ICON_DIR, label: t("shell.menu.openDir"), hint: p.path },
+      { act: "reveal", icon: ICON_DIR, label: t("shell.menu.reveal"), hint: p.path },
+      { act: "copy", icon: ICON_COPY, label: t("shell.menu.copyPath"), hint: p.path },
       { sep: true },
-      { act: "remove", icon: ICON_TRASH, label: "从列表移除", cls: " na",
-        hint: "默认工作区删不掉 —— 它不是一个项目条目，而是「没归到别的项目里的东西」"
-            + "的落点。它不在 projects.json 里，所以也没有可删的记录。" },
+      { act: "remove", icon: ICON_TRASH, label: t("shell.menu.remove"), cls: " na",
+        hint: t("shell.menu.defaultRemoveHint") },
     ];
   }
   if (!inPool) {
     return [
-      { act: "adopt", icon: ICON_PLUS, label: "收编为项目",
-        hint: `把这个目录加进项目池：${p.path}` },
+      { act: "adopt", icon: ICON_PLUS, label: t("shell.menu.adopt"),
+        hint: t("shell.menu.adoptHint", { path: p.path || "" }) },
       { sep: true },
-      { act: "new", icon: ICON_PLAY, label: "在这个目录新开一个 agent",
-        hint: `先打开新建卡片选 Agent（会预选这个文件夹上次用的）：${p.path}` + newAgentShortcutTip() },
+      newHere(),
       { sep: true },
-      { act: "opendir", icon: ICON_DIR, label: "打开这个目录", hint: p.path },
-      { act: "reveal", icon: ICON_DIR, label: "在资源管理器里定位", hint: p.path },
-      { act: "copy", icon: ICON_COPY, label: "复制路径", hint: p.path },
+      { act: "opendir", icon: ICON_DIR, label: t("shell.menu.openDir"), hint: p.path },
+      { act: "reveal", icon: ICON_DIR, label: t("shell.menu.reveal"), hint: p.path },
+      { act: "copy", icon: ICON_COPY, label: t("shell.menu.copyPath"), hint: p.path },
     ];
   }
   return [
-    { act: "pin", icon: ICON_PIN, label: p.pinned ? "取消置顶" : "置顶",
-      hint: p.pinned ? "取消置顶 —— 回到按最近活动排序" : "置顶到列表最前（Orca 的 Pinned 分区）" },
-    { act: "rename", icon: ICON_PENCIL, label: "重命名",
-      hint: `只改左栏显示的名字，磁盘上的目录不动：${p.path}` },
+    { act: "pin", icon: ICON_PIN,
+      label: p.pinned ? t("shell.menu.unpin") : t("shell.menu.pin"),
+      hint: p.pinned ? t("shell.menu.unpinHint") : t("shell.menu.pinHint") },
+    { act: "rename", icon: ICON_PENCIL, label: t("live.menu.rename"),
+      hint: t("shell.menu.renameDirHint", { path: p.path || "" }) },
     { sep: true },
-    { act: "new", icon: ICON_PLAY, label: "在这个目录新开一个 agent",
-      hint: `先打开新建卡片选 Agent（会预选这个文件夹上次用的）：${p.path}` + newAgentShortcutTip() },
+    newHere(),
     { sep: true },
-    { act: "opendir", icon: ICON_DIR, label: "打开这个目录", hint: p.path },
-    { act: "reveal", icon: ICON_DIR, label: "在资源管理器里定位", hint: p.path },
-    { act: "copy", icon: ICON_COPY, label: "复制路径", hint: p.path },
+    { act: "opendir", icon: ICON_DIR, label: t("shell.menu.openDir"), hint: p.path },
+    { act: "reveal", icon: ICON_DIR, label: t("shell.menu.reveal"), hint: p.path },
+    { act: "copy", icon: ICON_COPY, label: t("shell.menu.copyPath"), hint: p.path },
     { sep: true },
-    { act: "remove", icon: ICON_TRASH, label: "从列表移除",
-      hint: "只从这个列表里摘掉，磁盘上的目录一个字节都不动。（删除到回收站还没做）" },
+    { act: "remove", icon: ICON_TRASH, label: t("shell.menu.remove"),
+      hint: t("shell.menu.removeHint") },
   ];
 }
 
@@ -1297,7 +1311,7 @@ function openProjMenu(row, anchor, alignRight) {
   cardMenuClosed = null;
   cardMenuRowEl = null;
   cardMenuProj = { path, name: p.name, pinned: !!p.pinned, inPool, synthetic: !!p.synthetic };
-  const head = `<div class="mhead" title="${esc(p.path || "（没有工作目录）")}">`
+  const head = `<div class="mhead" title="${esc(p.path || t("shell.projects.noCwd"))}">`
     + `${esc(p.name)}</div>`;
   showMenuAt(head, projMenuItems(p, inPool), r, alignRight !== false,
     `项目 ${p.name} 路径=${p.path}`);
@@ -1307,44 +1321,41 @@ function openProjMenu(row, anchor, alignRight) {
    和项目菜单同一个出口（#cardmenu / showMenuAt），靠"讲的是谁"分流：
    `cardMenuAgent` 里有格对象时就是这一份。菜单项**不许**再出现"会话"这个词：
    用户定的模型里，agent 代表这件事的全部，右栏对话流就是它的记录。 */
-function agentMenuItems(t) {
-  const stopped = !!t.connDown;
-  const sid = t.sessionID || "";
-  const dir = effCwd(t);
+function agentMenuItems(tab) { // 参数别叫 t：会遮住 i18n 的 t()
+  const stopped = !!tab.connDown;
+  const sid = tab.sessionID || "";
+  const dir = effCwd(tab);
   // 改名的主语是会话 id（titles.json 的键）。还没报出身份 = 没有可写的键 ——
   // 做灰并把原因说出来（同"不可用做灰不做隐"）。
   const canRename = !!sid;
   return [
-    { act: "go", icon: ICON_PLAY, label: stopped ? "接上这个 agent" : "跳到这一格",
-      hint: stopped
-        ? "在同一座位接上它上次的对话（paneId 不变），座位序也不变"
-        : `第 ${t.id} 格` },
+    { act: "go", icon: ICON_PLAY,
+      label: stopped ? t("shell.menu.goResume") : t("shell.menu.goOpen"),
+      hint: stopped ? t("shell.menu.goResumeHint") : t("shell.menu.goOpenHint", { id: tab.id }) },
     // 在跑的才有「停止」；停了的这条由上面的「接上」顶上（同一颗按钮位置）。
-    ...(stopped ? [] : [{ act: "stop", icon: ICON_STOP, label: "停止这个 agent",
-      hint: "给这一格的终端发 /exit —— 它走自己的退出路径，正在跑的那一轮会先收尾。"
-          + "\n停了它还在：这一行变成「已停止」，座位和记录都留着，点一下就能接上。"
-          + "\n想立刻掐断：进格子按两下 Ctrl+C。" }]),
-    { act: "rename", icon: ICON_PENCIL, label: "重命名", cls: canRename ? "" : " na",
+    ...(stopped ? [] : [{ act: "stop", icon: ICON_STOP, label: t("shell.menu.stop"),
+      hint: t("shell.menu.stopHint") }]),
+    { act: "rename", icon: ICON_PENCIL, label: t("live.menu.rename"), cls: canRename ? "" : " na",
       hint: canRename
-        ? (STATE?.titles?.[sid] ? `现在叫「${STATE.titles[sid]}」` : "这个 agent 还没有名字")
-          + "\n只改显示名，不动磁盘上的对话文件；清空 = 取消命名"
-        : "这个 agent 还没报出会话 id —— 等它起来再改名" },
+        ? (STATE?.titles?.[sid]
+            ? t("live.menu.renameNow", { name: STATE.titles[sid] })
+            : t("shell.menu.renameNoneAgent"))
+          + "\n" + t("shell.menu.renameHint")
+        : t("shell.menu.renameNoId") },
     { sep: true },
-    { act: "new", icon: ICON_PLUS, label: "在这个工作区新开一个 agent",
-      hint: `打开新建卡片先选 Agent（会预选这个文件夹上次用的）。\n`
-          + `新 agent 是一条**全新的对话**（不在这一条上续）：${dir || "（默认工作区）"}`
+    { act: "new", icon: ICON_PLUS, label: t("shell.menu.newHereWs"),
+      hint: t("shell.menu.newHereWsHint", { dir: dir || t("shell.menu.defaultDir") })
           + newAgentShortcutTip() },
     { sep: true },
-    { act: "opendir", icon: ICON_DIR, label: "打开工作目录", cls: dir ? "" : " na",
-      hint: dir || "这一格没有工作目录" },
-    { act: "copy", icon: ICON_COPY, label: "复制工作目录", cls: dir ? "" : " na",
-      hint: dir || "这一格没有工作目录" },
+    { act: "opendir", icon: ICON_DIR, label: t("live.menu.openCwd"), cls: dir ? "" : " na",
+      hint: dir || t("shell.menu.noDir") },
+    { act: "copy", icon: ICON_COPY, label: t("shell.menu.copyDir"), cls: dir ? "" : " na",
+      hint: dir || t("shell.menu.noDir") },
     { sep: true },
     /* 「结束」= 用户明确不要这个 agent 了。**文件不删、记录删** —— 这两句话
        必须在 title 里说全，否则看起来像"删掉我的工作"。 */
-    { act: "end", icon: ICON_TRASH, label: "结束这个 agent",
-      hint: "关掉这一格并释放它的座位（paneId 记录一起摘掉）。"
-          + "\n磁盘上的对话文件一个字节都不动 —— 要接着干，就在这个目录新开一个 agent，让它读最新进度" },
+    { act: "end", icon: ICON_TRASH, label: t("shell.menu.end"),
+      hint: t("shell.menu.endHint") },
   ];
 }
 
@@ -1364,38 +1375,41 @@ function openAgentMenu(t, anchor, alignRight, rowEl) {
     agentMenuItems(t), r, alignRight !== false, `agent tab=${t.id} pane=${t.paneID || 0}`);
 }
 
-function doAgentAct(act, el, t, rowEl) {
+function doAgentAct(act, el, tab, rowEl) { // 参数别叫 t：会遮住 i18n 的 t()
   if (el && el.classList.contains("na")) {
-    showToast(miLabel(el) || "这件事现在做不了", el.title, "err"); return;
+    showToast(miLabel(el) || t("shell.toast.cantNow"), el.title, "err"); return;
   }
-  if (!t) return;
+  if (!tab) return;
   switch (act) {
     case "go":
-      if (t.connDown) resumeAgentInSeat(t);
-      else jumpInto(t, "左栏 agent 菜单");
+      if (tab.connDown) resumeAgentInSeat(tab);
+      else jumpInto(tab, "左栏 agent 菜单");
       break;
-    case "stop": stopAgent(t); break;
+    case "stop": stopAgent(tab); break;
     case "rename": {
-      const sid = t.sessionID || "";
+      const sid = tab.sessionID || "";
       const nm = liveNmEl(sid, rowEl && rowEl.querySelector(".nm"));
       if (!sid || !nm) {
-        showToast("改不了名", "这个 agent 还没报出会话 id —— 等它起来再试。", "err"); return;
+        showToast(t("shell.toast.renameFailedTitle"), t("shell.toast.renameFailedNoId"), "err");
+        return;
       }
       openSessionRename({ id: sid }, nm);
       break;
     }
-    case "new": openNewSpace({ folder: effCwd(t), why: "左栏 agent 菜单" }); break;
+    case "new": openNewSpace({ folder: effCwd(tab), why: "左栏 agent 菜单" }); break;
     case "opendir": {
-      const d = effCwd(t);
+      const d = effCwd(tab);
       if (d) sendCtrl({ type: "open", mode: "open", path: d });
       break;
     }
     case "copy": {
-      const d = effCwd(t);
-      if (d) copyText(d).then((ok) => { if (ok) showToast("已复制工作目录", d, "ok", true); });
+      const d = effCwd(tab);
+      if (d) copyText(d).then((ok) => {
+        if (ok) showToast(t("shell.toast.copiedCwd"), d, "ok", true);
+      });
       break;
     }
-    case "end": endAgent(t); break;
+    case "end": endAgent(tab); break;
   }
 }
 
@@ -1411,29 +1425,29 @@ function closedMenuItems(r) {
   return [
     /* 接不上的那条**做灰不做隐**（同"不可用的动作做灰"那条例）：点它会把原因
        说出来（见 doClosedAct），而不是从菜单里悄悄消失、让用户以为功能坏了。 */
-    { act: "go", icon: ICON_PLAY, label: dead ? "接不上这个 agent" : "接上这个 agent",
+    { act: "go", icon: ICON_PLAY,
+      label: dead ? t("shell.closed.deadMenuLabel") : t("shell.menu.goResume"),
       cls: dead ? " na" : "",
-      hint: dead ? closedWhy(r)
-        : "在原座位接上它上次的对话（paneId 不变）。\n它现在是「已关闭」—— 只是关掉了，没有删。" },
-    { act: "rename", icon: ICON_PENCIL, label: "重命名", cls: canRename ? "" : " na",
+      hint: dead ? closedWhy(r) : t("shell.menu.resumeClosedHint") },
+    { act: "rename", icon: ICON_PENCIL, label: t("live.menu.rename"), cls: canRename ? "" : " na",
       hint: canRename
-        ? (STATE?.titles?.[sid] ? `现在叫「${STATE.titles[sid]}」` : "这个 agent 还没有名字")
-          + "\n只改显示名，不动磁盘上的对话文件；清空 = 取消命名"
-        : "这个 agent 没报出过会话 id —— 没有可改名的那条记录" },
+        ? (STATE?.titles?.[sid]
+            ? t("live.menu.renameNow", { name: STATE.titles[sid] })
+            : t("shell.menu.renameNoneAgent"))
+          + "\n" + t("shell.menu.renameHint")
+        : t("shell.menu.renameNoIdClosed") },
     { sep: true },
-    { act: "new", icon: ICON_PLUS, label: "在这个工作区新开一个 agent",
-      hint: `打开新建卡片先选 Agent（会预选这个文件夹上次用的）。\n`
-          + `新 agent 是一条**全新的对话**（不在这一条上续）：${dir || "（默认工作区）"}`
+    { act: "new", icon: ICON_PLUS, label: t("shell.menu.newHereWs"),
+      hint: t("shell.menu.newHereWsHint", { dir: dir || t("shell.menu.defaultDir") })
           + newAgentShortcutTip() },
     { sep: true },
-    { act: "opendir", icon: ICON_DIR, label: "打开工作目录", cls: dir ? "" : " na",
-      hint: dir || "它没有工作目录" },
-    { act: "copy", icon: ICON_COPY, label: "复制工作目录", cls: dir ? "" : " na",
-      hint: dir || "它没有工作目录" },
+    { act: "opendir", icon: ICON_DIR, label: t("live.menu.openCwd"), cls: dir ? "" : " na",
+      hint: dir || t("shell.menu.noDirClosed") },
+    { act: "copy", icon: ICON_COPY, label: t("shell.menu.copyDir"), cls: dir ? "" : " na",
+      hint: dir || t("shell.menu.noDirClosed") },
     { sep: true },
-    { act: "end", icon: ICON_TRASH, label: "结束这个 agent",
-      hint: "把它的记录也摘掉 —— 以后工作区里不会再出现这一行。"
-          + "\n磁盘上的对话文件一个字节都不动。" },
+    { act: "end", icon: ICON_TRASH, label: t("shell.menu.end"),
+      hint: t("shell.menu.endClosedHint") },
   ];
 }
 
@@ -1455,10 +1469,10 @@ function doClosedAct(act, el, r, rowEl) {
   if (!r) return;
   // 「接不上」那一项是灰的，但**可点**：点一下把原因原样说出来（不是静默不动）。
   if (act === "go" && closedUnresumable(r)) {
-    showToast("这个 agent 接不上", closedWhy(r), "err"); return;
+    showToast(t("shell.closed.resumeFailTitle"), closedWhy(r), "err"); return;
   }
   if (el && el.classList.contains("na")) {
-    showToast(miLabel(el) || "这件事现在做不了", el.title, "err"); return;
+    showToast(miLabel(el) || t("shell.toast.cantNow"), el.title, "err"); return;
   }
   switch (act) {
     case "go": resumeClosedPane(r); break;
@@ -1466,7 +1480,9 @@ function doClosedAct(act, el, r, rowEl) {
       const sid = r.sessionId || "";
       const nm = liveNmEl(sid, rowEl && rowEl.querySelector(".nm"));
       if (!sid || !nm) {
-        showToast("改不了名", "这个 agent 没报出过会话 id。", "err"); return;
+        showToast(t("shell.toast.renameFailedTitle"),
+          t("shell.toast.renameFailedNoIdClosed"), "err");
+        return;
       }
       openSessionRename({ id: sid }, nm);
       break;
@@ -1479,7 +1495,9 @@ function doClosedAct(act, el, r, rowEl) {
     }
     case "copy": {
       const d = r.cwd || defaultWorkspacePath();
-      if (d) copyText(d).then((ok) => { if (ok) showToast("已复制工作目录", d, "ok", true); });
+      if (d) copyText(d).then((ok) => {
+        if (ok) showToast(t("shell.toast.copiedCwd"), d, "ok", true);
+      });
       break;
     }
     case "end": endClosedPane(r); break;
@@ -1495,7 +1513,7 @@ function doClosedAct(act, el, r, rowEl) {
 function doProjAct(act, el, p) {
   // 灰的项**可点**：点一下把 title 里那句原因原样说出来（同 doCardAct，理由见那儿）。
   if (el && el.classList.contains("na")) {
-    showToast(miLabel(el) || "这件事现在做不了", el.title, "err"); return;
+    showToast(miLabel(el) || t("shell.toast.cantNow"), el.title, "err"); return;
   }
   p = p || cardMenuProj;
   if (!p) return;
@@ -1506,12 +1524,14 @@ function doProjAct(act, el, p) {
     case "new":     openNewSpace({ folder: p.path, why: "项目菜单「新建 agent」" }); break;
     case "opendir": sendCtrl({ type: "open", mode: "open", path: p.path }); break;
     case "reveal":  sendCtrl({ type: "open", mode: "reveal", path: p.path }); break;
-    case "copy":    copyText(p.path).then((ok) => { if (ok) showToast("已复制路径", p.path, "ok", true); }); break;
+    case "copy":    copyText(p.path).then((ok) => {
+      if (ok) showToast(t("shell.toast.copiedPath"), p.path, "ok", true);
+    }); break;
     // 默认工作区那条是灰的，点它走的是上面那句 na 分支（把原因说出来）；这一行是
     // 兜底：万一哪天真给它挂上一颗不灰的移除键，也只是提示、不真删。
     case "remove":  if (p.synthetic) {
-                      showToast("默认工作区删不掉",
-                        "它不在项目池里，所以没有可删的记录。", "err"); break;
+                      showToast(t("shell.toast.defaultRemoveTitle"),
+                        t("shell.toast.defaultRemoveNote"), "err"); break;
                     }
                     removeProj(p); break;
   }
@@ -1542,8 +1562,8 @@ function beginProjRename(path) {
   const input = document.createElement("input");
   input.type = "text";
   input.className = "tab-input";
-  input.placeholder = "显示名";
-  input.setAttribute("aria-label", "重命名这个项目（只改显示名）");
+  input.placeholder = t("shell.rename.placeholder");
+  input.setAttribute("aria-label", t("shell.rename.aria"));
   input.value = p ? p.name : nm.textContent;
   input.addEventListener("keydown", (e) => {
     // ⚠️ 中文输入法确认候选词的那个 Enter 不是"提交"（同标签重命名）。
@@ -1633,7 +1653,7 @@ function onLeftClick(e) {
     ct.classList.toggle("open", on);
     ct.setAttribute("aria-expanded", on ? "true" : "false");
     const n = ct.querySelector(".ctcount")?.textContent || "";
-    ct.title = on ? "收起已关闭的 agent" : `展开 ${n} 个已关闭的 agent`;
+    ct.title = on ? t("shell.closed.toggleCollapse") : t("shell.closed.toggleExpand", { n });
     // 也在原地切，不重画 —— 和 toggleProj 同一条理由。
     const list = ct.nextElementSibling;
     if (list && list.classList.contains("closed-list")) list.hidden = !on;
@@ -1738,10 +1758,10 @@ $("rail").addEventListener("click", (e) => {
   if (el.dataset.soon) {
     /* title 的写法是「还没做的面板（后面会有什么）」—— 正好拆成标题和正文。
        括号前那半句是"是什么"，括号里是"还会有什么"，一卡两行，别让标题只剩「还没做」。 */
-    const t = el.title || "";
-    const i = t.indexOf("（");
-    showToast(i > 0 ? t.slice(0, i) : (t || "还没做"),
-      i > 0 ? t.slice(i + 1).replace(/）\s*$/, "") : "", "info");
+    const ti = el.title || "";
+    const i = ti.search(/[（(]/);
+    showToast(i > 0 ? ti.slice(0, i) : (ti || t("nav.soon")),
+      i > 0 ? ti.slice(i + 1).replace(/[）)]\s*$/, "") : "", "info");
     return;
   }
   const v = el.dataset.view;
@@ -1777,7 +1797,7 @@ $("add-proj").addEventListener("click", () => {
 // Go 算的，前端没有"哪些行要挪"的局部信息。这条消息只在池子动作时来（低频）。
 function applyPool(m) {
   if (!m) return;
-  if (m.err) showToast("项目池出错了", m.err, "err");
+  if (m.err) showToast(t("shell.pool.errorTitle"), m.err, "err");
   if (Array.isArray(m.projects)) STATE.projects = m.projects;
   if (m.assign && typeof m.assign === "object") STATE.assign = m.assign;
   STATE.poolErr = m.err || "";
@@ -1796,7 +1816,7 @@ function applyPool(m) {
       const fresh = (m.projects || []).find((p) => p && p.path && !newWsPending.has(p.path));
       if (fresh) {
         newWsPending = null;
-        showToast("工作区已添加", fresh.name || fresh.path, "ok");
+        showToast(t("shell.pool.added"), fresh.name || fresh.path, "ok");
         setNavView("workspace");
       }
     }
@@ -1810,14 +1830,15 @@ function applyPool(m) {
 
 function poolErrText() {
   if (STATE?.poolErr) return STATE.poolErr;
-  if (!Array.isArray(STATE?.projects)) return "这次没带项目池（Go 侧没起来）";
+  if (!Array.isArray(STATE?.projects)) return t("shell.pool.missing");
   return "";
 }
 function syncPoolBanner() {
   const slot = $("pool-err-slot");
   if (!slot) return;
-  const t = poolErrText();
-  slot.innerHTML = t ? `<div class="poolerr">项目池读不出来：${esc(t)}</div>` : "";
+  const err = poolErrText(); // 别叫 t：会遮住 i18n 的 t()
+  slot.innerHTML = err
+    ? `<div class="poolerr">${esc(t("shell.pool.error", { err }))}</div>` : "";
 }
 
 function renderShell() {

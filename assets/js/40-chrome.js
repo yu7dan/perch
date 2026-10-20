@@ -28,8 +28,8 @@ function syncMaxButton() {
     icoMax.classList.toggle("off", m);
     icoRestore.classList.toggle("off", !m);
     const btn = $("wc-max");
-    btn.title = m ? "向下还原" : "最大化";
-    btn.setAttribute("aria-label", m ? "向下还原" : "最大化");
+    btn.title = m ? t("chrome.restore") : t("chrome.maximize");
+    btn.setAttribute("aria-label", m ? t("chrome.restore") : t("chrome.maximize"));
   });
 }
 $("wc-min").addEventListener("click", () => Window.Minimise());
@@ -324,9 +324,9 @@ function svg(paths, size, w) {
     stroke="currentColor" stroke-width="${w || 2.1}" stroke-linecap="round"
     stroke-linejoin="round">${paths}</svg>`;
 }
-// 状态 → 中文标签（格子头的 title/aria 用）。Orca 的 agentStateLabel 是同一件事。
-const DOT_LABEL = { idle: "空闲", working: "工作中", off: "已断开",
-                    ask: "在等你", unread: "有新消息", failed: "出错了" };
+// 状态点认识的那几个态（格子头的 title/aria 文字在 i18n 的 state.* 里；
+// 这里只当"是不是已知状态"的判据用，不存文字 —— 存一份中文就是第二份会漂的措辞）。
+const DOT_STATES = new Set(["idle", "working", "off", "ask", "unread", "failed"]);
 
 function renderRsbMods() {
   for (const b of document.querySelectorAll("#rsb-bar .arbtn")) {
@@ -851,7 +851,7 @@ function renderCollapseBtn() {
   // 它住在标签条右侧（.icon-btn，26×26），是 `.tabs-right` 的最后一个孩子 ——
   // 右栏开着时它就顶在中栏右沿上（那条几何见 .window-controls-titlebar-spacer）。
   $("p-collapse").innerHTML = lucide(collapsed ? LUCIDE_PANEL_LEFT_OPEN : LUCIDE_PANEL_LEFT_CLOSE, 15);
-  $("p-collapse").title = collapsed ? "展开终端面板" : "收起终端面板";
+  $("p-collapse").title = collapsed ? t("chrome.expandPanel") : t("chrome.collapsePanel");
 }
 renderCollapseBtn();
 
@@ -912,7 +912,7 @@ function rsbPaintOpen() {
   const b = $("rsb-open");
   if (!b) return;
   b.classList.toggle("mute", collapsed);
-  b.title = collapsed ? "展开终端面板后可用" : "展开右栏 (Ctrl+Shift+B)";
+  b.title = collapsed ? t("chrome.expandPanelDisabled") : t("chrome.expandRight.title");
 }
 
 $("p-collapse").addEventListener("click", () => setTermCollapsed(!collapsed));
@@ -1000,7 +1000,9 @@ function groupRows() {
    列表的活儿；条上这个位置表达的是"谁坐在哪"，跟着状态变来变去反而找不到人。
    点一枚 = 去那一格（和点气泡同一件事，走同一条路）。 */
 function renderGroupHead(head) {
-  const sig = groupTabs().map((t) => t.id).join(",") + "|" + (activeTab ? activeTab.id : 0);
+  // 语言进签名：`+` 那颗键的 title 是现画的，切语言时整条要重画一次。
+  const sig = groupTabs().map((t) => t.id).join(",") + "|" +
+    (activeTab ? activeTab.id : 0) + "|" + PERCH_LOCALE;
   if (head.dataset.sig !== sig) {
     head.dataset.sig = sig;
     head.innerHTML = groupTabs().map((t) =>
@@ -1009,7 +1011,7 @@ function renderGroupHead(head) {
         `<span class="tab-ico">${agentTabIcon(t.spec.agent, 13)}</span>` +
         dotHTML(cellState(t)) +
       `</span>`).join("") +
-      `<button id="group-add" title="新开一个并行 agent" aria-label="新开一个并行 agent">` +
+      `<button id="group-add" title="${esc(t("group.add"))}" aria-label="${esc(t("group.add"))}">` +
         `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"` +
         ` stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>` +
       `</button>`;
@@ -1034,9 +1036,9 @@ function renderGroupList(list) {
   const rows = groupRows();
 
   if (!rows.length) {
-    if (!list.querySelector(".gempty")) {
-      list.innerHTML = `<div class="gempty hist-empty">这个工作区里还没有 agent。</div>`;
-    }
+    const empty = list.querySelector(".gempty");
+    if (!empty) list.innerHTML = `<div class="gempty hist-empty">${esc(t("group.empty"))}</div>`;
+    else empty.textContent = t("group.empty");   // 切语言时就地换那一句
     list.dataset.order = "";
     return;
   }
@@ -1068,14 +1070,14 @@ function renderGroupList(list) {
   // ③ 内容
   for (const r of rows) {
     const el = list.querySelector(`.grow[data-gtab="${r.t.id}"]`);
-    const t = r.t;
-    const nm = realTabTitle(t);
+    const tab = r.t; // 别叫 t：会遮住 i18n 的 t()
+    const nm = realTabTitle(tab);
     // 标题为空 → 退化成状态词，**不留空行**（Orca DashboardAgentRow.tsx:143-148 同判据）
-    const stWord = DOT_LABEL[r.st] || r.st;
+    const stWord = DOT_STATES.has(r.st) ? t("state." + r.st) : r.st;
     const name = nm || stWord;
 
     const g1 = el.querySelector(".g1");
-    const s1 = [r.st, name, t === activeTab ? "cur" : ""].join("\u0001");
+    const s1 = [r.st, name, tab === activeTab ? "cur" : "", PERCH_LOCALE].join("\u0001");
     if (g1.dataset.sig !== s1) {
       g1.dataset.sig = s1;
       g1.innerHTML = dotHTML(r.st) + `<span class="nm" title="${esc(nm)}">${esc(name)}</span>`;
@@ -1089,8 +1091,10 @@ function renderGroupList(list) {
     const line2 = (r.ask || r.perm) ? ""
       : (r.latest && r.latest.text) || (r.v && r.v.note && r.v.note.text) || stWord;
     const g2 = el.querySelector(".g2");
-    if (g2.dataset.sig !== line2) {
-      g2.dataset.sig = line2;
+    // 末级回落是状态词（随语言变），所以签名要带上语言；正文本身不带。
+    const s2 = [line2, PERCH_LOCALE].join("\u0001");
+    if (g2.dataset.sig !== s2) {
+      g2.dataset.sig = s2;
       // 渲染**行内**标记，和右栏那条流同一套（同一份东西两处呈现不能一处渲染
       // 一处直出 —— 实测里它当场吐出了原文的 `**Blue**`）。用 mdInline 不用 md：
       // 这一行是单行省略的摘要，md() 会给围栏代码吐 <pre>，把这一行顶变形。
@@ -1101,16 +1105,16 @@ function renderGroupList(list) {
     const at = (r.ask && r.ask.at) || (r.perm && r.perm.at) ||
       (r.latest && r.latest.at) || (r.v && r.v.at) || "";
     const g3 = el.querySelector(".g3");
-    const s3 = [at, t === activeTab ? "cur" : ""].join("\u0001");
+    const s3 = [at, tab === activeTab ? "cur" : "", PERCH_LOCALE].join("\u0001");
     if (g3.dataset.sig !== s3) {
       g3.dataset.sig = s3;
-      g3.innerHTML = `<span class="tab-ico">${agentTabIcon(t.spec.agent, 12)}</span><span>格 ${t.id}</span>` +
+      g3.innerHTML = `<span class="tab-ico">${agentTabIcon(tab.spec.agent, 12)}</span><span>${esc(t("group.pane", { id: tab.id }))}</span>` +
         // 时间节点带 .tm + data-at：相对时间会随时间长歪，靠下面那个 60s 的定时
         // 刷新按 data-at 重算（和对话流里的时间节点是**同一个**机制，不是两套）。
         (at ? `<span>·</span>` +
           `<span class="tm" data-at="${esc(at)}" title="${esc(absTime(at))}">${esc(rel(at))}</span>`
           : "") +
-        `<button class="go" data-go="${t.id}">进入 →</button>`;
+        `<button class="go" data-go="${tab.id}">${esc(t("group.enter"))}</button>`;
     }
 
     /* ④ 待办卡 —— 这一行**唯一的动作区**（这一行其余的地方都是"进那一格"的落点）。
@@ -1169,6 +1173,8 @@ function askBlockSig(a) {
      （要等整张提问收尾、转录把 answers 落下来才被顶掉）。这是个"界面在说自己不知道
      一件它知道的事"，比没有这块显示更糟。 */
   return "ask:" + (a.id || "") + ":" + (a.ok == null ? "pending" : "done") +
+    // 语言也是这张卡的内容：卡里每个字都是现画的，切语言时签名要变才会重画。
+    ":" + PERCH_LOCALE +
     ":" + JSON.stringify(a.answers || null) +
     ":" + JSON.stringify(answerPick.get(a.id) || null) +
     ":" + JSON.stringify(answerErr.get(a.id) || null) +

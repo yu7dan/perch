@@ -21,24 +21,24 @@
 // 一张页 = 一个标签元素，外观和「并行」同一套（所以 #tablist .tab 那几条直接
 // 生效）。元素挂在标签对象上，和格子头一样**建一次就不重建**（重命名会把 .nm
 // 换成输入框，重建等于把用户正在打的字连输入框一起删掉）。
-function makePageEl(t) {
-  if (t.pageEl) return t.pageEl;
+function makePageEl(tab) { // 参数别叫 t：会遮住 i18n 的 t()
+  if (tab.pageEl) return tab.pageEl;
   const el = document.createElement("div");
   el.className = "tab";
   el.innerHTML =
-    `<span class="adot" data-state="idle" role="img" aria-label="空闲"></span>` +
+    `<span class="adot" data-state="idle" role="img" aria-label="${esc(t("state.idle"))}"></span>` +
     `<span class="tab-ico"></span>` +
     `<span class="nm ell"></span>` +
-    `<span class="x" title="关闭页面（agent 回到网格，不会结束它）">×</span>`;
-  t.pageEl = el;
-  t.pageDotEl = el.querySelector(".adot");
-  t.pageIcoEl = el.querySelector(".tab-ico");
-  t.pageNmEl = el.querySelector(".nm");
-  t.pageIcoEl.innerHTML = agentTabIcon(t.spec.agent, 12);
+    `<span class="x" title="${esc(t("pages.closeTitle"))}">×</span>`;
+  tab.pageEl = el;
+  tab.pageDotEl = el.querySelector(".adot");
+  tab.pageIcoEl = el.querySelector(".tab-ico");
+  tab.pageNmEl = el.querySelector(".nm");
+  tab.pageIcoEl.innerHTML = agentTabIcon(tab.spec.agent, 12);
   // 名字和状态点**直接跟格子头同源**（同一对渲染函数，见它们的双写那段）——
   // 界面上同一个 agent 的两个落点必须永远说同一句话。
-  renderTabTitle(t);
-  renderAgentDot(t);
+  renderTabTitle(tab);
+  renderAgentDot(tab);
   $("tablist").appendChild(el);
   return el;
 }
@@ -530,14 +530,14 @@ function defaultSpawnSpec() {
 function opCapsText(a) {
   const c = (a && a.caps) || {};
   const parts = [];
-  if (c.status) parts.push("状态");
-  if (c.resume) parts.push("续接");
-  if (c.actions) parts.push("动作");
-  return parts.length ? parts.join(" · ") : "仅启动";
+  if (c.status) parts.push(t("pages.cap.status"));
+  if (c.resume) parts.push(t("pages.cap.resume"));
+  if (c.actions) parts.push(t("pages.cap.actions"));
+  return parts.length ? parts.join(" · ") : t("dash.agents.levelLaunch");
 }
 function opMechTitle(a) {
   const m = ((a && a.caps && a.caps.mechanism) || "").trim();
-  return m && m !== "terminal" ? `状态来源：${m}` : "只启动，没有状态接入";
+  return m && m !== "terminal" ? t("pages.stateSource", { m }) : t("pages.launchOnly");
 }
 function opAgentIcon(name) {
   // iconHTML 在 86-dash（和总览共用同一套图标规则）。运行期已求值；
@@ -560,12 +560,12 @@ function paintOpAgentSelection() {
   const a = opLaunchable(a0) ? a0 : null;
   const go = $("op-go");
   if (go) {
-    go.textContent = a ? `+ 新开一个 ${a.name}` : "+ 新开一个 agent";
+    go.textContent = a ? t("pages.go.openNamed", { name: a.name }) : t("pages.go.open");
     // 灰而不禁（用户定的规矩：禁用后 title 不弹）：点击时说清楚为什么。
     const na = !a;
     go.classList.toggle("na", na);
     go.setAttribute("aria-disabled", na ? "true" : "false");
-    go.title = na ? "没有检测到已安装、能启动的 Agent —— 去总览 → Agent 安装" : "";
+    go.title = na ? t("pages.go.noAgent") : "";
   }
   const defBtn = $("op-agdef");
   if (defBtn) {
@@ -573,17 +573,20 @@ function paintOpAgentSelection() {
     const na = !a || pinned === opAgent;
     defBtn.classList.toggle("na", na);
     defBtn.setAttribute("aria-disabled", na ? "true" : "false");
-    defBtn.title = !a ? "先选一个 Agent"
-      : pinned === opAgent ? "这一位已经是默认 Agent"
-        : `把 ${a.name} 设为新建格子的默认 Agent`;
+    defBtn.title = !a ? t("pages.def.pick")
+      : pinned === opAgent ? t("pages.def.isDefault")
+        : t("pages.def.set", { name: a.name });
   }
   const tip = $("op-agtip");
   if (tip) {
     const def0 = opAgentById(defaultAgentId());
     const def = opLaunchable(def0) ? def0 : null;
     tip.textContent = def
-      ? `默认：${def.name}${opDefaultPinned() === def.id ? "" : "（自动）"}`
-      : "没有可启动的 Agent";
+      ? t("pages.default.line", {
+          name: def.name,
+          auto: opDefaultPinned() === def.id ? "" : t("pages.default.autoSuffix"),
+        })
+      : t("pages.default.none");
     tip.title = tip.textContent;
   }
 }
@@ -606,8 +609,7 @@ function renderOpAgents() {
     return as - bs;
   });
   if (!list.length) {
-    listEl.innerHTML = `<div class="op-agempty">没有检测到已安装、能启动的 Agent。<br>` +
-      `去总览 → Agent 安装后再回来。</div>`;
+    listEl.innerHTML = `<div class="op-agempty">${t("pages.emptyAgents")}</div>`;
   } else {
     listEl.innerHTML = list.map((a) => {
       const on = a.id === opAgent;
@@ -617,7 +619,8 @@ function renderOpAgents() {
         `title="${esc(a.name + " · " + opMechTitle(a))}">` +
         `<span class="op-agico">${opAgentIcon(a.icon)}</span>` +
         `<span class="op-agwho"><span class="op-agnm">${esc(a.name)}` +
-          (isDef ? `<span class="op-agpill">${pinned === a.id ? "默认" : "自动"}</span>` : "") +
+          (isDef ? `<span class="op-agpill">${esc(pinned === a.id
+            ? t("pages.pill.default") : t("pages.pill.auto"))}</span>` : "") +
         `</span><span class="op-agsub">${esc(opCapsText(a))}</span></span>` +
         `<span class="op-agck" aria-hidden="true">` +
           `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" ` +
@@ -629,7 +632,10 @@ function renderOpAgents() {
   paintOpAgentSelection();
   if (catalogMissing) {
     const tip = $("op-agtip");
-    if (tip) { tip.textContent = "Agent 名单没送到，暂用 Claude Code"; tip.title = tip.textContent; }
+    if (tip) {
+      tip.textContent = t("pages.catalogFallback");
+      tip.title = tip.textContent;
+    }
   }
 }
 
@@ -655,7 +661,8 @@ function opSetDefaultAgent() {
   // Go 拒绝时会推回旧值（见 05-prefs / 85-settings 的文件头）。
   settingsSend({ defaultAgent: a.id }, `默认 Agent → ${a.id}`);
   renderOpAgents();
-  showToast(`默认 Agent 已设为 ${a.name}`, "以后新建的格子默认用它。", "ok");
+  showToast(t("pages.toast.defaultSetTitle", { name: a.name }),
+    t("pages.toast.defaultSetNote"), "ok");
 }
 
 function currentWorkspacePath() {
@@ -684,7 +691,7 @@ function renderOpWs() {
     `<option value="${esc(p.path)}">${esc(p.name)}</option>`).join("");
   $("op-ws").value = opWSPath;
   $("op-ws").disabled = opAllWs;
-  $("op-newpath").textContent = opWSPath || "（默认工作目录）";
+  $("op-newpath").textContent = opWSPath || t("pages.defaultWorkdir");
 }
 
 function opSessionCount() {
@@ -704,14 +711,15 @@ function opRowsHTML() {
   const list = hit.slice().sort((a, b) =>
     (Date.parse(b.updated || "") || 0) - (Date.parse(a.updated || "") || 0));
   if (!list.length) {
-    return `<div class="op-empty">${key ? "没找到匹配的会话"
-      : opAllWs ? "还没有历史会话" : "这个工作区里还没有历史会话"}</div>`;
+    return `<div class="op-empty">${esc(key
+      ? t("pages.sessions.noMatch")
+      : opAllWs ? t("pages.sessions.noHistory") : t("pages.sessions.noHistoryWs"))}</div>`;
   }
   return list.map((s) => {
     const why = resumeWhy(s);
     const live = why ? null : tabForSession(s.id);
-    const tag = live ? `<span class="op-tag">在第 ${live.id} 格</span>` : "";
-    const turn = s.turns ? `${s.turns} 轮` : "没存下往来";
+    const tag = live ? `<span class="op-tag">${esc(t("pages.inPane", { id: live.id }))}</span>` : "";
+    const turn = s.turns ? t("pages.turns", { n: s.turns }) : t("pages.noTurns");
     return `<button class="op-row${why ? " na" : ""}" data-sid="${esc(s.id)}"
       title="${esc(why || sessionTitle(s))}">
       <div class="op-row1"><span class="op-rowtitle">${esc(sessionTitle(s))}</span>${tag}</div>
@@ -783,7 +791,7 @@ function openAgentPanel(why) {
 async function opNewAgent() {
   const a = opAgentById(opAgent);
   if (!opLaunchable(a)) {
-    showToast("先选一个 Agent", "没有检测到已安装、能启动的 Agent。去总览 → Agent 安装。", "err");
+    showToast(t("pages.pickAgentTitle"), t("pages.pickAgentNote"), "err");
     sendCtrl({ type: "log", msg:
       `选择面板 新会话：没有可启动的 Agent（opAgent=${opAgent || "空"}），不发建格` });
     return;
@@ -798,7 +806,7 @@ async function opPick(s) {
   if (!s) return;
   const why = resumeWhy(s);
   if (why) {
-    showToast("接不上这条会话", why, "err");
+    showToast(t("live.resumeFailed"), why, "err");
     sendCtrl({ type: "log", msg: `选择面板 接不上会话 id=${s.id}（${why}）` });
     return;
   }
@@ -806,7 +814,8 @@ async function opPick(s) {
   closeAgentPanel(live ? "接着那一格" : "接上会话");
   if (live) {
     jumpToTab(live, "选择面板里已经在跑");
-    showToast("它已经开着了", `在第 ${live.id} 格，已经跳过去。`, "ok");
+    showToast(t("shell.closed.alreadyRunningTitle"),
+      t("pages.alreadyOpenNote", { id: live.id }), "ok");
     sendCtrl({ type: "log", msg: `选择面板 会话已在跑 id=${s.id} → 跳到 tab=${live.id}` });
     return;
   }

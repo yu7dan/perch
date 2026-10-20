@@ -96,7 +96,7 @@ function closedRowName(r) {
     const t = (STATE?.titles || {})[sid];
     if (t) return t;
   }
-  return r.name || "已关闭的 agent";
+  return r.name || t("pane.closedAgent");
 }
 function closedMatch(r, key) {
   if (!key) return true;
@@ -119,11 +119,7 @@ function closedUnresumable(r) {
    文件被删了；两种分开说，因为用户能做的判断不一样（"我还没让它干过活" vs
    "我的文件怎么没了"）。 */
 function closedWhy(r) {
-  const head = r.spoke
-    ? "它上次那条会话文件已经不在盘上了（可能被删了，或者在别的机器上）。"
-    : "它上次没说过话 —— 零轮次的会话在盘上本来就没有文件，所以没有内容可接。";
-  return head + " 这个 agent 的记录还在，这一行也留着 —— "
-    + "可以右键「在这个工作区新开一个 agent」，或者选「结束这个 agent」把它清掉。";
+  return r.spoke ? t("pane.closedWhy.spoke") : t("pane.closedWhy.zero");
 }
 
 /* 等那份清单，最多 800ms。**为什么不是直接 await 一个 promise**：清单是 ctl 通道上
@@ -384,18 +380,21 @@ function dispatchCtl(m) {
            · 会话 id 正是这件事有争议的那个东西。
          找不到就只记一行（用户可能已经把这一格关掉了）——绝不新建、绝不猜测。 */
       const p = m.pane | 0;
-      const t = TAB_LIST.find((x) => x.spec && x.spec.paneId && x.spec.paneId === p) || null;
-      if (!t) {
+      const tab = TAB_LIST.find((x) => x.spec && x.spec.paneId && x.spec.paneId === p) || null;
+      if (!tab) {
         sendCtrl({ type: "log", msg: `续接落空横幅：pane=${p} 已经不在界面上了（用户关掉了？），只落日志` });
         return;
       }
-      showCellBanner(t, {
+      showCellBanner(tab, {
         kind: "mismatch",
         // 屏幕上这一行只留"最该看见的那半句"；哪两个 id、claude 报了什么，进 title
         // （窄格子里放不下，而放不下的部分被省略号切掉时，留在开头的那半句才是要点）。
-        text: `接上来的不是上次那条会话 —— 记录里那条 id 没改`,
-        sub: `请求 ${m.want}（这就是记录里那条）· 实际 ${m.got}\n` +
-             `claude 报的 source=${m.source || "(未报)"}；盘上那条会话一个字没动，下次重开还会再试它`,
+        text: t("pane.mismatch.text"),
+        sub: t("pane.mismatch.sub", {
+          want: m.want,
+          got: m.got,
+          source: m.source || t("pane.mismatch.notReported"),
+        }),
       });
       return;
     }
@@ -507,7 +506,7 @@ function dispatchCtl(m) {
     case "settings": {
       // 默认目录的提交错误就地显示在输入框下面，不再弹 toast（85-settings.js）。
       const inline = typeof settingsMessageArrived === "function" && settingsMessageArrived(m);
-      if (m.err && !inline) showToast("设置没保存", m.err, "err");
+      if (m.err && !inline) showToast(t("ctl.settingsFailedTitle"), m.err, "err");
       if (m.settings) {
         applySettings(m.settings, {
           fromGo: true,
