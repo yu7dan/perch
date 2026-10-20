@@ -1172,15 +1172,17 @@ async function resumeClosedPane(r) {
   if (!nt || !TAB_LIST.includes(nt) || !nt.streamName) {
     r.busy = false;
     const ref = nt && nt.resumeRefused;
+    const refMsg = ref
+      ? tMsg(ref.msgCode, ref.msgParams, ref.msg || ref.code) : "";
     if (ref && ref.code === "unavailable") {
       // 盘上已经没有那条会话了：把这一行翻成「接不上」，下一次点它先说原因。
       r.onDisk = false;
       armRailRebuild();
       showToast(t("shell.closed.resumeFailTitle"), closedWhy(r), "err");
-      sendCtrl({ type: "log", msg: `已关闭的 agent 接不上 pane=${pane}：${ref.msg}` });
+      sendCtrl({ type: "log", msg: `已关闭的 agent 接不上 pane=${pane}：${refMsg}` });
     } else if (ref) {
       showToast(t("shell.closed.resumeFailTitle"),
-        t("shell.closed.resumeFailNote", { msg: ref.msg || ref.code }), "err");
+        t("shell.closed.resumeFailNote", { msg: refMsg }), "err");
     }
     return;
   }

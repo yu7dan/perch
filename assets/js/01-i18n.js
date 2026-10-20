@@ -1056,6 +1056,14 @@ const PERCH_I18N = {
 
     "msg.diff.timeout": "Timed out (the transcript follower did not answer)",
 
+    "msg.refusal.latestPane": "Pane {pane} is running session {session} — --continue would pick the same one, and two processes writing it would destroy it. Use + for a new session.",
+    "msg.refusal.latestProcess": "A claude is already running in this folder (pid={pid}) — --continue would pick the same session. Use + for a new session.",
+    "msg.refusal.badId": "That session id has an invalid shape (letters, digits, - and _ only; at most 128 characters); refusing: \"{id}\"",
+    "msg.refusal.unavailable": "That session is not on disk — it may be a stale card, or a subagent session (a subagent id is not a session you can resume on its own)",
+    "msg.refusal.liveProcess": "That session is being run by a claude process (pid={pid}) — two processes writing the same session file would destroy it. Stop that one first, or use Fork (fork writes a new file).",
+    "msg.refusal.livePane": "That session is being run by pane {pane} — two claudes writing the same session file would destroy it. Close that pane, or use Fork (fork writes a new file).",
+    "msg.refusal.unknownKind": "Unknown resume intent: \"{kind}\"",
+
     "msg.gw.notRunning": "Gateway is not running",
     "msg.gw.notDetected": "No local gateway was detected",
     "msg.gw.exeMissing": "Could not find the magpie executable (install or open magpie once)",
@@ -2102,6 +2110,14 @@ const PERCH_I18N = {
     "msg.files.readFailed": "读不了这个文件：{err}",
 
     "msg.diff.timeout": "超时（转录跟随器没有应答）",
+
+    "msg.refusal.latestPane": "格子 {pane} 正跑着会话 {session}：--continue 会挑中同一条，两个进程一起写会毁掉它。要开新的请用 +。",
+    "msg.refusal.latestProcess": "这个目录里已经有一个 claude 在跑（pid={pid}）：--continue 会挑中同一条会话。要开新的请用 +。",
+    "msg.refusal.badId": "会话 id 的形状不对（只允许字母数字和 -_，长度 ≤128），不接：\"{id}\"",
+    "msg.refusal.unavailable": "盘上找不到这条会话 —— 可能是张旧卡片，或者它是子代理会话（子代理的 id 不是一条能单独接上的会话）",
+    "msg.refusal.liveProcess": "这条会话正被一个 claude 进程跑着（pid={pid}）—— 两个进程同时写同一份会话文件会毁掉它。先停掉那一个，或者用「另起分支」（fork 写的是新文件）。",
+    "msg.refusal.livePane": "这条会话正被格子 {pane} 跑着 —— 两条 claude 同时写同一份会话文件会毁掉它。先关掉那一格，或者用「另起分支」（fork 写的是新文件）。",
+    "msg.refusal.unknownKind": "未知的续接意图：\"{kind}\"",
 
     "msg.gw.notRunning": "网关未运行",
     "msg.gw.notDetected": "没有检测到本地网关",

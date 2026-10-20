@@ -24,7 +24,7 @@ func (s *Server) tabNew(c Conn, m *Msg, tabReqCache map[int][]byte) {
 	// C2 护栏：判**在建标签之前**。一个没有 PTY 的占位格比"什么都没发生"
 	// 更糟 —— 界面上会多出一格，用户以为它在跑。判据见 session.ResumeRefusal。
 	if ref := s.deps.Tabs.ResumeRefusal(*m.Spec); ref != nil {
-		reply, _ := json.Marshal(map[string]any{
+		out := map[string]any{
 			"type": "tab.ok", "tab": 0, "stream": "", "req": m.Req,
 			// 被拒也要把 paneId 带回去：前端要么用它重试同一格
 			// （瞬时冲突那 2 次重试），要么让它显式降级 ——
@@ -34,7 +34,16 @@ func (s *Server) tabNew(c Conn, m *Msg, tabReqCache map[int][]byte) {
 			// 能不能重试由**判的人**给（见 session.Refusal.Retryable）：
 			// 前端不许拿 code 去查表 —— 那是第二份会漂的规则。
 			"retryable": ref.Retryable,
-		})
+		}
+		// msg 的稳定身份：前端按当前语言渲染 msg.<msgCode>，带 pid/格子的值
+		// 从 msgParams 拼；字典里没有就回退 msg 原文。
+		if ref.MsgCode != "" {
+			out["msgCode"] = ref.MsgCode
+		}
+		if len(ref.MsgParams) > 0 {
+			out["msgParams"] = ref.MsgParams
+		}
+		reply, _ := json.Marshal(out)
 		_ = c.Send(reply)
 		if m.Req != 0 {
 			tabReqCache[m.Req] = reply // 拒绝也是应答：重发时重放它，不重新判一次护栏

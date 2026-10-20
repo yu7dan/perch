@@ -58,6 +58,11 @@ type Refusal struct {
 	Code      string
 	Msg       string
 	Retryable bool
+	// MsgCode/MsgParams 是 Msg 的稳定身份：前端按当前语言渲染 msg.<MsgCode>，
+	// 字典里没有时回退 Msg。Msg 里带 pid / 格子号 / 会话 id，靠 code + params
+	// 才能翻译，不能只翻译 code。
+	MsgCode   string
+	MsgParams map[string]string
 }
 
 // SafeSessionID 是**白名单**，比 Orca 的黑名单严（那边只挡"空 / 超长 / 以 - 开头 /
@@ -185,29 +190,41 @@ func (m *Manager) ResumeRefusal(spec SpawnSpec) *Refusal {
 
 	case "latest":
 		if owner, sid := m.AnyLiveSession(); owner != 0 {
-			return &Refusal{Code: "agent_session_conflict", Retryable: true, Msg: fmt.Sprintf(
-				"格子 t%d 正跑着会话 %s：--continue 会挑中同一条，两个进程一起写会毁掉它。要开新的请用 +。",
-				owner, short(sid))}
+			return &Refusal{Code: "agent_session_conflict", Retryable: true,
+				MsgCode: "refusal.latestPane",
+				MsgParams: map[string]string{
+					"pane":    fmt.Sprintf("t%d", owner),
+					"session": short(sid),
+				},
+				Msg: fmt.Sprintf(
+					"格子 t%d 正跑着会话 %s：--continue 会挑中同一条，两个进程一起写会毁掉它。要开新的请用 +。",
+					owner, short(sid))}
 		}
 		// 这一格之外的 claude 也算：`--continue` 解析的是"这个目录里最新的会话"，
 		// 而登记表是全机器范围的，所以这一条能挡住"另一个终端正在这个目录里跑"。
 		// Pi 不写这份登记表，这道判据只对 claude 有意义。
 		if spec.Agent == "claude" {
 			if pid := m.anyClaudeInCWD(spec.CWD); pid != 0 {
-				return &Refusal{Code: "agent_session_conflict", Retryable: true, Msg: fmt.Sprintf(
-					"这个目录里已经有一个 claude 在跑（pid=%d）：--continue 会挑中同一条会话。要开新的请用 +。", pid)}
+				return &Refusal{Code: "agent_session_conflict", Retryable: true,
+					MsgCode:   "refusal.latestProcess",
+					MsgParams: map[string]string{"pid": strconv.Itoa(pid)},
+					Msg: fmt.Sprintf(
+						"这个目录里已经有一个 claude 在跑（pid=%d）：--continue 会挑中同一条会话。要开新的请用 +。", pid)}
 			}
 		}
 		return nil
 
 	case "exact", "fork":
 		if !SafeSessionID(r.ID) {
-			return &Refusal{Code: "bad_id", Msg: "会话 id 的形状不对（只允许字母数字和 -_，长度 ≤128），不接：" +
-				strconv.Quote(r.ID)}
+			return &Refusal{Code: "bad_id", MsgCode: "refusal.badId",
+				MsgParams: map[string]string{"id": r.ID},
+				Msg: "会话 id 的形状不对（只允许字母数字和 -_，长度 ≤128），不接：" +
+					strconv.Quote(r.ID)}
 		}
 		if !m.SessionFileExistsFor(spec.Agent, spec.CWD, r.ID) {
-			return &Refusal{Code: "unavailable", Msg: "盘上找不到这条会话 —— 可能是张旧卡片，" +
-				"或者它是子代理会话（子代理的 id 不是一条能单独接上的会话）"}
+			return &Refusal{Code: "unavailable", MsgCode: "refusal.unavailable",
+				Msg: "盘上找不到这条会话 —— 可能是张旧卡片，" +
+					"或者它是子代理会话（子代理的 id 不是一条能单独接上的会话）"}
 		}
 		// fork 到这儿就放行：它写的是**新**文件，不碰旧的。
 		if r.Kind == "fork" {
@@ -219,19 +236,27 @@ func (m *Manager) ResumeRefusal(spec SpawnSpec) *Refusal {
 		// 全机器登记表只有 claude 会写；Pi/OpenCode 没有等价的“外部进程”视图。
 		if spec.Agent == "claude" {
 			if pid := m.sessionLiveElsewhere(r.ID); pid != 0 {
-				return &Refusal{Code: "agent_session_conflict", Retryable: true, Msg: fmt.Sprintf(
-					"这条会话正被一个 claude 进程跑着（pid=%d）—— 两个进程同时写同一份会话"+
-						"文件会毁掉它。先停掉那一个，或者用「另起分支」（fork 写的是新文件）。", pid)}
+				return &Refusal{Code: "agent_session_conflict", Retryable: true,
+					MsgCode:   "refusal.liveProcess",
+					MsgParams: map[string]string{"pid": strconv.Itoa(pid)},
+					Msg: fmt.Sprintf(
+						"这条会话正被一个 claude 进程跑着（pid=%d）—— 两个进程同时写同一份会话"+
+							"文件会毁掉它。先停掉那一个，或者用「另起分支」（fork 写的是新文件）。", pid)}
 			}
 		}
 		if owner := m.LiveOwnerOf(r.ID); owner != 0 {
-			return &Refusal{Code: "agent_session_conflict", Retryable: true, Msg: fmt.Sprintf(
-				"这条会话正被格子 t%d 跑着 —— 两条 claude 同时写同一份会话文件会毁掉它。"+
-					"先关掉那一格，或者用「另起分支」（fork 写的是新文件）。", owner)}
+			return &Refusal{Code: "agent_session_conflict", Retryable: true,
+				MsgCode:   "refusal.livePane",
+				MsgParams: map[string]string{"pane": fmt.Sprintf("t%d", owner)},
+				Msg: fmt.Sprintf(
+					"这条会话正被格子 t%d 跑着 —— 两条 claude 同时写同一份会话文件会毁掉它。"+
+						"先关掉那一格，或者用「另起分支」（fork 写的是新文件）。", owner)}
 		}
 		return nil
 	}
-	return &Refusal{Code: "unknown_kind", Msg: "未知的续接意图：" + strconv.Quote(r.Kind)}
+	return &Refusal{Code: "unknown_kind", MsgCode: "refusal.unknownKind",
+		MsgParams: map[string]string{"kind": r.Kind},
+		Msg:       "未知的续接意图：" + strconv.Quote(r.Kind)}
 }
 
 // LiveOwnerOf：这条会话正被哪个**活着的**格子占着？没有就 0。

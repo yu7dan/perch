@@ -353,7 +353,10 @@ function dispatchCtl(m) {
       if (m.err) {
         // `retryable` 由 Go 给（见 resume.go）—— 前端**不许**拿 code 去查表：
         // "能不能再试一次"是判决的一部分，只有做判决的那一侧知道。
-        t.resumeRefused = { code: m.err, msg: m.msg || "", retryable: m.retryable === true };
+        t.resumeRefused = {
+          code: m.err, msg: m.msg || "", msgCode: m.msgCode || "",
+          msgParams: m.msgParams || null, retryable: m.retryable === true,
+        };
         if (m.pane) t.paneID = m.pane;
         t.onSpawned = null;
         sendCtrl({ type: "log", msg: `接上被拒 code=${m.err} retryable=${m.retryable === true} msg=${m.msg} spec=${JSON.stringify(t.spec)}` });

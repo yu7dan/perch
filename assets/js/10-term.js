@@ -657,7 +657,9 @@ installImeAnchor(T);
         unavailable: t("term.resume.unavailable"),
         bad_id: t("term.resume.badId"),
       }[T.resumeRefused.code] || t("term.resume.failed"),
-        T.resumeRefused.msg || t("term.resume.refusedCode", { code: T.resumeRefused.code }), "err");
+        T.resumeRefused.msg
+          ? tMsg(T.resumeRefused.msgCode, T.resumeRefused.msgParams, T.resumeRefused.msg)
+          : t("term.resume.refusedCode", { code: T.resumeRefused.code }), "err");
     }
     return T;
   }
