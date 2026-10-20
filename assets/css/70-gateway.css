@@ -1,5 +1,5 @@
-/* gw.css —— 网关页的外壳。
-   页面本身是 magpie 自己的界面：Go 在 /gwui/ 与 /api/ 上做同源反代（gwui.go），
+/* 70-gateway.css —— 网关页的外壳。
+   页面本身是 magpie 自己的界面：Go 在 /gwui/ 与 /api/ 上做同源反代（internal/gateway/ui.go），
    这里只负责 iframe 的尺寸，以及控制面没接上时那张安装/接入卡。
    Provider / 路由 / 用量 / 插件的一切样式都在 magpie 的 app.css 里，本文件不再
    复制任何一份 —— 手写实现已于 2026-10-18 整体删除。 */

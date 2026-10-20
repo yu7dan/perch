@@ -61,11 +61,6 @@ function filesRootPath() {
   if (FU.root && filesProjects().some((p) => p.path === FU.root)) return FU.root;
   return filesDefaultRoot();
 }
-function filesRootName(root) {
-  const p = filesProjects().find((x) => x.path === root);
-  return p ? p.name : (String(root).split(/[\\/]/).filter(Boolean).pop() || "工作区");
-}
-
 /* 一个文件属于哪个允许根（最长前缀）。touched 里的文件可能是别的项目的，
    读的时候要用它自己的根；找不到 = 不在任何工作区里，前端先拒绝，
    省得发一条注定被 Go 拒的请求。 */

@@ -1,7 +1,7 @@
 "use strict";
 /* 05-prefs.js —— Perch 自己的偏好：缓存、终端外观、默认目录。
    本文件在 10-term.js **之前**求值（xterm 建的时候要读字号/字体栈），
-   在 84-settings.js 之前提供 SETTINGS / applySettings 这两样东西。
+   在 85-settings.js 之前提供 SETTINGS / applySettings 这两样东西。
 
    两份事实的分工：
      · Go 的 %APPDATA%\Perch\settings.json 是**权威**（见 settings.go）；
@@ -37,7 +37,7 @@ let SETTINGS_CWD_MISSING = false;
 // 10-term.js 末尾会置 true。在此之前 applySettings 只改缓存，不碰终端。
 let PERCH_TERM_READY = false;
 /* 设置页正在录制快捷键。**必须放在这个文件**（05 最先求值）：60-shell 的全局
-   keydown 和 84-settings 的录制器都要读它，放在 84 里会留下一段 TDZ 窗口
+   keydown 和 85-settings 的录制器都要读它，放在 85 里会留下一段 TDZ 窗口
    （`typeof` 一个还没初始化的 let 也会抛，见 60-shell.js:462 那条教训）。 */
 let SHORTCUT_RECORDING = false;
 
@@ -141,9 +141,6 @@ const TERM_FONT_JETBRAINS =
   '"JetBrains Mono WB", "Cascadia Code WB", Consolas, "Microsoft YaHei", monospace';
 function termFontStack() {
   return SETTINGS.termFontFamily === "jetbrains" ? TERM_FONT_JETBRAINS : TERM_FONT_CASCADIA;
-}
-function termFontFamilyLabel() {
-  return SETTINGS.termFontFamily === "jetbrains" ? "JetBrains Mono" : "Cascadia Code";
 }
 
 /* 应用一份设置。

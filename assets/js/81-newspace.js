@@ -47,10 +47,6 @@ function nsPickAgentForFolder(folder) {
   };
 }
 
-function nsFolderInPool(folder) {
-  return nsProjects().some((p) => p.path === folder);
-}
-
 function nsCanCreate() {
   if (!NS || !NS.folder) return false;
   if (NS.agent) return true;

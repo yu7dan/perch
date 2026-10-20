@@ -315,7 +315,6 @@ const askOpen = new Set();
 const G_ASK = '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>';
 const G_BELL = '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>';
 const G_FORK = '<circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/>';
-const G_FILE = '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/>';
 const G_SAY = '<path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/>';
 const G_TOOL = '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/>';
 const G_DOT = '<circle cx="12" cy="12" r="5.2" fill="currentColor" stroke="none"/>';
@@ -601,7 +600,7 @@ $("rsb-open").addEventListener("click", () => {
    改成 capture（document 上的捕获阶段在整个传播链最前面）之后，语句顺序调转：
    我们 preventDefault → xterm 那个监听器第一行就是
        `if (e.defaultPrevented) return`
-   （见 assets/xterm.js 里 registerListeners 的 keydown 分支），于是它整条按键
+   （见 assets/vendor/xterm.js 里 registerListeners 的 keydown 分支），于是它整条按键
    都不再处理 —— 这个组合键因此**只**收右栏，终端那边一个字都收不到。
    选 Shift 组合而不用裸 Ctrl+B：裸的那一份是终端的语义（Claude Code 里也是），
    不该被壳层吃掉。 */

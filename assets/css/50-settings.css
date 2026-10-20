@@ -1,0 +1,195 @@
+/* ===========================================================================
+   6. 设置页
+   ===========================================================================
+   形态照 Orca 的设置页：大标题 + 说明，下面是「区标题 + 一张装行的卡片」；
+   行是「标签/说明 ←→ 控件」。卡片是**一整块面 + 头发丝分隔**，不是一摞小卡
+   —— 和总览的操作台同一套语言。
+   =========================================================================== */
+/* scrollbar-gutter:stable —— 滚动条出现/消失时内容不横跳；
+   scroll-padding-top 给以后的深链留出吸顶搜索条的高度（批次 3 用得上）。 */
+.settings-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;
+                 scrollbar-gutter:stable;scroll-padding-top:64px;overscroll-behavior:contain}
+.settings-wrap{max-width:920px;margin:0 auto;padding:36px 44px 72px}
+
+/* 搜索条：吸在滚动容器顶部。底边用同色渐变收口，滚动时内容从下面淡出。
+   Ctrl+F 从任何地方聚焦它（85-settings.js）；提示常显 —— 聚焦时藏起来反而让人
+   以为快捷键没了。 */
+/* 底边只在最后 4px 淡出：渐变太长会让滚到下面的节标题从搜索条底下
+   半截透出来（观感像裁切错误），太长又会让边界生硬。 */
+.settings-search{position:sticky;top:0;z-index:5;padding:16px 44px 10px;
+                 background:linear-gradient(var(--bg) calc(100% - 4px),rgba(10,10,10,0))}
+.settings-search-in{display:flex;align-items:center;gap:8px;max-width:832px;margin:0 auto;
+                    height:32px;padding:0 9px;border:1px solid var(--line);border-radius:8px;
+                    background:#0d0d0f;color:var(--faint);
+                    transition:border-color .14s,background .14s,color .14s}
+.settings-search-in:focus-within{border-color:rgba(255,255,255,.22);
+                                 background:#101012;color:var(--muted)}
+/* 键盘聚焦时给整条搜索框一圈中性灰环（Orca 的 --ring = #737373，这里用 28%）。 */
+.settings-search-in:has(#set-search:focus-visible){
+  box-shadow:0 0 0 2px rgba(115,115,115,.28)}
+.settings-search-in svg{flex:none}
+#set-search{flex:1;min-width:0;height:100%;background:none;border:0;outline:none;
+            font-size:13px;color:var(--fg)}
+#set-search::placeholder{color:var(--faint)}
+.set-search-kbd{display:flex;gap:3px;flex:none}
+.set-search-kbd kbd{min-width:16px;height:17px;padding:0 4px;display:grid;place-items:center;
+                     border:1px solid var(--line);border-radius:4px;background:rgba(255,255,255,.04);
+                     font:10px var(--mono);color:var(--faint)}
+.set-search-clear{flex:none;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;
+                  font-size:14px;line-height:1;color:var(--muted);background:rgba(255,255,255,.08)}
+.set-search-clear:hover{color:var(--fg);background:rgba(255,255,255,.14)}
+.set-search-clear[hidden]{display:none}
+
+/* 搜索结果：不命中的行/区整块收起（display:none，不占位）。
+   第一块露出来的区少留一点上边距，免得空出一大块。 */
+.settings-sec.is-hidden,.settings-row.is-hidden{display:none}
+.settings-sec.is-first{margin-top:26px}
+.settings-empty{margin-top:34px;padding:34px 18px;border:1px dashed var(--line);
+                border-radius:12px;text-align:center}
+.settings-empty[hidden]{display:none}
+.settings-empty p{margin:0;font-size:13px;color:var(--fg2)}
+.settings-empty p.sub{margin-top:6px;font-size:12px;color:var(--faint)}
+.settings-empty .set-btn{margin-top:14px}
+
+/* 「改过」的痕迹：标签右侧一颗小点；恢复默认按钮只在有偏差时出现。 */
+.settings-row.modified .settings-lab b::after{content:"";display:inline-block;width:5px;height:5px;
+  margin-left:7px;border-radius:50%;background:var(--accent);vertical-align:2px}
+.set-reset{flex:none;margin-left:10px;height:26px;padding:0 7px;border-radius:5px;
+           font-size:11px;color:var(--faint);white-space:nowrap;
+           transition:background .14s,color .14s}
+.set-reset:hover{color:var(--fg2);background:rgba(255,255,255,.06)}
+.set-reset[hidden]{display:none}
+.set-def{display:block;margin-top:2px;font-style:normal;font-size:11px;color:rgba(115,115,115,.85)}
+.set-def:empty{display:none}
+
+/* 键盘焦点：设置页所有可操作控件共用一圈中性灰环（不是饱和蓝）。
+   输入框的环画在外层盒子上（.settings-search-in / .set-cwd-line），
+   自身 outline 关掉，免得出现双层描边。 */
+#settings button:focus-visible{
+  outline:2px solid rgba(115,115,115,.62);outline-offset:2px}
+#settings .set-seg button:focus-visible{outline-offset:1px}
+#settings .set-input:focus-visible{outline:none}
+.set-cwd-line:has(#set-cwd-input:focus-visible){
+  border-color:rgba(255,255,255,.24);
+  box-shadow:0 0 0 2px rgba(115,115,115,.22)}
+
+/* 标签/说明可以选中复制；控件自己的文字不参与选中。 */
+.settings-head,.settings-sec-head,.settings-lab,.settings-foot,.settings-empty{user-select:text}
+#settings button{user-select:none}
+
+/* 字号步进：− 当前段 +（段里仍可直选）。到头的那颗做灰、不做禁，点它会说为什么。 */
+.set-size-ctl{display:flex;align-items:center;gap:8px}
+.set-step{width:26px;height:26px;border:1px solid var(--line);border-radius:6px;background:#0d0d0f;
+          color:var(--muted);font-size:14px;line-height:1;display:grid;place-items:center;
+          transition:background .14s,color .14s,border-color .14s}
+.set-step:hover{color:var(--fg);background:#141416;border-color:rgba(255,255,255,.16)}
+/* ⚠️ 不可用项用**颜色变淡**，不用 opacity：opacity 会把 focus-visible
+   的描边一起吃掉，键盘用户看不到焦点落在哪。 */
+.set-step.na{color:rgba(161,161,161,.4);cursor:default}
+.set-step.na:hover{color:rgba(161,161,161,.4);background:#0d0d0f;border-color:var(--line)}
+.settings-head h1{margin:0;font-size:24px;line-height:1.25;font-weight:650;letter-spacing:-.2px}
+.settings-head p{margin:8px 0 0;max-width:640px;font-size:12.5px;line-height:1.7;color:var(--muted)}
+.settings-sec{margin-top:34px}
+.settings-sec-head{padding:0 2px 12px}
+.settings-sec-head h2{margin:0;font-size:14px;font-weight:600;color:var(--fg)}
+.settings-sec-head p{margin:4px 0 0;font-size:12px;line-height:1.65;color:var(--faint)}
+.settings-card{border:1px solid var(--line);border-radius:12px;background:#121214;overflow:hidden}
+.settings-row{display:flex;align-items:center;justify-content:space-between;gap:28px;
+              padding:15px 18px;min-height:58px}
+.settings-row + .settings-row{border-top:1px solid var(--line-soft)}
+.settings-lab{min-width:0;flex:1}
+.settings-lab b{display:block;font-size:13px;font-weight:550;color:var(--fg2)}
+.settings-lab span{display:block;margin-top:3px;font-size:12px;line-height:1.6;color:var(--faint)}
+.settings-ctl{flex:none;display:flex;align-items:center;justify-content:flex-end;min-width:0}
+.settings-foot{margin:30px 2px 0;font-size:11px;line-height:1.7;color:var(--faint)}
+.settings-foot code{font:11px var(--mono);color:var(--muted);background:rgba(255,255,255,.05);
+                    border:1px solid var(--line-soft);border-radius:4px;padding:1px 5px}
+
+/* 默认目录：路径盒子 + 两颗按钮。路径可能很长（深目录），用 ell + title。 */
+.set-cwd-ctl{display:flex;flex-direction:column;align-items:flex-end;gap:8px;max-width:520px}
+.set-cwd-line{display:flex;align-items:center;gap:8px;min-width:0;width:100%;max-width:100%;
+              background:#0c0c0d;border:1px solid var(--line-soft);border-radius:7px;
+              padding:6px 9px;transition:border-color .14s}
+.set-cwd-line:focus-within{border-color:rgba(255,255,255,.24)}
+.set-kind{flex:none;font-size:10px;color:var(--faint);border:1px solid var(--line-soft);
+          border-radius:999px;padding:1px 6px}
+.set-path{min-width:0;font:11px var(--mono);color:var(--fg2);direction:ltr}
+.set-input{flex:1;width:380px;height:16px;padding:0;border:0;outline:none;background:none}
+.set-input::placeholder{color:var(--faint)}
+.set-cwd-line.bad{border-color:rgba(255,101,104,.5)}
+.set-cwd-line.bad:focus-within{border-color:rgba(255,101,104,.75)}
+.set-err{padding:0 18px 13px;font-size:11.5px;line-height:1.6;color:var(--red)}
+.set-err[hidden]{display:none}
+/* 搜索把默认目录那一行收起时，行外的说明/错误也一起收（它们不是行）。 */
+.settings-row.is-hidden + .set-note,
+.settings-row.is-hidden + .set-note + .set-err{display:none}
+.set-btns{display:flex;gap:6px}
+.set-btn{height:26px;padding:0 10px;border:1px solid var(--line);border-radius:6px;
+         background:rgba(255,255,255,.035);font-size:12px;color:var(--fg2);
+         transition:background .14s,border-color .14s,color .14s}
+/* 快捷键录制键：等宽 + 给组合键留够宽度；录制中描边用 accent（不是 opacity，
+   焦点环还得看得见）。 */
+.set-key{min-width:118px;font-family:var(--mono);font-size:11.5px;letter-spacing:.01em}
+.set-key.rec{border-color:var(--accent);color:var(--accent)}
+.set-btn:hover{background:rgba(255,255,255,.075);border-color:rgba(255,255,255,.16);color:var(--fg)}
+.set-btn.quiet{border-color:transparent;background:none;color:var(--faint)}
+.set-btn.quiet:hover{background:rgba(255,255,255,.06);color:var(--fg2)}
+/* 不可用的动作做灰、不做禁（禁了 title 不弹）—— 点下去会说为什么。
+   同上：颜色变淡而不是 opacity。 */
+.set-btn.na{color:rgba(115,115,115,.55);cursor:default}
+.set-btn.na:hover{background:none;border-color:transparent;color:rgba(115,115,115,.55)}
+.set-note{padding:0 18px 13px;font-size:11.5px;line-height:1.6;color:var(--amber)}
+.set-note.info{color:var(--faint)}
+.set-note:empty{display:none}
+
+/* 分段控件（主题 / 字号 / 启动落点）：Orca SettingsSegmentedControl 的形态。 */
+.set-seg{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--line);
+         border-radius:8px;background:#0d0d0f}
+.set-seg button{height:26px;padding:0 10px;border-radius:6px;font-size:12px;
+                color:var(--muted);white-space:nowrap;
+                transition:background .14s,color .14s,transform .12s}
+.set-seg button:hover{color:var(--fg2)}
+.set-seg button:active{transform:scale(.97)}
+.set-seg button.on{background:rgba(255,255,255,.12);color:var(--fg)}
+.set-seg button.na{color:rgba(161,161,161,.42)}
+.set-seg button.na:hover{color:rgba(161,161,161,.42)}
+
+/* 下拉（默认 Agent）：和分段控件同一块控制面材质。原生 select 在深色主题里
+   会带系统白底，必须 appearance:none 再自己画箭标（和窗口控件的笔法一致）。 */
+.set-select{height:30px;min-width:158px;max-width:220px;padding:0 26px 0 10px;
+            border:1px solid var(--line);border-radius:8px;background:#0d0d0f;
+            color:var(--fg2);font-size:12px;appearance:none;cursor:pointer;
+            background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23a1a1a1' stroke-width='2.4'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat:no-repeat;background-position:right 8px center;
+            transition:border-color .14s,color .14s}
+.set-select:hover{border-color:rgba(255,255,255,.18);color:var(--fg)}
+.set-select:focus-visible{outline:2px solid rgba(115,115,115,.62);outline-offset:2px}
+.set-select option{background:#141416;color:var(--fg2)}
+
+/* 字体卡：用字体自己写样张，选中的那枚有描边和一颗小圆点。 */
+.set-fontcards{display:flex;gap:8px}
+.set-fontcard{position:relative;width:168px;padding:10px 12px;border:1px solid var(--line);
+              border-radius:9px;background:#0d0d0f;text-align:left;
+              transition:border-color .14s,background .14s}
+.set-fontcard:hover{border-color:rgba(255,255,255,.18);background:#111113}
+.set-fontcard.on{border-color:rgba(255,255,255,.34);background:rgba(255,255,255,.045);
+                 box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}
+.set-fontsample{display:block;font-size:16px;line-height:1.35;color:var(--fg);letter-spacing:.2px}
+.set-fontsample.font-cascadia{font-family:"Cascadia Code WB",var(--mono)}
+.set-fontsample.font-jetbrains{font-family:"JetBrains Mono WB",var(--mono)}
+.set-fontname{display:block;margin-top:5px;font-size:11px;color:var(--faint)}
+.set-fontcard.on .set-fontname{color:var(--fg2)}
+/* 选中点落在卡片内边距的角上（10px），和内容对齐；和行标签旁「已修改」点同尺寸。 */
+.set-fontcard.on::after{content:"";position:absolute;top:10px;right:10px;width:5px;height:5px;
+                        border-radius:50%;background:var(--fg2)}
+
+/* 开关：和 Windows 11 / Orca 的 switch 同一形态（轨道 + 滑块）。 */
+.set-switch{position:relative;width:36px;height:20px;border-radius:999px;
+            background:#3a3a40;transition:background .16s;flex:none}
+.set-switch i{position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;
+              background:#d8d8de;transition:transform .16s,background .16s}
+.set-switch[aria-checked="true"]{background:var(--accent)}
+.set-switch[aria-checked="true"] i{transform:translateX(16px);background:#fff}
+.set-switch:hover{filter:brightness(1.12)}
+.set-switch:focus-visible{outline:2px solid rgba(115,115,115,.62);outline-offset:2px}
+

@@ -1,0 +1,241 @@
+/* Perch 前端样式（2026-10-17 从 index.html 的 <style> 原样搬出，未改一行规则）。
+   放在独立文件里：改某个模块的样式时不必再在 1 万行的 HTML 里翻找；
+   图标/分隔线/滚动条这些全局规则在文件顶部的「外壳」「分隔条」两段。 */
+/* ===========================================================================
+   形态参照：Orca ADE（stablyai/orca，MIT）
+   三栏 = 导航栏 / 会话列表 / 主区；主区 = 标签条 + 分屏面板；底部 = 状态栏。
+   令牌与尺寸刻意收窄（12–13px、6px 圆角、紧凑行高）—— Orca 的观感来自
+   「信息密度高但呼吸感够」，不是来自大圆角和粗描边。
+   =========================================================================== */
+:root{
+  /* 令牌取自 Orca 深色主题实测值（src/renderer/src/assets/main.css 的 .dark 块）。
+     三处最容易做错的地方：
+       1. 深色下的边框是 **7% 白**，不是某个灰色实色 —— 实色边框会让整个界面发"脏"；
+       2. 应用背景是 #0a0a0a（近黑），而不是常见的 #1a1a1c 一类的"深灰"；
+       3. 终端画面底色 —— **这一条我们刻意偏离了 Orca，见下面的说明。** */
+  --bg:#0a0a0a; --rail:#171717; --side:#171717; --panel:#171717;
+  /* ⚠️ 2026-10-15：终端底色**不再**用 Orca 的 #282c34，改用与画布同一块的 #0a0a0a。
+     Orca 的规格里明确要"终端画面比应用背景亮一档，
+     终端是凸出来的一块面板"，#282c34 就是为这个层级选的 Ghostty Default Style Dark。
+     但用户两次提出「终端那块色和周围的 UI 不搭、有割裂感」：第一次我误判成"pane 被刷成
+     终端色、三块色板拼一起"，只改掉了 pane、没动底色本身，所以问题原样还在。
+     这一轮按用户明确选择**放弃那个层级**：终端直接融进画布，接缝消失。
+     代价（已知并接受）：侧栏 #171717 反而比内容区亮，层级反转 —— 这与 VS Code
+     "编辑器底色就是主区底色"的读法一致，读起来不违和。
+     ⚠️ 改这个值必须**四处同步**：本行、下面 xterm 的 theme.background、
+     theme.cursorAccent、以及 osc_color.go 里的 termBackground。
+     少一处，agent 就会按错误的底色去选自己的配色。 */
+  --term-bg:#0a0a0a; --term-fg:#ffffff;
+  --card:#262626; --card-hov:#353535; --card-sel:rgba(255,255,255,.08);
+  --line:rgba(255,255,255,.07); --line-soft:rgba(255,255,255,.045);
+  --fg:#fafafa; --fg2:#d4d4d4; --muted:#a1a1a1; --faint:#737373;
+  --accent:#1447e6; --green:#86efac; --amber:#eab308; --red:#ff6568; --claude:#e8833a;
+  /* 「等你」那一族橙（C6b 前一批）。**不是 --amber** —— 上面 .adot 那段注释已经把
+     这条界线立住了：黄 = 在干活，橙 = 在等你，混了就分不出"忙"和"该我了"。
+     取值直接照 Orca assets/main.css:344-345 的暗色档：
+       --agent-question      : var(--color-orange-500)   → #f97316
+       --agent-question-text : var(--color-orange-300)   → #fdba74
+     后者是它注释里写明的用法 ——「Tinted 橙底上还能读的正文重量」。 */
+  --ask:#f97316; --ask-text:#fdba74;
+  --ui:"Geist", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  /* 正文字体的别名：历史样式按 var(--sans) 写字号，语义上就是 UI 字体。 */
+  --sans:var(--ui);
+  /* 终端字体栈：Cascadia（WT 官方字体，方块/制表符字形齐全）优先，
+     JetBrains Mono 兜底，中文回退给雅黑（**不要用 MS Gothic** —— 它是日文字体，
+     简体字会显示成日文字形，中国用户一眼能看出来）。 */
+  --mono:"Cascadia Code WB","JetBrains Mono WB",Consolas,"Microsoft YaHei","MS Gothic",monospace;
+  --r:10px; --r-sm:4px;   /* Orca: --radius:0.625rem → lg=10px md=8px sm=6px */
+}
+/* 终端字体**随应用走**，不等系统装。
+   这台机器上 Cascadia / JetBrains Mono 一个都没有 —— 之前 fontFamily 里写的
+   Cascadia 一路静默回退到 Consolas（2004 年的字体），那才是"看着不原生"的
+   真凶：不是渲染管线不行，是字本身就不好看。
+   Orca 之所以在任何机器上都长一个样，也是因为它自带字体。 */
+/* 终端字体**随应用走**，不等系统装。
+   这台机器上 Cascadia / JetBrains Mono 一个都没有 —— 之前 fontFamily 里写的
+   Cascadia 一路静默回退到 Consolas（2004 年的字体），那才是"看着不原生"的
+   真凶：不是渲染管线不行，是字本身就不好看。
+   Orca 之所以在任何机器上都长一个样，也是因为它自带字体。
+
+   ⚠️ 必须用**完整字重文件**，不能用 fontsource 那种按 unicode-range 切好的子集：
+   方块元素 U+2580–259F 和制表符 U+2500–257F **不属于 latin/latin-ext/cyrillic
+   任何子集**，用子集字体时这些码位会回退到中文字体，而 CJK 字体把方块字符当
+   **全角**画 —— 宽度翻倍后相邻格子互相重叠，Claude Code 那个像素风 logo
+   就糊成一整块白砖（负空间全被填死了）。 */
+@font-face{font-family:"JetBrains Mono WB";font-style:normal;font-weight:400;
+           font-display:block;src:url("/fonts/jbm-full-400.woff2") format("woff2")}
+@font-face{font-family:"JetBrains Mono WB";font-style:normal;font-weight:700;
+           font-display:block;src:url("/fonts/jbm-full-700.woff2") format("woff2")}
+@font-face{font-family:"JetBrains Mono WB";font-style:italic;font-weight:400;
+           font-display:block;src:url("/fonts/jbm-full-400-it.woff2") format("woff2")}
+/* Cascadia Code —— Windows Terminal 的官方字体，也是 Orca 字体栈里点名的
+   "Cascadia Mono"。Windows 11 把它以**应用内字体**随 Windows Terminal 发布，
+   所以系统字体目录里查不到、别的程序也用不上（我们前面扫过了，确实没有）。
+   它的方块元素 U+2580–259F 与制表符是按终端格子设计的**半格**字形，
+   这正是 Claude Code 像素风 banner 能画出来的前提。 */
+@font-face{font-family:"Cascadia Code WB";font-style:normal;font-weight:200 700;
+           font-display:block;src:url("/fonts/CascadiaCode.woff2") format("woff2")}
+@font-face{font-family:"Cascadia Code WB";font-style:italic;font-weight:200 700;
+           font-display:block;src:url("/fonts/CascadiaCodeItalic.woff2") format("woff2")}
+/* 界面字体：Geist（Orca 的 --app-font-family 首选也是它）。
+   没有中文字形，中文会按老规矩回退到系统字体 —— Orca 在中文环境下同样如此。 */
+@font-face{font-family:"Geist";font-style:normal;font-weight:100 900;font-display:swap;
+           src:url("/fonts/geist-latin-wght-normal.woff2") format("woff2")}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
+          font:13px/1.45 var(--ui);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+/* 滚动条：用户 2026-10-17 的评审 —— 原来 10px/可见 4px 在终端里"太显眼"。
+   8px 槽 + 3px 透明边 = **2px 可见**，hover 才提亮；轨道始终透明。 */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:#2e2e35;border-radius:999px;border:3px solid transparent;
+                          background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:#484852;background-clip:content-box}
+::-webkit-scrollbar-track{background:transparent}
+svg{display:block;flex:none}
+.ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- 外壳 ---------- */
+/* grid 必须显式给行高：隐式行是 auto，会被侧栏内容撑高 ——
+   卡片一多，整行就长到 1960px，主区跟着变高，终端于是拿到一个
+   108 行的尺寸，而实际只有 33 行可见（TUI 按 108 行排版，
+   我们看到的是左上角一小块，字因此"变大"了）。
+   minmax(0,1fr) 把行钉死在容器高度上，内部再用 overflow 自己滚。
+
+   四列：`rail`（132px 导航栏）+ `list`（240px 会话列表）+ `main` + `rsb`。
+
+   ⚠️ 2026-10-16 的一条教训：我一度把 132px 那条导航栏整条删了（把它读成了
+   "层级错了、该并进列表"），用户当场纠正 —— **那是要的两层设计**。
+   该删的不是这一层，是它里面那个「全部会话」导航项和它对应的**平铺视图**
+   （会话在工作区行下面已经有了，同一份数据说两遍）。两层照旧：
+   左边一条窄栏管"去哪一区"，右边一列管"这一区里有什么"。
+
+   ⚠️ C6a：右栏是 grid 的**第四列**（`rsb`），不是中栏的子元素。
+   这一条就是"历史流会被挤扁"那个 bug 的修复本身 —— 它以前长在 #panes 里，
+   和终端抢同一块宽度（`.pane.a` flex-basis + `.pane.b` flex:1），
+   所以 agent 一多、主区一变，它就被切走一块。现在是兄弟列：谁都挤不到谁。
+   右栏宽度 = `--rsb-w`（可拖、可收起为 0，见「右栏」那段）。 */
+#app{position:fixed;left:0;right:0;bottom:24px;top:0;display:grid;
+     /* 2026-10-17：第二列从字面量 240px 换成 --list-w —— 它现在可拖
+        （#list-divider，见「列表↔主区的缝」那段）。**132 那一列仍是字面量**：
+        导航栏不给拖，用户点名的就是这一条。 */
+     /* 2026-10-17：第一列也换成变量 —— 总览里总览↔左栏那条缝可拖（#rail-divider）。
+        默认仍是 132，见 :root 的 --rail-w。 */
+     grid-template-columns:var(--rail-w) var(--list-w) minmax(0,1fr) var(--rsb-w);
+     grid-template-rows:var(--titlebar-h) minmax(0,1fr);
+     grid-template-areas:"tb tb tb tb" "rail list main rsb"}
+
+/* ===========================================================================
+   0. 自绘窗口标题栏（36px）
+   ===========================================================================
+   窗口已经是 Frameless（见 main.go），系统标题栏不再存在，这一条就是窗框。
+
+   尺寸与布局全部来自 Orca：
+     src/renderer/src/app-shell/app-window-chrome.ts
+       WINDOW_CONTROLS_WIDTH  = '138px'   // 3 × 46px 窗口按钮
+       WINDOW_CONTROLS_HEIGHT = '36px'    // 标题栏本身
+     src/main/window/main-window-visual-lifecycle.ts
+       TITLEBAR_CSS_CENTER = 18           // = 36 / 2，标题栏的垂直中心
+     src/renderer/src/assets/main.css `.titlebar` / `.titlebar-left` / `.window-controls*`
+
+   三处细节是照搬而不是自创的：
+     1) 左段用地面的颜色（Orca 用 `--worktree-sidebar`，我们用 --rail/--side），
+        让"标题栏左半 + 侧栏"读成**一个面板**，而不是两个色块拼在一起；
+     2) 右段的 138px 是**占位**，Orca 那边由 Electron 的原生 caption 按钮压在上面，
+        我们这边则由自己画的那三个按钮占据（见 .window-controls）；
+     3) `-webkit-app-region` 换成 Wails 的 `--wails-draggable`（属性继承，
+        所以交互子元素必须显式写 no-drag，否则点不动）。
+   =========================================================================== */
+:root{--titlebar-h:36px;--rail-w:132px}
+#titlebar{grid-area:tb;height:var(--titlebar-h);display:flex;align-items:stretch;
+          position:relative;/* #dash-tabs（绝对居中）的定位基准 */
+          background:var(--side);border-bottom:1px solid var(--line-soft);
+          user-select:none;--wails-draggable:drag}
+/* 左段宽度 = 导航栏 132px，地面同色，右缝与 #rail 的 border-right 对齐
+   （⚠️ 2026-10-16 我一度把这两段并为一段 —— logo 搬进了 .tb-list —— 用户纠正：
+   两层是要的。现在照原样两段，各自的底色和右缝都对得上下面那一列。） */
+.tb-rail{width:var(--rail-w);flex:none;display:flex;align-items:center;gap:8px;padding:0 10px;
+         background:var(--rail);border-right:1px solid var(--line-soft)}
+.tb-rail .mark{position:relative;width:22px;height:22px;border-radius:0;background:none;
+               display:block;flex:none;overflow:hidden}
+/* 设计稿 1254 见方，图形只占中间约 750（四周是透明留白）。直接按 22px 放，
+   图形只剩 13px；这里放大到 34px 再由槽裁掉透明边 —— **只裁留白，不裁图形，
+   比例不变**。⚠️ 必须绝对定位居中：grid 的 auto 轨道会被 34px 的图撑大，
+   图就从槽的左边起、只有右边被裁掉，图形会缺一块（量到 15px 而不是 20px）。 */
+.tb-rail .mark img{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+                   width:34px;height:34px;max-width:none;display:block;
+                   object-fit:contain;user-select:none;-webkit-user-drag:none}
+.tb-rail .tb-name{font-weight:600;font-size:13px;letter-spacing:.2px}
+/* 中段宽度 = 会话列表 240px，地面同色 */
+.tb-list{width:240px;flex:none;background:var(--side);
+         border-right:1px solid var(--line-soft)}
+/* C6a：标题栏在右栏那一列上的切片。地面同色（--side），所以收起时它看起来
+   就是标题栏自己延长过去 —— 不会有"少了一格"的缝。 */
+.tb-rsb{width:var(--rsb-w);flex:none;background:var(--side)}
+/* 预留 3 个窗口按钮的宽度，免得标签条被那层 fixed 覆盖层压住。
+   ⚠️ C8：写死 138px 会让**中栏**的标题条右端短一截 —— 标题栏这条 flex 行是
+   `.tb-rail 132 | .tb-list 240 | #tabs flex:1 | .tb-rsb --rsb-w | 这个 spacer`，
+   于是 `#tabs` 的右沿 = W − rsb-w − 138，而 `#main` 的右沿 = W − rsb-w：
+   钉在 `.tabs-right`（= 面板右上角那颗收起键）上的东西**偏了 138px**，
+   加上 #tabs 自己的 8px 内边距正好是实测的 146px —— 用户说的"太突兀、偏中心"。
+
+   这 138px 该谁出，取决于右栏在不在：`.window-controls` 是 fixed 在**窗口右上**，
+   右栏开着时它落在右栏那一列里面（由 `.tb-rsb` 的宽度覆盖着），此时中栏的右沿
+   就该一直顶到右栏的左沿；只有右栏收起到 0，中栏自己的右端才真的要让出它。
+   一次说清两态：`max(0px, 138 − rsb-w)`。
+   （别把这个 max() 挪到 `.tb-rsb` 上试试 —— 那样右栏收起时会多出一条 --side 色的
+   138px，因为那一格是**画**背景的。） */
+.window-controls-titlebar-spacer{flex:none;width:max(0px, calc(138px - var(--rsb-w)))}
+
+/* 交互子元素必须显式 no-drag：`--wails-draggable` 是**继承**属性，
+   不写的话它们会跟着标题栏一起变成拖拽区，点不动。 */
+#titlebar .tab,#titlebar .tab-add,#titlebar .tabs-right,
+#titlebar .icon-btn,#titlebar .segs{--wails-draggable:no-drag}
+
+/* ---------------------------------------------------------------------------
+   三个窗口按钮 —— 复刻 Windows 11 原生 caption 按钮
+   ---------------------------------------------------------------------------
+   Orca 在 Windows 上**不画**这三个按钮：它用 Electron 的 titleBarStyle:'hidden'，
+   按钮由 Chromium 的 Window Controls Overlay 画，前端只留 138px 空位
+   （就是上面那个 .window-controls-titlebar-spacer）。
+
+   我们在 Wails 里没有 WCO，只能自己画 —— 那就画成同一样东西：
+     · 46 × 36：Orca 的 WINDOW_CONTROLS_WIDTH / HEIGHT 原值（3 × 46 = 138）
+     · 关闭键 hover #c42b1c —— 从 Orca 的 .window-controls-close:hover 抄来的，
+       它本身就是 Windows 11 的关闭键红
+     · 普通 hover 的 6% 白 = Windows 11 caption 按钮的提亮量
+     · 光标是箭头不是手型（原生 caption 按钮不用 pointer，Orca 那条是 Linux 分支的写法）
+
+   ---------------------------------------------------------------------------
+   字形为什么不用 Segoe Fluent Icons 的码位，而是照原生墨迹描线
+   ---------------------------------------------------------------------------
+   一开始这里写的是 `font:10px/1 "Segoe Fluent Icons"` + `&#xE921;/&#xE922;/&#xE8BB;`，
+   看上去是最"正统"的做法（那确实是 Windows 图标语料的码位）。实测下来不对：
+
+     量法：把自绘窗口和原生窗口都截图，在右上角按亮度阈值取**墨迹包围盒**
+     （逐像素量墨迹总量），再逐个字形切簇。
+     原生（记事本，Win11 26200 / 100% DPI）：
+         最小化 10 x 1    最大化 10 x 10    关闭 10 x 10   笔画 1px
+     字体渲染（WebView2）：
+         最小化 12 x 1    最大化 12 x 10    关闭 12 x 10   笔画 2px，纯白
+
+   宽度恒定多 2px、笔画粗一倍 —— 不是字号问题：把同一个字形交给 GDI+ 在
+   10px 下光栅化，得到的**就是** 10 x 10 / 10 x 1，和原生一致。也就是说
+   字体本身没错，是"把字形当文字排版"这条路会带上光栅化加粗。
+   （Windows 自己画 caption 按钮根本不走字体排版，它用 1px 描边的矢量几何。）
+
+   所以这里照着**原生的墨迹**描线：10x10 的方框、1px 的笔画、对角线走
+   geometricPrecision 保留抗锯齿（原生那两条对角线也是抗锯齿的，实测有 `:*:` 这种中间灰），
+   横平竖直的边则用 crispEdges 钉死在整像素上。这样在任何 DPI 下都不会再胖出来。
+   --------------------------------------------------------------------------- */
+.window-controls{position:fixed;top:0;right:0;z-index:9999;display:flex;flex-direction:row;
+                 height:var(--titlebar-h);--wails-draggable:no-drag}
+.wc-btn{width:46px;height:var(--titlebar-h);display:grid;place-items:center;
+        background:transparent;border:none;padding:0;color:#fff;cursor:default;
+        transition:background 100ms,color 100ms}
+.wc-btn:hover{background:rgb(255 255 255 / .06)}
+.wc-btn:active{background:rgb(255 255 255 / .10)}
+.wc-close:hover,.wc-close:active{background:#c42b1c;color:#fff}
+.wc-glyph{display:block;width:10px;height:10px;color:inherit}
+.wc-glyph.off{display:none}
+

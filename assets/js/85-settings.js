@@ -1,6 +1,6 @@
 "use strict";
-/* 84-settings.js —— 设置页的交互 + 通用确认框。
-   本文件在 80-live.js 之后、85-dash.js 之前求值：setNavView("settings") 要用
+/* 85-settings.js —— 设置页的交互 + 通用确认框。
+   本文件在 80-live.js 之后、86-dash.js 之前求值：setNavView("settings") 要用
    这里的 renderSettings；60-shell.js 的 endAgent 也会在**事件触发时**调
    askConfirm（那时本文件早已求值完）。
 
@@ -297,7 +297,7 @@ function syncSettingsUI() {
 }
 
 /* ---------------------------------------------------------------------------
-   搜索（评分在 83-settings-search.js，这里只负责把 DOM 读成条目 + 显隐）
+   搜索（评分在 84-settings-search.js，这里只负责把 DOM 读成条目 + 显隐）
    ---------------------------------------------------------------------------
    命中规则和 Orca 一致：先看这个区，区内逐行打分；**区标题命中 = 整区都留下**，
    否则只留下命中的行。查询为空时不扫描，全部显示。输入停 150ms 才扫一遍

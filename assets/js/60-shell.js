@@ -750,8 +750,6 @@ function renderLists(key) {
 /* 右栏那个「子代理」模块。C7 起它是排序过的（进行中的排最前，照 Orca 的
    attention-first），组内顺序不动。 */
 function renderSideList(side) {
-  const cnt = $("rsb-side-cnt");
-  if (cnt) cnt.textContent = side.length;
   const sideSt = new Map(side.map((x) => [x.id, subStateOf(x)]));
   side.sort((a, b) => (sideSt.get(a.id) === "run" ? 0 : 1) - (sideSt.get(b.id) === "run" ? 0 : 1));
   const sideRun = Array.from(sideSt.values()).filter((v) => v === "run").length;
@@ -1788,7 +1786,7 @@ function applyPool(m) {
   const nsTook = (typeof newSpacePoolUpdate === "function")
     ? newSpacePoolUpdate(m.projects || [], m.picked || "", m.err || "") : false;
   // 总览「新建工作区」：选择器成功时 Go 会推一份带新路径的池子；取消时**什么都不推**，
-  // 所以靠"快照里没有的路径"来判断成功，并在两分钟后作废（见 85-dash）。
+  // 所以靠"快照里没有的路径"来判断成功，并在两分钟后作废（见 86-dash）。
   if (!nsTook && newWsPending && typeof newWsPending === "object") {
     if (m.err || Date.now() - newWsPendingAt > 120000) {
       // 池子报错 = 这次没加成（包括"选择器打不开"）；作废，别等下一次池子变动。

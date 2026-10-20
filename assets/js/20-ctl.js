@@ -277,7 +277,7 @@ ctl.onopen = () => {
   for (const m of window.__bootErr) ctl.send({ type: "log", msg: "启动期错误: " + m });
   window.__bootErr.length = 0;
   // 右栏文件树可能启动时就停在「全部」：它等的就是这条通道。ctl 没连上时
-  // filesList 不发请求（sendCtrl 会静默吞掉），这里补一次。82-files.js 可能
+  // filesList 不发请求（sendCtrl 会静默吞掉），这里补一次。83-files.js 可能
   // 还没求值完（defer 顺序），所以只认函数在不在，别直接碰它的状态。
   if (typeof renderFiles === "function") { try { renderFiles(true); } catch (e) {} }
   // 通道建好之前攒下的**非错误**事实（见 bootFact）——同样补发，但不加"错误"前缀。
@@ -302,8 +302,8 @@ ctl.onopen = () => {
         在块与块之间可以让出事件循环 —— 网络消息会落在"后面的脚本还没求值"的缝里；
      ② 这条 ctl 流在 20-ctl 求值时就建好了（`const ctl = JSONStream("ctl")`），
         而分发要用到的处理函数散在后面的文件里：applyHook/applyAgent/applyActs/
-        applyFiles/applyLibrary 在 80-live，MAGPIE 在 85-dash，applyInstall 在
-        86-install，applyMagpie/applyGw* 在 87-gw-apply。
+        applyFiles/applyLibrary 在 80-live，MAGPIE 在 86-dash，applyInstall 在
+        88-install，applyMagpie/applyGw* 在 87-gateway。
 
    哪一条消息会先到不由我们决定：magpie watcher 每 2.5s 推整份读数（Go 的
    `startMagpieWatcher` 在开窗之前就起了），沙盒里会话库很小的时候 shell 首帧
@@ -311,7 +311,7 @@ ctl.onopen = () => {
    一条 `hook` 落在 80 之前，就是 `applyHook is not defined` —— 同一类病。
 
    ⚠️ 修法**不是**在每个 case 里加 `typeof` 守卫：
-     · `MAGPIE` 是 85 才声明的 `let`，TDZ 里连 `typeof MAGPIE` 都会抛
+     · `MAGPIE` 是 86 才声明的 `let`，TDZ 里连 `typeof MAGPIE` 都会抛
        （60-shell.js:462 那条注释记的就是这个教训）；
      · 守卫会把消息**当场丢掉** —— 丢一条 `panes.list` 等于这一轮冷恢复不恢复，
        丢一条 `magpie` 就要等下一次推送才画得出来。
@@ -385,7 +385,6 @@ function dispatchCtl(m) {
          找不到就只记一行（用户可能已经把这一格关掉了）——绝不新建、绝不猜测。 */
       const p = m.pane | 0;
       const t = TAB_LIST.find((x) => x.spec && x.spec.paneId && x.spec.paneId === p) || null;
-      const short8 = (s) => String(s || "").slice(0, 8);
       if (!t) {
         sendCtrl({ type: "log", msg: `续接落空横幅：pane=${p} 已经不在界面上了（用户关掉了？），只落日志` });
         return;
@@ -465,7 +464,7 @@ function dispatchCtl(m) {
     case "acts":  applyActs(m);  return;
     case "files": applyFiles(m); return;
     // 右栏「文件」：fs.list / fs.read 的应答，fs.err 是两条共用的错误通道
-    // （护栏、目录没了、文件不是普通文件…）。实现和渲染都在 82-files.js。
+    // （护栏、目录没了、文件不是普通文件…）。实现和渲染都在 83-files.js。
     case "fs.list": applyFsList(m); return;
     case "fs.read": applyFsRead(m); return;
     case "fs.err":  applyFsErr(m);  return;
@@ -492,12 +491,12 @@ function dispatchCtl(m) {
         }
       }
       return;
-    // Agent 接线（agent_cfg.go）：整份 /api/state 的 agents 快照；预览是
-    // 断开前那次 dry run 的答案。两类都只落进状态，由 88-agent-cfg.js 画。
+    // Agent 接线（internal/gateway/agents.go）：整份 /api/state 的 agents 快照；预览是
+    // 断开前那次 dry run 的答案。两类都只落进状态，由 89-agent-cfg.js 画。
     case "gw.agents": applyGwAgents(m); return;
     case "gw.agents.drift": applyGwAgentsDrift(m); return;
     case "gw.agent.preview": applyGwPreview(m); return;
-    // magpie 本体的版本 / 更新（magpie_update.go）：只落状态，壳在 gw/00-frame.js。
+    // magpie 本体的版本 / 更新（magpie_update.go）：只落状态，壳在 87-gateway.js。
     case "magpie.update": applyGwUpdate(m); return;
     // 项目池（左栏那一轮）。它和 state 是两回事：state 是"扫出来的会话库"，
     // 这一条是"用户声明的项目池 + 归属"。分开发的理由和三条腿分开是同一条 ——
@@ -506,7 +505,7 @@ function dispatchCtl(m) {
     // 设置（Perch 自己的偏好）。shell 首帧里也带一份，之后每次改动 Go 都推整份；
     // 默认目录选择器是协程里推的，所以它和 settings.set 的答复走同一条消息。
     case "settings": {
-      // 默认目录的提交错误就地显示在输入框下面，不再弹 toast（84-settings.js）。
+      // 默认目录的提交错误就地显示在输入框下面，不再弹 toast（85-settings.js）。
       const inline = typeof settingsMessageArrived === "function" && settingsMessageArrived(m);
       if (m.err && !inline) showToast("设置没保存", m.err, "err");
       if (m.settings) {

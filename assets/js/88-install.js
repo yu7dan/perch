@@ -1,5 +1,5 @@
 "use strict";
-/* 86-install.js —— 行内安装控制台：agent 官方安装命令的流式日志与收尾。
+/* 88-install.js —— 行内安装控制台：agent 官方安装命令的流式日志与收尾。
    本文件是 index.html 里按序 defer 的一段 classic script；所有文件共享同一个全局词法作用域，
    顺序即依赖：后面的文件可以用前面声明的 const/let/function。新代码放进对应域的文件，
    别在这一段里再塞别的域。源行 10743-10840（2026-10-17 从 app.js 原样切出，逻辑未改）。 */
@@ -238,7 +238,7 @@ $("dash-agent-list").addEventListener("click", (e) => {
     bootFact(`Agent 打开 → ${lb.dataset.launch}`);
     return;
   }
-  // 行本身 = 打开右侧配置抽屉（88-agent-cfg.js）。安装/打开按钮在上面已经
+  // 行本身 = 打开右侧配置抽屉（89-agent-cfg.js）。安装/打开按钮在上面已经
   // 各自处理并 return，所以点按钮不会顺带打开抽屉。
   const cb = e.target.closest("[data-agentcfg]");
   if (cb) acOpen(cb.dataset.agentcfg);

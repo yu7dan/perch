@@ -1,0 +1,256 @@
+/* ===========================================================================
+   4. 右栏（C6a）—— 外壳级的独立区域
+   ---------------------------------------------------------------------------
+   它和左栏（#rail + #list）在结构上是对称的：都是"桌子边上的一列"，
+   谁都不是中栏的子元素。不同点是右边这一列的内容不是导航，而是
+   **关于当前工作的读数**，所以它内部有模块之分。
+
+   Orca 的对应物是 components/right-sidebar/index.tsx（:139-213）：
+     · 一个 flex-row 容器，面板内容 + 可选的 40px 侧边活动栏；
+     · 面板内容里从上到下 = 活动栏（'top' 布局，36px 高的一排图标）+ 面板正文；
+     · 最左那条 10px 的透明抓取区（:191-195）就是我们的 .divider。
+   我们照搬的是这一层的**关系**（独立列 + 模块切换 + 可拖边界 + 收起不卸载），
+   不是它的像素：它屏幕更宽、左栏更窄，右栏能从 y=0 通到底；我们左栏吃掉
+   372px，右栏若也从 y=0 通高，那 36px 的头会被窗口按钮（138px overlay）压住
+   —— Orca 用"40px 侧边活动栏吸收 40px"绕这个，我们要么图标放不下、要么得
+   让图标钻到关闭键底下。所以右栏从标题栏下沿开始，代价只是顶部多 36px 留白
+   （标题栏自己在那一列上的切片 .tb-rsb，同色，看不出接缝）。
+   =========================================================================== */
+#rsb{grid-area:rsb;position:relative;display:flex;flex-direction:column;
+     min-width:0;background:var(--side);
+     /* ── 2026-10-17：把最外那 10px 让给**窗口自己的缩放边** ────────────────
+        实测（真按真拖）：
+          · 拖**产品左框**（client x=2）→ 窗口缩放生效 292,66 1424x900 → 329,66 1387x900；
+          · 拖**产品右框**（client x=1422，距最右 2px）→ **什么都没发生**。
+        差别的来路：右栏两条滚动区（上段 .scroll、下段 #hist）的滚动条各 10px 宽，
+        正好落在 [W−10, W]，把窗口右框那 8px 的缩放边盖住了 —— DOM 先拿到按下，
+        于是"拖动最右侧的边框往往会被滚动条选中"（用户的原话）。
+        让出 10px 之后滚动条落到 [W−20, W−10]，最外这条竖带重新归窗口缩放，
+        左右两侧手感一致。
+        代价只有 10px 内容宽；背景色本来就铺满内边距，看不出少了一块。
+        附带修好一处：横着的 #rsb-split 右端以前被上下两条滚动条夹在 10px 里。
+        ⚠️ 标题栏右上角那颗关闭键（.window-controls，fixed 138x36、z-index 9999）
+        仍然盖着最外那条带的上 36px —— 窗口右上**角**的缩放要避开它，另议。 */
+     padding-right:10px}
+/* 收起 = 宽度 0 + overflow:hidden。**组件不卸载** —— Orca 的注释写得很清楚
+   （index.tsx:145-150：收起时切 overflow-hidden 是为了图标和内容不外溢，
+   而"组件保持挂载"是性能决定，见它 App.tsx 那边）。我们这边还有一条更硬的
+   理由：对话流那棵 DOM 是 JS 渲染出来的，卸载了就得重新渲染一遍，
+   而它记着的滚动位置（#hist.scrollTop）会一起没。 */
+#rsb.off{overflow:hidden}
+#rsb-head{flex:none;height:var(--titlebar-h);display:flex;align-items:stretch;
+          border-bottom:1px solid var(--line-soft);user-select:none}
+#rsb-bar{display:flex;align-items:stretch;flex:1;min-width:0;overflow:hidden}
+/* 模块按钮：**数值逐条取自 Orca components/right-sidebar/activity-bar-buttons.tsx:144-172
+   的 'top' 布局**（`h-[36px] w-9` = 36×36、图标 16px、活动态是底部 2px 前景色
+   短线 + 前景色，非活动态 text-muted-foreground/60）。它和窗口标题栏同高同基线，
+   所以这一排读起来是标题栏的延续，不是又一个工具条。 */
+.arbtn{position:relative;width:36px;flex:none;display:grid;place-items:center;
+       color:color-mix(in srgb,var(--muted) 60%,transparent);
+       transition:color 100ms ease}
+.arbtn:hover{color:var(--muted)}
+.arbtn.on{color:var(--fg)}
+.arbtn.on::after{content:"";position:absolute;left:25%;right:25%;bottom:0;height:2px;
+                 border-radius:2px 2px 0 0;background:var(--fg)}
+/* 「需要你」的数字徽标。**没有现成样式可抄** —— Orca 的活动条上只有 7px 圆点、
+   全库没有一个数字徽标（理由见 HTML 里那颗徽标的注释），所以这块是照它的**语言**
+   新画的：橙是它给"需要人"的色（--ask，AgentQuestionIcon 那支），圆角药丸、
+   等宽数字、深字压橙底。
+   ⚠️ 两条实测出来的：
+   (1) 位置必须**出流**（absolute）。`.arbtn` 是 grid，徽标留在流里会占掉一个
+       网格行、把图标顶上去一行 —— 徽标一出现图标就跳，比没徽标更难受。
+   (2) `display` 一写，`[hidden]` 那条 UA 规则就被盖掉了，`b.hidden = true`
+       再也藏不住（会一直挂着一个旧数字）。所以下面那条 [hidden] 是**必须**的，
+       不是补丁 —— 这文件里 `.rsb-mod[hidden]` 是同一个坑的另一处。 */
+.badge{position:absolute;top:2px;right:2px;min-width:14px;height:14px;
+       padding:0 4px;display:inline-flex;align-items:center;justify-content:center;
+       font-size:9px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums;
+       color:#2b1500;background:var(--ask);border-radius:7px;
+       box-shadow:0 0 0 1.5px var(--side);pointer-events:none}
+.badge[hidden]{display:none}
+#rsb-head .rt{display:flex;align-items:center;flex:none;gap:4px;padding-right:6px}
+/* 模块面板：一次只显示一个。用 [hidden] 而不是 display:none 的类 —— 它本来
+   就是给这个用的，而且"另一个模块的标记还在但不可见"这件事在 DOM 里读得出来。 */
+.rsb-mod{flex:1;display:flex;flex-direction:column;min-height:0;min-width:0;
+  animation:rsbModIn 120ms ease-out}
+.rsb-mod[hidden]{display:none}
+/* 模块切换的入场：只淡入 + 2px 上移。display:none→flex 会重启动画，
+   所以不用额外的"切换"类。 */
+@keyframes rsbModIn{from{opacity:0;transform:translateY(2px)}}
+@media (prefers-reduced-motion:reduce){.rsb-mod{animation:none}}
+#rsb .scroll{padding:0 8px 12px}
+/* 子代理模块没有工具条，滚动区自己留一点上边距；流水有 24px 上下文行，
+   滚动内容同样需要呼吸。 */
+.rsb-mod[data-mod="side"] .scroll{padding-top:6px}
+.rsb-mod[data-mod="flow"] .scroll{padding-top:6px}
+
+/* —— 右栏分上下两段 ————————————————————————————————————————————————
+   上段 = 四个**格子级**模块，一次显示一个（逻辑和以前一字不差）；
+   下段 = 对话流，**常驻**（它不再是"一次一个"里的一员，所以切上段不再动它）。
+   为什么要分：对话流是"当前会话在说什么"的正文，跟那四个抢同一个按钮位、
+   同一段高度，谁被切走谁的阅读位置就丢（原来那条 rsbFlowScroll 就是为这个
+   打的补丁，现在整条删掉了 —— 不被隐藏就不需要记住位置）。
+   ⚠️ 下段**默认只占一行头部**，这不是省事，是学费：Orca 的右栏曾经有过一个
+   "底部常驻面板"，被它自己撤了（components/right-sidebar/index.tsx:89-93），
+   原话是 "competed with file Explorer/Search for vertical space"。上下两段
+   抢高度的代价它付过一次，所以这里默认折叠，要用再展开。 */
+#rsb-mods{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+#rsb-hist{flex:none;display:flex;flex-direction:column;min-height:0;
+          height:var(--rsb-hist-h, 24px);overflow:hidden}
+/* ⚠️ 这里**没有** border-top：上段和下段之间那条线由 #rsb-split 的 ::after 画。
+   两处都画就是紧挨着的两条线（10px 抓取带里一条 + 1px 边框），看着像画重了。 */
+/* 上段/下段之间那条可拖的边界。**几何整套照左边界那条 .divider**（可见线 1px
+   由 ::after 居中画、可抓区 10px、元素本身必须透明否则会把线盖掉），
+   差别只有方向：cursor 是 row-resize。10px 的抓取带就是它的高度 ——
+   够抓，又不显眼。 */
+#rsb-split{position:relative;flex:none;height:10px;cursor:row-resize;z-index:3}
+#rsb-split::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;
+                  transform:translateY(-50%);border-radius:1px;
+                  background:var(--divider-line);transition:background 100ms ease}
+#rsb-split:hover::after,#rsb-split.drag::after{background:var(--divider-line-strong)}
+/* 下段的折叠箭头：图标本体只有一个（朝上 = "往上长开"），展开时转 180°。 */
+#h-fold svg{transition:transform 120ms ease}
+#rsb-hist.open #h-fold svg{transform:rotate(180deg)}
+
+/* 下段头上的**来源**小签：下段有两种主语（当前格 / 会话库），而且长得一模一样。
+   不标出来，你没法知道看的这段对话到底属于哪一个 —— 它会是你排错时最贵的一类
+   误解（"这格怎么在说我没说过的话"）。点它 = 回到当前格。 */
+#h-src{font:10.5px/1 var(--mono);padding:3px 6px;border-radius:4px;white-space:nowrap;
+       color:var(--faint);background:transparent;border:1px solid transparent}
+#h-src.lib{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,transparent);
+           background:color-mix(in srgb,var(--accent) 12%,transparent);cursor:pointer}
+#h-src.lib:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)}
+
+/* 「跳回最新」——读者往上翻了之后回尾部的那条路。
+   ⚠️ **常挂载**，靠 opacity/translate 淡入淡出，不是 display:none：
+     · 淡出需要一个还活着的节点（display:none 会当场掐掉过渡）；
+     · 隐藏时用 inert + aria-hidden（在 JS 里设），所以它既点不到、也 Tab 不到、
+       读屏也读不到 —— 这是 Orca 的 NativeChatJumpToLatest 那套语义。
+   那几个数值都不是随手取的：48px 决定"要不要显形"（见 FLOW_BOTTOM_PX），
+   4px 才是"回到尾部"的重武装线，两个数管两件事，混用会变成"往上滚一点就被拽回去"。 */
+#h-jump{position:absolute;left:50%;bottom:10px;z-index:4;
+        display:flex;align-items:center;gap:5px;
+        height:26px;padding:0 10px;border-radius:13px;
+        font:11.5px/1 var(--sans);color:var(--fg);
+        background:var(--popover,#26262c);border:1px solid var(--divider-line-strong);
+        box-shadow:0 4px 14px rgba(0,0,0,.45);cursor:pointer;
+        opacity:0;pointer-events:none;transform:translate(-50%,6px);
+        transition:opacity 150ms ease,transform 150ms ease}
+#h-jump.on{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
+#h-jump:hover{background:var(--hover,#33333a)}
+@media (prefers-reduced-motion: reduce){ #h-jump{transition:none} }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   右栏的四个**格子级**模块（需要你 / 子代理 / 改动 / 流水）
+
+   为什么这一批模块全挂在"当前这一格"上：左栏是**会话库**（历史，点一个看一个），
+   右栏是**工作台**（现在正在跑的那几个 agent）。同一列里混两种主语，读数就会
+   互相打架 —— "改动"到底是左边选中那个会话改的，还是当前格改的？
+   所以这一列的主人只有一个：当前格（.cell.cur）。例外是「对话流」，它读的是
+   左栏选中的那个会话（那是会话库的读物），等 C6b 把左栏改成
+   工作台/历史/搜索/设置 之后它该搬去「历史」。
+
+   三个列表共用一套行骨架 —— 它们的差别只在列数，不在"行是什么"。
+   ═══════════════════════════════════════════════════════════════════════════ */
+.vlist{display:flex;flex-direction:column;min-height:0}
+.vrow{width:100%;text-align:left;background:none;border:1px solid transparent;
+      border-radius:var(--r);font:inherit;color:inherit}
+.vrow:hover{background:var(--card-hov)}
+/* 分组小标题 + 一条细线拉到右边。Orca 的右栏面板里分组是这样一个"小标题 + 分隔"
+   的节奏（它用 SidebarSectionHeader），而不是靠留白分层 —— 留白在滚动容器里
+   一滚就没了，标题会跟着内容跑，读不出"这下面是另一组"。 */
+.cap{display:flex;align-items:center;gap:7px;padding:10px 8px 4px;
+     font:10.5px var(--mono);color:var(--faint);letter-spacing:.3px}
+.cap::after{content:"";flex:1;height:1px;background:var(--line-soft)}
+.vlist > .cap:first-child{padding-top:4px}
+
+/* ---------- 子代理状态签（C7） ----------
+   一颗点 + 一个词：进行中 / 已完成 / 已关闭 / 失败。点和图形**复用标签条那颗
+   .adot 的同一套态**（Orca 的 AgentStateDot 就是"侧栏子行和聊天条共用同一颗点"
+   的那一个零件，AgentChildRowContent.tsx:21-24），只是尺寸收到 sm；
+   词色一律中性，只有失败用红 —— 状态靠图形分，不靠给每一行换一种字色。 */
+.subst{display:inline-flex;align-items:center;gap:4px;font:10.5px/1 var(--sans);
+       color:var(--muted);white-space:nowrap;flex:none}
+.subst.done{color:var(--fg2)}
+.subst.closed{color:var(--faint)}
+.subst.fail{color:var(--red)}
+
+/* ---------- ① 需要你 ----------
+   一行 = 一个在等你的格子。行里三件事：谁、为什么等你、它的最后一句。
+   排序由 JS 定（要人在前的排前面），这里只管长相。 */
+.need{display:grid;grid-template-columns:13px minmax(0,1fr) auto;gap:0 8px;
+      align-items:start;padding:7px 8px}
+.need .g{display:grid;place-items:center;margin-top:2px;color:var(--ask)}
+.need .m{min-width:0}
+.need .hd{display:flex;align-items:center;gap:6px;min-width:0}
+/* .who 是 flex 里那个**会被压**的：格子名长了要截它，不是截右边那个时间。
+   （flex:0 1 auto + min-width:0 才能真的缩下去；只写 min-width 它照样撑开。） */
+.need .who{font-size:12.5px;font-weight:500;color:var(--fg);flex:0 1 auto;min-width:0}
+.need .why{flex:none;font:10.5px var(--mono);color:var(--ask)}
+.need .tx{margin-top:3px;font-size:11.5px;line-height:1.45;color:var(--muted);
+          display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.need .tm{font:10.5px/1.7 var(--mono);color:var(--faint);white-space:nowrap}
+/* 「空闲」那一组：**同一件事，但已经看过了**。它的存在是为了回答"—格都没动，
+   它们在等我吗"（登记表里的 idle 原文就是 "Claude is waiting for your input"），
+   所以它不能被藏掉；但它不是新闻，所以整行压暗、字形退成灰、计数也不进徽标。 */
+.need.quiet .who{font-weight:400}
+.need.quiet .why{color:var(--faint)}
+.need.quiet .g{color:var(--faint)}
+/* 出错那一行的字形给红：它和"等你/有新消息"是不同的两件事，
+   染成同一族橙会被读成"它在等我"（它其实已经停在那儿不动了）。 */
+.need.k-fail .g{color:var(--red)}
+
+/* ±N 是**字面量**不是计数器：文件树和预览里的 +/- 各是一段带色文本，
+   两位都为 0 时整段不出现（读文件那种动作不该留一行空读数）。 */
+.d-add{color:var(--green)} .d-del{color:var(--red)}
+
+/* ---------- ③ 流水 ----------
+   列：种类字形 / 正文 / 时间。正文里的工具名与目标分开上色，让"这一步在干什么"
+   不用读完整行就看得出来。 */
+.fd{display:grid;grid-template-columns:13px minmax(0,1fr) auto;gap:0 7px;
+    align-items:start;padding:5px 8px;font-size:12px}
+.fd .k{display:grid;place-items:center;margin-top:2px;font:11px/1.3 var(--mono);
+       color:var(--faint);text-align:center}
+.fd .tx{min-width:0;line-height:1.45;color:var(--fg2);white-space:pre-wrap;
+        overflow-wrap:anywhere}
+/* ⚠️ inline-flex + gap 是 C7 加的：子代理那一行的状态签挪到了**时间左边**，
+   于是这一格里有"签 + 时间"两件东西，靠 nowrap 保证它们不折行（原来只有时间，
+   是个纯文本 span）。C7 之前它俩挤在正文里，长描述一折行，签就跟着掉到第二行，
+   截图里读出来是"…report ose | 进行中"这种断句。 */
+.fd .tm{font:10px/1.7 var(--mono);color:var(--faint);white-space:nowrap;
+        display:inline-flex;align-items:center;gap:6px}
+.fd .tool{color:var(--fg)}
+.fd .tgt{font:11px var(--mono);color:var(--muted);word-break:break-all}
+.fd .ok{color:var(--faint)} .fd .no{color:var(--red)}
+/* 你说的话是这一串流水里的"锚"，它该比 agent 那些步骤更亮一点 */
+.fd.p .k{color:var(--accent)} .fd.p .tx{color:var(--fg)}
+/* 失败的那一步整行的字形漂红（Orca 的失败态用 --red）。 */
+.fd.fail .k{color:var(--red)}
+/* 模块内的空状态：和 .empty 同一套排版，只是这里的容器自己有内边距 */
+#rsb .vlist .empty{padding:10px 8px}
+/* 子代理那两组的容器（第一组是"本格在跑的"，第二组是会话库里的卡片） */
+#side-live{display:flex;flex-direction:column}
+#side-live:empty{display:none}
+
+/* ---------- 5. 状态栏 ---------- */
+#status{position:fixed;left:0;right:0;bottom:0;height:24px;background:var(--rail);
+        border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:14px;
+        padding:0 12px;font:11.5px/1 var(--ui);color:var(--muted);user-select:none}
+#status .it{display:flex;align-items:center;gap:6px}
+#status .sp{margin-left:auto}
+/* 2026-10-15 从面板头/面板尾搬过来的读数。cwd 与终端字体/渲染后端本就是
+   会话级的环境事实 —— Orca 的 StatusBarSurface 就是放这些的地方，
+   放在每个终端的头顶/脚底反而是我们自造的（原来那条 .pfoot 已删）。 */
+/* 两条绝对路径并排放会分不清谁是谁（#s-store 是会话库、#s-cwd 是工作目录），
+   所以各给一个暗标签。路径本身用等宽。 */
+#status .cwd{min-width:0;max-width:320px}
+#status .lbl{color:var(--faint);flex:none}
+#s-dims,#s-font,#s-lig,#s-render,#s-grid{font:11px var(--mono);color:var(--faint)}
+/* 每格列数掉到 Claude Code 的下限（64）以下时**换色**，不是加个图案 ——
+   这是一条读数，不是一个状态：它和上面的字体回退用同一个 --red，
+   因为两者说的是同一件事（"有个东西没到位，但功能还在"）。 */
+#s-grid.warn{color:var(--red)}
+.meter{display:flex;align-items:center;gap:6px;font:11px/1 var(--mono);color:var(--faint)}
+.meter .bar{width:64px;height:4px;border-radius:999px;background:#2f2f35;overflow:hidden}
+.meter .bar i{display:block;height:100%;background:var(--muted);width:0}
+

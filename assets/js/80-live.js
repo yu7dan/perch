@@ -555,7 +555,7 @@ const shell = Stream("shell");
 /* 启动闸（和 20-ctl.js 的 ctlInbox 是同一条理由）：
    这条流在**本文件求值时就建好了**，而 handleShell 是"连上就同步扫一遍、
    马上 Send"（main.go:1601）—— 会话库很小的时候（比如验收用的沙盒），
-   载荷几毫秒就回来，落在 84-settings / 87-gw-apply 还没求值的那条缝里。
+   载荷几毫秒就回来，落在 85-settings / 87-gateway 还没求值的那条缝里。
    处理函数 applyMagpie 在 87，于是就是红条 `applyMagpie is not defined`。
    启动期间先收住这一帧，99-boot 打开 ctl 启动闸时按同一顺序补画。 */
 let pendingShell = null;
@@ -583,7 +583,7 @@ shell.onmessage = (ev) => {
   try {
     p = typeof ev.data === "string" ? JSON.parse(ev.data) : JSON.parse(new TextDecoder().decode(ev.data));
   } catch (e) { console.error("[perch] 壳层数据解析失败:", e); return; }
-  // 启动闸：这一刻 84/87 可能还没求值（见上面那段），先收住，等 99-boot 放行。
+  // 启动闸：这一刻 85/87 可能还没求值（见上面那段），先收住，等 99-boot 放行。
   if (!ctlBootReady) { pendingShell = p; return; }
   applyShell(p);
 };

@@ -1,5 +1,5 @@
 "use strict";
-/* 83-settings-search.js —— 设置搜索的纯函数。这里**不碰 DOM**，方便单独测。
+/* 84-settings-search.js —— 设置搜索的纯函数。这里**不碰 DOM**，方便单独测。
 
    评分分层照 Orca 的 settings-search.ts（MIT）：
      节标题（pane 级）  exact 900 / prefix 850 / substring 800
@@ -7,7 +7,7 @@
      描述               exact 500 / prefix 450 / substring 400
      关键词             exact 300 / prefix 250 / substring 200
 
-   放在 84-settings.js 之前求值：84 只负责把 DOM 读成 {title,description,keywords}
+   放在 85-settings.js 之前求值：85 只负责把 DOM 读成 {title,description,keywords}
    再调这里。查询为空 = 全部命中（返回 1，不是 0）；空查询不扫描条目。
    超长查询（> 2 KiB）直接判不命中 —— 粘贴一大段文本不该让页面逐字扫描。 */
 
@@ -59,8 +59,4 @@ function settingsSearchScoreEntry(query, entry, isSection) {
     best = Math.max(best, settingsSearchScoreText(nq, kw, SETTINGS_SEARCH_TIERS.keyword));
   }
   return best;
-}
-
-function settingsSearchMatch(query, entry, isSection) {
-  return settingsSearchScoreEntry(query, entry, isSection) > SETTINGS_SEARCH_NO_MATCH;
 }

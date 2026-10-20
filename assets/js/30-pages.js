@@ -490,7 +490,7 @@ let OP_CATALOG_MISSING = false;
 function opCatalog() {
   let list = [];
   try {
-    // MAGPIE 是 85-dash 里的 let；这个函数只在启动闸之后调用（面板打开/建格），
+    // MAGPIE 是 86-dash 里的 let；这个函数只在启动闸之后调用（面板打开/建格），
     // 那时它已经初始化。try 兜住"有人把调用挪到求值期"的情况（TDZ 里 typeof 也会抛）。
     if (MAGPIE && Array.isArray(MAGPIE.catalog)) list = MAGPIE.catalog;
   } catch (_) { list = []; }
@@ -540,7 +540,7 @@ function opMechTitle(a) {
   return m && m !== "terminal" ? `状态来源：${m}` : "只启动，没有状态接入";
 }
 function opAgentIcon(name) {
-  // iconHTML 在 85-dash（和总览共用同一套图标规则）。运行期已求值；
+  // iconHTML 在 86-dash（和总览共用同一套图标规则）。运行期已求值；
   // 万一不可用就留空，不影响行本身。
   return typeof iconHTML === "function" ? iconHTML(name || "", " op-ag-icon") : "";
 }
@@ -651,8 +651,8 @@ function opSetDefaultAgent() {
     sendCtrl({ type: "log", msg: `选择面板 设为默认：${a.id} 已经是默认，不动` });
     return;
   }
-  // settingsSend 在 84-settings（运行期已求值）：乐观写缓存 + settings.set；
-  // Go 拒绝时会推回旧值（见 05-prefs / 84-settings 的文件头）。
+  // settingsSend 在 85-settings（运行期已求值）：乐观写缓存 + settings.set；
+  // Go 拒绝时会推回旧值（见 05-prefs / 85-settings 的文件头）。
   settingsSend({ defaultAgent: a.id }, `默认 Agent → ${a.id}`);
   renderOpAgents();
   showToast(`默认 Agent 已设为 ${a.name}`, "以后新建的格子默认用它。", "ok");

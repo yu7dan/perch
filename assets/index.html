@@ -3,9 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <title>Perch · 栖枝</title>
-<link rel="stylesheet" href="/xterm.css">
-<link rel="stylesheet" href="/app.css">
-<link rel="stylesheet" href="/gw.css">
+<!-- CSS 按域拆分，链接顺序 = 层叠顺序（基础 token → 各区域 → 第三方覆盖）。
+     新增样式放进对应的域文件，不要再建第二份全局样式表。 -->
+<link rel="stylesheet" href="/vendor/xterm.css">
+<link rel="stylesheet" href="/css/00-base.css">
+<link rel="stylesheet" href="/css/10-nav.css">
+<link rel="stylesheet" href="/css/20-list.css">
+<link rel="stylesheet" href="/css/30-workspace.css">
+<link rel="stylesheet" href="/css/40-sidebar.css">
+<link rel="stylesheet" href="/css/50-settings.css">
+<link rel="stylesheet" href="/css/60-pages.css">
+<link rel="stylesheet" href="/css/70-gateway.css">
 </head>
 <body>
 
@@ -37,7 +45,7 @@
     <div class="tb-rail">
       <!-- 产品标：直接用设计稿 perch-logo.png（透明 PNG，形状与比例未改）。
            CSS 只裁掉四周的透明留白，让 22px 的槽里图形仍然看得清。 -->
-      <span class="mark"><img src="/perch-logo.png" alt="" draggable="false"></span>
+      <span class="mark"><img src="/icons/perch-logo.png" alt="" draggable="false"></span>
       <span class="tb-name" title="Perch（栖枝）">Perch</span>
     </div>
     <div class="tb-list"></div>
@@ -177,7 +185,7 @@
            两层设计里，右层这个标题只是"你正在哪一层的哪一栏"的落款，
            把同一个数再写一遍就是同一句话在同一个屏幕上说两遍。 -->
       <h1 id="list-title">工作区</h1>
-      <div style="margin-left:auto;display:flex;gap:2px">
+      <div class="list-actions">
         <button class="icon-btn" id="add-proj" title="添加项目（选一个目录）">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>
         </button>
@@ -484,7 +492,7 @@
             <!-- Agent CLI 接线表：只列本机能在终端里跑的 CLI agent（已接入 /
                  未接入两组）；未检测到的收进 magpie 式折叠栏，点「安装」在 Perch
                  里跑官方 CLI 命令。桌面端不在这里 —— 用户自己下载，在网关层配置。
-                 点一行 = 右侧配置抽屉（88-agent-cfg.js）：接入网关、模型、
+                 点一行 = 右侧配置抽屉（89-agent-cfg.js）：接入网关、模型、
                  推理强度、分档、子代理、登录方式。 -->
             <section class="console-foot" id="dash-agent-card">
               <div class="mod-head">
@@ -498,7 +506,7 @@
 
         <!-- 网关：magpie 自己的界面（用户 2026-10-18 定的方向：不手写第二份）。
              网关的那几页（供应商的陈列/添加/订阅/配置页、路由、网关、用量、
-             插件）由 magpie 的前端渲染；Go 侧在同源路径下反代（gwui.go），
+             插件）由 magpie 的前端渲染；Go 侧在同源路径下反代（internal/gateway/ui.go），
              并把 magpie 自己的 Agents/Sessions/Library 与左侧栏从内嵌页里
              拿掉 —— 那些和 Perch 的总览/Agent 重复，导航按顶部标签摆。
              iframe 地址里没有 key —— 鉴权 cookie 由服务端注入。
@@ -541,7 +549,7 @@
        `#app.settings` 时它和总览一样从第 2 列铺到最后一列，会话列表/终端/右栏
        一起退场（visibility:hidden，理由同总览：PTY 的起始尺寸靠真实布局）。
        形态照 Orca 的设置页：标题 + 说明 + 一张装行的卡片；行是「标签/说明 ←→ 控件」。
-       内容全部静态放在这里（单例、看得见、量得到），动态值由 84-settings.js
+       内容全部静态放在这里（单例、看得见、量得到），动态值由 85-settings.js
        的 syncSettingsUI 填。 -->
   <main id="settings">
     <div class="settings-scroll">
@@ -631,12 +639,12 @@
                 <div class="set-fontcards" id="set-fonts" role="radiogroup" aria-label="终端字体">
                   <button type="button" class="set-fontcard" role="radio" data-set-font="cascadia"
                           aria-checked="true">
-                    <span class="set-fontsample" style="font-family:'Cascadia Code WB'">Aa 中文 0O1l</span>
+                    <span class="set-fontsample font-cascadia">Aa 中文 0O1l</span>
                     <span class="set-fontname">Cascadia Code</span>
                   </button>
                   <button type="button" class="set-fontcard" role="radio" data-set-font="jetbrains"
                           aria-checked="false">
-                    <span class="set-fontsample" style="font-family:'JetBrains Mono WB'">Aa 中文 0O1l</span>
+                    <span class="set-fontsample font-jetbrains">Aa 中文 0O1l</span>
                     <span class="set-fontname">JetBrains Mono</span>
                   </button>
                 </div>
@@ -914,7 +922,7 @@
   </div>
 </div>
 <!-- Agent 配置抽屉（总览 → Agent 名单 → 点一行）。数据与写操作都走 magpie
-     控制面（agent_cfg.go / 88-agent-cfg.js）；这里只放壳，内容打开时现填。
+     控制面（internal/gateway/agents.go / 89-agent-cfg.js）；这里只放壳，内容打开时现填。
      fixed 在右沿、标题栏之下、状态栏之上；点外面、Esc、× 都收起。 -->
 <aside id="agentcfg" role="dialog" aria-label="Agent 配置" aria-hidden="true">
   <div class="ac-head">
@@ -933,7 +941,7 @@
 </aside>
 <!-- 确认框（单例）。关窗确认、结束 agent 确认都走它 —— 一处语义、一处键盘行为。
      盖住整个窗口（包括自绘标题栏）：确认没答复之前，点 × 也只会把焦点送回卡片，
-     不会在背后偷偷把窗口关掉。内容由 84-settings.js 的 askConfirm 填。 -->
+     不会在背后偷偷把窗口关掉。内容由 85-settings.js 的 askConfirm 填。 -->
 <div id="confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title"
      aria-describedby="confirm-body" hidden>
   <div class="cf-card" role="document">
@@ -952,13 +960,14 @@
 </div>
 <div id="toasts" role="status" aria-live="polite"></div>
 
-<script src="/xterm.js"></script>
-<script src="/addon-fit.js"></script>
-<script src="/addon-web-links.js"></script>
-<script src="/addon-unicode11.js"></script>
-<script src="/addon-webgl.js"></script>
-<script src="/addon-image.js"></script>
-<script src="/addon-serialize.js"></script>
+<!-- 第三方终端库保持原样分发（见 assets/vendor/ 与 THIRD-PARTY.md）。 -->
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/addon-fit.js"></script>
+<script src="/vendor/addon-web-links.js"></script>
+<script src="/vendor/addon-unicode11.js"></script>
+<script src="/vendor/addon-webgl.js"></script>
+<script src="/vendor/addon-image.js"></script>
+<script src="/vendor/addon-serialize.js"></script>
 <!-- ⚠️ 这一段必须是**普通脚本**，而且必须在下面的 module 之前 —— 它专门抓
      一种最难查的白屏：**module 里的语法错误**。模块解析失败时它一行都不执行，
      连下面那个 jserr 都还没注册，日志/控制台/标题三条路全断 ——
@@ -1002,6 +1011,10 @@ window.__facts = [];
   import { Stream, JSONStream, Window, Events } from "/wails/runtime.js";
   window.__wails = { Stream, JSONStream, Window, Events };
 </script>
+<!-- 前端自有脚本是 classic script：**数字前缀就是加载顺序**，它们共享同一个
+     全局词法作用域，拆目录会制造"模块化"的错觉。05 先跑（偏好缓存），
+     99 最后跑（启动闸）；ESM（wails runtime）只有在 defer 之前求值才可依赖。
+     新增文件请取一个能插进现有顺序的编号，并同步这里。 -->
 <script defer src="/js/05-prefs.js"></script>
 <script defer src="/js/10-term.js"></script>
 <script defer src="/js/20-ctl.js"></script>
@@ -1016,14 +1029,13 @@ window.__facts = [];
      状态里读数据，但各自是一个独立的面，不往 80-live 里再堆。 -->
 <script defer src="/js/81-newspace.js"></script>
 <script defer src="/js/82-file-icons.js"></script>
-<script defer src="/js/82-files.js"></script>
-<script defer src="/js/83-settings-search.js"></script>
-<script defer src="/js/84-settings.js"></script>
-<script defer src="/js/85-dash.js"></script>
-<script defer src="/js/gw/00-frame.js"></script>
-<script defer src="/js/86-install.js"></script>
-<script defer src="/js/87-gw-apply.js"></script>
-<script defer src="/js/88-agent-cfg.js"></script>
+<script defer src="/js/83-files.js"></script>
+<script defer src="/js/84-settings-search.js"></script>
+<script defer src="/js/85-settings.js"></script>
+<script defer src="/js/86-dash.js"></script>
+<script defer src="/js/87-gateway.js"></script>
+<script defer src="/js/88-install.js"></script>
+<script defer src="/js/89-agent-cfg.js"></script>
 <script defer src="/js/99-boot.js"></script>
 </body>
 </html>

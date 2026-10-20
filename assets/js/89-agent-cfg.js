@@ -1,9 +1,9 @@
 "use strict";
-/* 88-agent-cfg.js —— 总览 → Agent 名单 → 右侧配置抽屉（2026-10-18）。
+/* 89-agent-cfg.js —— 总览 → Agent 名单 → 右侧配置抽屉（2026-10-18）。
  *
  * 用户的要求：总览下面的 Agent 配置要做到 magpie 的 Agents 页那套事 ——
  * 接进网关、模型 / 推理强度 / 分档 / 子代理 / 登录方式，一次把 14 个字段全做。
- * 数据与写操作都走 magpie 控制面（Go 侧 agent_cfg.go）：
+ * 数据与写操作都走 magpie 控制面（Go 侧 internal/gateway/agents.go）：
  *
  *   GET  /api/state                → {type:"gw.agents", agents, notice}
  *   POST /api/set                  → 同上（值空串 = 回到 agent 自己的默认）
@@ -622,7 +622,7 @@ $("ac-body").addEventListener("click", (e) => {
     return;
   }
   if (act === "keep") {
-    // 不写文件：只是让 magpie 接受现状（见 agent_cfg.go 的 gwAgentAction）。
+    // 不写文件：只是让 magpie 接受现状（见 internal/gateway/agents.go 的 gwAgentAction）。
     AC_BUSY = "keep";
     AC_ERR = "";
     renderAgentDrawer();

@@ -4,7 +4,7 @@
    顺序即依赖：后面的文件可以用前面声明的 const/let/function。新代码放进对应域的文件，
    别在这一段里再塞别的域。源行 1-1607（2026-10-17 从 app.js 原样切出，逻辑未改）。 */
 
-/* 本文件只放终端工厂与它直接依赖的状态；壳层、总览、网关分别在 40/60/85 等文件。 */
+/* 本文件只放终端工厂与它直接依赖的状态；壳层、总览、网关分别在 40/60/86 等文件。 */
 // Window / Events 是 Wails 运行时带的前端 API。窗口按钮能走它就别自己绕后端 ——
 // 这两个在运行时里是直接调平台层（`internal/runtime/desktop/@wailsio/runtime/src/window.ts`），
 // 我们只需要接上"什么时候该换字形"。
@@ -57,7 +57,7 @@ const MONO = '"Cascadia Code WB", "JetBrains Mono WB", Consolas, "Microsoft YaHe
 let LigaturesAddon = null;
 const fontsReady = (async () => {
 try {
-  const m = await import("/addon-ligatures.esm.js");
+  const m = await import("/vendor/addon-ligatures.esm.js");
   LigaturesAddon = m.LigaturesAddon ?? m.default?.LigaturesAddon ?? null;
 } catch (e) { console.warn("[perch] ligatures 未加载:", e); }
 

@@ -1,6 +1,7 @@
 "use strict";
-/* 85-dash.js —— 总览（读数、热力图、实时、在等你、Agent 名单）。
-   网关已拆到 gw/ 下（2026-10-17）：本文件只做总览，别再往这里放网关代码。
+/* 86-dash.js —— 总览（读数、热力图、实时、在等你、Agent 名单）。
+   网关在 87-gateway.js（2026-10-17 拆出，2026-10-20 合回一个域文件）：
+   本文件只做总览，别再往这里放网关代码。
    本文件是 index.html 里按序 defer 的一段 classic script；所有文件共享同一个全局词法作用域，
    顺序即依赖：后面的文件可以用前面声明的 const/let/function。 */
 
@@ -37,21 +38,12 @@ function mgLive() {
   const m = mg();
   return !!(m && m.state === "running");
 }
-function mgAgo(at) {
-  if (!at) return "";
-  const d = new Date(at);
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
 function mgCompact(n) {
   n = Number(n) || 0;
   if (n >= 1e9) return (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + "B";
   if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M";
   if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + "k";
   return String(Math.round(n));
-}
-function mgPct(part, total) {
-  return total > 0 ? Math.round((100 * part) / total) + "%" : "—";
 }
 function mgPromptOf(u) {
   return (u.input || 0) + (u.cache_read || 0) + (u.cache_write || 0);
@@ -68,17 +60,6 @@ function mgCacheRate(u) {
   const p = mgPromptOf(u || {});
   return p ? Math.round((100 * (u.cache_read || 0)) / p) : null;
 }
-function mgProviderName(id) {
-  const m = mg();
-  const p = m && (m.providers || []).find((x) => x.id === id);
-  return (p && p.name) || id || "";
-}
-function mgModelName(id) {
-  const m = mg();
-  const x = m && (m.models || []).find((v) => v.id === id);
-  return (x && x.name) || id || "";
-}
-
 /* 图标 resolver：照搬 magpie 的 icon()（app.js:285-321）——
    名字带 -color 或是已知位图 → <img>（图标自带颜色，直接给扩展名）；
    其余单色 SVG → CSS mask，跟着当前前景色走。
@@ -104,16 +85,27 @@ function iconHTML(name, cls) {
   const png = isPngIcon(nm);
   if (explicit || nm.endsWith("-color") || png) {
     const file = explicit ? nm : nm + (png ? ".png" : ".svg");
-    return `<img class="ico-img${c}" src="agent-icons/${encodeURIComponent(file)}" alt="" loading="lazy">`;
+    return `<img class="ico-img${c}" src="icons/agents/${encodeURIComponent(file)}" alt="" loading="lazy">`;
   }
-  const url = `agent-icons/${encodeURIComponent(nm)}.svg`;
+  const url = `icons/agents/${encodeURIComponent(nm)}.svg`;
   return `<span class="ico-mask${c}" aria-hidden="true" ` +
     `style="-webkit-mask-image:url('${url}');mask-image:url('${url}')"></span>`;
 }
 function magpieLogo(cls) {
   const c = " " + (cls || "");
-  return `<span class="ico-mask${c}" aria-hidden="true" style="-webkit-mask-image:url('magpie.svg');mask-image:url('magpie.svg')"></span>`;
+  return `<span class="ico-mask${c}" aria-hidden="true" style="-webkit-mask-image:url('icons/magpie.svg');mask-image:url('icons/magpie.svg')"></span>`;
 }
+/* 图标文件缺失（例如 magpie 报了一个我们没有的 icon id）时不要留 404 空白。
+   img 的 error 事件不冒泡，所以在 document 的捕获阶段接住，换成带底色的「?」。 */
+document.addEventListener("error", (e) => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement) || !img.classList.contains("ico-img")) return;
+  const span = document.createElement("span");
+  span.className = img.className.replace(/\bico-img\b/, "ico-mask ico-unknown");
+  span.textContent = "?";
+  span.setAttribute("aria-hidden", "true");
+  img.replaceWith(span);
+}, true);
 
 const THUMB_MS = 280, THUMB_EASE = "cubic-bezier(.2,.8,.2,1)";
 
@@ -219,7 +211,7 @@ function setNavView(view) {
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     renderDashboard("进入总览");
   } else if (view === "settings") {
-    // 配置抽屉属于总览的 Agent 名单；离开总览就收起（见 88-agent-cfg.js）。
+    // 配置抽屉属于总览的 Agent 名单；离开总览就收起（见 89-agent-cfg.js）。
     if (typeof acClose === "function") acClose();
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     // 先按缓存画（第一帧不空），同时问 Go 要权威值（默认目录是不是还在盘上
@@ -639,7 +631,7 @@ function renderDashAgents() {
           : c.launch
             ? "能在 Perch 里开一格；还没有状态接入"
             : "Perch 还没有这个 agent 的启动适配器";
-    // 已检测到的行可以点开右侧配置抽屉（88-agent-cfg.js）。网关那个点只有
+    // 已检测到的行可以点开右侧配置抽屉（89-agent-cfg.js）。网关那个点只有
     // 读到 magpie 的 agent 列表之后才画 —— 没读到时不假装"未接入"。
     const cfg = gid !== "missing";
     const ga = cfg && typeof gwAgentOf === "function" ? gwAgentOf(a.id) : null;
@@ -685,7 +677,7 @@ function renderDashAgents() {
   host.innerHTML = html;
 }
 
-/* 网关页 = magpie 自己的界面（2026-10-18 改）。它由 gw/00-frame.js 管：
+/* 网关页 = magpie 自己的界面（2026-10-18 改）。它由 87-gateway.js 管：
    控制面接上之后，一个 iframe 指向同源反代的 /gwui/?view=providers；
    没接上时显示 Perch 的安装/接入卡。供应商/路由/用量/插件不再手写。
    总览的读数仍然来自两条腿：

@@ -1,10 +1,10 @@
 "use strict";
-/* gw/00-frame.js —— 网关页 = magpie 自己的界面（同源反代，见 gwui.go）。
+/* 87-gateway.js —— 网关页 = magpie 自己的界面（同源反代，见 internal/gateway/ui.go）。
  *
  * 用户 2026-10-18 的结论：供应商的陈列/添加（含订阅）/配置页、路由、用量、
  * 插件、拖动排序，全都有现成实现，**不该由 Perch 再写一份**。只搬网关自己的
  * 那几页：Agents / Sessions / Library 与 Perch 的总览、Agent 重复，由
- * gwui.go 的 gwUIEmbed 从 magpie 的导航里拿掉，并把导航摆回顶部（用户明确
+ * internal/gateway/ui.go 的 gwUIEmbed 从 magpie 的导航里拿掉，并把导航摆回顶部（用户明确
  * 不要 magpie 的左侧栏）。所以本文件不再渲染任何业务页面，只做四件事：
  *   1. 控制面自动接入（沿用原来的节奏：最多 3 次、间隔 15 秒）；
  *   2. 接上之后把 iframe 指到 /gwui/?view=providers（地址里没有 key）；
@@ -13,8 +13,8 @@
  *
  * 本文件是 index.html 里按序 defer 的一段 classic script；共享全局词法作用域。 */
 
-/* GW：控制面整份读数，由 87-gw-apply.js 的 applyGw 落进来。
-   GW_INSTALL：magpie 本体的行内安装器状态，由 86-install.js 更新。 */
+/* GW：控制面整份读数，由本文件后半段的 applyGw 落进来。
+   GW_INSTALL：magpie 本体的行内安装器状态，由 88-install.js 更新。 */
 let GW = null;
 let GW_INSTALL = null;
 let GW_BUSY = "";
@@ -39,7 +39,7 @@ function gwOn() {
   return !!(GW && GW.connected);
 }
 
-/* embed=1 是稳定的标记，也让地址和旧缓存区分开（gwui.go 只在这个地址上裁剪
+/* embed=1 是稳定的标记，也让地址和旧缓存区分开（internal/gateway/ui.go 只在这个地址上裁剪
    页面）；view=providers 是每轮启动进来的那一页。 */
 function gwFrameURL() {
   return "/gwui/?view=providers&embed=1";
@@ -261,3 +261,110 @@ $("gw-frame").addEventListener("load", () => {
   const f = $("gw-frame");
   if (f && !f.hidden) bootFact("网关 内嵌界面已加载");
 });
+
+/* ===========================================================================
+   推送落点（原 87-gw-apply.js）：网关/控制面消息到达后落到 GW / 抽屉 / 总览。
+   与上面的网关壳同属一域，所以合在一个文件里，按 section 分开。
+   =========================================================================== */
+
+/* 控制面整份读数到达。网关页现在内嵌 magpie 自己的界面（iframe），
+   Perch 只需要知道「连上没有 / 端口是多少」来决定是否设 iframe 的 src；
+   供应商、账号、路由、用量、插件的数据都由那个页面自己取。 */
+function applyGw(g) {
+  if (!g || typeof g !== "object") return;
+  GW = g;
+  GW_BUSY = "";
+  if (!g.connected) {
+    if (NAV_HERE === "dash" && dashTab === "gateway") renderGateway();
+    return;
+  }
+  // 接上了就把自动接入的尝试次数清零：以后进程真掉了，还有三次自动恢复的机会。
+  gwAutoTries = 0;
+  if (NAV_HERE === "dash" && dashTab === "gateway") renderGateway();
+}
+
+/* 断开预览的落点（internal/gateway/agents.go → {type:"gw.agent.preview"}）。
+   只接受当前抽屉那个 agent 的答案；晚到的旧预览不能覆盖新打开的那个。 */
+function applyGwPreview(m) {
+  if (!m || !AC_ID || m.id !== AC_ID) return;
+  AC_PREVIEW = m.preview || null;
+  renderAgentDrawer();
+}
+
+/* Agent 接线状态的落点（internal/gateway/agents.go → {type:"gw.agents"}）。
+   只做三件事：把 agents 放进 GW_AGENTS、清掉这次动作的忙碌标记、重画名单
+   和抽屉。具体画成什么样在 86（名单）与 89（抽屉）。 */
+function applyGwAgents(m) {
+  if (!m || typeof m !== "object") return;
+  // 预览失败不是错误：非 native agent（配置在 home 之外）本来就给不出 dry run，
+  // 断开照样成立。把它记进 AC_PREVIEW，抽屉里用通用说明兜底。
+  if (m.op === "preview") {
+    if (AC_ID && m.id === AC_ID) {
+      AC_PREVIEW = m.err ? { changes: null, error: m.err } : (m.preview || null);
+      renderAgentDrawer();
+    }
+    return;
+  }
+  GW_AGENTS_NOTICE = m.notice || "";
+  if (Array.isArray(m.agents)) GW_AGENTS = m.agents;
+  // 任何一次动作（读/写/接入/断开/重应用）回来都结束了忙碌态。
+  AC_BUSY = "";
+  if (m.err) {
+    GW_AGENTS_ERR = m.err;
+    if (AC_ID && (!m.id || m.id === AC_ID)) AC_ERR = m.err;
+  } else {
+    GW_AGENTS_ERR = "";
+    AC_ERR = "";
+  }
+  renderDashAgents();
+  renderAgentDrawer();
+}
+
+/* 漂移轮询的落点（internal/gateway/agents.go → {type:"gw.agents.drift"}）。
+   /api/drift 只给"现在漂着的"：不在映射里的 agent 要把旧 drift 清掉。
+   只有真的变了才重画；抽屉正在写字段或开着选择器时先不重画（会把操作打断），
+   下一次动作回来的整份 state 会补上。 */
+function applyGwAgentsDrift(m) {
+  if (!m || typeof m !== "object" || !Array.isArray(GW_AGENTS)) return;
+  const d = m.drift && typeof m.drift === "object" ? m.drift : {};
+  let changed = false;
+  for (const a of GW_AGENTS) {
+    const next = d[a.id] || null;
+    if (JSON.stringify(next) !== JSON.stringify(a.drift || null)) {
+      if (next) a.drift = next;
+      else delete a.drift;
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  renderDashAgents();
+  if (!AC_PICK && !AC_BUSY) renderAgentDrawer();
+}
+
+/* magpie 快照到达（shell 首帧 + 每 2.5s 的推送都走这里）。
+   只重画「变了的那几块」：状态条/读数/实时是秒级；热力图只在序列变了时重画
+   （371 个格子每 2.5s 重排一次没有意义，还会打断 hover）；名单只在安装状态
+   或今日流量变了时重画。网关页可见时整页重画 —— 它的数据本来就来自这份快照。 */
+function applyMagpie(s) {
+  if (!s || typeof s !== "object") return;
+  MAGPIE = s;
+  const sig = JSON.stringify([s.state, (s.series || []).length,
+    (s.series || []).reduce((n, x) => n + (x.calls | 0), 0), (s.today || {}).calls]);
+  const catSig = JSON.stringify((s.catalog || []).map((a) => [a.id, !!a.installed, a.calls | 0]));
+  const seriesChanged = sig !== MG_SIG;
+  const catChanged = catSig !== MG_CAT_SIG;
+  MG_SIG = sig;
+  MG_CAT_SIG = catSig;
+
+  if (NAV_HERE !== "dash") return;
+  renderDashStatus();
+  renderDashKpis();
+  renderDashLiveFeed();
+  renderDashMix();
+  renderDashLat();
+  if (seriesChanged) renderHeat();
+  if (catChanged) renderDashAgents();
+  // 网关页只在「未接入」时才需要重画那张卡；接上之后 iframe 不归这里管。
+  if (dashTab === "gateway") renderGateway();
+  dashProbe(`magpie=${s.state}`, 0);
+}
