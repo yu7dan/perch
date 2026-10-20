@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/yu7dan/perch/internal/agent"
+	"github.com/yu7dan/perch/internal/agentcatalog"
 )
 
 // 这一层只做两件事：把主程序的旧名字接到 internal/agent 的公开类型上，
@@ -20,11 +21,10 @@ const (
 	agentEvidenceRegistry = agent.EvidenceRegistry
 )
 
-// capsForAgent 决定 Agent 名单上那一行该说什么：Launch 看主程序的完整名单，
-// 状态能力看适配器表。
+// capsForAgent 决定 Agent 名单上那一行该说什么：Launch 看静态清单（不触发
+// Defs/Exe 探测），状态能力看适配器表。
 func capsForAgent(id string) agentCaps {
-	_, canLaunch := agentDefs[id]
-	return agent.CapsFor(id, canLaunch)
+	return agent.CapsFor(id, agentcatalog.Has(id))
 }
 
 // buildEnv 让主程序和适配器共用同一份终端环境规则。

@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/yu7dan/perch/internal/agentcatalog"
 	"github.com/yu7dan/perch/internal/appdir"
 )
 
@@ -107,10 +108,8 @@ func (s appSettings) normalize() appSettings {
 	// 只认能启动的 agent id。空串是合法值 = 自动；认不出的（手改配置/卸载了）
 	// 落回自动 —— 别把一个不存在的 agent 当成“设置过”。
 	s.DefaultAgent = strings.ToLower(strings.TrimSpace(s.DefaultAgent))
-	if s.DefaultAgent != "" {
-		if _, ok := agentDefs[s.DefaultAgent]; !ok {
-			s.DefaultAgent = ""
-		}
+	if s.DefaultAgent != "" && !agentcatalog.Has(s.DefaultAgent) {
+		s.DefaultAgent = ""
 	}
 	// 快捷键：能规范化就规范化，规范化不了就**关掉**（不落回默认键 ——
 	// 一个手改坏的字符串不该悄悄变成一个会吃终端按键的组合键）。
@@ -286,10 +285,8 @@ func (s *settingsStore) patch(p settingsPatch) (appSettings, error) {
 	}
 	if p.DefaultAgent != nil {
 		v := strings.ToLower(strings.TrimSpace(*p.DefaultAgent))
-		if v != "" {
-			if _, ok := agentDefs[v]; !ok {
-				return old, fmt.Errorf("不认识这个 agent：%s", v)
-			}
+		if v != "" && !agentcatalog.Has(v) {
+			return old, fmt.Errorf("不认识这个 agent：%s", v)
 		}
 		next.DefaultAgent = v
 	}

@@ -41,6 +41,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/yu7dan/perch/internal/agentcatalog"
 )
 
 const (
@@ -209,23 +211,10 @@ type magpiePlugins struct {
 	Entries   int      `json:"entries"`
 }
 
-// agentCard 是 Agent 名单的一行。数据一半来自本机探测（装没装、Perch 能不能跑），
-// 一半来自今天的网关流量（calls）—— 后者是"真的接上了"的唯一证据。
-type agentCard struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Icon      string    `json:"icon"`
-	Vendor    string    `json:"vendor"`
-	URL       string    `json:"url"`
-	Path      string    `json:"path,omitempty"`
-	Installed bool      `json:"installed"`
-	Adapter   bool      `json:"adapter"` // 有结构化状态/续接（兼容旧字段；新代码读 caps）
-	Caps      agentCaps `json:"caps"`    // 启动/忙闲/等用户/动作，到哪一层
-	Install   bool      `json:"install"` // 有 Perch 能代跑的官方安装配方
-	Windows   bool      `json:"windows"` // 这个 agent 在 Windows 上有原生支持
-	Note      string    `json:"note,omitempty"`
-	Calls     int       `json:"calls"`
-}
+// agentCard 是 Agent 名单的一行（定义在 agentcatalog；这里留旧名给 root 过渡期用）。
+// 数据一半来自本机探测（装没装、Perch 能不能跑），一半来自今天的网关流量
+// （calls）—— 后者是"真的接上了"的唯一证据。
+type agentCard = agentcatalog.Card
 
 type magpieSnap struct {
 	State     string           `json:"state"` // running | stopped | absent
@@ -246,8 +235,8 @@ type magpieSnap struct {
 	Plugins   magpiePlugins    `json:"plugins"`
 	UsageAt   string           `json:"usageAt,omitempty"`
 	// 今天的三个榜（接口算好的，前端只排序取前几）：agent / 模型 / provider 账号。
-	TodayAgents   []magpieAgentTotal  `json:"todayAgents"`
-	TodayModels   []magpieModelTotal  `json:"todayModels"`
+	TodayAgents       []magpieAgentTotal  `json:"todayAgents"`
+	TodayModels       []magpieModelTotal  `json:"todayModels"`
 	TodayProviderKeys []magpieProviderKey `json:"todayProviderKeys"`
 }
 
@@ -603,118 +592,13 @@ func scanMagpiePlugins(dir string) magpiePlugins {
 // Agent 名单
 // ---------------------------------------------------------------------------
 
-// agentCatalogDefs 是用户 2026-10-17 点名的那份清单（外加几枚同类里最该有的）。
-//
-// 这份清单是**使用层**：只收能在终端里跑的 CLI agent，不收桌面应用。
-// 桌面客户端（Claude Desktop 等）属于 magpie 的**网关层**，可以出现在
-// /api/state 里，但不从这里安装、启动或展示。没有安装配方也不等于桌面应用 ——
-// 那只是"Perch 还不能替它跑安装命令"，前端给官方安装说明的出口。
-//
-// 探测规则抄 magpie 的 reference.md（第 88 行起那张表）：**看配置文件**，
-// 不看 PATH —— Windows 上装完不重开、PATH 没刷新的情况太常见了。
-// 能不能启动、有没有忙闲、能不能看到“在等你”是三件事，能力由 capsForAgent
-// （internal/agent/status.go）决定。别再拿 agentDefs 里有没有它当“已接入”：通用启动
-// 会给所有有 Bin 的 agent 都注册一条，只代表能开一格。
-//
-// URL 一律是官方安装页/仓库：按钮的动作是"打开下载页"，不是静默安装 ——
-// 在别人机器上替人跑安装脚本，比少一个按钮危险得多。
-type agentCatalogDef struct {
-	ID, Name, Icon, Vendor, URL, Note string
-	Windows, Adapter                  bool
-	Paths                             []string
-	Bin                               string
-}
-
-var agentCatalogDefs = []agentCatalogDef{
-	{"claude", "Claude Code", "claudecode-color", "Anthropic", "https://code.claude.com/docs/en/setup", "", true, true,
-		[]string{"~/.claude/settings.json", "~/.local/claude.exe"}, "claude"},
-	{"codex", "Codex", "codex-color", "OpenAI", "https://chatgpt.com/codex", "", true, false,
-		[]string{"~/.codex/config.toml"}, "codex"},
-	{"pi", "Pi", "pi", "Earendil Works", "https://github.com/earendil-works/pi", "", true, false,
-		[]string{"~/.pi/agent/settings.json", "~/.pi/agent/models.json"}, "pi"},
-	{"opencode", "OpenCode", "opencode", "OpenCode", "https://opencode.ai", "", true, false,
-		[]string{"~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc",
-			"~/.local/share/opencode/auth.json"}, "opencode"},
-	{"agy", "Antigravity CLI", "antigravity-color", "Google", "https://antigravity.google/docs/cli/install", "", true, false,
-		[]string{"~/.gemini/antigravity-cli/settings.json"}, "agy"},
-	{"dsh", "DeepSeek Harness", "deepseek-color", "DeepSeek", "https://www.npmjs.com/package/@deepseek-ai/dsh", "", true, false,
-		[]string{"~/.dsh/config.yaml", "~/.dsh/settings.yaml", "~/.dsh/profiles"}, "dsh"},
-	{"cursor", "Cursor", "cursor", "Anysphere", "https://cursor.com/cli", "", true, false,
-		[]string{"~/.cursor/cli-config.json"}, "cursor-agent"},
-	{"codebuddy", "CodeBuddy Code", "codebuddy-color", "Tencent", "https://www.codebuddy.ai/docs/cli/installation", "", true, false,
-		[]string{"~/.codebuddy/models.json", "~/.codebuddy/settings.json"}, "codebuddy"},
-	{"kimi", "Kimi Code", "kimi", "Moonshot", "https://github.com/MoonshotAI/kimi-code", "", true, false,
-		[]string{"~/.kimi/config.toml", "~/.kimi-code/config.toml"}, "kimi"},
-	{"muse", "Muse Code", "meta-color", "Meta", "https://dev.meta.ai/docs/muse-code", "原生 Windows（2026-09 起）", true, false,
-		[]string{"~/.config/muse/settings.json", "~/.muse", "~/AppData/Local/Programs/muse"}, "muse"},
-	{"zcode", "ZCode", "zcode", "Zhipu", "https://zcode.z.ai", "", true, false,
-		[]string{"~/.zcode/v2/config.json", "~/.zcode/v2/provider_config.json"}, "zcode"},
-	// 追加的同类：magpie 都有图标与配置格式，接进来不增加猜测。
-	{"gemini", "Gemini CLI", "geminicli-color", "Google", "https://github.com/google-gemini/gemini-cli", "", true, false,
-		[]string{"~/.gemini/settings.json"}, "gemini"},
-	{"copilot", "Copilot CLI", "githubcopilot", "GitHub", "https://github.com/github/copilot-cli", "", true, false,
-		[]string{"~/.copilot/settings.json"}, "copilot"},
-	{"qwen", "Qwen Code", "qwen-color", "Alibaba", "https://github.com/QwenLM/qwen-code", "", true, false,
-		[]string{"~/.qwen/settings.json"}, "qwen"},
-	{"crush", "Crush", "crush", "Charm", "https://github.com/charmbracelet/crush", "", true, false,
-		[]string{"~/.config/crush/crush.json"}, "crush"},
-}
-
-func scanAgentCatalog(home string) []agentCard {
-	out := make([]agentCard, 0, len(agentCatalogDefs))
-	for _, d := range agentCatalogDefs {
-		caps := capsForAgent(d.ID)
-		_, canInstall := installRecipes[d.ID]
-		c := agentCard{
-			ID: d.ID, Name: d.Name, Icon: d.Icon, Vendor: d.Vendor, URL: d.URL,
-			// ⚠️ Adapter 不能再从 agentDefs 里查：genericAgentDef 会给所有有 Bin
-			// 的 agent 注册一条“只开新会话”，那会把“能启动”写成“已接入”。
-			// 结构化能力只认 capsForAgent。
-			Adapter: caps.Status || caps.Resume || caps.Actions,
-			Caps:    caps, Install: canInstall, Windows: d.Windows, Note: d.Note,
-		}
-		for _, raw := range d.Paths {
-			p := expandHome(home, raw)
-			if fi, err := os.Stat(p); err == nil {
-				c.Installed = true
-				c.Path = prettyHome(home, p)
-				if fi.IsDir() {
-					// 目录也算（dsh profiles / zcode 数据目录）。
-					break
-				}
-				break
-			}
-		}
-		// 配置目录不在时，用**和启动同一份**候选表再找一次 exe：GUI 进程的
-		// PATH 常常比终端里短，而且 Codex 的官方安装器根本不写 PATH。
-		if !c.Installed && d.Bin != "" {
-			if p, ok := findAgentExe(d.Bin); ok {
-				c.Installed = true
-				c.Path = p
-			}
-		}
-		out = append(out, c)
-	}
-	return out
-}
+// scanAgentCatalog 是本机探测的入口；清单、能力、配方、Exe 发现全在
+// internal/agentcatalog。这里只留旧名字给 root 过渡期用。
+func scanAgentCatalog(home string) []agentCard { return agentcatalog.Cards(home) }
 
 // ---------------------------------------------------------------------------
 // 小工具
 // ---------------------------------------------------------------------------
-
-func expandHome(home, p string) string {
-	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
-		return filepath.Join(home, p[2:])
-	}
-	return p
-}
-
-func prettyHome(home, p string) string {
-	if home != "" && strings.HasPrefix(strings.ToLower(p), strings.ToLower(home)) {
-		return "~" + p[len(home):]
-	}
-	return p
-}
 
 func hostOf(u string) string {
 	u = strings.TrimSpace(u)

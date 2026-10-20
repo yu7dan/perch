@@ -20,6 +20,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"github.com/yu7dan/perch/internal/agent"
+	"github.com/yu7dan/perch/internal/agentcatalog"
 	"github.com/yu7dan/perch/internal/appdir"
 )
 
@@ -170,76 +171,17 @@ type spawnSpec struct {
 // agentDef / resumeIntent 的字段定义在 internal/agent（见 agent_bridge.go 的别名）。
 // 新增一个深度适配的 agent = 在那个包里加一份构造函数，别处不用改。
 
-// resolveClaudeExe 找 agent 的可执行文件，顺序：
+// agentDefs 是本机可启动的 agent 表。清单、能力、配方、Exe 解析全在
+// internal/agentcatalog；这里只留启动表本身。
 //
-//	① 环境变量 CLAUDE_EXE（换安装位置的人用它）；
-//	② <用户主目录>\.local\claude.exe（本机常见的用户级安装位置）；
-//	③ 交给 PATH 解析 "claude"。
-//
-// ⚠️ 不写死任何人的绝对路径。
-func resolveClaudeExe() string {
-	if v := strings.TrimSpace(os.Getenv("CLAUDE_EXE")); v != "" {
-		return v
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		p := filepath.Join(home, ".local", "claude.exe")
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-			return p
-		}
-	}
-	return "claude"
-}
+// ⚠️ 必须是 init() 里构造，不能做成包级字面量：Defs 会走
+// agent.Host.ResolveExe，必须先 SetHost。这是组合期的顺序，不是风格。
+var agentDefs map[string]agentDef
 
-var agentDefs = map[string]agentDef{
-	"claude": {
-		Exe: resolveClaudeExe(),
-		Env: map[string]string{"CLAUDE_CONFIG_DIR": claudeStateDir},
-		Args: func(r resumeIntent, settings string) []string {
-			var args []string
-			switch r.Kind {
-			case "latest":
-				args = []string{"--continue"}
-			case "exact":
-				args = []string{"--resume", r.ID}
-			case "fork":
-				args = []string{"--resume", r.ID, "--fork-session"}
-			}
-			// "new"：裸启动就是全新会话，本身不需要参数。
-			//
-			// ⚠️ 刻意**不用 --session-id 去钉住新会话**：格子↔会话的关联改由
-			// claude 自己写的 sessions\<pid>.json 登记表定（见 status.go）——
-			// 那条路对 --resume/--continue 一视同仁，也不会多出一个可能和真实
-			// 状态不一致的第二事实源。也正因为如此，这里绝不能把 --session-id
-			// 和 --resume/--continue 混用：实测重复 id 是**硬失败**（起不来）。
-			if settings != "" {
-				args = append(args, "--settings", settings)
-			}
-			return args
-		},
-	},
-}
-
-// 通用适配：凡是有配置/CLI 探测的 agent，都给它一条“新会话”启动路。
-// 深度适配（续接、hook、转录）仍然只对 claude 做 —— 用户 2026-10-17 确认的
-// 第一阶段范围是“装完能在 Perch 里启动”。
 func init() {
 	agent.SetHost(rootAgentHost{})
-	for _, d := range agentCatalogDefs {
-		if d.ID == "claude" || d.ID == "zcode" || d.Bin == "" {
-			continue
-		}
-		agentDefs[d.ID] = genericAgentDef(d.Bin)
-	}
-	// 通用适配只负责“能开一格”；OpenCode 有自己的一套启动参数/状态观察，
-	// 覆盖掉通用那条。以后 Pi/Codex 同样在这里覆盖。
-	agentDefs["opencode"] = agent.OpenCodeDef()
-	// Pi 也覆盖通用那条：续接参数 + -e 观察扩展。
-	agentDefs["pi"] = agent.PiDef()
-	// Codex：每格一个 app-server + TUI --remote（见 internal/agent/codex.go）。
-	agentDefs["codex"] = agent.CodexDef()
+	agentDefs = agentcatalog.Defs(claudeStateDir)
 }
-
-func genericAgentDef(bin string) agentDef { return agent.GenericDef(bin) }
 
 type tabHost struct {
 	id     int
