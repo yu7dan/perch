@@ -13,7 +13,7 @@
 </div>
 
 <p align="center">
-  <img src="docs/images/overview.png" alt="Perch 总览：并行 agent 的读数、活动热力图与 Agent 接线" width="960">
+  <sub>总览截图待脱敏后重拍（旧图含本机路径与旧品牌，已从仓库移除）。</sub>
 </p>
 
 Perch 是面向"agent 终端"的 Windows 桌面网关，与 Orca 同属 **agent 开发环境**这一类。
@@ -44,7 +44,7 @@ Perch 把这些收进一个窗口：
 
 </td>
 <td width="50%">
-  <img src="docs/images/agent.png" alt="Perch 的 Agent 配置抽屉与可搜索模型选择器" width="100%">
+  <sub>Agent 抽屉截图待脱敏后重拍。</sub>
 </td>
 </tr>
 <tr>
@@ -57,24 +57,24 @@ Perch 把这些收进一个窗口：
 
 </td>
 <td width="50%">
-  <img src="docs/images/gateway.png" alt="Perch 网关页：内嵌 magpie 与版本更新条" width="100%">
+  <sub>网关页截图待脱敏后重拍。</sub>
 </td>
 </tr>
 </table>
 
 <p align="center">
-  <sub>总览、Agent 抽屉与网关页都来自真实运行中的 Perch；界面会继续变。</sub>
+  <sub>截图会在脱敏的演示 profile 上重拍；界面会继续变。</sub>
 </p>
 
 ## 支持的 agent
 
 <table align="center">
 <tr>
-<td align="center" width="20%"><img src="assets/agent-icons/claudecode-color.svg" width="32" height="32" alt="Claude Code"><br><sub>Claude Code</sub></td>
-<td align="center" width="20%"><img src="assets/agent-icons/codex-color.svg" width="32" height="32" alt="Codex"><br><sub>Codex</sub></td>
-<td align="center" width="20%"><img src="assets/agent-icons/pi.svg" width="32" height="32" alt="Pi"><br><sub>Pi</sub></td>
-<td align="center" width="20%"><img src="assets/agent-icons/opencode.svg" width="32" height="32" alt="OpenCode"><br><sub>OpenCode</sub></td>
-<td align="center" width="20%"><img src="assets/agent-icons/workbuddy-color.svg" width="32" height="32" alt="WorkBuddy"><br><sub>WorkBuddy</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/claudecode-color.svg" width="32" height="32" alt="Claude Code"><br><sub>Claude Code</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/codex-color.svg" width="32" height="32" alt="Codex"><br><sub>Codex</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/pi.svg" width="32" height="32" alt="Pi"><br><sub>Pi</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/opencode.svg" width="32" height="32" alt="OpenCode"><br><sub>OpenCode</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/workbuddy-color.svg" width="32" height="32" alt="WorkBuddy"><br><sub>WorkBuddy</sub></td>
 </tr>
 </table>
 
@@ -105,12 +105,12 @@ Perch 的使用层只安装、启动 CLI agent；桌面客户端不进终端，�
 `go:embed` 直接进二进制。
 
 ```powershell
-go build -o perch.exe .
-go build -o perch-hook.exe ./cmd/perch-hook   # ⚠️ hook 接收器：代码里按这个名字找它
-.\perch.exe
+go build -o build\perch.exe ./cmd/perch
+go build -o build\perch-hook.exe ./cmd/perch-hook   # ⚠️ hook 接收器：代码里按这个名字找它
+.\build\perch.exe
 ```
 
-需要两个产物：主程序，和一个几 KB 的 **hook 接收器**（agent 的 hook 事件由它落盘，
+需要两个产物：主程序，和一个独立的 **hook 接收器**（agent 的 hook 事件由它落盘，
 主程序再去读）。⚠️ 接收器的文件名**写死在代码里**（`hooks.go` 的 `hookExeName`），
 两个 exe 必须并排放在同一目录 —— 少一个的症状是"功能静默消失"。
 
@@ -125,7 +125,8 @@ go build -o perch-hook.exe ./cmd/perch-hook   # ⚠️ hook 接收器：代码�
 ## 给贡献者
 
 前端为什么是 classic script + defer、某个文件该放什么、图标规则、改完为什么必须重建 ——
-都在 [docs/STRUCTURE.md](docs/STRUCTURE.md)。
+都在 [docs/FRONTEND.md](docs/FRONTEND.md)；后端分层与依赖方向见
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 致谢
 

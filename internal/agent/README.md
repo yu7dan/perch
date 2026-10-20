@@ -3,14 +3,16 @@
 这里放「怎么启动一个 agent」和「怎么知道它在忙、在等、在做什么」。
 主程序不在这里：它只负责窗口、标签、PTY 和持久化，通过 `Host` 接口把这三样能力借给适配器。
 
-Claude 的状态腿（hook / 登记表 / 转录）仍住在主程序里 —— 它是最早、最深的一条，
-暂不搬动；这个包的边界是**新增 agent** 和**非 Claude 适配器**。
+身份与安装配方在 `internal/agentcatalog`；这个包的边界是**启动一个 agent** 和
+**读懂它在忙、在等、在做什么**。Claude 的状态腿（hook / 登记表 / 转录）分别在
+`internal/session` 与 `internal/transcript`，不在这里。
 
 ## 文件
 
 | 文件 | 职责 |
 |---|---|
 | `def.go` | `Def` / `ResumeIntent`：把续接意图翻译成命令行；`GenericDef` 与各 agent 的构造函数 |
+| `claude.go` | Claude 的启动定义（`--resume`、hook 设置、状态目录） |
 | `host.go` | `Host`：适配器需要主程序提供的最小表面（绑定会话、写状态、推前端、找 exe） |
 | `status.go` | 能力矩阵、归一化事件、OpenCode 适配器 |
 | `codex.go` | Codex：每格一个 app-server，TUI 通过 `--remote` 连它 |
@@ -34,10 +36,18 @@ Claude 的状态腿（hook / 登记表 / 转录）仍住在主程序里 —— �
 
 ## 加一个 agent
 
-1. 在 `def.go` 里写构造函数（`GenericDef(bin)` 起步，需要时补 `Args` / `Prepare`）。
-2. 需要状态就在 `status.go` 的矩阵里登记，并通过 `Host.Push` 发归一化事件。
-3. 在 `main.go` 的 `init()` 里用构造函数覆盖 `agentDefs[id]`。
-4. 需要续接判据时，在 `pi.go` 底部那种分派口上加一个分支。
+身份只有一份清单：`internal/agentcatalog`。
+
+1. 在 `agentcatalog/catalog.go` 的 `entries` 里加一条 `Entry`：ID / 名称 / 图标 /
+   探测路径 / `Bin` / **显式 `Launch`**（能不能在终端里启动，不要靠隐式例外）。
+2. 有官方安装命令就加一条 `agentcatalog/recipes.go` 的 `Recipe`；没有就留空，
+   前端会给「安装说明」。
+3. 通用 CLI agent 到这里就够了：`Defs()` 会用 `agent.GenericDef(Bin)` 生成启动定义。
+4. 需要深度适配（结构化状态 / 续接）时，才在 `internal/agent` 加构造函数，并让
+   `agentcatalog.Defs()` 选它；同时把能力写进 `status.go` 的 `CapsFor`。
+   状态事件通过 `Host.Push` 发归一化后的 JSON。
+5. `Defs()` 必须在 `agent.SetHost` 之后调用（构造 `Def` 会解析 exe）。不要在
+   `init()` 或包级变量里建 Defs，也不要再加可变全局。
 
 ## 事件协议
 

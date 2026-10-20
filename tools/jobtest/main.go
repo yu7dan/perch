@@ -12,7 +12,7 @@
 //	① plain 子进程必须死 —— job 的 kill-on-close 生效；
 //	② breakaway 子进程（显式 CREATE_BREAKAWAY_FROM_JOB）在带 BREAKAWAY_OK 时
 //	   **起得来**、父进程死后**还活着** —— 这就是「在 Windows Terminal 里打开」
-//	   那条路靠的东西（main.go 的 openInWindowsTerminal），也是那个标志存在的理由；
+//	   那条路靠的东西（cmd/perch/main.go 的 openInWindowsTerminal），也是那个标志存在的理由；
 //	③ 换成 -nobreak：同一个 breakaway 子进程**根本起不来**（CreateProcess 直接
 //	   ERROR_ACCESS_DENIED）。这一条是"不能只留 KILL_ON_JOB_CLOSE"的实证 ——
 //	   没有它，工具链里任何一个显式请求脱离的进程都会静默失败。

@@ -178,7 +178,7 @@ type ActItem struct {
 //
 // ⚠️ Prev 是**多行**的：它画的是"影响面"那种对齐块（✓/✗ 缩进列表），
 // 所以它截断用的是 cutRunes 而**不是** clip —— clip 会把换行压成空格，
-// 正好毁掉 preview 唯一的用处（clip 是给日志写的，见 hooks.go:291）。
+// 正好毁掉 preview 唯一的用处（clip 是给日志写的，见 internal/session/hooks.go）。
 type QOpt struct {
 	Label string `json:"label"`
 	Desc  string `json:"desc,omitempty"`

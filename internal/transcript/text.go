@@ -63,7 +63,7 @@ func msgText(s string) (string, int) {
 }
 
 // textOf 抠出 message.content 里的文本（string 和 array of blocks 两种形状都吃，
-// 上游两种都出现过 —— 见 store.go 的同一条教训）。
+// 上游两种都出现过 —— 见 internal/history 的同一条教训）。
 func textOf(raw json.RawMessage) string {
 	b := bytes.TrimSpace(raw)
 	if len(b) == 0 {
