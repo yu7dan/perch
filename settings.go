@@ -26,6 +26,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/yu7dan/perch/internal/appdir"
 )
 
 const settingsFileName = "settings.json"
@@ -197,11 +199,7 @@ type settingsStore struct {
 }
 
 func settingsFilePath() (string, error) {
-	d, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(d, poolDirName, settingsFileName), nil
+	return appdir.PerchFile(settingsFileName)
 }
 
 func loadSettingsStore() *settingsStore {

@@ -37,6 +37,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/yu7dan/perch/internal/appdir"
 )
 
 const (
@@ -65,11 +67,11 @@ var gwConn gwServer
 // ---------------------------------------------------------------------------
 
 func gwKeyPath() string {
-	d, err := os.UserConfigDir()
+	p, err := appdir.PerchFile(gwKeyFile)
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(d, poolDirName, gwKeyFile)
+	return p
 }
 
 // gwUsedBefore 只看 key 文件在不在：存在 = 这台机器上用过网关（Perch 起过控制面）。

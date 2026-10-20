@@ -35,6 +35,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/yu7dan/perch/internal/appdir"
 )
 
 // Project 是**落盘的那份形状**。算出来的东西（最近活动、会话数）不在这里 ——
@@ -81,11 +83,6 @@ const (
 	// 所以这个值同时是"这一条是合成出来的"的判据（wireProjects 就靠它盖 Synthetic）。
 	sourceSynthetic = "synthetic"
 	defaultWSName   = "默认工作区"
-	// <用户主目录>\Documents\Perch。
-	// ⚠️ 中文 Windows 上资源管理器把 Documents 显示成「文档」，但**真实目录名仍是
-	// Documents**（那个显示名在 desktop.ini 里，文件系统上没有"文档"这个目录）——
-	// 拼"文档"会建出一个谁也看不见的新目录。
-	defaultWSDir = "Perch"
 )
 
 // defaultWorkspacePath 给出默认工作区**当前生效**的绝对路径。
@@ -111,12 +108,11 @@ func defaultWorkspacePath() (string, bool) {
 // builtinDefaultWorkspacePath 是不带任何设置时的内置落点。
 // 设置页的「恢复默认」和自定义目录失效时的回落都读它。
 func builtinDefaultWorkspacePath() (string, bool) {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		log.Printf("[pool] 默认工作区：拿不到用户主目录（err=%v），这一轮不合成", err)
-		return "", false
+	p, ok := appdir.BuiltinDefaultWorkspace()
+	if !ok {
+		log.Printf("[pool] 默认工作区：拿不到用户主目录，这一轮不合成")
 	}
-	return filepath.Join(home, "Documents", defaultWSDir), true
+	return p, ok
 }
 
 // 自定义默认目录不可用这件事会出现在每次 defaultCWD/poolReply 里，
@@ -180,16 +176,12 @@ type projectPool struct {
 }
 
 const (
-	poolDirName  = "Perch"
+	poolDirName  = appdir.PerchDirName
 	poolFileName = "projects.json"
 )
 
 func poolFilePath() (string, error) {
-	d, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(d, poolDirName, poolFileName), nil
+	return appdir.PerchFile(poolFileName)
 }
 
 // pathKey 是路径的**比较键**：Windows 上大小写不敏感、分隔符与 `.`/`..` 要先归一。
@@ -217,7 +209,7 @@ func loadProjectPool() *projectPool {
 	// Roots 是"去哪儿找项目"的起点（目前只随载荷一起发出去，前端还没有消费它）。
 	// 默认取用户主目录 —— 不写死任何本机路径。
 	p := &projectPool{}
-	if home, err := os.UserHomeDir(); err == nil {
+	if home, err := appdir.Home(); err == nil {
 		p.Roots = []string{home}
 	}
 	f, err := poolFilePath()

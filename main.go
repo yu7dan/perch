@@ -20,6 +20,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"github.com/yu7dan/perch/internal/agent"
+	"github.com/yu7dan/perch/internal/appdir"
 )
 
 //go:embed assets
@@ -36,23 +37,10 @@ const ctrlPrefix = 0xFF
 // ⚠️ 仓库里**不留任何本机绝对路径**（发布清理的一部分）：状态根按 Claude Code
 // 自己的规则取 —— 环境里有 CLAUDE_CONFIG_DIR 就用它，否则 <用户主目录>\.claude。
 // 这样换一台机器、换一个用户，索引到的就是那个人自己的会话库。
-var claudeStateDir = func() string {
-	if v := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); v != "" {
-		return v
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".claude")
-	}
-	return ".claude"
-}()
+var claudeStateDir = appdir.ClaudeState()
 
 // fallbackCWD 只在**拿不到用户主目录**时兜底（那种情况下总不能连格都起不来）。
-var fallbackCWD = func() string {
-	if home, err := os.UserHomeDir(); err == nil {
-		return home
-	}
-	return "."
-}()
+var fallbackCWD = appdir.HomeOrDot()
 
 // defaultCWD 是「新格没指定目录时落在哪」的**唯一**答案。
 // 2026-10-16 起它是默认工作区（<用户主目录>\Documents\Perch，见 projects.go）——

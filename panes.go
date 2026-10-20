@@ -53,6 +53,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/yu7dan/perch/internal/appdir"
 )
 
 // Pane 是**落盘的那份形状**。算出来的东西（这一格现在跑着没有、是哪条会话在跑）
@@ -157,13 +159,9 @@ type paneStore struct {
 }
 
 func paneStoreFilePath() (string, error) {
-	d, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
 	// 与池子同一个目录（%APPDATA%\Perch）。**绝不**写进 claudeStateDir ——
 	// 那是 claude 自己的状态根，两家状态不许搅在一起（projects.go:11-13 同款理由）。
-	return filepath.Join(d, poolDirName, paneStoreFile), nil
+	return appdir.PerchFile(paneStoreFile)
 }
 
 // loadPaneStore 读登记表。三条出口：
