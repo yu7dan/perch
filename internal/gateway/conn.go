@@ -75,6 +75,13 @@ type Gateway struct {
 	updMu   sync.Mutex // TryLock：同一时间只允许一条更新链路
 	updLast string     // 上一次推给前端的原始状态，进度没变就不重复推
 
+	// 界面语言：langWant 是 Perch 的选择（system/en/zh），langApplied 是已经
+	// 写进 magpie 的那个值。langRun 串行化"读整份设置 → 只改 lang → 写回"。
+	langMu      sync.Mutex
+	langRun     sync.Mutex
+	langWant    string
+	langApplied string
+
 	driftErr string
 }
 
@@ -186,6 +193,7 @@ func (g *Gateway) Ensure() error {
 			g.lastErr = ""
 			g.exe = ""
 			log.Printf("[gw] 接到已有的 magpie 控制面 127.0.0.1:%d", p)
+			go g.applyLanguage()
 			return nil
 		}
 	}
@@ -215,6 +223,7 @@ func (g *Gateway) Ensure() error {
 				g.proc, g.ours = cmd.Process, true
 				g.exe, g.lastErr = exe, ""
 				log.Printf("[gw] 已启动 magpie 控制面 127.0.0.1:%d（pid=%d，只由 Perch 使用）", p, cmd.Process.Pid)
+				go g.applyLanguage()
 				return nil
 			}
 			if cmd.ProcessState != nil && cmd.ProcessState.Exited() {

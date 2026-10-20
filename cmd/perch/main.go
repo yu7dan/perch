@@ -133,6 +133,9 @@ func main() {
 
 	// 网关与安装器：网关先建（安装完成回调要接它）；两者都只通过 push 出站。
 	a.gw = gateway.New(a.push.Push)
+	// 内嵌网关页的语言跟 Perch 的设置走：先记下偏好，控制面连上时再写进
+	// magpie（它自己的 settings.lang），见 internal/gateway/language.go。
+	a.gw.SetLanguage(a.prefs.Snapshot().Language)
 	a.installer = install.New(install.Deps{
 		Push: a.push.Push,
 		Cards: func() []agentcatalog.Card {

@@ -277,6 +277,14 @@ $("gw-frame").addEventListener("load", () => {
 /* 控制面整份读数到达。网关页现在内嵌 magpie 自己的界面（iframe），
    Perch 只需要知道「连上没有 / 端口是多少」来决定是否设 iframe 的 src；
    供应商、账号、路由、用量、插件的数据都由那个页面自己取。 */
+/* magpie 自己的 lang 已经写成这个值（gateway/language.go）。清掉加载标记，
+   renderGateway 会重新设 iframe 的 src —— 新页面在 boot.js 里拿到的就是新语言。 */
+function applyGwLang(m) {
+  if (!m || !m.lang) return;
+  if (GW_FRAME_AT) GW_FRAME_AT = "";
+  renderGateway();
+}
+
 function applyGw(g) {
   if (!g || typeof g !== "object") return;
   GW = g;

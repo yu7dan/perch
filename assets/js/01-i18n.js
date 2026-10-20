@@ -1006,7 +1006,7 @@ const PERCH_I18N = {
     "settings.startView.workspace": "Workspace",
 
     "settings.language.label": "Language",
-    "settings.language.note": "Interface language. Auto follows Windows.",
+    "settings.language.note": "Interface language. Auto follows Windows. The embedded Gateway page follows this too.",
     "settings.language.auto": "Auto (system)",
     "settings.language.en": "English",
     "settings.language.zh": "中文",
@@ -2054,7 +2054,7 @@ const PERCH_I18N = {
     "settings.startView.workspace": "工作区",
 
     "settings.language.label": "语言",
-    "settings.language.note": "界面语言。自动 = 跟随 Windows。",
+    "settings.language.note": "界面语言。自动 = 跟随 Windows；内嵌的网关页也跟着这里走。",
     "settings.language.auto": "自动（跟随系统）",
     "settings.language.en": "English",
     "settings.language.zh": "中文",

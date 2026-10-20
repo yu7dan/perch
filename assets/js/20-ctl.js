@@ -475,6 +475,9 @@ function dispatchCtl(m) {
     // 控制面：整份原生读数（网关页的 iframe 直接用 magpie 自己的界面，
     // 用量/账本/插件市场不再经过 Perch 中转）。
     case "gw": applyGw(m.gw); return;
+    // 后端把 Perch 的语言写进了 magpie 自己的 settings.lang（gateway/language.go）；
+    // 内嵌页重载一次，让它用新的 lang 走 bootPrefs 重画。
+    case "gw.lang": applyGwLang(m); return;
     // 安装器：start / log / phase / done 四条；done 里也带一份重扫过的 catalog。
     case "install.start":
     case "install.log":

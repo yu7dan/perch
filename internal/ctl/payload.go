@@ -243,6 +243,11 @@ func (s *Server) applySettingsPatch(p settings.Patch, why string) {
 		next.StartView, next.Language, pick(next.DefaultAgent, "(自动)"), pick(next.NewAgentShortcut, "(关闭)"),
 		next.ConfirmClose, next.ConfirmEndAgent)
 	s.pushSettings(nil)
+	// Perch 的语言选择也是 magpie 的：内嵌网关页跟随同一份设置（尽力而为，
+	// 失败只落日志；见 internal/gateway/language.go）。
+	if s.deps.Gateway != nil {
+		s.deps.Gateway.SetLanguage(next.Language)
+	}
 	if next.DefaultCWD != old.DefaultCWD {
 		project.EnsureDefaultWorkspace(s.customCWD)
 		s.poolReply(nil)
