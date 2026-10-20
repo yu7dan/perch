@@ -26,7 +26,7 @@ function instElapsed() {
 function instPhaseText() {
   if (!INSTALL) return "";
   if (INSTALL.state === "failed") {
-    return INSTALL.err ? t("inst.failedWith", { err: INSTALL.err }) : t("inst.failed");
+    return INSTALL.err ? t("inst.failedWith", { err: msgText(INSTALL.err) }) : t("inst.failed");
   }
   if (INSTALL.state === "done") {
     if (INSTALL.detected === true) return t("inst.doneDetected");
@@ -104,7 +104,7 @@ function instOpen(a) {
   INSTALL = {
     id: a.id, name: a.name, state: "running", phase: "preparing",
     source: "", startedAt: Date.now(), lines: [],
-    detected: undefined, err: "", elapsedMs: 0,
+    detected: undefined, err: null, elapsedMs: 0,
   };
   INSTALL_LOG_OPEN = false;
   $("inst-log").textContent = "";
@@ -123,7 +123,7 @@ function instDone(m) {
   INSTALL.state = m.ok ? "done" : "failed";
   INSTALL.phase = INSTALL.state;
   INSTALL.detected = m.detected;
-  INSTALL.err = m.ok ? "" : (m.err || "");
+  INSTALL.err = m.ok ? null : errMsgOf(m);
   INSTALL.elapsedMs = m.elapsedMs || (Date.now() - INSTALL.startedAt);
   if (!m.ok) INSTALL_LOG_OPEN = true;
   stopInstTicker();
@@ -139,7 +139,7 @@ function applyInstall(m) {
   // magpie 本体：同一个流式通道，id 固定是 "magpie"。装完之后 Go 那边会直接
   // gwConnect（见 install.go 的 finishInstall），这里只需要把日志和状态画出来。
   if (m.id === "magpie") {
-    if (!GW_INSTALL) GW_INSTALL = { state: "running", lines: [], err: "" };
+    if (!GW_INSTALL) GW_INSTALL = { state: "running", lines: [], err: null };
     if (m.type === "install.start") {
       GW_INSTALL.state = "running";
     } else if (m.type === "install.log") {
@@ -149,10 +149,10 @@ function applyInstall(m) {
       }
     } else if (m.type === "install.done") {
       GW_INSTALL.state = m.ok ? "done" : "failed";
-      GW_INSTALL.err = m.ok ? "" : (m.err || "");
+      GW_INSTALL.err = m.ok ? null : errMsgOf(m);
       if (m.ok) {
         // 新装的一份：版本状态要重新问（旧值属于上一个 exe）。
-        GW_UPD = null; GW_UPD_BUSY = ""; GW_UPD_ERR = ""; GW_UPD_TRIES = 0;
+        GW_UPD = null; GW_UPD_BUSY = ""; GW_UPD_ERR = null; GW_UPD_TRIES = 0;
         sendCtrl({ type: "gw.refresh" });
         sendCtrl({ type: "magpie.refresh" });
       }

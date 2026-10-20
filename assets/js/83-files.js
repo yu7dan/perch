@@ -578,8 +578,7 @@ function fvError(err) {
 
 /* fs.err / diff 的应答 → 可重放结构。原文留着兜底，切语言时重画即可。 */
 function fsErrOf(m, fallbackKey) {
-  if (!m || !m.err) return { key: fallbackKey || "fv.readFailed" };
-  return { code: m.errCode, params: m.errParams, text: m.err };
+  return errMsgOf(m, fallbackKey || "fv.readFailed");
 }
 
 function openFileView(path, root, name) {

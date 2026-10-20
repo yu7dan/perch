@@ -186,12 +186,16 @@ type Plugins struct {
 
 // Snapshot 是发给前端的整份读数。
 type Snapshot struct {
-	State     string              `json:"state"` // running | stopped | absent
-	Version   string              `json:"version,omitempty"`
-	Gateway   string              `json:"gateway,omitempty"`
-	ConfigDir string              `json:"configDir,omitempty"`
-	At        string              `json:"at"`
-	Err       string              `json:"err,omitempty"`
+	State     string `json:"state"` // running | stopped | absent
+	Version   string `json:"version,omitempty"`
+	Gateway   string `json:"gateway,omitempty"`
+	ConfigDir string `json:"configDir,omitempty"`
+	At        string `json:"at"`
+	Err       string `json:"err,omitempty"`
+	// ErrCode/ErrParams 与 Err 并行：Err 始终是原文（日志/旧前端），
+	// 这一对让当前前端把同一句按用户语言重画。
+	ErrCode   string              `json:"errCode,omitempty"`
+	ErrParams map[string]string   `json:"errParams,omitempty"`
 	Today     Totals              `json:"today"`
 	All       Totals              `json:"all"`
 	Series    []Day               `json:"series"`
@@ -373,7 +377,7 @@ func (w *watcher) fillRemote(s *Snapshot) {
 		s.Conc = Conc{Requests: conc.Requests, Waiting: conc.Waiting, Tools: conc.Tools, Lanes: len(conc.Data)}
 	} else if s.State == "stopped" {
 		// 目录在、网关没应答：保持 stopped，把原因留给界面。
-		s.Err = "网关未运行"
+		setSnapErr(s, "gw.notRunning", "网关未运行")
 	}
 	if errToday == nil {
 		s.Today = today.Totals
@@ -451,14 +455,22 @@ func (w *watcher) fillRemote(s *Snapshot) {
 	if errConc != nil && errToday != nil && errAll != nil && errReq != nil && errModels != nil {
 		// 五条全灭：网关确实不在。
 		if s.State == "absent" {
-			s.Err = "没有检测到本地网关"
+			setSnapErr(s, "gw.notDetected", "没有检测到本地网关")
 		} else {
 			s.State = "stopped"
-			s.Err = "网关未运行"
+			setSnapErr(s, "gw.notRunning", "网关未运行")
 		}
 	} else if s.Err != "" && errConc == nil {
-		s.Err = ""
+		s.Err, s.ErrCode, s.ErrParams = "", "", nil
 	}
+}
+
+// setSnapErr 同时写原文与稳定 code；快照的 Err 是字符串，不能像 map 那样
+// 再挂两个字段到同一条错误上，所以在结构体上并排留了一对。
+func setSnapErr(s *Snapshot, code, text string) {
+	s.Err = text
+	s.ErrCode = code
+	s.ErrParams = nil
 }
 
 func (w *watcher) getJSON(path string, v any) error {

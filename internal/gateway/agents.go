@@ -20,10 +20,11 @@ package gateway
 
 import (
 	"encoding/json"
-	"errors"
 	"log"
 	"net/url"
 	"strings"
+
+	"github.com/yu7dan/perch/internal/uimsg"
 )
 
 func (g *Gateway) agentPushErr(op, id string, err error) {
@@ -32,9 +33,8 @@ func (g *Gateway) agentPushErr(op, id string, err error) {
 		msg = err.Error()
 	}
 	log.Printf("[agentcfg] %s%s 失败：%s", op, agentLogID(id), msg)
-	g.emit(map[string]any{
-		"type": "gw.agents", "op": op, "id": id, "err": msg, "at": nowISO(),
-	})
+	m := map[string]any{"type": "gw.agents", "op": op, "id": id, "at": nowISO()}
+	g.emit(uimsg.Fields(m, err))
 }
 
 func agentLogID(id string) string {
@@ -60,7 +60,7 @@ func (g *Gateway) agentPushState(op, id string, b []byte) {
 		}
 		if err3 := json.Unmarshal(b2, &st); err3 != nil || len(st.Agents) == 0 ||
 			string(st.Agents) == "null" {
-			g.agentPushErr(op, id, errors.New("magpie 没有返回 agent 列表"))
+			g.agentPushErr(op, id, uimsg.New("gw.agentListMissing", "magpie 没有返回 agent 列表"))
 			return
 		}
 	}
@@ -110,7 +110,7 @@ func (g *Gateway) AgentState() {
 // 所以空值必须原样发过去（不能当成"没填"）。
 func (g *Gateway) AgentSet(id, field, value string) {
 	if id == "" || field == "" {
-		g.agentPushErr("set", id, errors.New("缺少 agent 或字段"))
+		g.agentPushErr("set", id, uimsg.New("gw.missingAgentField", "缺少 agent 或字段"))
 		return
 	}
 	if err := g.Ensure(); err != nil {
@@ -138,11 +138,11 @@ func (g *Gateway) AgentAction(op, id string) {
 	switch op {
 	case "connect", "disconnect", "reapply", "keep":
 	default:
-		g.agentPushErr(op, id, errors.New("不支持的 agent 动作"))
+		g.agentPushErr(op, id, uimsg.New("gw.unsupportedAction", "不支持的 agent 动作"))
 		return
 	}
 	if id == "" {
-		g.agentPushErr(op, id, errors.New("缺少 agent"))
+		g.agentPushErr(op, id, uimsg.New("gw.missingAgent", "缺少 agent"))
 		return
 	}
 	if err := g.Ensure(); err != nil {
@@ -163,7 +163,7 @@ func (g *Gateway) AgentAction(op, id string) {
 // 拿不到预览时照样给一个通用说明）。
 func (g *Gateway) AgentPreview(id string) {
 	if id == "" {
-		g.agentPushErr("preview", id, errors.New("缺少 agent"))
+		g.agentPushErr("preview", id, uimsg.New("gw.missingAgent", "缺少 agent"))
 		return
 	}
 	if err := g.Ensure(); err != nil {
@@ -176,7 +176,7 @@ func (g *Gateway) AgentPreview(id string) {
 		return
 	}
 	if !json.Valid(b) {
-		g.agentPushErr("preview", id, errors.New("magpie 返回的预览不是 JSON"))
+		g.agentPushErr("preview", id, uimsg.New("gw.previewNotJSON", "magpie 返回的预览不是 JSON"))
 		return
 	}
 	// 预览理论上是个对象；null 会让前端分不清"没有预览"和"还在读"，统一成 {}。

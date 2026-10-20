@@ -22,11 +22,11 @@
    GW_AGENTS_NOTICE：magpie 随 state 回来的一句话（接入/断开的结果）。
    AC_*：抽屉自己的状态；AC_BUSY 空串 = 空闲。 */
 let GW_AGENTS = null;
-let GW_AGENTS_ERR = "";
+let GW_AGENTS_ERR = null;
 let GW_AGENTS_NOTICE = "";
 let AC_ID = "";
 let AC_BUSY = "";
-let AC_ERR = "";
+let AC_ERR = null;
 let AC_PREVIEW = null;
 let AC_CONFIRM = false;
 /* 打开中的长列表选择器（模型字段）：{field, wrap}。弹层挂在 body 上（fixed），
@@ -133,7 +133,7 @@ function acOpen(id) {
   if (AC_ID !== id) AC_PREVIEW = null;
   AC_ID = id;
   AC_BUSY = "";
-  AC_ERR = "";
+  AC_ERR = null;
   AC_CONFIRM = false;
   renderAgentDrawer();
   // 打开时才问控制面（启动阶段它是被动的，不替用户拉起进程）。
@@ -166,7 +166,7 @@ function acClose() {
   acDriftWatch(false);
   AC_ID = "";
   AC_BUSY = "";
-  AC_ERR = "";
+  AC_ERR = null;
   AC_PREVIEW = null;
   AC_CONFIRM = false;
   renderAgentDrawer();
@@ -207,7 +207,7 @@ function acBodyHTML(a, name) {
   if (!a) {
     return `<div class="ac-empty">` +
       `${esc(t("ac.empty", { name }))}<br>` +
-      `<span>${esc(GW_AGENTS_ERR || t("ac.empty.count", { n: (GW_AGENTS || []).length }))}</span>` +
+      `<span>${esc(msgText(GW_AGENTS_ERR) || t("ac.empty.count", { n: (GW_AGENTS || []).length }))}</span>` +
       `</div>` + acReloadHTML();
   }
 
@@ -237,7 +237,7 @@ function acBodyHTML(a, name) {
   if (GW_AGENTS_NOTICE) {
     html += `<div class="ac-note">${esc(GW_AGENTS_NOTICE)}</div>`;
   }
-  if (AC_ERR) html += `<div class="ac-err">${esc(AC_ERR)}</div>`;
+  if (AC_ERR) html += `<div class="ac-err">${esc(msgText(AC_ERR))}</div>`;
 
   if (AC_CONFIRM) {
     html += acConfirmHTML(a);
@@ -310,7 +310,7 @@ function acChangesHTML(p) {
     return `<div class="ac-hint">${esc(t("ac.changes.loading"))}</div>`;
   }
   const list = Array.isArray(p.changes) ? p.changes : [];
-  const err = p.error ? String(p.error) : "";
+  const err = msgText(p.error);
   if (!list.length) {
     return `<div class="ac-hint">` +
       esc(err ? t("ac.changes.err", { err }) : t("ac.changes.plain")) +
@@ -414,7 +414,7 @@ function acFieldHTML(a, f, busy) {
 function acSetField(field, value) {
   if (!field || !AC_ID || AC_BUSY) return;
   AC_BUSY = "set:" + field;
-  AC_ERR = "";
+  AC_ERR = null;
   AC_CONFIRM = false;
   renderAgentDrawer();
   sendCtrl({ type: "gw.agent.set", id: AC_ID, field, value });
@@ -601,7 +601,7 @@ $("ac-body").addEventListener("click", (e) => {
   if (!b || !AC_ID) return;
   const act = b.dataset.ac;
   if (act === "reload") {
-    AC_ERR = "";
+    AC_ERR = null;
     renderAgentDrawer();
     sendCtrl({ type: "gw.agents" });
     if (AC_ID) sendCtrl({ type: "gw.agent.preview", id: AC_ID });
@@ -609,7 +609,7 @@ $("ac-body").addEventListener("click", (e) => {
   }
   if (act === "disconnect") {
     AC_CONFIRM = true;
-    AC_ERR = "";
+    AC_ERR = null;
     if (!AC_PREVIEW) sendCtrl({ type: "gw.agent.preview", id: AC_ID });
     renderAgentDrawer();
     return;
@@ -621,7 +621,7 @@ $("ac-body").addEventListener("click", (e) => {
   }
   if (act === "disconnect-go") {
     AC_BUSY = "disconnect";
-    AC_ERR = "";
+    AC_ERR = null;
     renderAgentDrawer();
     sendCtrl({ type: "gw.agent.disconnect", id: AC_ID });
     bootFact(`Agent 配置 断开 ${AC_ID}`);
@@ -630,7 +630,7 @@ $("ac-body").addEventListener("click", (e) => {
   if (act === "keep") {
     // 不写文件：只是让 magpie 接受现状（见 internal/gateway/agents.go 的 gwAgentAction）。
     AC_BUSY = "keep";
-    AC_ERR = "";
+    AC_ERR = null;
     renderAgentDrawer();
     sendCtrl({ type: "gw.agent.keep", id: AC_ID });
     bootFact(`Agent 配置 保留现状 ${AC_ID}`);
@@ -638,7 +638,7 @@ $("ac-body").addEventListener("click", (e) => {
   }
   if (act === "connect" || act === "reapply") {
     AC_BUSY = act;
-    AC_ERR = "";
+    AC_ERR = null;
     renderAgentDrawer();
     sendCtrl({ type: "gw.agent." + act, id: AC_ID });
     bootFact(`Agent 配置 ${act === "connect" ? "接入" : "重新应用"} ${AC_ID}`);

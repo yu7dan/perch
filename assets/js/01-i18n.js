@@ -1055,6 +1055,41 @@ const PERCH_I18N = {
     "msg.files.readFailed": "Could not read this file: {err}",
 
     "msg.diff.timeout": "Timed out (the transcript follower did not answer)",
+
+    "msg.gw.notRunning": "Gateway is not running",
+    "msg.gw.notDetected": "No local gateway was detected",
+    "msg.gw.exeMissing": "Could not find the magpie executable (install or open magpie once)",
+    "msg.gw.controlPlaneDown": "The control plane is not connected",
+    "msg.gw.badAPIPath": "Disallowed magpie API path: {path}",
+    "msg.gw.methodNotAllowed": "Only GET/POST are allowed",
+    "msg.gw.httpError": "magpie answered HTTP {status}: {body}",
+    "msg.gw.requestFailed": "{err}",
+    "msg.gw.startFailed": "The control plane failed to start",
+    "msg.gw.startFailedDetail": "magpie web did not come up on 127.0.0.1:{port}: {err}",
+    "msg.gw.agentListMissing": "magpie did not return an agent list",
+    "msg.gw.missingAgentField": "Missing agent or field",
+    "msg.gw.unsupportedAction": "Unsupported agent action",
+    "msg.gw.missingAgent": "Missing agent",
+    "msg.gw.previewNotJSON": "The preview returned by magpie is not JSON",
+    "msg.gw.updateNotJSON": "magpie's update state is not JSON",
+    "msg.gw.updateCheckFailed": "magpie update check failed: {err}",
+    "msg.gw.updateFailed": "Update failed: {reason}",
+    "msg.gw.updateDownloadFailed": "The update download failed",
+    "msg.gw.updateBlocked": "This version cannot start on this computer",
+    "msg.gw.updateBlockedReason": "This version cannot start on this computer: {reason}",
+    "msg.gw.updateManual": "magpie must be updated manually from its release page",
+    "msg.gw.updateManualReason": "magpie must be updated manually from its release page: {reason}",
+    "msg.gw.updateTimeout": "The update was still not ready after 15 minutes",
+    "msg.gw.updateNotReady": "No installable update was available (state: {state})",
+    "msg.gw.updateRejected": "magpie did not accept the update: {err}",
+    "msg.gw.updateNotBack": "The control plane did not answer after the update; restart Perch or reopen the Gateway page",
+
+    "msg.install.noRecipe": "This agent has no automatic install recipe (open its official install notes).",
+    "msg.install.startFailed": "Could not start the installer: {err}",
+    "msg.install.timeout": "Install timed out (20 minutes)",
+    "msg.install.cancelled": "Cancelled",
+    "msg.install.exitCode": "Installer exited with code {code}",
+    "msg.install.failed": "Install failed: {err}",
   },
 
   zh: {
@@ -2067,6 +2102,41 @@ const PERCH_I18N = {
     "msg.files.readFailed": "读不了这个文件：{err}",
 
     "msg.diff.timeout": "超时（转录跟随器没有应答）",
+
+    "msg.gw.notRunning": "网关未运行",
+    "msg.gw.notDetected": "没有检测到本地网关",
+    "msg.gw.exeMissing": "没有找到 magpie 可执行文件（先安装/打开一次 magpie）",
+    "msg.gw.controlPlaneDown": "控制面未连接",
+    "msg.gw.badAPIPath": "不允许的 magpie API 路径：{path}",
+    "msg.gw.methodNotAllowed": "只允许 GET/POST",
+    "msg.gw.httpError": "magpie 回答 HTTP {status}：{body}",
+    "msg.gw.requestFailed": "{err}",
+    "msg.gw.startFailed": "控制面启动失败",
+    "msg.gw.startFailedDetail": "magpie web 没能在 127.0.0.1:{port} 起来：{err}",
+    "msg.gw.agentListMissing": "magpie 没有返回 agent 列表",
+    "msg.gw.missingAgentField": "缺少 agent 或字段",
+    "msg.gw.unsupportedAction": "不支持的 agent 动作",
+    "msg.gw.missingAgent": "缺少 agent",
+    "msg.gw.previewNotJSON": "magpie 返回的预览不是 JSON",
+    "msg.gw.updateNotJSON": "magpie 返回的更新状态不是 JSON",
+    "msg.gw.updateCheckFailed": "magpie 检查更新失败：{err}",
+    "msg.gw.updateFailed": "更新失败：{reason}",
+    "msg.gw.updateDownloadFailed": "下载更新失败",
+    "msg.gw.updateBlocked": "这个版本在这台电脑上无法启动",
+    "msg.gw.updateBlockedReason": "这个版本在这台电脑上无法启动：{reason}",
+    "msg.gw.updateManual": "magpie 需要从发布页手动更新",
+    "msg.gw.updateManualReason": "magpie 需要从发布页手动更新：{reason}",
+    "msg.gw.updateTimeout": "等了 15 分钟更新仍未就绪",
+    "msg.gw.updateNotReady": "没有拿到可安装的更新（状态：{state}）",
+    "msg.gw.updateRejected": "magpie 没有接受更新：{err}",
+    "msg.gw.updateNotBack": "更新后控制面没有恢复应答；重启 Perch 或重开网关页再试",
+
+    "msg.install.noRecipe": "这个 agent 没有可用的自动安装配方（请打开官方安装说明）。",
+    "msg.install.startFailed": "起不了安装进程：{err}",
+    "msg.install.timeout": "安装超时（20 分钟）",
+    "msg.install.cancelled": "已取消",
+    "msg.install.exitCode": "安装进程退出码 {code}",
+    "msg.install.failed": "安装失败：{err}",
   },
 };
 
@@ -2131,6 +2201,13 @@ function msgText(m) {
   if (typeof m === "string") return m;
   if (m.key) return t(m.key);
   return tMsg(m.code, m.params, m.text);
+}
+
+/* 一条推送里的 {err, errCode, errParams} → 可重放结构。
+   没有 err 时返回 fallbackKey 对应的前端文案（或 null）。 */
+function errMsgOf(m, fallbackKey) {
+  if (!m || !m.err) return fallbackKey ? { key: fallbackKey } : null;
+  return { code: m.errCode, params: m.errParams, text: m.err };
 }
 
 /* 带数量的句子：n === 1 时优先用 `${base}One`（只在当前语言里存在才用）。

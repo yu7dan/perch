@@ -51,3 +51,28 @@ func TestNewParams(t *testing.T) {
 		t.Fatalf("got %#v (ok=%v)", msg, ok)
 	}
 }
+
+func TestFieldsAddsCodeButKeepsRawText(t *testing.T) {
+	m := Fields(map[string]any{"type": "gw.agents"},
+		NewParams("gw.missingAgent", "缺少 agent", nil))
+	if m["err"] != "缺少 agent" {
+		t.Fatalf("raw err = %v", m["err"])
+	}
+	if m["errCode"] != "gw.missingAgent" {
+		t.Fatalf("errCode = %v", m["errCode"])
+	}
+	if _, ok := m["errParams"]; ok {
+		t.Fatalf("empty params must not be sent: %#v", m)
+	}
+
+	plain := Fields(map[string]any{}, errors.New("plain"))
+	if plain["err"] != "plain" {
+		t.Fatalf("err = %v", plain["err"])
+	}
+	if _, ok := plain["errCode"]; ok {
+		t.Fatalf("plain errors must not gain an errCode: %#v", plain)
+	}
+	if n := Fields(map[string]any{"x": 1}, nil); n["x"] != 1 {
+		t.Fatalf("nil must leave the payload alone: %#v", n)
+	}
+}

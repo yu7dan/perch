@@ -27,7 +27,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -35,12 +34,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/yu7dan/perch/internal/appdir"
+	"github.com/yu7dan/perch/internal/uimsg"
 )
 
 const (
@@ -191,8 +192,7 @@ func (g *Gateway) Ensure() error {
 	// 2) 自己拉一个。端口被别的程序占着就换下一个 —— 绝不能停别人的进程。
 	exe := findMagpieExe()
 	if exe == "" {
-		g.lastErr = "没有找到 magpie 可执行文件（先安装/打开一次 magpie）"
-		return errors.New(g.lastErr)
+		return gwErr(g, uimsg.New("gw.exeMissing", "没有找到 magpie 可执行文件（先安装/打开一次 magpie）"))
 	}
 	var lastStart error
 	for p := gwFirstPort; p < gwFirstPort+gwPortTries; p++ {
@@ -202,7 +202,8 @@ func (g *Gateway) Ensure() error {
 		var out bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &out, &out
 		if err := cmd.Start(); err != nil {
-			lastStart = err
+			lastStart = uimsg.Wrap(err, "gw.startFailed", "控制面启动失败："+err.Error(),
+				map[string]string{"err": err.Error()})
 			continue
 		}
 		// 等它就绪。启动日志里带 key，**只在失败时**把 key 抹掉再取尾部。
@@ -227,13 +228,22 @@ func (g *Gateway) Ensure() error {
 		if i := strings.LastIndex(msg, "\n"); i > 0 && len(msg) > 400 {
 			msg = msg[len(msg)-400:]
 		}
-		lastStart = fmt.Errorf("magpie web 没能在 127.0.0.1:%d 起来：%s", p, strings.TrimSpace(msg))
+		detail := strings.TrimSpace(msg)
+		lastStart = uimsg.NewParams("gw.startFailedDetail",
+			fmt.Sprintf("magpie web 没能在 127.0.0.1:%d 起来：%s", p, detail),
+			map[string]string{"port": strconv.Itoa(p), "err": detail})
 	}
-	g.lastErr = "控制面启动失败"
+	uiErr := error(uimsg.New("gw.startFailed", "控制面启动失败"))
 	if lastStart != nil {
-		g.lastErr = lastStart.Error()
+		uiErr = lastStart
 	}
-	return errors.New(g.lastErr)
+	return gwErr(g, uiErr)
+}
+
+// gwErr 记下最后一次连接失败并把它交给调用方（日志与网关页读同一句）。
+func gwErr(g *Gateway, err error) error {
+	g.lastErr = err.Error()
+	return err
 }
 
 // findMagpieExe 找 magpie 本体：先问正在跑的那个进程（最可靠 —— 用户点开的就是它），
@@ -329,25 +339,26 @@ func (g *Gateway) connState() (int, string, *http.Client, bool) {
 func (g *Gateway) API(method, path string, body any) ([]byte, error) {
 	port, key, client, _ := g.connState()
 	if client == nil {
-		return nil, errors.New("控制面未连接")
+		return nil, uimsg.New("gw.controlPlaneDown", "控制面未连接")
 	}
 	if !strings.HasPrefix(path, "/api/") || strings.Contains(path, "..") || strings.Contains(path, "k=") {
-		return nil, fmt.Errorf("不允许的 magpie API 路径：%s", path)
+		return nil, uimsg.NewParams("gw.badAPIPath", fmt.Sprintf("不允许的 magpie API 路径：%s", path),
+			map[string]string{"path": path})
 	}
 	if method != "GET" && method != "POST" {
-		return nil, errors.New("只允许 GET/POST")
+		return nil, uimsg.New("gw.methodNotAllowed", "只允许 GET/POST")
 	}
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return nil, err
+			return nil, requestFailed(err)
 		}
 		rd = bytes.NewReader(b)
 	}
 	req, err := http.NewRequest(method, fmt.Sprintf("http://127.0.0.1:%d%s", port, path), rd)
 	if err != nil {
-		return nil, err
+		return nil, requestFailed(err)
 	}
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
@@ -361,21 +372,28 @@ func (g *Gateway) API(method, path string, body any) ([]byte, error) {
 	}
 	res, err := c.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, requestFailed(err)
 	}
 	defer res.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(res.Body, 32<<20))
 	if err != nil {
-		return nil, err
+		return nil, requestFailed(err)
 	}
 	if res.StatusCode/100 != 2 {
 		msg := strings.TrimSpace(string(data))
 		if len(msg) > 400 {
 			msg = msg[:400]
 		}
-		return nil, fmt.Errorf("magpie 回答 HTTP %d：%s", res.StatusCode, msg)
+		return nil, uimsg.NewParams("gw.httpError",
+			fmt.Sprintf("magpie 回答 HTTP %d：%s", res.StatusCode, msg),
+			map[string]string{"status": strconv.Itoa(res.StatusCode), "body": msg})
 	}
 	return data, nil
+}
+
+// requestFailed 是控制面请求在传输层失败的统一说法；OS/网络原文作为 {err}。
+func requestFailed(err error) error {
+	return uimsg.Wrap(err, "gw.requestFailed", err.Error(), map[string]string{"err": err.Error()})
 }
 
 func nowISO() string { return time.Now().Format(time.RFC3339) }
@@ -388,7 +406,7 @@ func (g *Gateway) pushGW(m map[string]any) {
 func (g *Gateway) Connect() {
 	if err := g.Ensure(); err != nil {
 		log.Printf("[gw] 连接失败：%v", err)
-		g.pushGW(map[string]any{"connected": false, "at": nowISO(), "err": err.Error()})
+		g.pushGW(uimsg.Fields(map[string]any{"connected": false, "at": nowISO()}, err))
 		return
 	}
 	g.Refresh()

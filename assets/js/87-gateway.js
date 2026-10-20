@@ -31,12 +31,16 @@ let GW_COVER_SIG = "";
    （checking / downloading / restarting）。 */
 let GW_UPD = null;
 let GW_UPD_BUSY = "";
-let GW_UPD_ERR = "";
+let GW_UPD_ERR = null;
 let GW_UPD_TRIES = 0;
 let GW_VER_SIG = "";
 
 function gwOn() {
   return !!(GW && GW.connected);
+}
+
+function gwErrText() {
+  return GW && GW.err ? tMsg(GW.errCode, GW.errParams, GW.err) : "";
 }
 
 /* embed=1 是稳定的标记，也让地址和旧缓存区分开（internal/gateway/ui.go 只在这个地址上裁剪
@@ -125,7 +129,7 @@ function gwCoverHTML(m) {
       `</span>` +
     `</div>` +
     gwInstallCard(m) +
-    (GW && GW.err ? `<div class="gw-msg bad">${esc(GW.err)}</div>` : "");
+    (gwErrText() ? `<div class="gw-msg bad">${esc(gwErrText())}</div>` : "");
 }
 
 /* 两条用户定的规则：
@@ -144,7 +148,7 @@ function gwInstallCard(m) {
         ? t("gw.connecting.body")
         : esc(t("gw.installedOff.body"))}</p>` +
       `<div class="row"><button type="button" class="gw-btn" data-gw-act="retry">${esc(t("gw.retry"))}</button></div>` +
-      (GW && GW.err ? `<p style="color:var(--red)">${esc(GW.err)}</p>` : ``) +
+      (gwErrText() ? `<p style="color:var(--red)">${esc(gwErrText())}</p>` : ``) +
       `</div>`;
   }
   return `<div class="gw-connect">` +
@@ -159,10 +163,10 @@ function gwInstallCard(m) {
         : `<button type="button" class="gw-btn primary" data-gw-act="install-magpie">` +
           esc(failed ? t("gw.install.redownload") : t("gw.install.download")) + `</button>`) +
     `</div>` +
-    (GW && GW.err && !GW_INSTALL ? `<p style="color:var(--red)">${esc(GW.err)}</p>` : ``) +
+    (gwErrText() && !GW_INSTALL ? `<p style="color:var(--red)">${esc(gwErrText())}</p>` : ``) +
     (st && st.lines && st.lines.length
       ? `<pre class="gw-inst-log" id="gw-inst-log">${esc(st.lines.join("\n"))}</pre>` : ``) +
-    (failed ? `<p style="color:var(--red)">${esc(st.err || t("gw.install.failed"))}</p>` : ``) +
+    (failed ? `<p style="color:var(--red)">${esc(msgText(st.err) || t("gw.install.failed"))}</p>` : ``) +
     `</div>`;
 }
 
@@ -172,7 +176,9 @@ function gwInstallCard(m) {
 
 function gwUpdateHTML() {
   const u = GW_UPD;
-  if (GW_UPD_ERR) return `<span class="err">${esc(t("gw.update.readErr", { err: GW_UPD_ERR }))}</span>`;
+  if (GW_UPD_ERR) {
+    return `<span class="err">${esc(t("gw.update.readErr", { err: msgText(GW_UPD_ERR) }))}</span>`;
+  }
   if (!u) return "";
   const cur = u.current || "";
   const latest = u.latest || "";
@@ -204,7 +210,7 @@ function applyGwUpdate(m) {
   if (!m || typeof m !== "object") return;
   if (m.update && typeof m.update === "object") GW_UPD = m.update;
   GW_UPD_BUSY = typeof m.busy === "string" ? m.busy : "";
-  GW_UPD_ERR = m.err ? String(m.err) : "";
+  GW_UPD_ERR = errMsgOf(m);
   if (GW_UPD || m.err) GW_UPD_TRIES = 2; // 问过就不再自动问
   if (m.updated) {
     GW_FRAME_AT = "";
@@ -218,7 +224,7 @@ $("gw-ver").addEventListener("click", (e) => {
   const b = e.target.closest("[data-gw-act]");
   if (!b || b.dataset.gwAct !== "update-magpie") return;
   GW_UPD_BUSY = "checking";
-  GW_UPD_ERR = "";
+  GW_UPD_ERR = null;
   bootFact("网关 更新 magpie");
   sendCtrl({ type: "magpie.update.install" });
   renderGateway();
@@ -301,7 +307,7 @@ function applyGwAgents(m) {
   // 断开照样成立。把它记进 AC_PREVIEW，抽屉里用通用说明兜底。
   if (m.op === "preview") {
     if (AC_ID && m.id === AC_ID) {
-      AC_PREVIEW = m.err ? { changes: null, error: m.err } : (m.preview || null);
+      AC_PREVIEW = m.err ? { changes: null, error: errMsgOf(m) } : (m.preview || null);
       renderAgentDrawer();
     }
     return;
@@ -311,11 +317,12 @@ function applyGwAgents(m) {
   // 任何一次动作（读/写/接入/断开/重应用）回来都结束了忙碌态。
   AC_BUSY = "";
   if (m.err) {
-    GW_AGENTS_ERR = m.err;
-    if (AC_ID && (!m.id || m.id === AC_ID)) AC_ERR = m.err;
+    // 存结构而不是渲染好的句子：切语言时 89-agent-cfg 会重画。
+    GW_AGENTS_ERR = errMsgOf(m);
+    if (AC_ID && (!m.id || m.id === AC_ID)) AC_ERR = errMsgOf(m);
   } else {
-    GW_AGENTS_ERR = "";
-    AC_ERR = "";
+    GW_AGENTS_ERR = null;
+    AC_ERR = null;
   }
   renderDashAgents();
   renderAgentDrawer();

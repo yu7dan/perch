@@ -20,7 +20,6 @@ package gateway
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -29,6 +28,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/yu7dan/perch/internal/uimsg"
 )
 
 type updateInfo struct {
@@ -50,25 +51,22 @@ func (g *Gateway) updateRead() (json.RawMessage, *updateInfo, error) {
 	}
 	var u updateInfo
 	if err := json.Unmarshal(b, &u); err != nil {
-		return nil, nil, errors.New("magpie 返回的更新状态不是 JSON")
+		return nil, nil, uimsg.New("gw.updateNotJSON", "magpie 返回的更新状态不是 JSON")
 	}
 	return json.RawMessage(b), &u, nil
 }
 
-func (g *Gateway) updatePush(op string, raw json.RawMessage, busy, errMsg string, updated bool) {
+func (g *Gateway) updatePush(op string, raw json.RawMessage, busy string, err error, updated bool) {
 	m := map[string]any{
 		"type": "magpie.update", "op": op, "busy": busy, "at": nowISO(),
 	}
 	if len(raw) > 0 {
 		m["update"] = raw
 	}
-	if errMsg != "" {
-		m["err"] = errMsg
-	}
 	if updated {
 		m["updated"] = true
 	}
-	g.emit(m)
+	g.emit(uimsg.Fields(m, err))
 }
 
 // MagpieUpdateGet 只读版本状态。控制面没接上就安静返回 —— 网关页自己会
@@ -80,10 +78,10 @@ func (g *Gateway) MagpieUpdateGet() {
 	}
 	raw, _, err := g.updateRead()
 	if err != nil {
-		g.updatePush("get", nil, "", err.Error(), false)
+		g.updatePush("get", nil, "", err, false)
 		return
 	}
-	g.updatePush("get", raw, "", "", false)
+	g.updatePush("get", raw, "", nil, false)
 }
 
 // MagpieUpdateInstall 是「更新」按钮的全部：需要时先让它检查/下载，等到
@@ -96,17 +94,17 @@ func (g *Gateway) MagpieUpdateInstall() {
 	g.updLast = ""
 
 	if err := g.Ensure(); err != nil {
-		g.updatePush("install", nil, "", err.Error(), false)
+		g.updatePush("install", nil, "", err, false)
 		return
 	}
 	port, key, _, ours := g.connState()
 	raw, u, err := g.updateRead()
 	if err != nil {
-		g.updatePush("install", nil, "", err.Error(), false)
+		g.updatePush("install", nil, "", err, false)
 		return
 	}
 	if u.Latest == "" || u.Latest == u.Current {
-		g.updatePush("install", raw, "", "", false)
+		g.updatePush("install", raw, "", nil, false)
 		return
 	}
 
@@ -114,11 +112,12 @@ func (g *Gateway) MagpieUpdateInstall() {
 	if u.State != "ready" {
 		raw, u, err = g.updatePrepare(raw, u)
 		if err != nil {
-			g.updatePush("install", raw, "", err.Error(), false)
+			g.updatePush("install", raw, "", err, false)
 			return
 		}
 		if u.State != "ready" {
-			g.updatePush("install", raw, "", "没有拿到可安装的更新（状态："+u.State+"）", false)
+			g.updatePush("install", raw, "", uimsg.NewParams("gw.updateNotReady",
+				"没有拿到可安装的更新（状态："+u.State+"）", map[string]string{"state": u.State}), false)
 			return
 		}
 	}
@@ -131,9 +130,10 @@ func (g *Gateway) MagpieUpdateInstall() {
 		g.mu.Unlock()
 	}
 
-	g.updatePush("install", raw, "restarting", "", false)
+	g.updatePush("install", raw, "restarting", nil, false)
 	if _, err := g.API("POST", "/api/update/install", map[string]any{"when": "now"}); err != nil {
-		g.updatePush("install", raw, "", "magpie 没有接受更新："+err.Error(), false)
+		g.updatePush("install", raw, "", uimsg.Wrap(err, "gw.updateRejected",
+			"magpie 没有接受更新："+err.Error(), map[string]string{"err": err.Error()}), false)
 		return
 	}
 
@@ -167,7 +167,8 @@ func (g *Gateway) MagpieUpdateInstall() {
 		back = false
 	}
 	if !back {
-		g.updatePush("install", raw, "", "更新后控制面没有恢复应答；重启 Perch 或重开网关页再试", false)
+		g.updatePush("install", raw, "", uimsg.New("gw.updateNotBack",
+			"更新后控制面没有恢复应答；重启 Perch 或重开网关页再试"), false)
 		return
 	}
 
@@ -186,7 +187,7 @@ func (g *Gateway) MagpieUpdateInstall() {
 	g.mu.Unlock()
 
 	log.Printf("[magpie] 已更新到 %s（控制面端口 %d，%s）", now.Current, port, map[bool]string{true: "Perch 拉起", false: "外部进程"}[ours])
-	g.updatePush("install", raw, "", "", true)
+	g.updatePush("install", raw, "", nil, true)
 	g.Refresh()
 }
 
@@ -196,7 +197,8 @@ func (g *Gateway) updatePrepare(raw json.RawMessage, u *updateInfo) (json.RawMes
 	if u.State != "downloading" && u.State != "checking" {
 		b, err := g.API("POST", "/api/update/check", map[string]any{})
 		if err != nil {
-			return raw, u, errors.New("magpie 检查更新失败：" + err.Error())
+			return raw, u, uimsg.Wrap(err, "gw.updateCheckFailed",
+				"magpie 检查更新失败："+err.Error(), map[string]string{"err": err.Error()})
 		}
 		raw = json.RawMessage(b)
 		var u2 updateInfo
@@ -212,11 +214,14 @@ func (g *Gateway) updatePrepare(raw json.RawMessage, u *updateInfo) (json.RawMes
 		}
 		switch u.State {
 		case "error":
-			return raw, u, errors.New(firstNonEmpty(u.Error, "下载更新失败"))
+			return raw, u, updateReasonErr("gw.updateFailed", "gw.updateDownloadFailed",
+				"下载更新失败", u.Error)
 		case "blocked":
-			return raw, u, errors.New(firstNonEmpty(u.Stuck, u.Error, "这个版本在这台电脑上无法启动"))
+			return raw, u, updateReasonErr("gw.updateBlockedReason", "gw.updateBlocked",
+				"这个版本在这台电脑上无法启动", firstNonEmpty(u.Stuck, u.Error))
 		case "available":
-			return raw, u, errors.New(firstNonEmpty(u.Stuck, "magpie 需要从发布页手动更新"))
+			return raw, u, updateReasonErr("gw.updateManualReason", "gw.updateManual",
+				"magpie 需要从发布页手动更新", u.Stuck)
 		case "latest":
 			return raw, u, nil
 		}
@@ -227,7 +232,7 @@ func (g *Gateway) updatePrepare(raw json.RawMessage, u *updateInfo) (json.RawMes
 			if u.State == "checking" {
 				busy = "checking"
 			}
-			g.updatePush("install", raw, busy, "", false)
+			g.updatePush("install", raw, busy, nil, false)
 		}
 		time.Sleep(2 * time.Second)
 		r2, u2, err := g.updateRead()
@@ -236,7 +241,16 @@ func (g *Gateway) updatePrepare(raw json.RawMessage, u *updateInfo) (json.RawMes
 		}
 		raw, u = r2, u2
 	}
-	return raw, u, errors.New("等了 15 分钟更新仍未就绪")
+	return raw, u, uimsg.New("gw.updateTimeout", "等了 15 分钟更新仍未就绪")
+}
+
+// updateReasonErr 有 magpie 给的具体原因就带上 {reason}；没有就用同一句话的
+// 无参 code（免得字典里留下一个没被替换的占位符）。
+func updateReasonErr(codeWithReason, codePlain, plainText, reason string) error {
+	if reason == "" {
+		return uimsg.New(codePlain, plainText)
+	}
+	return uimsg.NewParams(codeWithReason, plainText+"："+reason, map[string]string{"reason": reason})
 }
 
 // gwPortOwner 找监听某个端口的进程。只在更新后认领新 sidecar 时用：

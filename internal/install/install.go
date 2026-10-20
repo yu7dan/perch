@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/yu7dan/perch/internal/agentcatalog"
+	"github.com/yu7dan/perch/internal/uimsg"
 )
 
 const pathPrelude = `$ErrorActionPreference='Stop'
@@ -104,7 +105,8 @@ func (in *Installer) Start(id string) {
 	r, ok := agentcatalog.Recipes[id]
 	if !ok || (r.Script == "" && !r.NPM) {
 		in.log(id, "这个 agent 没有可用的自动安装配方（请打开官方安装说明）。")
-		in.emit(map[string]any{"type": "install.done", "id": id, "ok": false, "err": "no recipe"})
+		in.emit(uimsg.Fields(map[string]any{"type": "install.done", "id": id, "ok": false},
+			uimsg.New("install.noRecipe", "这个 agent 没有可用的自动安装配方（请打开官方安装说明）。")))
 		return
 	}
 	in.mu.Lock()
@@ -138,16 +140,16 @@ func (in *Installer) Start(id string) {
 	cmd.WaitDelay = 2 * time.Second
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		in.finish(id, false, 1, err.Error(), cancelled(ctx))
+		in.finish(id, false, 1, startFailed(err), cancelled(ctx))
 		return
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		in.finish(id, false, 1, err.Error(), cancelled(ctx))
+		in.finish(id, false, 1, startFailed(err), cancelled(ctx))
 		return
 	}
 	if err := cmd.Start(); err != nil {
-		in.finish(id, false, 1, err.Error(), false)
+		in.finish(id, false, 1, startFailed(err), false)
 		return
 	}
 	in.mu.Lock()
@@ -197,20 +199,18 @@ func (in *Installer) Start(id string) {
 		}
 	}
 	if ctx.Err() == context.DeadlineExceeded {
-		werr = fmt.Errorf("安装超时（20 分钟）")
+		werr = uimsg.New("install.timeout", "安装超时（20 分钟）")
 	}
-	in.finish(id, werr == nil, code, errText(werr), cancelled(ctx))
+	in.finish(id, werr == nil, code, werr, cancelled(ctx))
 }
 
 func cancelled(ctx context.Context) bool {
 	return ctx.Err() == context.Canceled
 }
 
-func errText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
+func startFailed(err error) error {
+	return uimsg.Wrap(err, "install.startFailed", "起不了安装进程："+err.Error(),
+		map[string]string{"err": err.Error()})
 }
 
 // finish 收尾：重读 PATH（安装脚本改的是注册表里的用户 PATH，而本进程
@@ -219,7 +219,7 @@ func errText(err error) string {
 // 顺序很重要：**先推新名单，再推 done**。前端收到 done 时手里已经是新名单，
 // 行会在同一个事件里从「未检测到」翻成「已接入」，不用等下一次 2.5 秒轮询。
 // --version 只是证据，放后台跑，不挡收尾。
-func (in *Installer) finish(id string, ok bool, code int, msg string, wasCancelled bool) {
+func (in *Installer) finish(id string, ok bool, code int, err error, wasCancelled bool) {
 	in.mu.Lock()
 	job := in.runs[id]
 	delete(in.runs, id)
@@ -275,17 +275,35 @@ func (in *Installer) finish(id string, ok bool, code int, msg string, wasCancell
 		return
 	}
 
-	if wasCancelled {
-		msg = "已取消"
-	}
-	if msg == "" {
-		msg = fmt.Sprintf("退出码 %d", code)
-	}
-	in.log(id, "失败："+msg)
-	in.emit(map[string]any{
-		"type": "install.done", "id": id, "ok": false, "code": code, "err": msg,
+	uiErr := failureMessage(code, err, wasCancelled)
+	in.log(id, "失败："+uiErr.Error())
+	in.emit(uimsg.Fields(map[string]any{
+		"type": "install.done", "id": id, "ok": false, "code": code,
 		"elapsedMs": elapsed.Milliseconds(),
-	})
+	}, uiErr))
+}
+
+// failureMessage 把「为什么没装成」归一成一句带稳定 code 的话。
+// 已有 code 的错误（超时 / 起不了进程）原样保留；退出码与取消各自成一个 code。
+func failureMessage(code int, err error, wasCancelled bool) error {
+	switch {
+	case wasCancelled:
+		return uimsg.New("install.cancelled", "已取消")
+	case err != nil:
+		if _, ok := uimsg.From(err); ok {
+			return err
+		}
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return uimsg.Wrap(err, "install.exitCode", fmt.Sprintf("退出码 %d", code),
+				map[string]string{"code": fmt.Sprint(code)})
+		}
+		return uimsg.Wrap(err, "install.failed", "安装失败："+err.Error(),
+			map[string]string{"err": err.Error()})
+	default:
+		return uimsg.NewParams("install.exitCode", fmt.Sprintf("退出码 %d", code),
+			map[string]string{"code": fmt.Sprint(code)})
+	}
 }
 
 func (in *Installer) cards() []agentcatalog.Card {

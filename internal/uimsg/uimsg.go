@@ -60,3 +60,22 @@ func From(err error) (Msg, bool) {
 	}
 	return Msg{}, false
 }
+
+// Fields attaches err to an outgoing payload. `err` stays the raw text for
+// logs and older clients; `errCode` / `errParams` are additive and absent when
+// the error has no stable identity. nil leaves the payload untouched.
+func Fields(m map[string]any, err error) map[string]any {
+	if err == nil {
+		return m
+	}
+	m["err"] = err.Error()
+	if msg, ok := From(err); ok {
+		if msg.Code != "" {
+			m["errCode"] = msg.Code
+		}
+		if len(msg.Params) > 0 {
+			m["errParams"] = msg.Params
+		}
+	}
+	return m
+}
