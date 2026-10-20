@@ -1,9 +1,9 @@
 <div align="center">
 
-# Perch <sub>栖枝</sub>
+# Perch
 
-**把 agent 终端装进桌面的工作环境。**<br>
-一个窗口里并排跑多个 agent，一格一个真终端；收起终端，它就是一块"谁在等你"的工作看板。
+**A desktop workspace for agent terminals.**<br>
+Run several agents side by side in one window — one real terminal per pane. Collapse the terminals and it becomes a work board that shows who is waiting on you.
 
 ![Windows 11](https://img.shields.io/badge/Windows%2011-0078D4?logo=windows&logoColor=white)
 ![Go](https://img.shields.io/badge/Go-1.27%2B-00ADD8?logo=go&logoColor=white)
@@ -13,49 +13,80 @@
 </div>
 
 <p align="center">
-  <img src="docs/images/overview.png" alt="Perch 总览：并行 agent 工作看板、网关用量与 Agent 名单" width="100%">
+  <a href="docs/images/overview.png"><img src="docs/images/overview.png" alt="Perch overview: parallel agent panes, gateway usage, and the agent catalog" width="960"></a>
 </p>
 
-Perch 是面向"agent 终端"的 Windows 桌面网关，与 Orca 同属 **agent 开发环境**这一类。
-终端本身就是主界面 —— 你看到的每个格子都是一个活着的 ConPTY，agent 在里面正常跑；
-外层做的事是**让 N 个这样的格子同时可看、可管，并且在它停下来等你的时候叫得够清楚**。
-它不是"并排跑 N 个某一个 agent"：agent 是哪一家由你决定，这一层只做终端与工作环境。
+Perch is a Windows desktop gateway for agent terminals, in the same **agent development environment** category as Orca.
+The terminal is the main interface: every pane is a live ConPTY, and the agent runs inside it normally. The layer around it exists to **keep many such panes visible and manageable, and to make it obvious when one stops and waits for you**.
+It is not "run N copies of one vendor's agent": the agent is your choice. This layer owns the terminal and the workspace.
 
-## 它解决什么
+## Why Perch
 
-每个 agent 都有自己的会话、自己的状态、自己的"正在等你"。开三个终端，你就得在三个窗口之间来回看。
-Perch 把这些收进一个窗口：
+Every agent has its own sessions, its own state, and its own idea of "waiting for you". Open three terminals and you spend the day switching between them. Perch brings them into one window:
 
-- **一格一个真终端**：并行网格、独立页、标签与状态点；滚动缓冲留在本地，切回来还在。
-- **attention-first**：谁停下来等你，谁排在前面；选择提问直接在「需要你」里答，收起终端后权限框也能在工作看板上允许/拒绝。
-- **收起终端就是工作看板**：一行一个 agent，固定行高，不呈现正文；点行 = 进那一格。
-- **网关不另做一套**：供应商、路由、用量、插件用 magpie 的原生界面，Perch 只负责把它嵌进来、把 Agent 接进去。
+- **One real terminal per pane** — parallel grid, independent tabs, status dots; scrollback stays local and is still there when you switch back.
+- **Attention first** — whoever is waiting for you comes first. Answer selection prompts from the "Needs you" panel; permission prompts can be allowed or denied from the work board after the terminals are collapsed.
+- **Collapse terminals into a work board** — one fixed-height row per agent; the row does not render the transcript; click a row to enter that pane.
+- **The gateway is not rebuilt** — providers, routing, usage, and plugins use magpie's native pages. Perch embeds them and wires agents into them; it does not keep a second copy.
 
-## 界面
+## Features
 
-### Agent 接线与模型选择
+<table>
+<tr>
+<td width="50%" valign="middle">
 
-接入 / 断开 / 重新应用 / 保留现状；长模型列表变成可搜索的弹层，当前值自动带进视野。
-配置来自 magpie 的 `/api/state`，写操作也走同一组 API —— Perch 不另存一份。
+### Parallel agent grid
 
-<p align="center">
-  <img src="docs/images/agent-wiring.png" alt="Agent 配置抽屉：接入网关、模型与推理强度，长模型列表可搜索" width="100%">
-</p>
+Each pane is a live ConPTY with its own scrollback, tab, and status dot. Switching tabs does not lose output, and the grid keeps the whole team visible at a glance.
 
-### 内嵌 magpie 网关
+</td>
+<td width="50%">
+  <a href="docs/images/overview.png"><img src="docs/images/overview.png" alt="Parallel agent panes in the Perch overview" width="100%"></a>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="middle">
 
-供应商、路由、用量、插件用 magpie 自己的页面；版本与更新条由 Perch 接住。
-更新是 magpie 自己的 `check → install`，re-exec 之后 Perch 按端口认领新进程。
+### Agent wiring and model selection
 
-<p align="center">
-  <img src="docs/images/gateway.png" alt="内嵌 magpie 网关：用量、会话、模型与 Agent 统计" width="100%">
-</p>
+Connect, disconnect, re-apply, or keep the current configuration. Long model lists become a searchable popover; the current value is brought into view automatically. Configuration comes from magpie's `/api/state`, and writes go through the same API — Perch does not keep a second copy.
 
-<p align="center">
-  <sub>截图为脱敏的演示 profile，数据均为虚构；界面会继续变。</sub>
-</p>
+</td>
+<td width="50%">
+  <a href="docs/images/agent-wiring.png"><img src="docs/images/agent-wiring.png" alt="Agent configuration drawer with gateway wiring and a searchable model picker" width="100%"></a>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="middle">
 
-## 支持的 agent
+### Embedded magpie gateway
+
+Providers, routing, usage, and plugins use magpie's own pages; the version and update bar is hosted by Perch. Updates use magpie's own `check → install`; after re-exec, Perch claims the new process by port.
+
+</td>
+<td width="50%">
+  <a href="docs/images/gateway.png"><img src="docs/images/gateway.png" alt="Embedded magpie gateway with usage, sessions, models, and agent statistics" width="100%"></a>
+</td>
+</tr>
+</table>
+
+**Also in the box:**
+
+- **Attention-first work board** — the "Needs you" panel puts the pane that is waiting in front. Selection prompts can be answered there; permission requests can be handled from the work board after the terminal is collapsed.
+- **Exact resume, honest fallbacks** — a pane restores the exact session while its file is still on disk. If the session is gone, the seat is kept and a new conversation starts with a banner that explains why.
+- **Real terminals, three-legged state** — ConPTY plus xterm.js with local scrollback. State is read from transcripts, agent hooks, and the screen; the three corroborate each other, and a weak signal is never allowed to conclude alone.
+- **Read-only file rail** — a file tree and preview beside the active agent. Perch reads files and never edits them behind your back.
+- **Close is not delete** — closing a pane stops the run but keeps the record. The agent appears as "closed" in the left rail and can be resumed later under the same pane ID.
+- **Install recipes built in** — the agent catalog detects what is installed, runs the official installer or npm package on request, and rescans immediately after installation.
+- **Gateway lifecycle** — Perch observes a running magpie, can start its own control plane when needed, follows updates through re-exec, and never stops the desktop magpie.
+
+## Supported agents
+
+Perch's catalog contains CLI agents only. Desktop clients are not installed or launched by Perch; they belong to magpie's gateway layer. The catalog ships with 15 CLI agents, grouped by integration depth.
+
+### Full integration
+
+These four have dedicated adapters: structured status and exact session resume. They are also installable and launchable through the same Agent CLI list.
 
 <table align="center">
 <tr>
@@ -66,72 +97,76 @@ Perch 把这些收进一个窗口：
 </tr>
 </table>
 
-上表这四个有完整的结构化状态与续接适配；总览的清单里另有 11 个同类 CLI agent
-（Antigravity CLI、DeepSeek Harness、Cursor、CodeBuddy Code、Kimi Code、Muse Code、
-ZCode、Gemini CLI、Copilot CLI、Qwen Code、Crush），同样内置图标与探测入口，
-能不能在 Perch 里启动、能不能代装由各自配方决定。未安装的会在「未检测到」里列出，
-能自动安装的直接给「安装」，暂时没有自动配方的给「安装说明」，打开官方页面。
-安装时总览底部会固定一条进度台：当前阶段、已用时间、进度条和最后一行输出，
-完整日志可展开；装完立刻重扫本机并给出「已检测到 / 暂未检测到」，不等下一轮轮询。
-Perch 的使用层只安装、启动 CLI agent；桌面客户端不进终端，也不由 Perch 安装或启动 ——
-它们只在网关层由 magpie 接管。任何能设置 base URL 的客户端，都可以接到 Perch 的网关。
+### Install and launch
 
-> 状态解析目前以 Claude Code 的终端输出为样本；换别的 agent 需要补规则（见「现状」）。
+The other ten have a one-click install recipe — the official installer or an npm package — and can be started in a Perch pane. They share the same icon, detection, install, and launch path.
 
-## 数据从哪来
+<table align="center">
+<tr>
+<td align="center" width="20%"><img src="assets/icons/agents/antigravity-color.svg" width="32" height="32" alt="Antigravity CLI"><br><sub>Antigravity CLI</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/deepseek-color.svg" width="32" height="32" alt="DeepSeek Harness"><br><sub>DeepSeek Harness</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/cursor.svg" width="32" height="32" alt="Cursor"><br><sub>Cursor</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/codebuddy-color.svg" width="32" height="32" alt="CodeBuddy Code"><br><sub>CodeBuddy Code</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/kimi.svg" width="32" height="32" alt="Kimi Code"><br><sub>Kimi Code</sub></td>
+</tr>
+<tr>
+<td align="center" width="20%"><img src="assets/icons/agents/meta-color.svg" width="32" height="32" alt="Muse Code"><br><sub>Muse Code</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/geminicli-color.svg" width="32" height="32" alt="Gemini CLI"><br><sub>Gemini CLI</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/githubcopilot.svg" width="32" height="32" alt="Copilot CLI"><br><sub>Copilot CLI</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/qwen-color.svg" width="32" height="32" alt="Qwen Code"><br><sub>Qwen Code</sub></td>
+<td align="center" width="20%"><img src="assets/icons/agents/crush.png" width="32" height="32" alt="Crush"><br><sub>Crush</sub></td>
+</tr>
+</table>
 
-三条腿，优先级从硬到软（一条比一条虚，所以排序不能反）：
+<p align="center">
+  <img src="assets/icons/agents/zcode.png" width="24" height="24" alt="ZCode" valign="middle">
+  <sub><b>ZCode</b> — detected and listed in the catalog, but not installed or launched by Perch.</sub>
+</p>
 
-1. **转录** —— 磁盘上的会话 JSONL。说了什么、还在不在等某个工具，都是结构化事实；
-2. **hook** —— agent 自己的 hook 事件，状态变化来得最快；
-3. **屏幕** —— 读终端缓冲。兜底，而且有些东西**只有屏上有**（比如一张提问"现在问到第几问"）——
-   转录要等整张提问收尾才落结果。
+**Install** means Perch runs the agent's official installer or npm package after you click "Install". **Launch** means Perch can start it in a pane. Desktop clients are outside this list; any client that can point at a custom base URL can use the magpie gateway.
 
-三条腿互相印证，不信的那一条不许单独下结论（"答了 No"不算完成、"还在转圈"有一道
-合成兜底并**标明**它是合成的）。
+## Where the data comes from
 
-## 构建
+Three legs, from hardest to softest — the order is deliberate:
 
-需要 Windows 11（ConPTY）、Go 1.27+。前端没有打包器：一个 `index.html` 加资产，
-`go:embed` 直接进二进制。
+1. **Transcript** — the session JSONL on disk. What was said and whether a tool call is still pending are structured facts.
+2. **Hooks** — the agent's own hook events; state changes arrive fastest here.
+3. **Screen** — the terminal buffer. A fallback, and the only source for some facts (for example, which question of a multi-question prompt you are on) — the transcript only lands after the whole prompt is answered.
+
+The three corroborate each other. A single weak leg is not allowed to conclude on its own: "answered No" is not the same as done, and "still spinning" has a synthetic fallback that is explicitly labeled as synthetic.
+
+## Build
+
+Requires Windows 11 (ConPTY) and Go 1.27+. The frontend has no bundler: one `index.html` plus assets, embedded with `go:embed`.
 
 ```powershell
 go build -o build\perch.exe ./cmd/perch
-go build -o build\perch-hook.exe ./cmd/perch-hook   # ⚠️ hook 接收器：代码里按这个名字找它
+go build -o build\perch-hook.exe ./cmd/perch-hook   # hook receiver: the name is hard-coded
 .\build\perch.exe
 ```
 
-需要两个产物：主程序，和一个独立的 **hook 接收器**（agent 的 hook 事件由它落盘，
-主程序再去读）。⚠️ 接收器的文件名**写死在代码里**（`hooks.go` 的 `hookExeName`），
-两个 exe 必须并排放在同一目录 —— 少一个的症状是"功能静默消失"。
+Two binaries are required: the main app and a separate hook receiver (the agent's hook events are written by it, and the main app reads them). The receiver's file name is hard-coded (`hookExeName` in the hook code) and both executables must sit side by side in the same directory. If one is missing, features disappear silently.
 
-## 现状
+## Status
 
-- **实验性**，接口会变；
-- 只在 Windows 上（依赖 ConPTY 与 Job Object）；
-- 状态解析目前以 Claude Code 的终端输出为样本；规则表可扩展，别的 agent 需要补规则；
-- 进程名、状态目录、hook 接收器统一叫 `perch` / `Perch`；不依赖本机绝对路径，
-  换一台机器会用那个人自己的 Claude 状态根（`CLAUDE_CONFIG_DIR`，没设则 `~/.claude`）。
+- **Experimental**; interfaces will change.
+- Windows only (ConPTY and Job Objects).
+- Status parsing is currently sampled from Claude Code's terminal output. The rule table is extensible; other agents need their own rules.
+- Process names, the state directory, and the hook receiver are all `perch` / `Perch`; there are no machine-specific absolute paths. On another machine Perch uses that machine's own state root (`CLAUDE_CONFIG_DIR`, or `~/.claude` when unset).
 
-## 给贡献者
+## For contributors
 
-前端为什么是 classic script + defer、某个文件该放什么、图标规则、改完为什么必须重建 ——
-都在 [docs/FRONTEND.md](docs/FRONTEND.md)；后端分层与依赖方向见
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+Why the frontend uses classic scripts with `defer`, what belongs in each file, icon rules, and why assets require a rebuild — see [docs/FRONTEND.md](docs/FRONTEND.md). Backend layers and dependency direction are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## 致谢
+## Acknowledgements
 
-这个项目参考过两个开源实现，学的是**具体工序**（终端面板的排版、状态点的字形、
-活动流"一个 agent 一行"的降噪合同、自动滚动状态机……），架构与数据面是我们自己定的。
-逐项列在 [THIRD-PARTY.md](THIRD-PARTY.md) 里，包括它们的许可。
+This project learned from two open-source implementations, mostly at the level of concrete process (terminal pane layout, status-dot glyphs, the one-agent-per-line activity stream, the auto-scroll state machine). The architecture and data plane are our own. [THIRD-PARTY.md](THIRD-PARTY.md) lists each item and its license.
 
-- [Orca](https://github.com/stablyai/orca)（MIT）—— 界面样式与一批实现细节
-- [Magpie](https://github.com/yetone/magpie)（MIT）—— 桌面质感与用量面板的信息组织
+- [Orca](https://github.com/stablyai/orca) (MIT) — UI styling and a set of implementation details
+- [Magpie](https://github.com/yetone/magpie) (MIT) — desktop feel and the information architecture of the usage panel
 
-以及 [xterm.js](https://github.com/xtermjs/xterm.js)、[Wails](https://github.com/wailsapp/wails)、
-[Cascadia](https://github.com/microsoft/cascadia-code)、[JetBrains Mono](https://github.com/JetBrains/JetBrainsMono)、
-[Geist](https://github.com/vercel/geist-font)。
+And [xterm.js](https://github.com/xtermjs/xterm.js), [Wails](https://github.com/wailsapp/wails), [Cascadia](https://github.com/microsoft/cascadia-code), [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), and [Geist](https://github.com/vercel/geist-font).
 
-## 许可
+## License
 
-MIT © 2026 yu7dan。第三方组件与参考实现的许可见 [THIRD-PARTY.md](THIRD-PARTY.md)。
+MIT © 2026 yu7dan. Third-party components and reference implementations are covered in [THIRD-PARTY.md](THIRD-PARTY.md).
