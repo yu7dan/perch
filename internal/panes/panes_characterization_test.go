@@ -1,4 +1,4 @@
-package main
+package panes
 
 import (
 	"os"
@@ -8,6 +8,15 @@ import (
 
 // 这些测试是仓库结构整理前给 panes 拍的照片：判据、计数、只读语义。
 // 搬进 internal/panes 时断言不变，只改包名与构造方式。
+
+// claudeSessionExists 复刻生产里 Claude 的判据（<root>\projects\*\ <id>.jsonl
+// 存在），通过 RestorePlan 的注入点喂进去 —— 本包不 import 会话层。
+func claudeSessionExists(root string) func(agent, cwd, id string) bool {
+	return func(agent, cwd, id string) bool {
+		m, err := filepath.Glob(filepath.Join(root, "projects", "*", id+".jsonl"))
+		return err == nil && len(m) > 0
+	}
+}
 
 func writeClaudeTranscript(t *testing.T, stateDir, id string) {
 	t.Helper()
@@ -21,13 +30,10 @@ func writeClaudeTranscript(t *testing.T, stateDir, id string) {
 }
 
 func TestRestorePlanCharacterization(t *testing.T) {
-	oldState := claudeStateDir
-	claudeStateDir = t.TempDir()
-	defer func() { claudeStateDir = oldState }()
+	stateDir := t.TempDir()
+	writeClaudeTranscript(t, stateDir, "dup-id")
 
-	writeClaudeTranscript(t, claudeStateDir, "dup-id")
-
-	p := &paneStore{
+	p := &Store{
 		file: filepath.Join(t.TempDir(), "panes.json"),
 		Panes: []Pane{
 			{PaneID: 1, Agent: "claude"},
@@ -38,7 +44,7 @@ func TestRestorePlanCharacterization(t *testing.T) {
 		},
 	}
 
-	plan := p.restorePlan()
+	plan := p.RestorePlan(claudeSessionExists(stateDir))
 
 	wantVerdicts := map[int]string{1: "no_id", 2: "no_session", 3: "ok", 4: "dup", 5: "closed"}
 	if len(plan.Views) != len(wantVerdicts) {
@@ -56,7 +62,7 @@ func TestRestorePlanCharacterization(t *testing.T) {
 		plan.Counts["no_id"] != 1 || plan.Counts["no_session"] != 1 || plan.Counts["closed"] != 1 {
 		t.Fatalf("counts=%v", plan.Counts)
 	}
-	if got := p.count(); got != 4 {
+	if got := p.Count(); got != 4 {
 		t.Fatalf("after prune count=%d want 4", got)
 	}
 	for _, v := range plan.Views {
@@ -71,10 +77,10 @@ func TestRestorePlanCharacterization(t *testing.T) {
 
 func TestPaneStoreReadOnlyNeverWrites(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "panes.json")
-	p := &paneStore{file: file, readOnly: true, next: 1}
+	p := &Store{file: file, readOnly: true, next: 1}
 
-	p.bind(1, "claude", `C:\demo`, "sid-1", "", "test")
-	p.flushSync("test")
+	p.Bind(1, "claude", `C:\demo`, "sid-1", "", "test")
+	p.FlushSync("test")
 
 	if _, err := os.Stat(file); !os.IsNotExist(err) {
 		t.Fatalf("read-only store wrote %s (err=%v)", file, err)

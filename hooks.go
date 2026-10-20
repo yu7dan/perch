@@ -309,7 +309,7 @@ func handleHookLine(line string, tabID int, push func(any)) {
 		// 有内容，盘上那份 jsonl 于是开始存在。冷恢复靠它分辨"上次这条会话丢了"
 		// 和"上一格压根没说过话"—— 后者安安静静地开新格，别吓唬用户。
 		if id := paneIDFor(tab); id > 0 {
-			panes.markSpoke(id, "一轮跑完 tab="+itoa(tab))
+			panes.MarkSpoke(id, "一轮跑完 tab="+itoa(tab))
 		}
 	case "Notification":
 		// 「需要你」的正主：官方的人机信号，类型就在 payload 里。
@@ -330,7 +330,7 @@ func handleHookLine(line string, tabID int, push func(any)) {
 		// 转录也在盘上。Orca 把 interrupted turn 明确算作可续
 		// （resume-sleeping-agent-session.ts:182-183），我们这里同一件事的另一半。
 		if id := paneIDFor(tab); id > 0 {
-			panes.markSpoke(id, "非正常收尾 tab="+itoa(tab))
+			panes.MarkSpoke(id, "非正常收尾 tab="+itoa(tab))
 		}
 	case "PermissionRequest":
 		// 批准框出现：比 Notification(permission_prompt) 早，而且 tool_name 直接

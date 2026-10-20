@@ -227,10 +227,10 @@ func (tm *tabManager) create(app *application.App, spec spawnSpec) *tabHost {
 	// 绝不持着 tm.mu 做磁盘 I/O（那会把所有格子的操作一起卡在文件系统上）。
 	paneID := 0
 	if spec.PaneID > 0 {
-		panes.claim(spec.PaneID, "冷恢复建格")
+		panes.Claim(spec.PaneID, "冷恢复建格")
 		paneID = spec.PaneID
 	} else if panes != nil {
-		paneID = panes.nextID()
+		paneID = panes.NextID()
 	}
 	tm.mu.Lock()
 	tm.next++
@@ -243,12 +243,12 @@ func (tm *tabManager) create(app *application.App, spec spawnSpec) *tabHost {
 	if panes != nil && paneID > 0 {
 		// 建格**立刻**记一条：还没有 sessionId 也要写 —— "这一格开着"本身就是一件
 		// 事实（它意味着"这一格的座位还在"，重启后要给它留个位置）。
-		panes.bind(paneID, spec.Agent, effectiveCWD(spec), "", "", fmt.Sprintf("建格 tab=%d", host.id))
+		panes.Bind(paneID, spec.Agent, effectiveCWD(spec), "", "", fmt.Sprintf("建格 tab=%d", host.id))
 		// 降级那一笔（如果有）**跟在 bind 后面**写：bind 的规矩是"空值不覆盖"，
 		// 两者写的是不同字段，谁也不影响谁 —— 分开写是为了让"留证"这件事
 		// 一眼看得出是**附带**的，不是建格的一部分。
 		if spec.DegradedFrom != "" {
-			panes.markDegraded(paneID, spec.DegradedFrom, fmt.Sprintf("tab=%d 被拒后改起新会话", host.id))
+			panes.MarkDegraded(paneID, spec.DegradedFrom, fmt.Sprintf("tab=%d 被拒后改起新会话", host.id))
 		}
 	}
 	return host
@@ -352,7 +352,7 @@ func (tm *tabManager) setTranscript(id int, path string) {
 			paneID, short(stem), short(intent.ID))
 		return
 	}
-	panes.bind(paneID, agent, cwd, "", path, "拿到转录路径")
+	panes.Bind(paneID, agent, cwd, "", path, "拿到转录路径")
 }
 
 // transcriptStem 从转录路径里取会话 id：`…\projects\<目录>\<id>.jsonl` → `<id>`。
@@ -461,7 +461,7 @@ func (tm *tabManager) bindSession(id int, sid, name, source string) bool {
 	}
 	switch judgeResume(intent, sid) {
 	case evMissed:
-		panes.markMismatch(paneID, intent.ID, sid, "首次身份到达")
+		panes.MarkMismatch(paneID, intent.ID, sid, "首次身份到达")
 		log.Printf("[panes] ⚠️ 续接落空：请求 %s 实际 %s（source=%s）—— 格子 t%d pane=%d。"+
 			"记录里那条会话 id **一个字都不改**（盘上那条还在），只留 mismatchAt",
 			short(intent.ID), short(sid), orNone(source), id, paneID)
@@ -472,16 +472,16 @@ func (tm *tabManager) bindSession(id int, sid, name, source string) bool {
 			"want": intent.ID, "got": sid, "source": source,
 		})
 	case evMatched:
-		if panes.clearMismatch(paneID, fmt.Sprintf("续接对上 tab=%d（撤掉上次那笔落空）", id)) {
+		if panes.ClearMismatch(paneID, fmt.Sprintf("续接对上 tab=%d（撤掉上次那笔落空）", id)) {
 			log.Printf("[panes] 续接对上：格子 t%d pane=%d 请求的就是 %s（source=%s）—— 上次那笔落空撤掉",
 				id, paneID, short(sid), orNone(source))
 		} else {
 			log.Printf("[panes] 续接对上：格子 t%d pane=%d 请求的就是 %s（source=%s）",
 				id, paneID, short(sid), orNone(source))
 		}
-		panes.bind(paneID, agent, cwd, sid, "", fmt.Sprintf("首次绑上会话 tab=%d（证据对上）", id))
+		panes.Bind(paneID, agent, cwd, sid, "", fmt.Sprintf("首次绑上会话 tab=%d（证据对上）", id))
 	default:
-		panes.bind(paneID, agent, cwd, sid, "", fmt.Sprintf("首次绑上会话 tab=%d", id))
+		panes.Bind(paneID, agent, cwd, sid, "", fmt.Sprintf("首次绑上会话 tab=%d", id))
 	}
 	return true
 }
@@ -525,14 +525,14 @@ func (tm *tabManager) rebindSession(id int, sid, name, source string) bool {
 	// 一个字都不改，只留 mismatch；格子的内存身份仍然跟着 Y（它才是现在跑的）。
 	switch judgeResume(intent, sid) {
 	case evMissed:
-		panes.markMismatch(paneID, intent.ID, sid, "格内换会话")
+		panes.MarkMismatch(paneID, intent.ID, sid, "格内换会话")
 	case evMatched:
-		if panes.clearMismatch(paneID, fmt.Sprintf("格内换会话对上 tab=%d", id)) {
+		if panes.ClearMismatch(paneID, fmt.Sprintf("格内换会话对上 tab=%d", id)) {
 			log.Printf("[panes] 续接对上：格子 t%d pane=%d 请求的就是 %s（格内换会话）",
 				id, paneID, short(sid))
 		}
 	default:
-		panes.bind(paneID, agent, cwd, sid, "", fmt.Sprintf("格内换会话 tab=%d", id))
+		panes.Bind(paneID, agent, cwd, sid, "", fmt.Sprintf("格内换会话 tab=%d", id))
 	}
 	return true
 }
@@ -820,7 +820,7 @@ func handleCtl(c *application.StreamConn) {
 				_ = c.Send(reply)
 				continue
 			}
-			plan := panes.restorePlan() // 这一行自己打计数 + 座位序（见 panes.go）
+			plan := panes.RestorePlan(sessionFileExistsFor) // 这一行自己打计数 + 座位序（见 panes.go）
 			reply, err := json.Marshal(map[string]any{
 				"type": "panes.list", "panes": plan.Views,
 				"agents": bootAgentCards(), "defaultAgent": defaultAgentSetting(),
@@ -837,7 +837,7 @@ func handleCtl(c *application.StreamConn) {
 			if panes == nil {
 				continue
 			}
-			if panes.markClosed(m.Pane, "用户点格子头的 ×") {
+			if panes.MarkClosed(m.Pane, "用户点格子头的 ×") {
 				log.Printf("[ctl] pane.close pane=%d（关格保留记录，重启不自动拉起）", m.Pane)
 			} else {
 				log.Printf("[ctl] pane.close pane=%d：盘上没有这条记录（可能已经摘过），不动", m.Pane)
@@ -849,7 +849,7 @@ func handleCtl(c *application.StreamConn) {
 			if panes == nil {
 				continue
 			}
-			if panes.forget(m.Pane, "用户关格") {
+			if panes.Forget(m.Pane, "用户关格") {
 				log.Printf("[ctl] pane.forget pane=%d（用户显式关格 —— 只有这条路会摘记录）", m.Pane)
 			} else {
 				log.Printf("[ctl] pane.forget pane=%d：盘上没有这条记录（可能已经摘过），不动", m.Pane)
@@ -1291,9 +1291,9 @@ func main() {
 	panes = loadPaneStore()
 	if secondInstance && panes != nil {
 		// 只读 = 不写；恢复那一步由 panes.query 的应答挡（见下面那段）。
-		panes.setReadOnly("已经有一个我在跑（步 7 的单实例闸）")
+		panes.SetReadOnly("已经有一个我在跑（步 7 的单实例闸）")
 	}
-	paneStoreWarn(panes)
+	panes.Warn()
 
 	// C3：**第一个动作**就是给自己上"随进程退出清理整棵树"的保险 ——
 	// 必须早于任何子进程（窗口的 WebView2、每个格子的 ConPTY 都在这之后才起）。
@@ -1437,7 +1437,7 @@ func main() {
 	   节流负责"平时一直在写"，这一条负责"真到最后一刻也写完"。 */
 	mainWindow.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
 		if panes != nil {
-			panes.flushSync("窗口正在关闭")
+			panes.FlushSync("窗口正在关闭")
 		}
 		// Perch 自己拉起的 magpie web 随窗口一起收掉；外部控制面（桌面 magpie
 		// 或用户自己起的）只断开连接，不动进程。关窗这条路不经过 OnShutdown，
@@ -1452,7 +1452,7 @@ func main() {
 	app.OnShutdown(func() {
 		gwStop()
 		if panes != nil {
-			panes.flushSync("应用收尾（Quit/信号）")
+			panes.FlushSync("应用收尾（Quit/信号）")
 		}
 	})
 
