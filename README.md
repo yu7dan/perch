@@ -70,15 +70,17 @@ Perch 把这些收进一个窗口：
 
 <table align="center">
 <tr>
-<td align="center" width="20%"><img src="assets/icons/agents/claudecode-color.svg" width="32" height="32" alt="Claude Code"><br><sub>Claude Code</sub></td>
-<td align="center" width="20%"><img src="assets/icons/agents/codex-color.svg" width="32" height="32" alt="Codex"><br><sub>Codex</sub></td>
-<td align="center" width="20%"><img src="assets/icons/agents/pi.svg" width="32" height="32" alt="Pi"><br><sub>Pi</sub></td>
-<td align="center" width="20%"><img src="assets/icons/agents/opencode.svg" width="32" height="32" alt="OpenCode"><br><sub>OpenCode</sub></td>
-<td align="center" width="20%"><img src="assets/icons/agents/workbuddy-color.svg" width="32" height="32" alt="WorkBuddy"><br><sub>WorkBuddy</sub></td>
+<td align="center" width="25%"><img src="assets/icons/agents/claudecode-color.svg" width="32" height="32" alt="Claude Code"><br><sub>Claude Code</sub></td>
+<td align="center" width="25%"><img src="assets/icons/agents/codex-color.svg" width="32" height="32" alt="Codex"><br><sub>Codex</sub></td>
+<td align="center" width="25%"><img src="assets/icons/agents/pi.svg" width="32" height="32" alt="Pi"><br><sub>Pi</sub></td>
+<td align="center" width="25%"><img src="assets/icons/agents/opencode.svg" width="32" height="32" alt="OpenCode"><br><sub>OpenCode</sub></td>
 </tr>
 </table>
 
-总览里内置了这些 agent 的图标、安装与接线入口；未安装的会在「未检测到」里列出，
+上表这四个有完整的结构化状态与续接适配；总览的清单里另有 11 个同类 CLI agent
+（Antigravity CLI、DeepSeek Harness、Cursor、CodeBuddy Code、Kimi Code、Muse Code、
+ZCode、Gemini CLI、Copilot CLI、Qwen Code、Crush），同样内置图标与探测入口，
+能不能在 Perch 里启动、能不能代装由各自配方决定。未安装的会在「未检测到」里列出，
 能自动安装的直接给「安装」，暂时没有自动配方的给「安装说明」，打开官方页面。
 安装时总览底部会固定一条进度台：当前阶段、已用时间、进度条和最后一行输出，
 完整日志可展开；装完立刻重扫本机并给出「已检测到 / 暂未检测到」，不等下一轮轮询。
