@@ -22,6 +22,6 @@ SOFTWARE.
 
 ---
 
-Agent and provider brand icons in assets/agent-icons are taken from
+Agent and provider brand icons in assets/icons/agents are taken from
 https://github.com/lobehub/lobe-icons (MIT), distributed via magpie's
 internal/gui/assets/icons.
