@@ -51,3 +51,23 @@ func OpenCodeDef() Def { return openCodeDef() }
 
 // PiDef 是每格一个观察扩展 + JSONL tail 的适配器。
 func PiDef() Def { return piDef() }
+
+// AgyDef 是 Antigravity CLI 的启动适配。
+//
+// agy 接进 magpie 之后，modelProvider="gemini" 写在 settings.json 里，但
+// 网关地址和密钥只认环境变量（GOOGLE_GEMINI_BASE_URL / GEMINI_API_KEY），
+// 配置文件里没有它们的位置。magpie 的 /api/state 会为这种 agent 给一条
+// launch 命令；组合根把它解析成 env+args 交给这里，每次开格现取。
+//
+// 没接线时 WireLaunch 返回 ok=false，退回 GenericDef 的普通启动。
+func AgyDef() Def {
+	d := GenericDef("agy")
+	d.Prepare = func(_ string, _ int, _ string) (map[string]string, []string, func(context.Context), error) {
+		env, args, ok := host.WireLaunch("agy")
+		if !ok {
+			return nil, nil, nil, nil
+		}
+		return env, args, nil, nil
+	}
+	return d
+}

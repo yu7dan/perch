@@ -65,16 +65,24 @@ func (g *Gateway) agentPushState(op, id string, b []byte) {
 		}
 	}
 	var rows []struct {
-		ID    string `json:"id"`
-		Wired bool   `json:"wired"`
+		ID     string `json:"id"`
+		Wired  bool   `json:"wired"`
+		Launch string `json:"launch"`
 	}
 	_ = json.Unmarshal(st.Agents, &rows)
 	wired := 0
+	launches := make(map[string]string, len(rows))
 	for _, r := range rows {
 		if r.Wired {
 			wired++
 		}
+		if r.Launch != "" {
+			launches[r.ID] = r.Launch
+		}
 	}
+	// 启动环境只认最新一份 state：断开 agy 后，旧的 launch 不能继续被
+	// 下一次开格捡到。
+	g.setAgentLaunch(launches)
 	log.Printf("[agentcfg] %s%s：%d 个 agent，已接网关 %d", op, agentLogID(id), len(rows), wired)
 	g.emit(map[string]any{
 		"type": "gw.agents", "op": op, "id": id, "agents": st.Agents,

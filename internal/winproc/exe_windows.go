@@ -43,6 +43,17 @@ func agentExeHints(bin, home, local string) []string {
 			}, out...)
 		}
 		return out
+	case "agy":
+		// Antigravity CLI 的官方安装脚本落在 %LOCALAPPDATA%\agy\bin，并把
+		// 这个目录写进用户 PATH。GUI 进程启动时 PATH 可能还是旧的，所以
+		// 这里也列上，安装完不用重启 Perch。
+		if local == "" {
+			return nil
+		}
+		return []string{
+			filepath.Join(local, "agy", "bin", "agy.exe"),
+			filepath.Join(local, "Programs", "agy", "agy.exe"),
+		}
 	}
 	return nil
 }

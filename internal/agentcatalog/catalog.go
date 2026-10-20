@@ -170,6 +170,9 @@ func Defs(stateDir string) map[string]agent.Def {
 	defs["opencode"] = agent.OpenCodeDef()
 	defs["pi"] = agent.PiDef()
 	defs["codex"] = agent.CodexDef()
+	// agy 只有「启动」是深度适配：网关地址/密钥必须按 magpie 的 launch
+	// 命令在每次开格时注入（见 internal/agent/def.go 的 AgyDef）。
+	defs["agy"] = agent.AgyDef()
 	return defs
 }
 

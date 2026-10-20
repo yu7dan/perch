@@ -43,6 +43,11 @@ type Manager struct {
 
 	defsMu sync.RWMutex
 	defs   map[string]agent.Def
+
+	// 组合根在网关建好之后注入：查 agy 这类 agent 的启动环境。
+	// 唯一调用点是 agent.AgyDef 的 Prepare；没接网关时保持 nil。
+	wireMu     sync.RWMutex
+	wireLaunch func(id string) (map[string]string, []string, bool)
 }
 
 // New 构造空的会话表。Defs 在 agent.SetHost 之后由 SetDefs 填 —— 顺序见
@@ -68,6 +73,14 @@ func (m *Manager) SetDefs(defs map[string]agent.Def) {
 	m.defsMu.Lock()
 	m.defs = defs
 	m.defsMu.Unlock()
+}
+
+// SetWireLaunch 由组合根在网关构造完成后调用。设置后每次开格都会现查，
+// 这样在抽屉里改完网关接线不需要重启 Perch。
+func (m *Manager) SetWireLaunch(fn func(id string) (map[string]string, []string, bool)) {
+	m.wireMu.Lock()
+	m.wireLaunch = fn
+	m.wireMu.Unlock()
 }
 
 func (m *Manager) defFor(id string) (agent.Def, bool) {
@@ -461,4 +474,15 @@ func (m *Manager) ResolveExe(bin string) (string, []string) {
 		return bin, nil
 	}
 	return m.resolveExe(bin)
+}
+
+// WireLaunch 实现 agent.Host：把请求转给组合根注入的网关查询。
+func (m *Manager) WireLaunch(id string) (map[string]string, []string, bool) {
+	m.wireMu.RLock()
+	fn := m.wireLaunch
+	m.wireMu.RUnlock()
+	if fn == nil {
+		return nil, nil, false
+	}
+	return fn(id)
 }

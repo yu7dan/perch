@@ -83,11 +83,16 @@ type Gateway struct {
 	langApplied string
 
 	driftErr string
+
+	// 接线状态的 launch 命令：agy 这类 agent 把网关地址/密钥放在环境变量里，
+	// 只能按 magpie 给的那条命令启动。每次 /api/state 到达时整份替换。
+	launchMu    sync.Mutex
+	agentLaunch map[string]string
 }
 
 // New 构造一个未连接的网关。push 是发给前端的函数，可以为 nil（测试）。
 func New(push func(any)) *Gateway {
-	return &Gateway{push: push}
+	return &Gateway{push: push, agentLaunch: map[string]string{}}
 }
 
 func (g *Gateway) emit(v any) {

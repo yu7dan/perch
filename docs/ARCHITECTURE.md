@@ -99,6 +99,10 @@ uimsg      ──> 标准库
    `Def` 会解析可执行文件，顺序不能倒。
 3. gateway / install / transcript / files / Wails app / ctl.Server 依次构造；
    `ctl` 的 `CreateTab` 闭包负责**先** `app.HandleStream`、再返回 tab。
+   gateway 建好后组合根调用 `mgr.SetWireLaunch(gw.Launch)`：magpie 的
+   `/api/state` 对 agy 这类 agent 给一条 `launch` 命令，gateway 只解析其中
+   固定形状的 `GEMINI_API_KEY` / `GOOGLE_GEMINI_BASE_URL` / `--model`，
+   开格时由 `agent.AgyDef` 取用；`agent` 不认识 gateway，方向不变。
 4. 前端连上后发 `shell` 请求，ctl 返回 `ShellPayload`；之后状态变化走 `Push`。
 5. 建格：`tab.new` → `session.Create` → Wails 流 → `stream.Serve` 首帧尺寸握手 →
    `session.StartTab` 起 ConPTY；读循环只有一条，`Send` 前复制字节。

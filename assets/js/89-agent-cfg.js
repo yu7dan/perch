@@ -239,6 +239,15 @@ function acBodyHTML(a, name) {
   }
   if (AC_ERR) html += `<div class="ac-err">${esc(msgText(AC_ERR))}</div>`;
 
+  // 能力边界要说出来，而不是只在「仅启动」两个字上停住：Perch 能开一格，
+  // 但没有状态适配器；agy 这种接了网关的，还要靠启动时注入环境变量。
+  const cat = ((mg() && mg().catalog) || []).find((x) => x.id === a.id) || null;
+  const caps = (cat && cat.caps) || {};
+  if (caps.launch && !caps.status) {
+    html += `<div class="ac-hint">${esc(t("ac.launchOnly"))}</div>`;
+    if (a.launch) html += `<div class="ac-hint">${esc(t("ac.launch.viaGateway"))}</div>`;
+  }
+
   if (AC_CONFIRM) {
     html += acConfirmHTML(a);
   } else {

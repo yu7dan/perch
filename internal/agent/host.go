@@ -17,6 +17,10 @@ type Host interface {
 	Push(v any)
 	// ResolveExe 找 agent 的可执行文件，并处理 Windows 的 .cmd/.bat shim。
 	ResolveExe(bin string) (string, []string)
+	// WireLaunch 返回 magpie 接线状态里那个 agent 的启动环境与参数。
+	// 只有把网关地址/密钥放在环境变量里的 agent（目前是 agy）才会用到；
+	// 没接线、没读到、或形状不认识时返回 ok=false，启动仍走通用路径。
+	WireLaunch(id string) (env map[string]string, args []string, ok bool)
 }
 
 var host Host = defaultHost{}
@@ -38,6 +42,9 @@ func (defaultHost) RebindSession(int, string, string, string) bool {
 }
 func (defaultHost) SetStatus(int, string) (string, bool) { return "", false }
 func (defaultHost) Push(any)                             {}
+func (defaultHost) WireLaunch(string) (map[string]string, []string, bool) {
+	return nil, nil, false
+}
 
 func (defaultHost) ResolveExe(bin string) (string, []string) {
 	bin = strings.TrimSpace(bin)
