@@ -19,10 +19,17 @@ import (
 )
 
 const (
-	gatewayURL = "http://127.0.0.1:3425"
-	pollEvery  = 2500 * time.Millisecond
-	httpWait   = 1800 * time.Millisecond
+	pollEvery = 2500 * time.Millisecond
+	httpWait  = 1800 * time.Millisecond
 )
+
+// gatewayURL 是 magpie 网关的默认地址。用 var 而不是 const，唯一原因是
+// 文档截图/演示可以构建一个读到独立端口、带虚构数据的 magpie：
+//
+//	go build -ldflags "-X github.com/yu7dan/perch/internal/gateway.gatewayURL=http://127.0.0.1:3450"
+//
+// 正常构建不传这个 ldflags，行为与写死 3425 完全相同。
+var gatewayURL = "http://127.0.0.1:3425"
 
 // ---------------------------------------------------------------------------
 // wire 形状
