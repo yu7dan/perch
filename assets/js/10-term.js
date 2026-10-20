@@ -1260,7 +1260,9 @@ function renderTabTitle(t) {
   // 草稿可能被 Esc 丢掉，而"页上跟着跳"会让人以为已经改成了。
   if (tabEditing && t === renameTab) return;
   const nm = currentTabTitle(t);
-  const tip = t.liveTitle || t.agentTitleRaw.trim();
+  // 悬停提示也只给"真的标题"：dsh 会发 Windows PowerShell，那不是身份，
+  // 让它从 tooltip 里也消失；没有真标题就不挂提示，别拿兜底名冒充。
+  const tip = t.liveTitle || realTabTitle(t) || "";
   t.nmEl.textContent = nm;
   t.nmEl.title = tip;
   if (t.pageNmEl) { t.pageNmEl.textContent = nm; t.pageNmEl.title = tip; }
