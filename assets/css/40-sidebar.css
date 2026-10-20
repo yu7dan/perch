@@ -235,16 +235,23 @@
 /* ---------- 5. 状态栏 ---------- */
 #status{position:fixed;left:0;right:0;bottom:0;height:24px;background:var(--rail);
         border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:14px;
-        padding:0 12px;font:11.5px/1 var(--ui);color:var(--muted);user-select:none}
-#status .it{display:flex;align-items:center;gap:6px}
-#status .sp{margin-left:auto}
+        padding:0 12px;font:11.5px/1 var(--ui);color:var(--muted);user-select:none;
+        /* 状态栏是**一行读数**：内容超了宁可让路径截断，也不许换行把 24px
+           撑破（换行会同时压掉右侧的用量计）。 */
+        overflow:hidden;white-space:nowrap}
+/* 固定读数不参与收缩；两条路径是唯一允许让位的项（.pathit），
+   它们在标签后面用 ell + max-width 截断。 */
+#status .it{display:flex;align-items:center;gap:6px;flex:none;min-width:0;white-space:nowrap}
+#status .it.pathit{flex:0 1 auto}
+#status .sp{margin-left:auto;flex:none}
 /* 2026-10-15 从面板头/面板尾搬过来的读数。cwd 与终端字体/渲染后端本就是
    会话级的环境事实 —— Orca 的 StatusBarSurface 就是放这些的地方，
    放在每个终端的头顶/脚底反而是我们自造的（原来那条 .pfoot 已删）。 */
 /* 两条绝对路径并排放会分不清谁是谁（#s-store 是会话库、#s-cwd 是工作目录），
    所以各给一个暗标签。路径本身用等宽。 */
-#status .cwd{min-width:0;max-width:320px}
+#status .cwd{min-width:0;max-width:320px;flex:0 1 auto}
 #status .lbl{color:var(--faint);flex:none}
+#status .meter{flex:none}
 #s-dims,#s-font,#s-lig,#s-render,#s-grid{font:11px var(--mono);color:var(--faint)}
 /* 每格列数掉到 Claude Code 的下限（64）以下时**换色**，不是加个图案 ——
    这是一条读数，不是一个状态：它和上面的字体回退用同一个 --red，
