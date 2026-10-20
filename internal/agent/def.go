@@ -71,3 +71,22 @@ func AgyDef() Def {
 	}
 	return d
 }
+
+// DshDef 是 DeepSeek Harness 的启动适配。
+//
+// dsh 没有默认 profile：裸启动会直接退出并报 "--profile <name> is required"。
+// magpie 接线写的是 web profile（~/.dsh/profiles/web/cordis.patch.yml），
+// 所以默认就启动 web；dsh 自己会把带进程令牌的 URL 交给默认浏览器。
+// 以后若要改成"Perch 内打开"，只需给 dsh 加 --no-open 并接住它打印的 URL。
+//
+// 如果以后 magpie 给 dsh 也发 launch 命令，走和 agy 相同的那条注入路径。
+func DshDef() Def {
+	d := GenericDef("dsh")
+	d.Prepare = func(_ string, _ int, _ string) (map[string]string, []string, func(context.Context), error) {
+		if env, args, ok := host.WireLaunch("dsh"); ok {
+			return env, args, nil, nil
+		}
+		return nil, []string{"--profile", "web"}, nil, nil
+	}
+	return d
+}

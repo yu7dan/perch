@@ -173,6 +173,8 @@ func Defs(stateDir string) map[string]agent.Def {
 	// agy 只有「启动」是深度适配：网关地址/密钥必须按 magpie 的 launch
 	// 命令在每次开格时注入（见 internal/agent/def.go 的 AgyDef）。
 	defs["agy"] = agent.AgyDef()
+	// dsh 裸启动会报 --profile 缺失；默认启动 magpie 实际写入的 web profile。
+	defs["dsh"] = agent.DshDef()
 	return defs
 }
 

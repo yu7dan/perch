@@ -18,7 +18,8 @@ type Host interface {
 	// ResolveExe 找 agent 的可执行文件，并处理 Windows 的 .cmd/.bat shim。
 	ResolveExe(bin string) (string, []string)
 	// WireLaunch 返回 magpie 接线状态里那个 agent 的启动环境与参数。
-	// 只有把网关地址/密钥放在环境变量里的 agent（目前是 agy）才会用到；
+	// 需要网关地址/密钥的 agent（agy）用它；dsh 也走同一条注入路径，
+	// 目前 magpie 还没给 dsh 发 launch，先由 DshDef 给默认 profile。
 	// 没接线、没读到、或形状不认识时返回 ok=false，启动仍走通用路径。
 	WireLaunch(id string) (env map[string]string, args []string, ok bool)
 }
