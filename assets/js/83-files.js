@@ -162,7 +162,7 @@ function filesList(root, dir, why) {
     if (!FS.reqs.has(req)) return;
     FS.reqs.delete(req);
     FS.loading.delete(dir);
-    FS.err.set(dir, t("files.err.timeout"));
+    FS.err.set(dir, { key: "files.err.timeout" });
     renderFiles(true);
   }, 8000));
   sendCtrl({ type: "fs.list", root, path: dir, req });
@@ -270,12 +270,12 @@ function filesTouchedHtml(tab, v) { // 参数别叫 t：会遮住 i18n 的 t()
 
 function filesEntryHtml(root, dir, depth) {
   const rec = FS.children.get(dir);
-  const err = FS.err.get(dir);
+  const errText = msgText(FS.err.get(dir));
   const loading = FS.loading.has(dir);
   let html = "";
   if (loading && !rec) html += `<div class="frow fstate">${esc(t("files.loading"))}</div>`;
-  if (err) {
-    html += `<div class="frow fstate ferr" title="${esc(err)}">${esc(t("files.err.read", { err }))}`
+  if (errText) {
+    html += `<div class="frow fstate ferr" title="${esc(errText)}">${esc(t("files.err.read", { err: errText }))}`
       + `<button type="button" class="flink" data-fretry="${esc(dir)}">${esc(t("files.retry"))}</button></div>`;
   }
   if (!rec) return html;
@@ -566,13 +566,20 @@ function fvSetTab(mode, why) {
   sendCtrl({ type: "log", msg: `文件预览 切页=${mode} path=${FV.path}（${why || ""}）` });
 }
 
-function fvError(text) {
+/* err 是「可重放的结构」：{key} 或 {code, params, text}，由 msgText 渲染。 */
+function fvError(err) {
   if (FV) {
     FV.readLoading = false;
-    FV.readErr = text || t("fv.readFailed");
+    FV.readErr = err || { key: "fv.readFailed" };
     FV.read = null;
   }
   fvRender();
+}
+
+/* fs.err / diff 的应答 → 可重放结构。原文留着兜底，切语言时重画即可。 */
+function fsErrOf(m, fallbackKey) {
+  if (!m || !m.err) return { key: fallbackKey || "fv.readFailed" };
+  return { code: m.errCode, params: m.errParams, text: m.err };
 }
 
 function openFileView(path, root, name) {
@@ -589,8 +596,8 @@ function openFileView(path, root, name) {
     tabMode: hasDiff ? "diff" : "code",
     tabPicked: false,
     hasDiff,
-    diff: null, diffReq: 0, diffLoading: !!(tab && tab.id), diffErr: "",
-    read: null, readLoading: true, readErr: "", readNotes: [], readNoteKind: "",
+    diff: null, diffReq: 0, diffLoading: !!(tab && tab.id), diffErr: null,
+    read: null, readLoading: true, readErr: null, readNotes: [], readNoteKind: "",
   };
   $("fv-name").textContent = FV.name;
   $("fv-path").textContent = path;
@@ -612,7 +619,7 @@ function openFileView(path, root, name) {
       FS.reqs.delete(dreq);
       if (FV && FV.diffReq === dreq) {
         FV.diffLoading = false;
-        FV.diffErr = t("fv.diffTimeout");
+        FV.diffErr = { key: "fv.diffTimeout" };
         fvSyncTabs();
         fvRender();
       }
@@ -624,7 +631,7 @@ function openFileView(path, root, name) {
     fvSyncTabs();
   }
   if (!FV.root) {
-    fvError(t("fv.outside"));
+    fvError({ key: "fv.outside" });
     sendCtrl({ type: "log", msg: `文件预览 拒绝（不在工作区里）path=${path}` });
     return;
   }
@@ -634,7 +641,7 @@ function openFileView(path, root, name) {
   FS.timeouts.set(req, setTimeout(() => {
     FS.timeouts.delete(req);
     FS.reqs.delete(req);
-    if (FV && FV.req === req) fvError(t("fv.ctlTimeout"));
+    if (FV && FV.req === req) fvError({ key: "fv.ctlTimeout" });
   }, 8000));
   sendCtrl({ type: "fs.read", root: FV.root, path, req });
   sendCtrl({ type: "log", msg: `文件预览 请求 path=${path} 根=${FV.root} req=${req}` });
@@ -792,7 +799,7 @@ function fvRender() {
     }
     if (FV.diffErr) {
       fvSetNote(t("fv.diffUnavailable"), "warn");
-      body.innerHTML = `<div class="fv-loading fv-err">${esc(FV.diffErr)}</div>`;
+      body.innerHTML = `<div class="fv-loading fv-err">${esc(msgText(FV.diffErr))}</div>`;
       return;
     }
     const d = FV.diff;
@@ -824,7 +831,7 @@ function fvRender() {
   }
   if (FV.readErr) {
     fvSetNote(FV.hasDiff ? t("fv.cantReadDiff") : "", FV.hasDiff ? "warn" : "");
-    body.innerHTML = `<div class="fv-loading fv-err">${esc(FV.readErr)}</div>`;
+    body.innerHTML = `<div class="fv-loading fv-err">${esc(msgText(FV.readErr))}</div>`;
     return;
   }
   const m = FV.read;
@@ -848,7 +855,7 @@ function applyFsRead(m) {
   if (meta) meta.textContent = fmtSize(m.size) + (m.encoding && m.encoding !== "utf-8" ? ` · ${m.encoding}` : "");
   FV.read = m;
   FV.readLoading = false;
-  FV.readErr = "";
+  FV.readErr = null;
   FV.readNotes = [];
   FV.readNoteKind = "";
   if (m.truncated) FV.readNotes.push(t("fv.noteTooBig"));
@@ -870,10 +877,10 @@ function applyTraceDiff(m) {
   if (!FV || FV.diffReq !== m.req) return;
   FV.diffLoading = false;
   if (m.err) {
-    FV.diffErr = m.err;
+    FV.diffErr = fsErrOf(m, "fv.diffErrFallback");
     FV.diff = null;
   } else {
-    FV.diffErr = "";
+    FV.diffErr = null;
     FV.diff = m;
     FV.hasDiff = !!(m.found && (m.changes || []).length);
     // 用户还没亲手切过页时，有改动就落在「改动」；否则尊重用户的选择。
@@ -912,11 +919,11 @@ function applyFsErr(m) {
   FS.timeouts.delete(m.req);
   if (w.op === "list") {
     FS.loading.delete(w.dir);
-    FS.err.set(w.dir, m.err || t("fv.readFailed"));
+    FS.err.set(w.dir, fsErrOf(m));
     renderFiles(true);
   } else if (w.op === "read" && FV && FV.req === m.req) {
     FV.readLoading = false;
-    FV.readErr = m.err || t("fv.readFailed");
+    FV.readErr = fsErrOf(m);
     FV.read = null;
     // 文件没了也不把已记录的改动藏起来：有 diff 就落到「改动」页
     // （用户亲手切过页的话仍尊重他的选择）。
@@ -925,7 +932,7 @@ function applyFsErr(m) {
     fvRender();
   } else if (w.op === "diff" && FV && FV.diffReq === m.req) {
     FV.diffLoading = false;
-    FV.diffErr = m.err || t("fv.diffErrFallback");
+    FV.diffErr = fsErrOf(m, "fv.diffErrFallback");
     FV.diff = null;
     fvSyncTabs();
     fvRender();

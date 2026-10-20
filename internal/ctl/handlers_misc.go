@@ -4,6 +4,8 @@ import (
 	"log"
 	"strings"
 	"time"
+
+	"github.com/yu7dan/perch/internal/uimsg"
 )
 
 // 页面级事实、快照补发与系统打开地址。它们不归标签/文件/网关任何一域，
@@ -84,8 +86,9 @@ func (s *Server) traceDiff(m *Msg) {
 	}
 	d := s.deps.Transcript.Diff(m.Tab, m.Path, 2*time.Second)
 	out := map[string]any{"type": "diff", "tab": m.Tab, "req": m.Req, "path": m.Path}
+	var uiErr error
 	if d == nil {
-		out["err"] = "超时（转录跟随器没有应答）"
+		uiErr = uimsg.New("diff.timeout", "超时（转录跟随器没有应答）")
 	} else {
 		out["found"] = d.Found
 		out["missing"] = d.Missing
@@ -95,7 +98,7 @@ func (s *Server) traceDiff(m *Msg) {
 		out["del"] = d.Del
 		out["changes"] = d.Changes
 	}
-	s.Push(out)
+	s.Push(withUIErr(out, uiErr))
 	if d == nil {
 		log.Printf("[trace] 改动正文请求超时 tab=%d path=%s", m.Tab, m.Path)
 	} else {

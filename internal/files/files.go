@@ -19,7 +19,6 @@ package files
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -28,6 +27,8 @@ import (
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
+
+	"github.com/yu7dan/perch/internal/uimsg"
 )
 
 const (
@@ -98,7 +99,12 @@ func (s *Service) Read(root, path string) (ReadResult, error) {
 }
 
 // ErrRootNotAllowed 是护栏对外的唯一说法；调用方据此回 fs.err。
-var ErrRootNotAllowed = errors.New("这个目录不在工作区里")
+var ErrRootNotAllowed = uimsg.New("files.rootNotAllowed", "这个目录不在工作区里")
+
+// failed 把底层 IO 错误包成带稳定 code 的消息；OS 原文作为 {err} 传给前端。
+func failed(code, format string, err error) error {
+	return uimsg.Wrap(err, code, fmt.Sprintf(format, err), map[string]string{"err": err.Error()})
+}
 
 // Resolve 把用户给的路径变成**真实**绝对路径：
 //
@@ -109,18 +115,19 @@ var ErrRootNotAllowed = errors.New("这个目录不在工作区里")
 func Resolve(p string) (string, error) {
 	p = strings.TrimSpace(p)
 	if p == "" {
-		return "", errors.New("空路径")
+		return "", uimsg.New("files.emptyPath", "空路径")
 	}
 	if !filepath.IsAbs(p) {
-		return "", fmt.Errorf("不是绝对路径：%s", p)
+		return "", uimsg.NewParams("files.notAbsolute",
+			fmt.Sprintf("不是绝对路径：%s", p), map[string]string{"path": p})
 	}
 	abs, err := filepath.Abs(p)
 	if err != nil {
-		return "", err
+		return "", failed("files.badPath", "这个路径看不懂：%v", err)
 	}
 	real, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		return "", err
+		return "", failed("files.unresolvable", "这个路径解析不了：%v", err)
 	}
 	return real, nil
 }
@@ -189,23 +196,23 @@ func ListDir(root, dir string) (ListResult, error) {
 	res := ListResult{Entries: []Entry{}}
 	rr, err := Resolve(root)
 	if err != nil {
-		return res, fmt.Errorf("工作区根目录不可用：%w", err)
+		return res, err
 	}
 	if strings.TrimSpace(dir) == "" {
 		dir = root
 	}
 	dd, err := Resolve(dir)
 	if err != nil {
-		return res, fmt.Errorf("目录不可用：%w", err)
+		return res, err
 	}
 	if !InsidePath(rr, dd) {
-		return res, errors.New("目录不在这个工作区里")
+		return res, uimsg.New("files.dirOutside", "目录不在这个工作区里")
 	}
 	res.Path = dd
 
 	ents, err := os.ReadDir(dd)
 	if err != nil {
-		return res, err
+		return res, failed("files.readDirFailed", "列目录失败：%v", err)
 	}
 	if len(ents) > MaxEntries {
 		ents = ents[:MaxEntries]
@@ -262,21 +269,21 @@ func ReadFile(root, path string) (ReadResult, error) {
 	res := ReadResult{Encoding: "utf-8"}
 	rr, err := Resolve(root)
 	if err != nil {
-		return res, fmt.Errorf("工作区根目录不可用：%w", err)
+		return res, err
 	}
 	rp, err := Resolve(path)
 	if err != nil {
-		return res, fmt.Errorf("文件不可用：%w", err)
+		return res, err
 	}
 	if !InsidePath(rr, rp) {
-		return res, errors.New("文件不在这个工作区里")
+		return res, uimsg.New("files.fileOutside", "文件不在这个工作区里")
 	}
 	fi, err := os.Stat(rp)
 	if err != nil {
-		return res, err
+		return res, failed("files.statFailed", "读不到文件信息：%v", err)
 	}
 	if !fi.Mode().IsRegular() {
-		return res, errors.New("不是普通文件")
+		return res, uimsg.New("files.notRegular", "不是普通文件")
 	}
 	res.Path = rp
 	res.Size = fi.Size()
@@ -286,12 +293,12 @@ func ReadFile(root, path string) (ReadResult, error) {
 
 	f, err := os.Open(rp)
 	if err != nil {
-		return res, err
+		return res, failed("files.openFailed", "打不开这个文件：%v", err)
 	}
 	defer f.Close()
 	raw, err := io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
 	if err != nil {
-		return res, err
+		return res, failed("files.readFailed", "读不了这个文件：%v", err)
 	}
 	if len(raw) > MaxFileBytes {
 		raw = raw[:MaxFileBytes]

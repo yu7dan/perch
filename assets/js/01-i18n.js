@@ -1040,6 +1040,21 @@ const PERCH_I18N = {
     "msg.settings.saveFailed": "Could not save settings: {err}",
     "msg.settings.noWindow": "The window is not ready yet, so the picker cannot open",
     "msg.settings.pickerFailed": "Could not open the picker: {err}",
+
+    "msg.files.rootNotAllowed": "That folder is not inside the workspace",
+    "msg.files.emptyPath": "Empty path",
+    "msg.files.notAbsolute": "Not an absolute path: {path}",
+    "msg.files.badPath": "Cannot understand this path: {err}",
+    "msg.files.unresolvable": "This path cannot be resolved: {err}",
+    "msg.files.dirOutside": "That directory is not inside this workspace",
+    "msg.files.fileOutside": "That file is not inside this workspace",
+    "msg.files.notRegular": "Not a regular file",
+    "msg.files.readDirFailed": "Could not list this directory: {err}",
+    "msg.files.statFailed": "Could not read file information: {err}",
+    "msg.files.openFailed": "Could not open this file: {err}",
+    "msg.files.readFailed": "Could not read this file: {err}",
+
+    "msg.diff.timeout": "Timed out (the transcript follower did not answer)",
   },
 
   zh: {
@@ -2037,6 +2052,21 @@ const PERCH_I18N = {
     "msg.settings.saveFailed": "设置没写成：{err}",
     "msg.settings.noWindow": "窗口还没起来，选择器打不开",
     "msg.settings.pickerFailed": "选择器打不开：{err}",
+
+    "msg.files.rootNotAllowed": "这个目录不在工作区里",
+    "msg.files.emptyPath": "空路径",
+    "msg.files.notAbsolute": "不是绝对路径：{path}",
+    "msg.files.badPath": "这个路径看不懂：{err}",
+    "msg.files.unresolvable": "这个路径解析不了：{err}",
+    "msg.files.dirOutside": "目录不在这个工作区里",
+    "msg.files.fileOutside": "文件不在这个工作区里",
+    "msg.files.notRegular": "不是普通文件",
+    "msg.files.readDirFailed": "列目录失败：{err}",
+    "msg.files.statFailed": "读不到文件信息：{err}",
+    "msg.files.openFailed": "打不开这个文件：{err}",
+    "msg.files.readFailed": "读不了这个文件：{err}",
+
+    "msg.diff.timeout": "超时（转录跟随器没有应答）",
   },
 };
 
@@ -2089,6 +2119,18 @@ function tMsg(code, params, fallback) {
     return t(k, params || {});
   }
   return fallback == null ? "" : String(fallback);
+}
+
+/* 一条「可重放的错误」的当前语言文本：
+     { key }                  前端自己的文案键
+     { code, params, text }   后端 uimsg
+   状态里存结构、不存渲染好的句子，切语言时重画一次就能跟上（实测：
+   设置页默认目录的内联错误要能随语言变，见 85-settings.js）。 */
+function msgText(m) {
+  if (!m) return "";
+  if (typeof m === "string") return m;
+  if (m.key) return t(m.key);
+  return tMsg(m.code, m.params, m.text);
 }
 
 /* 带数量的句子：n === 1 时优先用 `${base}One`（只在当前语言里存在才用）。

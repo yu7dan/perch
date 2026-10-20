@@ -113,9 +113,7 @@ function syncDefaultAgentSelect() {
 }
 
 function cwdErrText() {
-  if (!CWD_ERR) return "";
-  if (CWD_ERR.key) return t(CWD_ERR.key);
-  return tMsg(CWD_ERR.code, CWD_ERR.params, CWD_ERR.text);
+  return msgText(CWD_ERR);
 }
 
 function settingsCwdPaintError() {

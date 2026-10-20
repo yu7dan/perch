@@ -68,8 +68,8 @@ func (s *Server) fsList(root, dir string, req int) {
 		} else {
 			log.Printf("[fs] 列目录失败 root=%s dir=%s err=%v", root, dir, err)
 		}
-		s.Push(map[string]any{"type": "fs.err", "req": req, "op": "list",
-			"path": dir, "err": err.Error()})
+		m := map[string]any{"type": "fs.err", "req": req, "op": "list", "path": dir}
+		s.Push(withUIErr(m, err))
 		return
 	}
 	log.Printf("[fs] list root=%s dir=%s entries=%d truncated=%v",
@@ -89,8 +89,8 @@ func (s *Server) fsRead(root, path string, req int) {
 		} else {
 			log.Printf("[fs] 读文件失败 root=%s path=%s err=%v", root, path, err)
 		}
-		s.Push(map[string]any{"type": "fs.err", "req": req, "op": "read",
-			"path": path, "err": err.Error()})
+		m := map[string]any{"type": "fs.err", "req": req, "op": "read", "path": path}
+		s.Push(withUIErr(m, err))
 		return
 	}
 	log.Printf("[fs] read root=%s path=%s size=%d text=%d truncated=%v binary=%v enc=%s",
