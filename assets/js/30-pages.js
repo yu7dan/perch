@@ -145,8 +145,12 @@ function overTabs(x, y) {
 
 $("termbody").addEventListener("pointerdown", (e) => {
   if (e.button !== 0 || dragState) return;
-  // 关闭按钮和重命名输入框是它们自己的控件，不参与拎页。
-  if (e.target.closest(".x") || e.target.closest(".tab-input")) return;
+  // 关闭按钮、换 Agent 下拉和重命名输入框是它们自己的控件，不参与拎页。
+  // ⚠️ `.aswap` 必须列在这里：pointerdown 一旦 setPointerCapture，#termbody
+  // 就成了后续 pointerup/click 的目标，按钮自己的 click 永远收不到 ——
+  // 表现正是"点它没反应"（2026-10-20 真机验出来的）。
+  if (e.target.closest(".x") || e.target.closest(".aswap") ||
+      e.target.closest(".tab-input")) return;
   const el = e.target.closest(".cellhead");
   if (!el) return;
   const t = TAB_LIST.find((x) => x.tabEl === el);
@@ -264,8 +268,8 @@ function setActive(t) {
   t.refit();
   t.focus();
   // 切到它 = 看过它（Orca 的 unread 就是"看过即销"）：把它那条「需要你」
-  // 降级成「空闲」，并重画右栏那四个模块 —— 它们的主语是当前格，
-  // 当前格换了，改动/流水/子代理三栏的内容整批跟着换。
+  // 降级成「空闲」，并重画右栏那几个模块 —— 它们的主语是当前格，
+  // 当前格换了，文件/流水/子代理三栏的内容整批跟着换。
   ackNote(t, "切格");
   // 切到一格就顺手把它的流水快照补齐（页面刷新后每格都是空的，见 askActsSnapshot）
   askActsSnapshot("成为当前格");
@@ -425,10 +429,12 @@ async function newParallelTab(why) {
   if (soloTab) backToGrid();
   // 群组那排 +（收起时没有地方挂选择面板）：用设置里的默认 agent，和左栏一键新开一致。
   const spec = defaultSpawnSpec();
-  const t = await createTab(spec);
+  const t = await createTab(spec, { fresh: true });
   // 建格失败那条路（护栏拒绝）里 createTab 已经把这一格撤了（closeTab）——
   // 它照样返回了 T，别拿着一个不在 TAB_LIST 里的格去 setActive。
   if (!TAB_LIST.includes(t)) return;
+  // 和 newTabIn 同一条：新开的格子先挂着"可以换 Agent"的入口。
+  armFreshCell(t, why || "新开并行格");
   renderGroup();
   sendCtrl({ type: "log", msg: `新开并行 agent tab=${t.id} agent=${spec.agent} ` +
     `（${why || "点 +"}）现在 ${TAB_LIST.length} 格` });

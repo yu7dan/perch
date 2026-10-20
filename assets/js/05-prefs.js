@@ -19,6 +19,10 @@ const SETTINGS_DEFAULTS = Object.freeze({
   termFontFamily: "cascadia",  // "cascadia" | "jetbrains"
   startView: "dash",           // "dash" | "workspace"
   defaultAgent: "",            // 空 = 自动（优先有状态能力的已安装 agent）
+  // 新建格快捷键：**应用内**、有焦点时生效。Ctrl/Alt 至少带一个，主键只认
+  // A-Z / 0-9 / F1-F12；空串 = 关闭。这里存的是规范形状（Ctrl+Alt+N），
+  // 录制器和匹配器都走 normalizeShortcutString 这一处，不在两边各拼一遍。
+  newAgentShortcut: "Ctrl+Alt+N",
   confirmClose: true,
   confirmEndAgent: true,
 });
@@ -32,6 +36,63 @@ let SETTINGS_BUILTIN_CWD = "";
 let SETTINGS_CWD_MISSING = false;
 // 10-term.js 末尾会置 true。在此之前 applySettings 只改缓存，不碰终端。
 let PERCH_TERM_READY = false;
+/* 设置页正在录制快捷键。**必须放在这个文件**（05 最先求值）：60-shell 的全局
+   keydown 和 84-settings 的录制器都要读它，放在 84 里会留下一段 TDZ 窗口
+   （`typeof` 一个还没初始化的 let 也会抛，见 60-shell.js:462 那条教训）。 */
+let SHORTCUT_RECORDING = false;
+
+/* ---- 快捷键的规范形状 ----------------------------------------------------
+   规范：修饰键按 Ctrl → Alt → Shift 排，主键大写；必须带 Ctrl 或 Alt。
+   · 录制、匹配、落盘、Go 侧校验都用同一套规则；空串 = 关闭。
+   · 为什么主键用 e.code 而不是 e.key：中文/非 US 布局下 e.key 可能不是
+     字母（Shift+1 还会变成 "!"），录进去的键和按出来的键就对不上。
+     e.code 是**物理键位**（KeyN / Digit1 / F5），显示成 N / 1 / F5。 */
+function normalizeShortcutString(raw) {
+  const s = String(raw == null ? "" : raw).trim();
+  if (!s) return "";
+  const parts = s.split("+").map((x) => x.trim()).filter(Boolean);
+  if (parts.length < 2) return "";
+  const key = parts.pop().toUpperCase();
+  if (!/^[A-Z0-9]$/.test(key) && !/^F([1-9]|1[0-2])$/.test(key)) return "";
+  const mods = new Set();
+  for (const p of parts) {
+    const low = p.toLowerCase();
+    const m = low === "ctrl" ? "Ctrl" : low === "alt" ? "Alt" : low === "shift" ? "Shift" : "";
+    if (!m || mods.has(m)) return "";
+    mods.add(m);
+  }
+  if (!mods.has("Ctrl") && !mods.has("Alt")) return "";
+  return ["Ctrl", "Alt", "Shift"].filter((m) => mods.has(m)).concat(key).join("+");
+}
+function shortcutKeyFromEvent(e) {
+  const code = String((e && e.code) || "");
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (/^F([1-9]|1[0-2])$/.test(code)) return code;
+  return "";
+}
+function shortcutChordFromEvent(e) {
+  const key = shortcutKeyFromEvent(e);
+  if (!key) return "";
+  const mods = [];
+  if (e.ctrlKey) mods.push("Ctrl");
+  if (e.altKey) mods.push("Alt");
+  if (e.shiftKey) mods.push("Shift");
+  if (!mods.includes("Ctrl") && !mods.includes("Alt")) return "";
+  return mods.concat(key).join("+");
+}
+function shortcutMatches(e, chord) {
+  const want = normalizeShortcutString(chord);
+  if (!want || !e) return false;
+  const parts = want.split("+");
+  const key = parts.pop();
+  const mods = new Set(parts);
+  if (!!e.ctrlKey !== mods.has("Ctrl")) return false;
+  if (!!e.altKey !== mods.has("Alt")) return false;
+  if (!!e.shiftKey !== mods.has("Shift")) return false;
+  if (e.metaKey) return false;
+  return shortcutKeyFromEvent(e) === key;
+}
 
 function normalizeSettings(raw) {
   const d = SETTINGS_DEFAULTS;
@@ -50,6 +111,9 @@ function normalizeSettings(raw) {
   // agent id 只做去空白；能不能用由 30-pages 的 defaultAgentId() 对着
   // **当前探测到的名单**判（设置里写着、但这台机器没装 = 回落到自动）。
   s.defaultAgent = typeof s.defaultAgent === "string" ? s.defaultAgent.trim().toLowerCase() : "";
+  // 手改坏的值落回**关闭**而不是默认键：一个看不懂的字符串不该悄悄变成
+  // 一个会吃掉终端按键的组合键。缺字段时 Object.assign 已给了默认值。
+  s.newAgentShortcut = normalizeShortcutString(s.newAgentShortcut);
   s.confirmClose = s.confirmClose !== false;
   s.confirmEndAgent = s.confirmEndAgent !== false;
   return s;

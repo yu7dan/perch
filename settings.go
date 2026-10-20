@@ -23,6 +23,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -52,6 +53,11 @@ type appSettings struct {
 	// agent，见 assets/js/30-pages.js 的 defaultAgentId）。存的是 agent id，
 	// 不是名字 —— 名字会变，id 不会。
 	DefaultAgent string `json:"defaultAgent"`
+	// NewAgentShortcut 是应用内「新建格」的快捷键，规范形状如 "Ctrl+Alt+N"；
+	// 空串 = 关闭。只收带 Ctrl/Alt 的组合（裸键会在终端里吃掉普通输入），
+	// 主键只认 A-Z / 0-9 / F1-F12。录制器在前端，Go 这边再校一遍 ——
+	// settings.json 是手改得动的，不能只信前端。
+	NewAgentShortcut string `json:"newAgentShortcut"`
 	// 两个确认默认**开**（Orca 的默认也是 false = 不跳过确认）：
 	// 关窗会带走所有正在跑的 agent，结束 agent 会删掉它的座位记录。
 	ConfirmClose    bool `json:"confirmClose"`
@@ -60,11 +66,12 @@ type appSettings struct {
 
 func settingsDefaults() appSettings {
 	return appSettings{
-		TermFontSize:    14,
-		TermFontFamily:  "cascadia",
-		StartView:       "dash",
-		ConfirmClose:    true,
-		ConfirmEndAgent: true,
+		TermFontSize:     14,
+		TermFontFamily:   "cascadia",
+		StartView:        "dash",
+		NewAgentShortcut: "Ctrl+Alt+N",
+		ConfirmClose:     true,
+		ConfirmEndAgent:  true,
 	}
 }
 
@@ -103,24 +110,82 @@ func (s appSettings) normalize() appSettings {
 			s.DefaultAgent = ""
 		}
 	}
+	// 快捷键：能规范化就规范化，规范化不了就**关掉**（不落回默认键 ——
+	// 一个手改坏的字符串不该悄悄变成一个会吃终端按键的组合键）。
+	if v, ok := normalizeShortcut(s.NewAgentShortcut); ok {
+		s.NewAgentShortcut = v
+	} else {
+		s.NewAgentShortcut = ""
+	}
 	return s
+}
+
+// shortcutKeyPattern 是主键的白名单：字母、数字、F1-F12。
+// 故意不收空格/方向键/Tab/Enter：那些是终端的日常输入，壳层不该抢。
+var shortcutKeyPattern = regexp.MustCompile(`^(?:[A-Z0-9]|F(?:[1-9]|1[0-2]))$`)
+
+// normalizeShortcut 把快捷键收成规范形状（修饰键 Ctrl→Alt→Shift，主键大写）。
+// 空串是合法值 = 关闭；其余不合法的返回 ok=false，由调用方决定怎么落。
+func normalizeShortcut(raw string) (string, bool) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", true
+	}
+	parts := strings.Split(s, "+")
+	if len(parts) < 2 {
+		return "", false
+	}
+	key := strings.ToUpper(strings.TrimSpace(parts[len(parts)-1]))
+	if !shortcutKeyPattern.MatchString(key) {
+		return "", false
+	}
+	mods := map[string]bool{}
+	for _, p := range parts[:len(parts)-1] {
+		var m string
+		switch strings.ToLower(strings.TrimSpace(p)) {
+		case "ctrl":
+			m = "Ctrl"
+		case "alt":
+			m = "Alt"
+		case "shift":
+			m = "Shift"
+		default:
+			return "", false
+		}
+		if mods[m] { // "Ctrl+Ctrl+N" 这种重复修饰键也不收
+			return "", false
+		}
+		mods[m] = true
+	}
+	if !mods["Ctrl"] && !mods["Alt"] {
+		return "", false
+	}
+	out := make([]string, 0, 4)
+	for _, m := range []string{"Ctrl", "Alt", "Shift"} {
+		if mods[m] {
+			out = append(out, m)
+		}
+	}
+	out = append(out, key)
+	return strings.Join(out, "+"), true
 }
 
 // settingsPatch 是 ctl 的 "settings.set" 带来的增量。指针 = "这条请求有没有
 // 提到这个字段"：false / 0 / 空串都是**合法值**，不能用零值判断缺省。
 type settingsPatch struct {
-	DefaultCWD      *string `json:"defaultCwd,omitempty"`
-	TermFontSize    *int    `json:"termFontSize,omitempty"`
-	TermFontFamily  *string `json:"termFontFamily,omitempty"`
-	StartView       *string `json:"startView,omitempty"`
-	DefaultAgent    *string `json:"defaultAgent,omitempty"`
-	ConfirmClose    *bool   `json:"confirmClose,omitempty"`
-	ConfirmEndAgent *bool   `json:"confirmEndAgent,omitempty"`
+	DefaultCWD       *string `json:"defaultCwd,omitempty"`
+	TermFontSize     *int    `json:"termFontSize,omitempty"`
+	TermFontFamily   *string `json:"termFontFamily,omitempty"`
+	StartView        *string `json:"startView,omitempty"`
+	DefaultAgent     *string `json:"defaultAgent,omitempty"`
+	NewAgentShortcut *string `json:"newAgentShortcut,omitempty"`
+	ConfirmClose     *bool   `json:"confirmClose,omitempty"`
+	ConfirmEndAgent  *bool   `json:"confirmEndAgent,omitempty"`
 }
 
 func (p settingsPatch) empty() bool {
 	return p.DefaultCWD == nil && p.TermFontSize == nil && p.TermFontFamily == nil &&
-		p.StartView == nil && p.DefaultAgent == nil &&
+		p.StartView == nil && p.DefaultAgent == nil && p.NewAgentShortcut == nil &&
 		p.ConfirmClose == nil && p.ConfirmEndAgent == nil
 }
 
@@ -166,9 +231,10 @@ func loadSettingsStore() *settingsStore {
 	}
 	cur = cur.normalize()
 	s.cur = cur
-	log.Printf("[settings] 载入：默认目录=%s 字号=%d 字体=%s 启动=%s 默认 agent=%s 关窗确认=%v 结束确认=%v（%s）",
+	log.Printf("[settings] 载入：默认目录=%s 字号=%d 字体=%s 启动=%s 默认 agent=%s 快捷键=%s 关窗确认=%v 结束确认=%v（%s）",
 		pick(cur.DefaultCWD, "(内置)"), cur.TermFontSize, cur.TermFontFamily,
-		cur.StartView, pick(cur.DefaultAgent, "(自动)"), cur.ConfirmClose, cur.ConfirmEndAgent, f)
+		cur.StartView, pick(cur.DefaultAgent, "(自动)"), pick(cur.NewAgentShortcut, "(关闭)"),
+		cur.ConfirmClose, cur.ConfirmEndAgent, f)
 	return s
 }
 
@@ -228,6 +294,13 @@ func (s *settingsStore) patch(p settingsPatch) (appSettings, error) {
 			}
 		}
 		next.DefaultAgent = v
+	}
+	if p.NewAgentShortcut != nil {
+		v, ok := normalizeShortcut(*p.NewAgentShortcut)
+		if !ok {
+			return old, errors.New("快捷键格式不对：需要 Ctrl 或 Alt + 字母、数字或 F1–F12")
+		}
+		next.NewAgentShortcut = v
 	}
 	if p.ConfirmClose != nil {
 		next.ConfirmClose = *p.ConfirmClose
@@ -331,9 +404,10 @@ func applySettingsPatch(p settingsPatch, why string) {
 		pushSettings(err.Error())
 		return
 	}
-	log.Printf("[settings] %s：默认目录=%s 字号=%d 字体=%s 启动=%s 默认 agent=%s 关窗确认=%v 结束确认=%v",
+	log.Printf("[settings] %s：默认目录=%s 字号=%d 字体=%s 启动=%s 默认 agent=%s 快捷键=%s 关窗确认=%v 结束确认=%v",
 		why, pick(next.DefaultCWD, "(内置)"), next.TermFontSize, next.TermFontFamily,
-		next.StartView, pick(next.DefaultAgent, "(自动)"), next.ConfirmClose, next.ConfirmEndAgent)
+		next.StartView, pick(next.DefaultAgent, "(自动)"), pick(next.NewAgentShortcut, "(关闭)"),
+		next.ConfirmClose, next.ConfirmEndAgent)
 	pushSettings("")
 	if next.DefaultCWD != old.DefaultCWD {
 		ensureDefaultWorkspace()

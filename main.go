@@ -103,6 +103,10 @@ type ctrlMsg struct {
 	// Go 侧仍然要复核（绝对路径 + 存在），见 resume.go 的 openPath。
 	Mode string `json:"mode"`
 	Path string `json:"path"`
+	// fs.list / fs.read 用：Root 是**文件树根**（必须是项目池里的目录）。
+	// Path 是根下面要列/要读的那个路径；Req 是令牌，原样带回。
+	// 护栏见 files.go —— 只读、包含性检查、大小上限，都在 Go 侧。
+	Root string `json:"root"`
 	// project.* 用：Path 是项目的身份（目录绝对路径）；Name 只在 rename /
 	// add 时给（空 = 恢复目录名 / 取目录名）；Source 只在 add 时给。
 	Name   string `json:"name"`
@@ -762,6 +766,18 @@ func pushJSON(v any) {
 // 走 pushJSON 而不是 c.Send：挑目录那条路要开系统对话框（阻塞），应答是从
 // 一个协程里发出来的，手里没有 ctl 那根流（见 "project.add" 的注释）。
 func poolReply(errMsg string) {
+	poolReplyPicked(errMsg, "")
+}
+
+/*
+picked = 这一次系统选择器最终指到哪个目录（规范化后的绝对路径）。
+
+	为什么必须单独带回来：用户完全可能挑一个**已经在池子里**的目录，那时
+	projects 一份都不变，前端靠"快照里多了一条"永远等不到结果 —— 新建工作区
+	卡片会一直停在"正在等系统文件夹选择器…"。选择器那条路没有应答帧，
+	这个字段就是它唯一的应答（见 81-newspace.js 的 newSpacePoolUpdate）。
+*/
+func poolReplyPicked(errMsg, picked string) {
 	if pool == nil {
 		pushJSON(map[string]any{"type": "pool", "err": "项目池不可用", "projects": []any{}, "assign": map[string]string{}})
 		return
@@ -780,6 +796,7 @@ func poolReply(errMsg string) {
 		"assign":   assign,
 		"roots":    roots,
 		"err":      errMsg,
+		"picked":   picked,
 	})
 	sum, nUn, nMain, nAll := poolAudit(sessions, assign, wire)
 	log.Printf("[pool] 推回前端：%d 个项目 / 归属 %d 条（Σ项目 %d + 未归类 %d = %d，主会话共 %d，全部 %d）；用时 %v",
@@ -982,6 +999,13 @@ func handleCtl(c *application.StreamConn) {
 			// 在系统里打开一个路径（卡片菜单里的"打开会话文件/在文件夹中显示/
 			// 打开工作目录"）。换协程：explorer 起进程不该拖住 ctl 收包。
 			go openPath(m.Mode, m.Path)
+		case "fs.list":
+			// 右栏「文件」模块：只读列目录。换协程 —— 网络盘上的 ReadDir
+			// 可能慢到秒级，不能把 ctl 的收包卡住。护栏见 files.go。
+			go fsListReq(m.Root, m.Path, m.Req)
+		case "fs.read":
+			// 只读预览一个文件（512 KiB 上限，二进制/非 UTF-8 只回标记）。
+			go fsReadReq(m.Root, m.Path, m.Req)
 		case "open.url":
 			// Agent 名单的「下载」= 打开官方安装页（**不是**替用户跑安装脚本）。
 			// 只放 http/https：别的 scheme 会把一个"看网页"的按钮变成可执行动作。
@@ -1179,7 +1203,7 @@ func handleCtl(c *application.StreamConn) {
 					return
 				}
 				log.Printf("[pool] 加项目 %q（选择器）路径=%s 新增=%v", pr.Name, pr.Path, added)
-				poolReply("")
+				poolReplyPicked("", pr.Path)
 			}()
 		case "project.remove":
 			// 只从池子里摘掉，**磁盘上一个字节都不动**（这一点必须做进 UI 的措辞里：
@@ -1284,6 +1308,46 @@ func handleCtl(c *application.StreamConn) {
 			}
 			pushJSON(map[string]any{"type": "acts", "tab": m.Tab, "items": items, "replace": true})
 			log.Printf("[ctl] 补发流水快照 tab=%d（%d 条）", m.Tab, len(items))
+		case "files.snapshot":
+			// 页面重载后补一次「碰过的」：跟随器的首次整份推送只发生一次，
+			// 前端刷新之后不补就会一直空着（直到下一次文件动作）。
+			if m.Tab <= 0 {
+				continue
+			}
+			files := filesSnapshot(m.Tab, 2*time.Second)
+			if files == nil {
+				log.Printf("[ctl] 补发文件台账 tab=%d 超时/没被取走，跳过", m.Tab)
+				continue
+			}
+			pushJSON(map[string]any{"type": "files", "tab": m.Tab, "files": files})
+			log.Printf("[ctl] 补发文件台账 tab=%d（%d 个）", m.Tab, len(files))
+		case "trace.diff":
+			// 文件预览的「改动」页：按需取**这一格**记到的某个文件的 diff 正文。
+			// 正文不挂在每 400ms 的 files 推送里（见 transcript.go 的 maxChangeText），
+			// 所以单独走一次请求；跟随器不在/超时就明确回 err，不让前端一直转圈。
+			if m.Tab <= 0 || strings.TrimSpace(m.Path) == "" {
+				continue
+			}
+			d := diffSnapshot(m.Tab, m.Path, 2*time.Second)
+			out := map[string]any{"type": "diff", "tab": m.Tab, "req": m.Req, "path": m.Path}
+			if d == nil {
+				out["err"] = "超时（转录跟随器没有应答）"
+			} else {
+				out["found"] = d.Found
+				out["missing"] = d.Missing
+				out["state"] = d.State
+				out["rel"] = d.Rel
+				out["add"] = d.Add
+				out["del"] = d.Del
+				out["changes"] = d.Changes
+			}
+			pushJSON(out)
+			if d == nil {
+				log.Printf("[trace] 改动正文请求超时 tab=%d path=%s", m.Tab, m.Path)
+			} else {
+				log.Printf("[trace] 改动正文 tab=%d path=%s found=%v 条=%d 缺=%v",
+					m.Tab, m.Path, d.Found, len(d.Changes), d.Missing)
+			}
 		}
 	}
 }
@@ -1382,7 +1446,7 @@ func main() {
 	// 而 1200px 窗口 + 240px 侧栏 + 原来的 62% 分栏只给到 60 列。
 	// 1440 宽 + 74% 分栏让终端拿到 ~85 列，留出余量。
 	mainWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:  "AI 工作台",
+		Title:  "Perch",
 		Width:  1440,
 		Height: 900,
 

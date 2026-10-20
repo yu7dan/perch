@@ -276,6 +276,10 @@ ctl.onopen = () => {
   // 补发启动期攒下的错误（那段"普通脚本"抓的，见文件头部）—— 那时还没有通道。
   for (const m of window.__bootErr) ctl.send({ type: "log", msg: "启动期错误: " + m });
   window.__bootErr.length = 0;
+  // 右栏文件树可能启动时就停在「全部」：它等的就是这条通道。ctl 没连上时
+  // filesList 不发请求（sendCtrl 会静默吞掉），这里补一次。82-files.js 可能
+  // 还没求值完（defer 顺序），所以只认函数在不在，别直接碰它的状态。
+  if (typeof renderFiles === "function") { try { renderFiles(true); } catch (e) {} }
   // 通道建好之前攒下的**非错误**事实（见 bootFact）——同样补发，但不加"错误"前缀。
   for (const m of window.__facts) ctl.send({ type: "log", msg: m });
   window.__facts.length = 0;
@@ -460,6 +464,13 @@ function dispatchCtl(m) {
     case "agent": applyAgent(m); return;
     case "acts":  applyActs(m);  return;
     case "files": applyFiles(m); return;
+    // 右栏「文件」：fs.list / fs.read 的应答，fs.err 是两条共用的错误通道
+    // （护栏、目录没了、文件不是普通文件…）。实现和渲染都在 82-files.js。
+    case "fs.list": applyFsList(m); return;
+    case "fs.read": applyFsRead(m); return;
+    case "fs.err":  applyFsErr(m);  return;
+    // 文件预览「改动」页：按需取这一格记到的 diff 正文（见 transcript.go 的 trace.diff）。
+    case "diff":    applyTraceDiff(m); return;
     case "state": applyLibrary(m.state); return;
     // 网关读数：shell 首帧里也带一份，之后由 Go 的 watcher 每 2.5s 推整份。
     case "magpie": applyMagpie(m.magpie); return;

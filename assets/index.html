@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>AI 工作台</title>
+<title>Perch · 栖枝</title>
 <link rel="stylesheet" href="/xterm.css">
 <link rel="stylesheet" href="/app.css">
 <link rel="stylesheet" href="/gw.css">
@@ -35,11 +35,10 @@
          现在照原样两段，右段的空 .tb-list 仍占着 240px 那一格，
          好让标题栏的两条缝和下面两列的边界对得上。 -->
     <div class="tb-rail">
-      <span class="mark">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1a1a1c"
-             stroke-width="2.4" stroke-linecap="round"><path d="M3 15c3-6 6 6 9 0s6-6 9 0"/></svg>
-      </span>
-      <span class="tb-name">工作台</span>
+      <!-- 产品标：直接用设计稿 perch-logo.png（透明 PNG，形状与比例未改）。
+           CSS 只裁掉四周的透明留白，让 22px 的槽里图形仍然看得清。 -->
+      <span class="mark"><img src="/perch-logo.png" alt="" draggable="false"></span>
+      <span class="tb-name" title="Perch（栖枝）">Perch</span>
     </div>
     <div class="tb-list"></div>
 
@@ -78,6 +77,16 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>
       </button>
       <div class="tabs-right">
+        <!-- 「需要你」从右栏搬到这里（2026-10-19，用户点名）：它本质是一条
+             消息提示，不该占右栏一个模块位。铃铛 + 数字徽标，点开是浮层；
+             右栏那个位置让给文件树。徽标/提示的更新仍走 needModel 那一处，
+             不另算一份。 -->
+        <button class="icon-btn bell" id="need-bell" title="需要你" aria-label="需要你"
+                aria-haspopup="dialog" aria-expanded="false">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg>
+          <span class="badge" id="need-badge" hidden>0</span>
+        </button>
         <!-- 收起/展开终端面板。原来它在面板头里 —— 折叠后面板 display:none，
            按钮跟着消失，**展不回来**。Orca 的 pane 头上也压根没有这个按钮
            （它的收起入口在右键菜单 onToggleExpand）。挪到标签条右侧：
@@ -276,20 +285,19 @@
              上一批的 side/diff 两枚是照 Lucide 的样子**手画**的（形状和真正的
              git-fork / file-diff 并不一样），这次连它们一起换成原文：
              同一个工具条里混"真图标"和"像图标的画"，放大一点就露馅。 -->
-        <!-- ① 需要你（inbox）—— 带**数字徽标**。
-             ⚠️ 这是**明确偏离 Orca** 的一处，用户点名要的：Orca 的活动条只有
-             7px 圆点、全库没有任何数字徽标（它靠"点 + 悬停提示"表达注意力）。
-             理由是它一次只跑几个 agent，而我们的默认视图是 N 格同屏，
-             "几件事在等你"这个读数比一个点更能回答"我现在要不要切过去"。 -->
-        <button class="arbtn on" data-mod="need" title="需要你">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
-          <span class="badge" id="need-badge" hidden>0</span>
+        <!-- ① 文件（Lucide `files`）—— 2026-10-19 用户点名用它替掉「需要你」：
+             agent 产出的文件/代码应该在这一列里就能点开看，而不是让用户
+             自己去资源管理器里翻。「需要你」搬去了标题栏的铃铛 —— 它本质
+             是消息提示，不是这一列的读物。
+             2026-10-20：模块图标从 folder-tree 换成 files —— 用户指出
+             folder-tree 是**文件夹**的图标，不能同时代表模块和目录行。
+             path 逐字取自 lucide-icons/lucide main:icons/files.svg（24 网格，
+             官方 stroke-width=2；这里按 16px 渲染、描边 1.7，和本列其它图标同重）。 -->
+        <button class="arbtn on" data-mod="files" title="文件">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2h-4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8"/><path d="M16.706 2.706A2.4 2.4 0 0 0 15 2v5a1 1 0 0 0 1 1h5a2.4 2.4 0 0 0-.706-1.706z"/><path d="M5 7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 1.732-1"/></svg>
         </button>
         <button class="arbtn" data-mod="side" title="子代理">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg>
-        </button>
-        <button class="arbtn" data-mod="diff" title="改动">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M9 10h6"/><path d="M12 13V7"/><path d="M9 17h6"/></svg>
         </button>
         <button class="arbtn" data-mod="flow" title="流水">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></svg>
@@ -304,42 +312,47 @@
       </div>
     </div>
 
-    <!-- 上段。这层包裹不是装饰：它把"四个模块"变成一个真的盒子，下段（对话流）
+    <!-- 上段。这层包裹不是装饰：它把"这几个模块"变成一个真的盒子，下段（对话流）
          才有东西可以跟它分高度（flex 的两个兄弟之间才谈得上分）。 -->
     <div id="rsb-mods">
 
-    <!-- ① 需要你 —— 这一列里唯一"主语是我"的模块：它回答的不是"它在干什么"，
-         而是"现在该把注意力放哪一格"。数据来自两条**实测过的腿**：
-           hook  Stop / StopFailure / Notification  → 它刚说完话、它挂了、它要你批
-           登记表 sessions\<pid>.json 的 status      → busy / idle（"在跑"/"该我了"）
-         两组合起来才能分清"忙"和"等你"，单看任何一条都分不出来（详情见 JS 那段）。
-
-         v1 的行是**只读**的：点一下 = 切到那一格 + 闪两下。就地作答/批权限
-         留着以后（要先把 TUI 那个选择器的按键序列量出来），所以这里刻意
-         不放任何"点一下就动手"的按钮 —— 一个点了不知道会发生什么的按钮，
-         比"你得自己切过去"更糟。 -->
-    <section class="rsb-mod" data-mod="need">
-      <div class="bhead">
-        <span class="ico">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
-        </span>
-        <span class="nm2">需要你</span>
-        <div class="rt"><span class="pill" id="need-cnt">0</span></div>
+    <!-- ① 文件 —— 2026-10-19 用户点名替换掉「需要你」。两种视图：
+         「碰过的」直接把当前格转录里 edit/write/read 过的文件铺成一棵树
+         （数据本来就在 LIVE.files 里，不用后端）；「全部」是一棵懒加载的
+         只读目录树，走 Go 的 fs.list/fs.read（护栏见 files.go）。
+         点文件 = 就地弹一张只读预览；不把文件写回终端，也不改盘上任何东西。 -->
+    <section class="rsb-mod" data-mod="files">
+      <!-- 一条 32px 工具条（Orca FileExplorerToolbar 的 h-8）：视图切换、
+           计数、点文件开关、刷新。**不再重复模块图标和「文件」二字** ——
+           上面活动条里那颗图标已经是这个模块的身份，页面里再说一遍就是噪音
+           （用户 2026-10-20 第三次点名："视觉重叠度太高了"）。 -->
+      <div id="files-bar">
+        <div class="fsegs" role="tablist" aria-label="文件视图">
+          <button type="button" class="fseg on" data-fmode="touched" role="tab"
+            title="当前这一格在转录里碰过的文件（新建 / 改动 / 读过）">碰过的</button>
+          <button type="button" class="fseg" data-fmode="all" role="tab"
+            title="工作区里的全部文件（只读；懒加载）">全部</button>
+        </div>
+        <span class="fsp"></span>
+        <span class="files-cnt" id="files-cnt"></span>
+        <button type="button" class="fdot" id="files-dot" aria-pressed="false"
+          title="显示/隐藏 . 开头的文件">.env</button>
+        <button class="icon-btn" id="files-refresh" title="刷新文件树">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></svg>
+        </button>
       </div>
-      <div class="scroll"><div class="vlist" id="need-list"></div></div>
+      <div id="files-rootrow" hidden>
+        <select id="files-root" aria-label="文件树根目录"></select>
+      </div>
+      <div class="scroll"><div id="files-tree"><div class="empty">还没有可显示的文件。</div></div></div>
     </section>
 
     <!-- ② 子代理 —— 从左侧列表的第三组搬过来。它原本和主会话挤在同一个
          滚动区里，但它说的其实是"当前这个工作**衍生出去**的那些会话"，
          和右栏这一列的语义一致，所以归到这里。 -->
     <section class="rsb-mod" data-mod="side" hidden>
-      <div class="bhead">
-        <span class="ico">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg>
-        </span>
-        <span class="nm2">子代理</span>
-        <div class="rt"><span class="pill g" id="rsb-side-cnt">0</span></div>
-      </div>
+      <!-- 没有模块头：活动条上的图标就是身份。计数在下面那行 caption 里
+           （"会话库里的子代理 · N"），不再另起一条重复的标题行。 -->
       <!-- 两段，**都叫子代理，但来源不同**：
            #side-live  = 当前这一格**现在**派生出去的子代理（hook SubagentStart/Stop
                          + 转录里的 Agent 工具调用），是实时信号。
@@ -352,37 +365,17 @@
       </div>
     </section>
 
-    <!-- ③ 改动 —— 数据来自**跟着转录文件走**的那条腿（transcript.go）：
-         Edit 的结果里带一份标准 unified diff（structuredPatch），数 +/- 前缀
-         就是 ±N；Write 带整份 content，数行数就是 +N。不用我们自己 diff 两份文本。
-         两段分组：「改过的」（edit/write，这里才有 ±N）在前，「读过的」在后 ——
-         读过的文件不是"改动"，但它同样是"这个会话碰过什么"的读数，
-         藏掉就等于每次都要靠记忆猜它读过什么。 -->
-    <section class="rsb-mod" data-mod="diff" hidden>
-      <div class="bhead">
-        <span class="ico">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M9 10h6"/><path d="M12 13V7"/><path d="M9 17h6"/></svg>
-        </span>
-        <span class="nm2">改动</span>
-        <span class="sub ell" id="led-who">没有当前格</span>
-        <div class="rt"><span class="sub" id="led-sum"></span><span class="pill" id="led-cnt">0</span></div>
-      </div>
-      <div class="scroll"><div class="vlist" id="led-list"></div></div>
-    </section>
-
-    <!-- ④ 流水 —— 当前这一格的**实时**活动（转录里每一条 tool_use / 文本 / 你的话）。
+    <!-- ③ 流水 —— 当前这一格的**实时**活动（转录里每一条 tool_use / 文本 / 你的话）。
          和「对话流」的分工要说清楚，否则这两栏看着像重复：
            流水   = 当前格、**现在**、结构化到"哪一步在动哪个文件"、跟着转录增量进来
            对话流 = 左栏选中的**那个会话**、全文、来自索引器（是会话库的读物）
          一条是"活着的那一格的脉搏"，一条是"翻旧账"。 -->
     <section class="rsb-mod" data-mod="flow" hidden>
-      <div class="bhead">
-        <span class="ico">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></svg>
-        </span>
-        <span class="nm2">流水</span>
+      <!-- 24px 上下文行：主语（当前格）+ 条数。没有模块图标/名字 ——
+           活动条上已经有「流水」，这里只补这条流**讲的是谁**。 -->
+      <div class="rmod-bar">
         <span class="sub ell" id="feed-who">没有当前格</span>
-        <div class="rt"><span class="pill" id="feed-cnt">0</span></div>
+        <span class="pill" id="feed-cnt">0</span>
       </div>
       <div class="scroll"><div class="vlist" id="feed-list"></div></div>
     </section>
@@ -696,6 +689,19 @@
                 <button type="button" class="set-reset" data-set-reset="defaultAgent" hidden>恢复默认</button>
               </div>
             </div>
+            <div class="settings-row" data-set-row="newAgentShortcut"
+                 data-search="快捷键 新建 新开 格 agent 默认 shortcut hotkey keybind new key">
+              <div class="settings-lab">
+                <b>新建格快捷键</b>
+                <span>按下后直接在当前文件夹用上次的 Agent 新开一格，不弹选择；没有记忆时用上面的默认 Agent。留空 = 关闭。<em class="set-def"
+                      data-set-default-hint="newAgentShortcut"></em></span>
+              </div>
+              <div class="settings-ctl">
+                <button type="button" class="set-btn set-key" id="set-newkey"
+                        data-set="record-newkey" aria-label="新建格快捷键">Ctrl+Alt+N</button>
+                <button type="button" class="set-reset" data-set-reset="newAgentShortcut" hidden>恢复默认</button>
+              </div>
+            </div>
             <div class="settings-row" data-set-row="confirmClose"
                  data-search="关闭 关窗 窗口 退出 确认 close window quit exit confirm">
               <div class="settings-lab">
@@ -776,6 +782,94 @@
      它们是单例，在 DOM 里看得见、量得到、截图里也跑不掉 —— 现造的元素
      "在不在页面上"这件事就只能靠日志证明。 -->
 <div id="cardmenu" role="menu"></div>
+<!-- 「需要你」的浮层（标题栏铃铛点开）。数据仍走 needModel/renderNeed ——
+     它和总览的「在等你」是同一份读数，不另算。fixed 定位，落点在铃铛下面，
+     打开时由 80-live 量一次；点外面 / Esc / 点一行都关。 -->
+<div id="need-pop" role="dialog" aria-label="需要你" hidden>
+  <div class="np-head">
+    <span class="np-title">需要你</span>
+    <span class="pill" id="need-cnt">0</span>
+    <span class="fsp"></span>
+    <button class="icon-btn np-x" id="need-pop-x" title="关闭" aria-label="关闭">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div class="np-body"><div class="vlist" id="need-list"></div></div>
+</div>
+
+<!-- 文件预览（只读）。点右栏文件树里的一行打开；正文由 Go 的 fs.read 给。
+     单例、静态放在这里：它盖住整个窗口，关闭前不改变盘上任何东西。 -->
+<div id="fview" role="dialog" aria-modal="true" aria-labelledby="fv-name" hidden>
+  <div class="fv-card" role="document">
+    <div class="fv-head">
+      <span class="fv-ico" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/></svg>
+      </span>
+      <div class="fv-id">
+        <b id="fv-name">文件</b>
+        <span class="fv-path" id="fv-path"></span>
+      </div>
+      <span class="fv-meta" id="fv-meta"></span>
+      <button class="fv-x" id="fv-x" title="关闭" aria-label="关闭">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <!-- 改动与文件正文在同一张预览里：点碰过的文件先落在「改动」（有 diff 时），
+         再切到「文件」看当前全文。2026-10-20 把原来独立的「改动」模块并进来,
+         同一份数据不再在两栏各说一遍。 -->
+    <div class="fv-tabs" id="fv-tabs" role="tablist" aria-label="文件视图" hidden>
+      <button type="button" class="fv-tab" data-fvtab="diff" role="tab">改动</button>
+      <button type="button" class="fv-tab" data-fvtab="code" role="tab">文件</button>
+      <span class="fsp"></span>
+      <span class="fv-sum" id="fv-sum"></span>
+    </div>
+    <div class="fv-note" id="fv-note" hidden></div>
+    <div class="fv-body" id="fv-body"><div class="fv-loading">读取中…</div></div>
+    <div class="fv-foot">
+      <button type="button" id="fv-copy">复制路径</button>
+      <button type="button" id="fv-reveal">在文件夹中显示</button>
+      <button type="button" id="fv-open">用默认程序打开</button>
+      <span class="fsp"></span>
+      <button type="button" id="fv-close">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 新建工作区（文件夹 + Agent，一个卡片里选完）。
+     形态照 Orca 的 NewWorkspaceComposer（Folder / Agent [Optional] / Create），
+     但文件夹用的是我们自己的项目池：选已有工作区，或者开系统选择器加一个新的。
+     Agent 只列**已安装且能启动**的；也可以选「不启动 Agent」（只添加文件夹）。
+     打开入口：标题栏/左栏的 +、项目行的 +、总览的「新建工作区」。 -->
+<div id="newspace" role="dialog" aria-modal="true" aria-labelledby="ns-title" hidden>
+  <div class="ns-card" role="document">
+    <div class="ns-head">
+      <span class="ns-title" id="ns-title">新建工作区</span>
+      <button class="ns-x" id="ns-x" title="关闭" aria-label="关闭">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="ns-body">
+      <div class="ns-lab">文件夹</div>
+      <select id="ns-folder" aria-label="选择工作区文件夹"></select>
+      <div class="ns-folder-row">
+        <button type="button" id="ns-pick">选择其他文件夹…</button>
+        <span class="ns-path ell" id="ns-path"></span>
+      </div>
+      <div class="ns-lab">Agent <span class="ns-opt">可选</span></div>
+      <div class="ns-agents" id="ns-agents" role="listbox" aria-label="选择 Agent"></div>
+      <div class="ns-note" id="ns-note"></div>
+    </div>
+    <div class="ns-foot">
+      <button type="button" id="ns-cancel">取消</button>
+      <button type="button" id="ns-create" class="primary">创建</button>
+    </div>
+  </div>
+</div>
+
 <!-- 「开一个 agent」选择面板（点标签条 + 打开）。和 #cardmenu 一样静态放在这里：
      单例、看得见、量得到。内容（工作区下拉、会话行）全是开的时候现填。 -->
 <div id="openpanel" role="dialog" aria-label="开一个 agent">
@@ -918,6 +1012,11 @@ window.__facts = [];
 <script defer src="/js/60-shell.js"></script>
 <script defer src="/js/70-flow.js"></script>
 <script defer src="/js/80-live.js"></script>
+<!-- 新建工作区卡片（文件夹 + Agent）与右栏文件树/预览。两者都从 80-live 的
+     状态里读数据，但各自是一个独立的面，不往 80-live 里再堆。 -->
+<script defer src="/js/81-newspace.js"></script>
+<script defer src="/js/82-file-icons.js"></script>
+<script defer src="/js/82-files.js"></script>
 <script defer src="/js/83-settings-search.js"></script>
 <script defer src="/js/84-settings.js"></script>
 <script defer src="/js/85-dash.js"></script>

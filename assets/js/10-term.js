@@ -173,6 +173,18 @@ const LUCIDE_TRIANGLE_ALERT =
   '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/>' +
   '<path d="M12 9v4"/><path d="M12 17h.01"/>';
 
+/* Lucide chevron-down（lucide-static 原文 path）—— 格子头上那颗常驻的
+   「换 Agent」下拉。用户 2026-10-20 定下的形态：箭头一直在 logo/名字后面，
+   未开始时亮蓝、开始后转灰（菜单项一起灰）；不再用格内横幅。
+   ⚠️ 不能在这个文件里调 40-chrome 的 lucide()：**第一个标签是模块求值期建的**，
+   那时 40-chrome 还没求值，函数根本不存在（10-term 头部那条 TDZ 教训）。
+   所以这里先把整段 SVG 拼成一个常量，建格时只用常量。 */
+const LUCIDE_CHEVRON_DOWN = '<path d="m6 9 6 6 6-6"/>';
+const AGENT_SWAP_SVG =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+  LUCIDE_CHEVRON_DOWN + '</svg>';
+
 // Go 的拒绝码 → 横幅（文案在这里，判据在 Go：码是它给的，我们只转述）
 function bannerForRefusal(r) {
   if (!r) return null;
@@ -215,6 +227,63 @@ function showCellBanner(t, info) {
   return true;
 }
 
+/* ===========================================================================
+   新格还没开始干活 → 可以换 Agent（用户 2026-10-20 定的形态）
+   ---------------------------------------------------------------------------
+   「还没开始」只有两个第一手判据，别的一律不算：
+     · 用户真的按键/粘贴/IME 提交（term.onKey / textarea paste /
+       compositionend）—— 焦点/滚动/复制/终端自动应答都不算；
+     · 除 SessionStart 外的任何 hook（用户离开子代理、工具调用、提问、Stop…）。
+   SessionStart 是新进程本身的开场白，不代表用户派了活，所以不算。
+   一触发就永久收灰：换 Agent 是**开局前**的选择，不是运行中改配置。
+   ⚠️ 入口是格子头上那颗**常驻**的下拉箭头（logo + Agent 名字后面）：
+   未开始 = accent 蓝，开始后 = faint 灰，菜单项一起灰并说明原因。
+   2026-10-20 拆掉了格内那条 24px 横幅（用户："上面标签栏下面马上又出现
+   一条切换栏，质感差"）——状态还在，只是不再多占一行。
+   ⚠️ 真正的切换在 60-shell 的 switchFreshAgent —— 它必须丢掉刚起的空会话
+   （pane.forget）再起新的一格，绝不能原地改一个已经连着 PTY 的 spec。
+   =========================================================================== */
+
+function freshAgentLabel(t) {
+  const id = (t && t.spec && t.spec.agent) || "";
+  const a = typeof opAgentById === "function" ? opAgentById(id) : null;
+  return (a && a.name) || id || "Agent";
+}
+
+/* 这一格开始干活了：头上的换人箭头由蓝转灰。返回是否真的改过（日志判据）。 */
+function freshCellStarted(t, why) {
+  if (!t || !t.fresh) return false;
+  t.fresh = false;
+  t.freshStartedBy = why || "";
+  if (t.freshBtn) {
+    t.freshBtn.classList.remove("live");
+    t.freshBtn.title = "换 Agent（这一格已经开始干活；要换请新开一格）";
+  }
+  if (t.cellEl) t.cellEl.classList.remove("fresh");
+  bootFact(`新格开始干活 tab=${t.id || 0} agent=${(t.spec && t.spec.agent) || "?"} ` +
+    `触发=${why || "?"} → 换 Agent 箭头转灰`);
+  return true;
+}
+
+/* 把"未开始"的状态挂到格子头上那颗下拉箭头上。
+   ⚠️ 只由**用户明确新开一格**的那几条路调用（newTabIn / newParallelTab /
+   总览启动），不跟冷恢复、接上已有、初始默认格混在一起 —— 那些不是"我刚点的
+   新格"，给它们一条换人提示只会变成噪音。
+   ⚠️ 不再建任何格内 DOM：2026-10-20 用户否掉了那条 24px 横幅。
+   状态只在标签对象上（t.fresh）+ 格子头的 class 上（.cell.fresh）。 */
+function armFreshCell(t, why) {
+  if (!t || !t.freshEligible || !TAB_LIST.includes(t)) return;
+  if (t.fresh || t.freshStartedBy || !t.id) return;
+  t.fresh = true;
+  if (t.cellEl) t.cellEl.classList.add("fresh");
+  if (t.freshBtn) {
+    t.freshBtn.classList.add("live");
+    t.freshBtn.title = `换一个 Agent（${freshAgentLabel(t)} 还没开始干活）`;
+  }
+  sendCtrl({ type: "log", msg: `新格提示 tab=${t.id || 0} pane=${t.paneID || 0} ` +
+    `agent=${(t.spec && t.spec.agent) || "?"} 未开始，可换 Agent（${why || "新开"}）` });
+}
+
 // createTab：建一个标签。**它是 async，但在第一个 await 之前就把终端建好、
 // 而且 fit 过一次了** —— 这条不能破：启动那段（模块顶层，等不了一个 await）
 // 拿到的必须是**已经 fit 过**的终端，否则第一个标签的尺寸要等下一帧才对。
@@ -226,11 +295,18 @@ function showCellBanner(t, info) {
 // 的（main.go tabManager.create），名字由 Go 发（term:<id>），前端不自己编 ——
 // 自己编的话，一旦前端连的时候 Go 还没注册，服务端会直接 404
 // （stream_server.go:247-256 在**连接建立时**才按名字查 handler）。
-async function createTab(spec) {
+async function createTab(spec, opts) {
   const T = {
     spec: spec || DEFAULT_SPAWN_SPEC,
     id: 0, streamName: "", stream: null,
     ready: false, connDown: false,
+    // —— 新格还没开始：提示条/换 Agent 键的状态。opts.fresh 是**用户新开一格**
+    //    的标记（见 armFreshCell 上面那段），冷恢复/接上/初始默认格都不带它。
+    freshEligible: !!(opts && opts.fresh),
+    fresh: false,
+    freshStartedBy: "",
+    freshBtn: null,
+    freshSwitching: false,
     // —— 标题与状态点：都要跟着**这个标签**走，切换标签时不能串
     agentTitleRaw: "", agentState: null,
     liveTitle: "",
@@ -308,12 +384,28 @@ async function createTab(spec) {
     `<span class="adot" data-state="idle" role="img" aria-label="空闲"></span>` +
     `<span class="tab-ico"></span>` +
     `<span class="nm ell"></span>` +
+    // **常驻**的下拉箭头（用户 2026-10-20 确认：未开始蓝、开始后灰）：
+    // 它就是"换 Agent"的入口，不再另起一条横幅。放在 × 左边 ——
+    // 它是"改这一格"，不是"关这一格"，两个动作不能挨着读错。
+    `<button class="aswap" type="button" aria-label="换 Agent" ` +
+      `title="换 Agent">${AGENT_SWAP_SVG}</button>` +
     `<span class="x" title="关闭">×</span>`;
   T.dotEl = T.tabEl.querySelector(".adot");
   T.icoEl = T.tabEl.querySelector(".tab-ico");
   T.nmEl  = T.tabEl.querySelector(".nm");
+  T.freshBtn = T.tabEl.querySelector(".aswap");
   T.icoEl.innerHTML = agentTabIcon(T.spec.agent); // agent 图标只在格子头这一个落点（见 P5 那段注释）
   renderTabTitle(T);
+  T.freshBtn.addEventListener("click", (e) => {
+    // 不能冒泡到 #termbody 的 click：那一条会把 .x 当关闭、还会顺手切格；
+    // 换 Agent 是这一格自己的事，由它自己处理。
+    // ⚠️ 不要求 T.fresh：开始后菜单也要能打开（项是灰的、点了会说明为什么）。
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof openFreshAgentMenu === "function") {
+      openFreshAgentMenu(T, T.freshBtn);
+    }
+  });
 
   T.cellEl.appendChild(T.tabEl);
   T.cellEl.appendChild(T.cellBody);
@@ -653,6 +745,18 @@ stream.onmessage = (ev) => {
   else if (ArrayBuffer.isView(d)) term.write(new Uint8Array(d.buffer, d.byteOffset, d.byteLength));
   else                            term.write(String(d));
 };
+/* 「未开始」的门只认**用户动作**，不能用 term.onData 判 ——
+   ⚠️ 2026-10-20 真机验收逮到的 bug：xterm 对终端查询的**自动应答**也走 onData
+   （焦点上报 `ESC[I`、DA/DSR 等）。Claude 一启动就发 `?9001h` / `?1004h`，
+   xterm 回的应答被当成"终端输入"，于是 `新格提示 ... 未开始` 的下一行立刻是
+   `新格开始干活 ... 触发=终端输入`，用户根本没碰键盘，⇄ 换 Agent 就没了。
+   现在只认三种真的由用户发起的动作：按键（onKey）、粘贴、输入法提交。
+   onData 只负责把字节送给 PTY（自动应答也必须送，否则终端会等应答）。 */
+term.onKey(() => freshCellStarted(T, "终端按键"));
+if (term.textarea) {
+  term.textarea.addEventListener("paste", () => freshCellStarted(T, "粘贴"));
+  term.textarea.addEventListener("compositionend", () => freshCellStarted(T, "输入法提交"));
+}
 term.onData((d) => { if (ready) stream.send(enc.encode(d)); });
 
 // 每次 xterm 改变列宽都会**折行重排**已有内容，而 xterm 会在这一步把上一帧的

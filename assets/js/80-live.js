@@ -40,6 +40,10 @@ let cardMenuAgent = null;
 /* 第四种主语：「已关闭」的 agent（没有格对象，只有那条薄快照）。
    它和 agent 菜单互斥 —— 开一份菜单时另外几个身份一律清掉（见 open*Menu）。 */
 let cardMenuClosed = null;
+/* 第五种主语：**还没开始干活的新格**（格子头的 ⇄ / 格内提示条的「切换」）。
+   它和上面四种互斥；动作只有一条：换一个 Agent 重开这一格
+   （switchFreshAgent，见 60-shell）。 */
+let cardMenuFresh = null;
 let cardMenuRowEl = null;  // 菜单是从**哪个元素**上开出来的（.arow / .card）——
                            // 「重命名」拿它去找要被换掉的标题元素（见 openCardMenu）
 // lucide circle-info / check / x（同一套笔法，官方 path 原文）
@@ -204,13 +208,85 @@ function openCardMenu(cardEl, anchor, alignRight) {
   return true;
 }
 
-function closeCardMenu(why) {
-  const menu = $("cardmenu");
-  if (!cardMenuCard && !cardMenuProj && !cardMenuAgent && !cardMenuClosed) return;
+/* 格子头上那颗常驻下拉的菜单：和项目/agent 菜单共用 #cardmenu，只列
+   **可启动**的 Agent。
+   两种状态（用户 2026-10-20 确认）：
+     · 未开始 —— 其它项可点，换 = 重开这一格；
+     · 已经开始 —— 当前项和其它项**一律灰掉**，点了会说明"要换请新开一格"，
+       不静默（不可用的动作做灰、做说明，不做隐）。 */
+function freshMenuItems(t) {
+  const cur = (t.spec && t.spec.agent) || "";
+  const started = !t.fresh;
+  const list = opCatalog().filter(opLaunchable);
+  if (!list.length) {
+    return [{ act: "fresh:none", icon: lucide(LUCIDE_INFO, 13),
+      label: "没有可启动的 Agent", cls: " na",
+      hint: "没有检测到已安装、能启动的 Agent。去总览 → Agent 安装。" }];
+  }
+  return list.map((a) => {
+    const isCur = a.id === cur;
+    let cls = "", hint;
+    if (isCur) {
+      cls = " na";
+      hint = started
+        ? "现在就是这个 Agent；这一格已经开始干活"
+        : "现在就是这个 Agent；这一格还没开始，随时可以换";
+    } else if (started) {
+      cls = " na";
+      hint = `${a.name}：这一格已经开始干活，不能原地换 —— 要换请新开一格（Ctrl+Alt+N）`;
+    } else {
+      hint = `换成 ${a.name}：这一格会重开（还没开始，旧的空会话不留记录）`;
+    }
+    return {
+      act: "fresh:" + a.id,
+      icon: opAgentIcon(a.icon) || lucide(LUCIDE_INFO, 13),
+      label: a.name + (isCur ? "（当前）" : ""),
+      cls, hint,
+    };
+  });
+}
+
+function openFreshAgentMenu(t, anchorEl) {
+  if (!t || !TAB_LIST.includes(t)) return;
+  const r = anchorEl.getBoundingClientRect();
   cardMenuCard = null;
   cardMenuProj = null;
   cardMenuAgent = null;
   cardMenuClosed = null;
+  cardMenuFresh = t;
+  cardMenuRowEl = null;
+  showMenuAt(`<div class="mhead">Agent · ${t.fresh ? "这一格还没开始" : "这一格已经开始"}</div>`,
+    freshMenuItems(t), r, false,
+    `格子头 Agent 菜单 tab=${t.id || 0} agent=${(t.spec && t.spec.agent) || "?"} ` +
+    `fresh=${t.fresh ? 1 : 0}`);
+}
+
+function doFreshAct(act, t) {
+  if (!act || act.indexOf("fresh:") !== 0) return;
+  const id = act.slice("fresh:".length);
+  if (id === "none") {
+    showToast("没有可启动的 Agent", "没有检测到已安装、能启动的 Agent。去总览 → Agent 安装。", "err");
+    return;
+  }
+  // 已经开始干活：菜单项是灰的，但点了要**说清楚**为什么不做（不做静默）。
+  if (!t.fresh) {
+    showToast("这一格已经开始干活", "换 Agent 只能在新会话开始前；要换请新开一格。", "info");
+    sendCtrl({ type: "log", msg: `换 Agent 拒绝：tab=${t.id || 0} 已开始` +
+      `（${t.freshStartedBy || "?"}）` });
+    return;
+  }
+  // 不 await：菜单已经关了，重开一格是后台上的一段异步动作（内部自己会报结果）。
+  switchFreshAgent(t, id);
+}
+
+function closeCardMenu(why) {
+  const menu = $("cardmenu");
+  if (!cardMenuCard && !cardMenuProj && !cardMenuAgent && !cardMenuClosed && !cardMenuFresh) return;
+  cardMenuCard = null;
+  cardMenuProj = null;
+  cardMenuAgent = null;
+  cardMenuClosed = null;
+  cardMenuFresh = null;
   cardMenuRowEl = null;
   menu.classList.remove("on");
   if (why) sendCtrl({ type: "log", msg: `菜单 关闭（${why}）` });
@@ -341,7 +417,9 @@ document.addEventListener("click", (e) => {
       /* 先认 agent 菜单（2026-10-17 加的第三种主语），再认项目菜单。
          两个身份和行元素都**先取在手里再关** —— closeCardMenu 会把它们清成 null
          （项目那条的老教训：关完再读就是"没有身份"，整个动作静默不做）。 */
-      const a = cardMenuAgent, cl = cardMenuClosed, arow = cardMenuRowEl, p = cardMenuProj;
+      const a = cardMenuAgent, cl = cardMenuClosed, fr = cardMenuFresh;
+      const arow = cardMenuRowEl, p = cardMenuProj;
+      if (fr) { closeCardMenu("选了菜单项"); doFreshAct(actEl.dataset.act, fr); return; }
       if (a) { closeCardMenu("选了菜单项"); doAgentAct(actEl.dataset.act, actEl, a, arow); return; }
       if (cl) { closeCardMenu("选了菜单项"); doClosedAct(actEl.dataset.act, actEl, cl, arow); return; }
       if (p) { closeCardMenu("选了菜单项"); doProjAct(actEl.dataset.act, actEl, p); }
@@ -365,12 +443,28 @@ document.addEventListener("click", (e) => {
   /* 点菜单外面 = 关。⚠️ 这一句原来只判 `cardMenuCard`（卡片菜单），而**项目/目录
      的菜单**身份在 `cardMenuProj` 里 —— 于是项目菜单点空白处关不掉（用户报的
      "必须点某个按钮才能取消"）。两种菜单都是这一枚 #cardmenu，守卫就该认两种。 */
-  if (cardMenuCard || cardMenuProj || cardMenuAgent || cardMenuClosed) closeCardMenu("点了菜单外面");
+  if (cardMenuCard || cardMenuProj || cardMenuAgent || cardMenuClosed || cardMenuFresh) {
+    closeCardMenu("点了菜单外面");
+  }
   /* 「开一个 agent」面板同一套：点面板外面 = 关。⚠️ 触发它的那颗 + 要排除 ——
      不排除的话捕获阶段先关、随后的 click 又把它打开，看起来像"关不掉"。 */
   if ($("openpanel").classList.contains("on")
       && !e.target.closest("#openpanel") && !e.target.closest("#tab-add")) {
     closeAgentPanel("点了面板外面");
+  }
+  /* 铃铛浮层 / 文件预览 / 新建工作区卡片：同一套"点外面 = 关"。
+     触发器（铃铛）和卡片本身要排除，否则捕获阶段先关、随后的 click 又打开。 */
+  if ($("need-pop") && !$("need-pop").hidden
+      && !e.target.closest("#need-pop") && !e.target.closest("#need-bell")) {
+    setNeedPop(false, "点了外面");
+  }
+  if (typeof closeFileView === "function"
+      && $("fview") && !$("fview").hidden && !e.target.closest(".fv-card")) {
+    closeFileView("点了外面");
+  }
+  if (typeof closeNewSpace === "function"
+      && $("newspace") && !$("newspace").hidden && !e.target.closest(".ns-card")) {
+    closeNewSpace("点了外面");
   }
 }, true);
 
@@ -420,7 +514,9 @@ document.addEventListener("contextmenu", (e) => {
    `菜单 关闭（选了菜单项）` 一种关闭方式，`点了菜单外面` 一次都没出现过。
    改成"开着菜单就关"（关没开的时候 closeCardMenu 自己就是空操作）。 */
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && (cardMenuCard || cardMenuProj || cardMenuAgent || cardMenuClosed)) closeCardMenu("按了 Esc");
+  if (e.key === "Escape" && (cardMenuCard || cardMenuProj || cardMenuAgent || cardMenuClosed || cardMenuFresh)) {
+    closeCardMenu("按了 Esc");
+  }
   if (e.key === "Escape") closeAgentPanel("按了 Esc");
 }, true);
 window.addEventListener("resize", () => {
@@ -764,6 +860,10 @@ function applyHook(m) {
   if (tab <= 0) return;                     // 对比窗口（wt）不是格子，不进这一列
   const t = liveTab(tab);
   if (!t) return;
+  /* 新格"还没开始"的门：除 SessionStart 外的任何 hook 都是活证据
+     （用户发了提示 / 批准框 / 工具调用 / Stop …）。SessionStart 只是新进程的
+     开场白，不代表用户派了活，所以不算。门一关就永久收起换 Agent 的入口。 */
+  if (m.event && m.event !== "SessionStart") freshCellStarted(t, `hook ${m.event}`);
   /* 「这一格跑的是哪条会话」—— 左栏那条腿就认它（tabForSession）：点会话行时
      "它在跑 ⇒ 跳过去"、行上那句「正在第 N 格里跑」、还有那行的选中高亮，全靠
      这一个字段。在此之前**没有任何地方写过它**，于是那三件事全是死的 ——
@@ -1044,6 +1144,7 @@ function askActsSnapshot(why) {
   if (!t || !snapAsked || snapAsked.has(t.id)) return;
   snapAsked.add(t.id);
   sendCtrl({ type: "acts.snapshot", tab: t.id });
+  sendCtrl({ type: "files.snapshot", tab: t.id });
   sendCtrl({ type: "log", msg: `对话流 要一份完整快照 tab=${t.id}（${why}）` });
 }
 
@@ -1058,6 +1159,7 @@ function askAllSnapshots(why) {
     if (snapAsked.has(t.id)) continue;
     snapAsked.add(t.id);
     sendCtrl({ type: "acts.snapshot", tab: t.id });
+    sendCtrl({ type: "files.snapshot", tab: t.id });
     n++;
   }
   if (n) sendCtrl({ type: "log", msg: `群组 补快照 ${n} 格（${why}）` });
@@ -1122,7 +1224,7 @@ function paintAttention() {
 // （Orca 能拿 Playwright 截图，我们只有日志）。所以每个模块渲染完回一条读数：
 // 行数、分组、以及第一行的内容。只在**内容变了**的时候回，否则 400ms 一条
 // 转录会让日志原地爆炸。
-// ⚠️ 去重必须**按模块**分键（第一次写成"一个全局变量"，四个模块轮流写它、
+// ⚠️ 去重必须**按模块**分键（第一次写成"一个全局变量"，几个模块轮流写它、
 // 于是每一条都和上一条不同，等于没有去重 —— 日志里同一行刷三遍就是这个原因）。
 const lastUI = new Map();
 function uiFact(key, s) {
@@ -1226,8 +1328,16 @@ function renderNeed() {
   if (M.wait.length) {
     html += `<div class="cap">在等你 · ${M.wait.length}</div>` + M.wait.map(needRowHTML).join("");
   }
-  if (M.quiet.length) {
-    html += `<div class="cap">空闲 · ${M.quiet.length}</div>` + M.quiet.map(needRowHTML).join("");
+  // quiet 里混着两种事：真的没事做（idle），和"你正看着它，所以不算未读"
+  // （前台格的权限框/提问）。原来一律写「空闲」—— 于是一条「要你批权限」
+  // 躺在标题「空闲」下面，读起来像自相矛盾。分开写，判据只用 kind，不另算。
+  const quietSeen = M.quiet.filter((r) => r.kind !== "idle");
+  const quietIdle = M.quiet.filter((r) => r.kind === "idle");
+  if (quietSeen.length) {
+    html += `<div class="cap">已看到 · ${quietSeen.length}</div>` + quietSeen.map(needRowHTML).join("");
+  }
+  if (quietIdle.length) {
+    html += `<div class="cap">空闲 · ${quietIdle.length}</div>` + quietIdle.map(needRowHTML).join("");
   }
   if (!M.rows.length) {
     html = `<div class="empty">没有在等你的格子。<br>
@@ -1235,12 +1345,14 @@ function renderNeed() {
       数据来自 agent 自己的 hook 事件和它的会话登记表，不靠猜。</div>`;
   }
   swapList("need-list", html);
-  $("need-cnt").textContent = M.rows.length;
+  const cnt = $("need-cnt");
+  if (cnt) cnt.textContent = M.rows.length;
   const first = M.rows[0];
+  const badge = $("need-badge");
   uiFact("need", `需要你 共${M.rows.length}（未读${M.wait.length}/空闲${M.quiet.length}）` +
     (first ? ` 首行=格子${first.t.id} ${NEED_WHY[first.kind]}` +
       (first.text ? `「${String(first.text).replace(/\s+/g, " ").slice(0, 24)}」` : "") : "") +
-    ` 徽标=${$("need-badge").hidden ? "藏" : $("need-badge").textContent}`);
+    ` 徽标=${!badge || badge.hidden ? "藏" : badge.textContent}`);
 }
 
 function paintNeedBadge() {
@@ -1251,72 +1363,55 @@ function paintNeedBadge() {
   b.textContent = n > 99 ? "99+" : String(n);
   // 提示挂在**按钮**上而不是徽标上：徽标是 pointer-events:none（悬停要落到按钮
   // 上才点得动），挂在它身上等于永远不显示。
-  const btn = b.closest(".arbtn");
-  if (btn) btn.title = n ? `需要你 · ${n} 件还没看` : "需要你";
+  // 2026-10-19：按钮从右栏活动条搬到了标题栏铃铛 —— 这里别再写 `.arbtn`
+  // （那会把 title 静默留在旧元素上，铃铛永远只有一句"需要你"）。
+  const btn = b.closest("button");
+  if (btn) {
+    btn.title = n ? `需要你 · ${n} 件还没看` : "需要你";
+    btn.classList.toggle("has", !!n);
+  }
 }
 
-// —— ③ 改动。两段（改过的 / 读过的），字母照 git 那套：A 新建、M 改动、
-//    R 读过。±N 是**字面量**（Orca 的改动行也是把 +/- 各画成一段带色文本），
-//    两位都为 0 时整段不出现。
+/* 「需要你」浮层（标题栏铃铛）。打开/关闭只动 hidden 与 aria-expanded；
+   列表内容仍由 renderNeed 每次重画（它本来就在 renderLive 里跑）。 */
+function placeNeedPop() {
+  const pop = $("need-pop"), bell = $("need-bell");
+  if (!pop || !bell || pop.hidden) return;
+  const b = bell.getBoundingClientRect();
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  let left = Math.round(b.right - w);
+  left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+  let top = Math.round(b.bottom + 6);
+  if (top + h > window.innerHeight - 8) top = Math.max(8, Math.round(b.top - h - 6));
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+}
+function setNeedPop(open, why) {
+  const pop = $("need-pop"), bell = $("need-bell");
+  if (!pop || !bell) return;
+  if (!!open === !pop.hidden) return;
+  pop.hidden = !open;
+  bell.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    renderNeed();       // 打开这一下按最新数据画（平时也在画，这里只是保证）
+    placeNeedPop();
+  }
+  sendCtrl({ type: "log", msg: `铃铛 ${open ? "打开" : "关闭"}（${why || ""}）` +
+    ` 条数=${$("need-cnt") ? $("need-cnt").textContent : "?"}` +
+    ` 落点=${open ? `${pop.style.left},${pop.style.top}` : "-"}` });
+}
+
+// —— 文件台账的行标记。字母照 git 那套：A 新建、M 改动、R 读过。
+//   独立「改动」模块并进文件预览之后，这三个符号只剩文件树在用；
+//   ±N 仍是**字面量**（来自转录里 Edit 的 structuredPatch / Write 的 content）。
 const OP_LETTER = { write: "A", edit: "M", read: "R" };
 const OP_NAME = { write: "新建", edit: "改动", read: "读过" };
 // 一个文件可能被读过也被改过（ops 是个**去重集合**）——展示时取"最重"的那个动作：
-// 新建 > 改动 > 读过。抽成一个函数是因为流水那条读数（uiFact）也要用它，
+// 新建 > 改动 > 读过。抽成一个函数是因为文件树和预览都要用它，
 // 两处各写一遍必然有一天不一致。
 function opOf(f) {
   const ops = (f && f.ops) || [];
   return ops.includes("write") ? "write" : ops.includes("edit") ? "edit" : "read";
-}
-function ledRowHTML(f) {
-  const ops = f.ops || [];
-  const op = opOf(f);
-  const p = f.rel || f.path || "";
-  const i = p.lastIndexOf("/");
-  const dir = i < 0 ? "" : p.slice(0, i + 1);
-  const nm = i < 0 ? p : p.slice(i + 1);
-  const d = (f.add || f.del)
-    ? `<span class="d"><span class="d-add">+${f.add || 0}</span><span class="d-del">−${f.del || 0}</span></span>`
-    : `<span class="d"></span>`;
-  const tip = `${f.path}\n${ops.map((o) => OP_NAME[o] || o).join(" + ")}${f.at ? "\n" + f.at : ""}`;
-  return `<div class="vrow led" title="${esc(tip)}">
-    <span class="op ${OP_LETTER[op]}">${OP_LETTER[op]}</span>
-    <span class="fi">${svg(G_FILE, 13, 1.8)}</span>
-    <span class="nm"><i>${esc(dir)}</i><b>${esc(nm)}</b></span>
-    ${d}
-  </div>`;
-}
-
-function renderLedger() {
-  const t = activeTab;
-  const v = t ? LIVE.get(t.id) : null;
-  const files = (v && v.files) || [];
-  $("led-who").textContent = t ? currentTabTitle(t) : "没有当前格";
-  // 只回传格子号：session id 在 Go 那边（前端从来没拿到过它，见 main.go 的
-  // bySession 那张表）—— 这里写个"session=?"只会让人以为关联断了。
-  $("led-who").title = t ? `格子 ${t.id}` : "";
-  const changed = files.filter((f) => (f.ops || []).some((o) => o !== "read"));
-  const read = files.filter((f) => !(f.ops || []).some((o) => o !== "read"));
-  let add = 0, del = 0;
-  for (const f of changed) { add += f.add || 0; del += f.del || 0; }
-  $("led-cnt").textContent = changed.length;
-  $("led-sum").innerHTML = (add || del)
-    ? `<span class="d-add">+${add}</span> <span class="d-del">−${del}</span>` : "";
-  let html = "";
-  if (changed.length) {
-    html += `<div class="cap">改过 · ${changed.length}</div>` + changed.map(ledRowHTML).join("");
-  }
-  if (read.length) {
-    html += `<div class="cap">读过 · ${read.length}</div>` + read.map(ledRowHTML).join("");
-  }
-  if (!files.length) {
-    html = `<div class="empty">${t ? "这一格还没碰过文件。" : "没有当前格。"}<br>
-      这里是跟着它的转录文件（<code>*.jsonl</code>）读出来的：
-      Edit 的结果里带一份标准 unified diff，<code>+/−</code> 就是那么数出来的。</div>`;
-  }
-  swapList("led-list", html);
-  const f0 = changed[0] || read[0];
-  uiFact("led", `改动 当前格=${t ? t.id : "?"} 改${changed.length}/读${read.length} +${add}/−${del}` +
-    (f0 ? ` 首行=${OP_LETTER[opOf(f0)]} ${f0.rel || f0.path} +${f0.add || 0}/−${f0.del || 0}` : ""));
 }
 
 // —— ④ 流水。新的在上（和 Orca 的 activity 列表一致），不自动滚。
@@ -1634,17 +1729,19 @@ function renderSideLive() {
 function renderLive() {
   paintNeedBadge();                       // 徽标永远要（模块条可能收着）
   for (const t of TAB_LIST) renderAgentDot(t);
-  /* ⚠️ 四个模块**每次都全画**，不是只画当前显示的那个。
-     代价是每次多几次 innerHTML（四个列表加起来：三个是"当前格"的短表，
-     需要你是每格一行 —— N 格也就 N 行），换来两件事：
+  /* ⚠️ 模块**每次都全画**，不是只画当前显示的那个。
+     代价是每次多几次 innerHTML（文件/子代理是"当前格"的短表，需要你是每格一行
+     —— N 格也就 N 行），换来两件事：
        ① 切模块时不可能看到过期内容（数据在你看另一个模块时也一直在更新）；
-       ② 验收时日志里四条读数是一组，能直接对上"这一刻四个模块各是什么"。
+       ② 验收时日志里几条读数是一组，能直接对上"这一刻每个模块各是什么"。
      唯一"贵"的是流水（屏上 120 行）；它本来也就是屏幕上会滚的那一栏。 */
   renderNeed();
+  /* 右栏「文件」：碰过的列表跟着转录增量更新；全部树只在签名变化时重画
+     （renderFiles 自己做这道闸，展开态和滚动位置不会被 700ms 的推送冲掉）。 */
+  if (typeof renderFiles === "function") renderFiles();
   // 总览开着时，「在跑 / 在等你 / 今日轮次」跟着同一拍更新。
   // 热力图**不在这里重画** —— 它读的是会话库重扫的结果，不是 700ms 的推送。
   renderDashLive();
-  renderLedger();
   renderFeed();
   renderSideLive();
   // 任务栏闪烁跟未读一起重算（它只在"未读存在 + 窗口不在前台"这两个条件
@@ -1687,7 +1784,22 @@ $("need-list").addEventListener("click", (e) => {
   if (!row) return;
   const t = liveTab(row.dataset.tab | 0);
   jumpToTab(t);
+  setNeedPop(false, "点了需要你的一行");
 });
+if ($("need-bell")) {
+  $("need-bell").addEventListener("click", () =>
+    setNeedPop($("need-pop").hidden, "点铃铛"));
+  $("need-pop-x").addEventListener("click", () => setNeedPop(false, "点 ×"));
+  window.addEventListener("resize", placeNeedPop);
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    // 文件预览/新建卡片是更上层的模态：它们开着时 Esc 归它们，别把下面
+    // 那个铃铛浮层一起关掉。
+    const over = $("fview") && !$("fview").hidden;
+    const ns = $("newspace") && !$("newspace").hidden;
+    if (!over && !ns) setNeedPop(false, "Esc");
+  }, true);
+}
 
 /* ===========================================================================
    总览（Dashboard）

@@ -505,17 +505,15 @@ function renderDashStatus() {
   $("dash-ws-proj").textContent = dashNum(projs);
 }
 
-/* 「新建工作区」= 开系统文件夹选择器，把选中的目录加进项目池，然后跳到工作区。
-   不回「加成功了没有」—— project.add 没有应答帧（取消也不发），所以先在点下去
-   那一刻记一份路径快照，applyPool 收到新路径时才跳。2 分钟没等到就作废，免得
-   下一次无关的池子变动把用户莫名其妙拽进工作区。 */
+/* 「新建工作区」= 打开「文件夹 + Agent」卡片（2026-10-19 用户点名的形态）。
+   卡片里的「选择其他文件夹…」仍然走同一条 project.add；只是新路径先落到卡片里，
+   由用户决定要不要顺手开一个 agent。
+   ⚠️ newWsPending 那套快照判据保留给老的调用点/回退路径：现在没有地方再设置它，
+   所以正常的卡片流程不会把用户从总览拽走。 */
 let newWsPending = null;
 let newWsPendingAt = 0;
 function startNewWorkspace() {
-  newWsPending = new Set((STATE?.projects || []).map((p) => p.path));
-  newWsPendingAt = Date.now();
-  sendCtrl({ type: "project.add" });
-  sendCtrl({ type: "log", msg: "总览「新建工作区」→ 开系统文件夹选择器" });
+  openNewSpace({ why: "总览「新建工作区」" });
 }
 
 $("dash-status").addEventListener("click", (e) => {
@@ -558,11 +556,11 @@ function renderDashNeed() {
    （压暗会把 logo 一起吞掉）。 */
 let INSTALL = null; // { id, name, state:"running"|"done"|"failed", lines:[] }
 
-/* "有没有下载"是用户 2026-10-17 定的分界线：**只展开本机已经检测到的**，
-   并且按「接没接进 Perch」分成两组；没检测到的收进 magpie 那个样式的
-   "显示 N 个…" 折叠栏里（默认收起）。这样第一屏讲的都是"你能用的东西"，
-   不再把 15 个 agent 平铺成一面墙。 */
-let agentsFoldOpen = false;
+/* "有没有下载"是用户 2026-10-17 定的分界线：已检测到的按「接没接进 Perch」
+   分成两组；没检测到的收进 magpie 那个样式的折叠栏里。
+   2026-10-19 用户把默认改成了**展开**：收起时页面底部会空一截，先让用户
+   看到完整清单；要收起是他们自己的动作（同一个会话里不会被重画弹回去）。 */
+let agentsFoldOpen = true;
 
 function renderDashAgents() {
   const host = $("dash-agent-list");
@@ -672,7 +670,7 @@ function renderDashAgents() {
   if (launchOnly.length) html += group("仅启动", launchOnly, "launch");
   if (noLaunch.length) html += group("未接入", noLaunch, "nolaunch");
   if (!installed.length) {
-    html += `<div class="gw-empty">还没有检测到本机安装的 Agent —— 展开下面的清单可以直接装。</div>`;
+    html += `<div class="gw-empty">还没有检测到本机安装的 Agent —— 下面的清单可以直接装。</div>`;
   }
   if (missing.length) {
     html +=

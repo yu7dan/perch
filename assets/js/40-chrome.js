@@ -208,17 +208,18 @@ function saveRsbW(px) {
    activity bar 是同一套语义（它那边 item 列表里还混着插件面板的 key，
    见 store/right-sidebar-route.ts:25-58 的 normalizeRightSidebarRoute）。
 
-   前四个的主语都是**当前这一格**（需要你 / 子代理 / 改动 / 流水），
-   第五个（hist 对话流）的主语是**左栏选中的那个会话**。主语不同却被放在同一列，
-   是因为这一列本来就追问两件事："我的手边现在怎么样"（工作台）
-   和"我翻开的那个会话讲了什么"（历史）。等 C6b 之后 hist 该搬去「历史」。
+   2026-10-19：用户把「需要你」从这个模块条里搬走了 —— 它本质是一条消息
+   提示，应该长在标题栏的铃铛上；空出来的第一个位置给「文件」（agent 产出的
+   文件/代码要能在这一列里点开看）。现在的四项是：文件 / 子代理 / 改动 / 流水。
 
-   ⚠️ 顺序 = 用户点名的那三个 + 流水，别随手按字母重排：
-   需要你排第一是因为它是**唯一会主动找你**的那个。
+   ⚠️ 顺序 = 用户点名的那个 + 其余两个，别随手按字母重排：
+   文件排第一是因为它是这一列里**最常被主动打开**的那个。
    对话流（原来第 5 个）2026-10-15 移出这一组、改成下段常驻 —— 见 CSS 里
-   #rsb-mods / #rsb-hist 那段注释。旧 localStorage 里存着 "hist" 的由
-   showRsbMod 那条兜底降级到第一个模块，不会白屏。 */
-const RSB_MODS = ["need", "side", "diff", "flow"];
+   #rsb-mods / #rsb-hist 那段注释。独立「改动」模块 2026-10-20 并进文件预览
+   （点文件先看改动、再切全文），所以这里也把它拿掉；旧 localStorage 里存着
+   "need"/"hist"/"diff" 的由 showRsbMod 那条兜底降级到第一个模块（= 文件），
+   不会白屏，也自动完成迁移。 */
+const RSB_MODS = ["files", "side", "flow"];
 const RSB_MOD_KEY = "rsbMod";
 let rsbMod = RSB_MODS[0];
 
@@ -227,7 +228,7 @@ let rsbMod = RSB_MODS[0];
    "去看一眼子代理再切回来"就落到一篇长对话的顶部。现在它常驻、**不再被隐藏**，
    这条补丁于是整个删掉了：不需要记住一个从不消失的东西的位置。 */
 
-/* 每个格子的实时读数（需要你/子代理/改动/流水 四个模块的唯一数据源），
+/* 每个格子的实时读数（文件/子代理/流水，以及铃铛的"需要你"），
    由 hook / 会话登记表 / 转录三条腿往里写。
    ⚠️ **声明必须在这里**（启动那一段之前），不能挪到文件末尾那段处理逻辑旁边：
    启动时 setActive() → renderAgentDot() → cellState() 就会读它，
@@ -355,6 +356,12 @@ function setRsbOpen(open, why) {
   $("rsb").classList.toggle("off", !rsbOpen);
   $("rsb-open").hidden = rsbOpen;       // 标题栏那颗只在收起时出现
   applyRsbW(rsbW);
+  // 展开时立刻按当前模块画一次。收起期间 renderFiles/renderSideLive 都提前
+  // return（隐藏的列不该发请求/重画），所以展开这一下如果不画，文件树会空着
+  // 等下一次状态推送 —— 空闲时可能永远等不到。
+  if (rsbOpen && typeof RSB_READY !== "undefined" && RSB_READY) {
+    try { renderLive(); } catch (e) {}
+  }
   sendCtrl({ type: "log", msg: `右栏${rsbOpen ? "展开" : "收起"}（${why}）宽=${rsbOpen ? Math.round(rsbW) : 0} 模块=${rsbMod}` });
 }
 
@@ -708,7 +715,7 @@ bootFact(`启动建格：要 ${bootPromises.length} 个、界面留 ${TAB_LIST.l
          `分隔条x=${Math.round(ld.left)}..${Math.round(ld.right)}(宽${Math.round(ld.width)}) 列表右沿=${Math.round(lr.right)} ` +
          `左栏合计=${leftColsPx()}`);
   const rb = Math.round($("rsb").getBoundingClientRect().width);
-  // 上段的滚动区：**当前显示的那个模块**才有宽 —— rsbMod 是 flow 时四个模块
+  // 上段的滚动区：**当前显示的那个模块**才有宽 —— rsbMod 是 flow 时几个模块
   // 全 hidden（它在下段），这里就量不到，如实说"不在上段"，不报 0 当证据。
   const visMod = $("rsb-mods").querySelector(".rsb-mod:not([hidden]) .scroll");
   const hist = $("hist");

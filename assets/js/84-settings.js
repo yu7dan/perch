@@ -30,6 +30,11 @@ let CWD_PENDING = false;
 let CWD_SKIP_BLUR = false;
 let CWD_ERR = "";
 let CWD_PENDING_TIMER = 0;
+/* 正在录快捷键时按住的那个键位。null = 没在录。录制器是**一次性的**：
+   开始时装一个 capture keydown，结束（录到/取消/失焦）时连 blur 一起摘掉。 */
+let SHORTCUT_RECORDER = null;
+// Perch 已经吃掉的组合键。录制器拦下它们，免得用户设完才发现两颗键打架。
+const SHORTCUT_RESERVED = ["Ctrl+K", "Ctrl+Shift+B", "Ctrl+F"];
 
 const SETTINGS_SIZES = [12, 13, 14, 15, 16, 18];
 
@@ -71,6 +76,7 @@ function settingsDefaultLabel(key) {
   if (key === "termFontFamily") return v === "jetbrains" ? "JetBrains Mono" : "Cascadia Code";
   if (key === "startView") return v === "workspace" ? "工作区" : "总览";
   if (key === "defaultAgent") return "自动";
+  if (key === "newAgentShortcut") return v || "关闭";
   if (typeof v === "boolean") return v ? "开" : "关";
   return String(v);
 }
@@ -273,6 +279,20 @@ function syncSettingsUI() {
   }
 
   syncDefaultAgentSelect();
+
+  // 快捷键按钮：录制中显示提示语；否则显示当前组合键（空 = 未设置）。
+  // 这里**不改**录制状态本身 —— 录制器自己管开/关，applySettings 只负责画。
+  const keyBtn = $("set-newkey");
+  if (keyBtn) {
+    if (!SHORTCUT_RECORDING) keyBtn.textContent = SETTINGS.newAgentShortcut || "未设置";
+    keyBtn.classList.toggle("rec", SHORTCUT_RECORDING);
+    keyBtn.title = SHORTCUT_RECORDING
+      ? "按下新的组合键；Esc 取消，Backspace 清除"
+      : SETTINGS.newAgentShortcut
+        ? `现在是 ${SETTINGS.newAgentShortcut}；点一下重新录制`
+        : "点一下设置快捷键；留空 = 关闭";
+  }
+
   settingsSyncRadioTabStops();
 }
 
@@ -401,6 +421,81 @@ function renderSettings(reason) {
   if (reason) sendCtrl({ type: "log", msg: `设置页：${reason}` });
 }
 
+/* ---- 快捷键录制 -----------------------------------------------------------
+   点按钮 → 进入录制；下一次 keydown 被 capture 抓住。60-shell 的全局快捷键
+   处理器会先看 SHORTCUT_RECORDING，所以录制期间按什么都不会新建格子。
+   · Esc 取消（不改设置）；Backspace/Delete（不带修饰键）清空 = 关闭；
+   · 单按 Control/Alt/Shift 不算组合，继续等主键；
+   · 主键用 e.code 取物理键位（中文布局下 e.key 可能不是字母）。
+   录到的形状与落盘形状都走 05-prefs 的 normalizeShortcutString，不在这边
+   另拼一份 —— 两边各拼一份迟早漂移。 */
+function beginShortcutRecord(btn) {
+  if (!btn) return;
+  if (SHORTCUT_RECORDING) { endShortcutRecord(null, "再次点击取消"); return; }
+  SHORTCUT_RECORDING = true;
+  btn.classList.add("rec");
+  btn.textContent = "按下组合键…";
+  btn.title = "Esc 取消；Backspace 清除";
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault(); e.stopPropagation();
+      endShortcutRecord(null, "Esc 取消");
+      return;
+    }
+    if ((e.key === "Backspace" || e.key === "Delete") &&
+        !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+      e.preventDefault(); e.stopPropagation();
+      endShortcutRecord("", "清空");
+      return;
+    }
+    if (e.key === "Control" || e.key === "Alt" || e.key === "Shift" || e.key === "Meta") {
+      // 只按了修饰键：这不是一个组合，等主键。仍然拦住它，别让 WebView2
+      // 把 Alt 拿去开菜单（那会把焦点从这颗按钮上带走）。
+      e.preventDefault(); e.stopPropagation();
+      return;
+    }
+    e.preventDefault(); e.stopPropagation();
+    const chord = shortcutChordFromEvent(e);
+    if (!chord) {
+      showToast("这个键不能当快捷键", "需要 Ctrl 或 Alt + 字母、数字或 F1–F12。", "err");
+      return;
+    }
+    if (SHORTCUT_RESERVED.includes(chord)) {
+      showToast("这个组合键已被占用", `${chord} 已经是 Perch 的快捷键；换一个。`, "err");
+      return;
+    }
+    endShortcutRecord(chord, `录到 ${chord}`);
+  };
+  const onBlur = () => endShortcutRecord(null, "失焦取消");
+  SHORTCUT_RECORDER = { btn, onKey, onBlur };
+  document.addEventListener("keydown", onKey, true);
+  btn.addEventListener("blur", onBlur, { once: true });
+  btn.focus({ preventScroll: true });
+  sendCtrl({ type: "log", msg: "设置：开始录制新建格快捷键" });
+}
+function endShortcutRecord(chord, why) {
+  if (!SHORTCUT_RECORDING) return;
+  SHORTCUT_RECORDING = false;
+  const rec = SHORTCUT_RECORDER;
+  SHORTCUT_RECORDER = null;
+  if (rec) {
+    document.removeEventListener("keydown", rec.onKey, true);
+    rec.btn.removeEventListener("blur", rec.onBlur);
+    rec.btn.classList.remove("rec");
+  }
+  syncSettingsUI();
+  if (chord === null || chord === undefined) {
+    sendCtrl({ type: "log", msg: `设置：新建格快捷键录制结束（${why || "取消"}）` });
+    return;
+  }
+  const v = normalizeShortcutString(chord);
+  if (v === SETTINGS.newAgentShortcut) {
+    sendCtrl({ type: "log", msg: `设置：新建格快捷键没变（${v || "关闭"}）` });
+    return;
+  }
+  settingsSend({ newAgentShortcut: v }, v ? `新建格快捷键 → ${v}` : "新建格快捷键 → 关闭");
+}
+
 // 乐观写入：先让界面变，再落盘。Go 拒绝时会把旧值整份推回来（见文件头）。
 function settingsSend(patch, why) {
   applySettings(patch);
@@ -502,6 +597,10 @@ $("settings").addEventListener("click", (e) => {
     return;
   }
 
+  if (b.dataset.set === "record-newkey") {
+    beginShortcutRecord(b);
+    return;
+  }
   if (b.dataset.setReset !== undefined) {
     const key = b.dataset.setReset;
     if (!Object.prototype.hasOwnProperty.call(SETTINGS_DEFAULTS, key)) return;

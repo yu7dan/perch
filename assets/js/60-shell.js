@@ -193,12 +193,16 @@ function viewProbe(why) {
   const line = rows.map((el) => (el.querySelector(".nm") || {}).textContent || "?").join(" · ");
   const un = [...document.querySelectorAll("#un-view .proj")];
   /* **左栏的唯一不变量**（2026-10-17 起）：行 = agent。
-     模型里有几个格、DOM 里就画几行 —— 但**收起的工作区不画行**，所以 DOM 数
-     只能和"展开的那些"比。两个数都报出来，外加有多少格已经拿到 paneId
-     （身份到了的格将来能跨重启接回来）。 */
+     模型里有几个格、DOM 里就画几行。2026-10-20 起收起的组**也画**（折叠成
+     0 高 + inert），所以 DOM 数不再只等于"展开的那些" —— 另报一个"可见"
+     （展开组里的），两个数都对得上才算没漏行。 */
   const model = TAB_LIST.filter((t) => t.id > 0);
   const withPane = model.filter((t) => (t.paneID | 0) > 0).length;
   const stopped = model.filter((t) => t.connDown).length;
+  const agentsShown = agents.filter((el) => {
+    const g = el.closest(".agroup");
+    return !g || g.classList.contains("open");
+  }).length;
   // 导航栏那一列也要报：栏是两层设计的左层，"哪一项亮着、一共几项"在截图上
   // 只能目测，而这两件事正是"栏还在不在"的判据（我删掉它那一次就是这么被逮住的）。
   const nav = [...document.querySelectorAll("#rail .nav")]
@@ -207,7 +211,7 @@ function viewProbe(why) {
   // 通道**可能还没建好**（两条流是各开各的）—— 在模块求值/启动路径上直接
   // sendCtrl 会静默把这条读数吞掉（那个教训见 bootFact 的注释）。
   bootFact(`左栏形态 view=agents（${why}）工作区行=${projs.length}` +
-    ` agent行(DOM)=${agents.length} 已关闭行(DOM)=${closedRows.length}` +
+    ` agent行(DOM)=${agents.length} 可见=${agentsShown} 已关闭行(DOM)=${closedRows.length}` +
     ` 格子=${model.length} 有paneId=${withPane} 已停止=${stopped}` +
     ` 已关闭=${CLOSED_PANES.size}` +
     ` 前三行=${line || "（空）"}` +
@@ -309,6 +313,50 @@ function setProjOpen(path, on) {
   try { localStorage.setItem(PROJ_OPEN_KEY, JSON.stringify(projOpenMap)); }
   catch (e) { jserr("存左栏展开态", e); }
 }
+/* 「已关闭」的 disclosure（2026-10-19 装修左栏时加的）：一个工作区里关掉的
+   agent 不应该和正在干活的行抢同一段高度，但它们**也不是垃圾**（关格 ≠ 删）。
+   所以默认收起成一行「已关闭 N」，用户点开才铺出那些行。按工作区记住。 */
+const PROJ_CLOSED_KEY = "projClosed";
+let projClosedMap = null;
+try { projClosedMap = JSON.parse(localStorage.getItem(PROJ_CLOSED_KEY) || "{}") || {}; }
+catch (e) { projClosedMap = {}; }
+if (typeof projClosedMap !== "object") projClosedMap = {};
+function closedOpen(path) { return projClosedMap[path] === true; }
+function setClosedOpen(path, on) {
+  projClosedMap[path] = on;
+  try { localStorage.setItem(PROJ_CLOSED_KEY, JSON.stringify(projClosedMap)); }
+  catch (e) { jserr("存已关闭展开态", e); }
+}
+/* ---- 文件夹记住的 Agent（2026-10-20）------------------------------------
+   用户在新建卡片里**明确选过**谁，就记住这个文件夹用谁；快捷键下一次直接
+   用它。只有卡片里的显式选择写这里 —— 快捷键、没开始的新格换 Agent 都不写，
+   否则"最开始选的那个"会被悄悄改写。
+   键 = normPath(文件夹路径)。默认工作区也是真实路径（STATE.projects 里
+   synthetic 那一行），所以不会和空串分叉。 */
+const LAST_AGENT_KEY = "lastAgentByPath";
+let lastAgentMap = null;
+try { lastAgentMap = JSON.parse(localStorage.getItem(LAST_AGENT_KEY) || "{}") || {}; }
+catch (e) { lastAgentMap = {}; }
+if (typeof lastAgentMap !== "object" || Array.isArray(lastAgentMap)) lastAgentMap = {};
+function lastAgentFor(dir) {
+  const id = lastAgentMap[normPath(dir || "")];
+  return typeof id === "string" ? id.trim().toLowerCase() : "";
+}
+function rememberLastAgent(dir, agent) {
+  const id = String(agent || "").trim().toLowerCase();
+  if (!id) return;
+  const key = normPath(dir || "");
+  if (lastAgentMap[key] === id) return;
+  lastAgentMap[key] = id;
+  try { localStorage.setItem(LAST_AGENT_KEY, JSON.stringify(lastAgentMap)); }
+  catch (e) { jserr("存文件夹默认 Agent", e); }
+  sendCtrl({ type: "log", msg: `记住文件夹 Agent key=${key || "(默认)"} agent=${id}` });
+}
+/* 「+」的 title / 菜单 hint 里那半句：快捷键存在时才说，否则别占地方。 */
+function newAgentShortcutTip() {
+  const k = SETTINGS.newAgentShortcut;
+  return k ? `\n快捷键 ${k}：直接开这个文件夹上次用的 Agent（不弹选择）` : "";
+}
 // ---------------------------------------------------------------------------
 // 行的 HTML
 //
@@ -330,8 +378,19 @@ function setProjOpen(path, on) {
 // kind: "proj"（池子里的项目）| "adopt"（未归类里的一个目录）| "bare"（连默认目录都没有）
 // ⚠️ 「默认工作区」走的是 kind="proj"（它就是 STATE.projects 里的一条，只是由
 //    Go 合成、带 `synthetic:true`）—— 它的差异只有动作区那一点点，不值得再开一种行。
-function projRowHTML(p, tabs, kind, total, closed) {
-  const open = projOpen(p.path);
+/* 工作区行第二行只放"这是哪个目录"的短提示：240px 的列宽里，全路径会把
+   「N agent」挤到看不见。最后两级足够区分同名目录，全路径在 title 里。 */
+function projPathHint(p) {
+  const parts = String(p || "").split(/[\\/]/).filter(Boolean);
+  if (!parts.length) return "";
+  if (parts.length <= 2) return parts.join("\\");
+  return "…\\" + parts.slice(-2).join("\\");
+}
+
+function projRowHTML(p, tabs, kind, total, closed, forceOpen) {
+  // forceOpen = 搜索中命中的工作区强制摊开：否则命中的行藏在收起的工作区里，
+  // 搜索结果看起来"什么都没找到"。存储里的展开态不动 —— 清掉搜索词就回去。
+  const open = forceOpen || projOpen(p.path);
   const st = projDotState(tabs);
   // 行尾读数只说在场的东西：一个 agent 都没有就写 0 —— 空着会让人以为
   // "这一行不数东西"。它数的是**agent**，不是已经被抽屉收起来的会话。
@@ -344,7 +403,7 @@ function projRowHTML(p, tabs, kind, total, closed) {
   const syn = kind === "proj" && !!p.synthetic;
   let acts = "";
   if (kind === "proj" || syn) {
-    acts = `<span class="pg"><button class="cardbtn" data-pact="new" title="在 ${esc(p.name)} 里新开一个 agent">${ICON_PLUS}</button></span>`
+    acts = `<span class="pg"><button class="cardbtn" data-pact="new" title="在 ${esc(p.name)} 里新开一个 agent${esc(newAgentShortcutTip())}">${ICON_PLUS}</button></span>`
          + `<button class="cardbtn" data-pact="menu" title="更多动作">${ICON_DOTS}</button>`;
   } else if (kind === "adopt") {
     acts = `<span class="pg"><button class="cardbtn" data-pact="adopt" title="把这个目录收进项目池：${esc(p.path)}">${ICON_PLUS}</button></span>`
@@ -355,8 +414,9 @@ function projRowHTML(p, tabs, kind, total, closed) {
   else if (syn) tip = `${p.path}\n（默认工作区 —— 没归到别的项目里的东西都落在这儿。它不是一个可以删掉的条目，所以「从列表移除」是灰的）`;
   // 「无工作目录」那一组没有可折叠的东西（它不是目录，没有 path 可记展开态），
   // 所以它不画那颗箭头 —— 画了就是一颗点了没反应的东西。
-  const chev = kind === "bare" ? "" :
-    svg(open ? '<path d="M6 9l6 6 6-6"/>' : '<path d="M9 6l6 6-6 6"/>', 12, 2);
+  // ⚠️ 永远画**同一个** chevron-right：展开态由 `.proj.open .tw svg` 转 90°。
+  // 换字形是硬切，转过去才有"往哪边开"的动作感（Orca 的 chevron 也是这么做的）。
+  const chev = kind === "bare" ? "" : svg('<path d="M9 6l6 6-6 6"/>', 12, 2);
   /* 文件夹图标**带角标**：角标就是原来那颗状态点，从"名字前面单占一格"挪到
      文件夹图标的右下角。为什么这么挪（两个好处，都不是审美）：
        · 240px 的列里，名字前面同时排着"箭头 + 状态点 + 图标"三样，光装饰就吃掉
@@ -374,25 +434,54 @@ function projRowHTML(p, tabs, kind, total, closed) {
     + `<span class="tw">${chev}</span>`
     + `<span class="ricon">${lucide(LIST_ICON.folder, 15)}`
     + `<span class="adot-slot">${st ? dotHTML(st) : ""}</span></span>`
+    // 两行（2026-10-19 用户说"拥挤、难以描述"）：第一行只放名字，
+    // 第二行放目录提示 + agent 数。名字不再和行尾动作抢同一段宽度。
+    + `<span class="pbody">`
+    + `<span class="nml">`
     + `<span class="nm ell">${esc(p.name)}</span>`
     + (kind === "proj" && p.pinned && !syn ? `<span class="pin" title="置顶">${ICON_PIN}</span>` : "")
+    + `</span>`
+    + `<span class="meta">`
+    + (p.path ? `<span class="path ell" title="${esc(p.path)}">${esc(projPathHint(p.path))}</span>` : "")
     + `<span class="sum">${esc(sum)}</span>`
+    + `</span></span>`
     + `<span class="pacts">${acts}</span>`
     + `</div>`
     // 展开的那一组 agent 行**包在一个容器里**：`renderProjLive` 就地点更新时要
     // 能一次拿到"属于这个工作区的行"，而平铺成一片就得靠 data-path 反查
     // （`.proj` 后面的行属于谁，没有别的记账方式了）。
-    + (open ? agentRowsHTML(tabs, p.path, kind, closed) : "");
+    // ⚠️ 2026-10-20：收起时**也画**（不再从 HTML 里省掉）—— 高度用 grid
+    // 0fr↔1fr 过渡，收起组用 inert 挡住点击和 Tab。这样展开/收起是动画，
+    // 不是"整表重建后突然出现"。
+    + agentRowsHTML(tabs, p.path, kind, closed, open);
 }
 
-function agentRowsHTML(tabs, path, kind, closed) {
-  return `<div class="agroup" data-path="${esc(path)}" data-kind="${kind}"`
-    + ` data-ids="${tabs.map((t) => t.id).join(",")}">`
+function agentRowsHTML(tabs, path, kind, closed, open) {
+  const crows = closed || [];
+  const copen = closedOpen(path);
+  /* 「已关闭」的行排在活的行**后面**，而且默认收成一行「已关闭 N」：
+     它们在场的意义是"这个 agent 还在，只是收起来了"，不该和正在干活的
+     行抢同一段高度（2026-10-19 用户说左栏拥挤）。点开才铺出来。 */
+  const closedBlock = crows.length
+    ? `<button type="button" class="closed-toggle${copen ? " open" : ""}" data-ctoggle="1" `
+      + `aria-expanded="${copen ? "true" : "false"}" `
+      + `title="${copen ? "收起已关闭的 agent" : `展开 ${crows.length} 个已关闭的 agent`}">`
+      + `<span class="fchev">${svg('<path d="M9 6l6 6-6 6"/>', 10, 2)}</span>`
+      + `<span class="ctlabel">已关闭</span><span class="ctcount">${crows.length}</span></button>`
+      + `<div class="agroup closed-list" data-path="${esc(path)}" data-kind="${kind}"`
+      + `${copen ? "" : " hidden"}>`
+      + crows.map(closedRowHTML).join("") + `</div>`
+    : "";
+  // `.agwrap` 是 0fr↔1fr 折叠的"量高度的那一层"（见 CSS）：grid 的一行只能
+  // 装一个子项，所以所有行必须先包进同一个 wrapper。
+  // 收起时加 inert：行还在 DOM 里（renderProjLive 照常就地更新），但点不到、
+  // Tab 也进不去 —— 这和"从 HTML 里省掉"对用户是同一件事，对动画不是。
+  return `<div class="agroup${open ? " open" : ""}" data-path="${esc(path)}" data-kind="${kind}"`
+    + ` data-ids="${tabs.map((t) => t.id).join(",")}"${open ? "" : " inert"}>`
+    + `<div class="agwrap">`
     + tabs.map(agentRowHTML).join("")
-    /* 「已关闭」的行排在活的行**后面**：它们在场的意义是"这个 agent 还在，
-       只是收起来了"，不该抢在正在干活的行前面。 */
-    + (closed || []).map(closedRowHTML).join("")
-    + `</div>`;
+    + closedBlock
+    + `</div></div>`;
 }
 
 /* 「已关闭」的 agent 行（点过 ×、记录还在）。
@@ -573,7 +662,7 @@ function renderWorkspaceView(key) {
     if (key && !selfHit && !shown.length && !shownClosed.length) continue;
     // 第 4 个参数是**这个工作区一共几个**（搜索时行尾那个数不跟着缩水）；
     // 已关闭的 agent 也算（关格 ≠ 删，它们仍然是这个工作区的 agent）。
-    rows.push(projRowHTML(p, shown, "proj", mine.length + cmine.length, shownClosed));
+    rows.push(projRowHTML(p, shown, "proj", mine.length + cmine.length, shownClosed, !!key));
   }
   /* ⚠️ 空态**不能**再用"行数 == 0"判：默认工作区是 Go 合成的、永远在，
      所以池子空着的时候也有一行 —— 那颗「添加项目」会再也不出现（首启的
@@ -613,10 +702,10 @@ function renderWorkspaceView(key) {
     if (!cwd) {
       // 连生效 cwd 都没有（项目池还没到）：池子里放的是目录，它没有可收编的东西 ——
       // 不给动作键（不是"灰着点不动"，是这里根本没有那个动作）。
-      uh += projRowHTML({ path: "", name: "（没有工作目录）", pinned: false }, shown, "bare", total, shownClosed);
+      uh += projRowHTML({ path: "", name: "（没有工作目录）", pinned: false }, shown, "bare", total, shownClosed, !!key);
       continue;
     }
-    uh += projRowHTML({ path: cwd, name: shortPath(cwd), pinned: false }, shown, "adopt", total, shownClosed);
+    uh += projRowHTML({ path: cwd, name: shortPath(cwd), pinned: false }, shown, "adopt", total, shownClosed, !!key);
   }
   $("un-view").innerHTML = uh;
 }
@@ -762,13 +851,166 @@ async function newTabIn(dir, why, agent) {
   // 第三参是选择面板选中的 agent；左栏/项目的一键入口不传，走设置里的默认。
   const pick = agent || defaultAgentId();
   const t = await createTab({ agent: pick, cwd: dir || "",
-    resume: { kind: "new", id: "" } });
+    resume: { kind: "new", id: "" } }, { fresh: true });
   if (!t || !TAB_LIST.includes(t)) return;
+  // 新格在**开始干活之前**可以换 Agent（见 10-term 的 armFreshCell）。
+  // 只标用户明确新开的格子：接上已有、冷恢复、启动默认格都不带这个 opts。
+  armFreshCell(t, why || "新开一格");
   if (collapsed) goToTab(t, why || "左栏 +");
   else setActive(t);
   sendCtrl({ type: "log", msg: `左栏新开一格 agent=${pick} cwd=${dir || "(默认)"} ` +
     `→ tab=${t.id}（${why || "+"}）` });
 }
+
+/* ---- 新格的 Agent 切换（2026-10-20）--------------------------------------
+   用户定的形态：新开的一格在**开始干活之前**可以换 Agent；一旦打了字或来了
+   任何非 SessionStart 的 hook，这一格就定下来了（见 10-term 的 freshCellStarted）。
+   换法**不是原地改 spec**：这一格已经起了一条 PTY、可能还占着一条 pane 记录。
+   正确做法是：
+     ① 等 paneId（tab.ok 的应答）—— pane.forget 只认这个身份，不认 tab id；
+     ② pane.forget 丢掉刚起的空座位（新格不该在左栏留下一条「已关闭」幽灵）；
+     ③ 关流、用**同一个 cwd、新的 Agent、不带旧 paneId** 再建一格；
+     ④ 插回原来的座位序，跳进去。
+   ⚠️ 不写文件夹记忆：记忆只由新建卡片里的**明确选择**写（见 ns-create）。
+   ⚠️ 绝不原地切一个已经干活的会话 —— 那会把它的上下文和记录一起弄丢。
+     以后要做 Orca 那种 "Hand Off"，是**另起一格**，不是改这一格。
+   ⚠️ 新格可能还没拿到 paneId（tab.ok 在 2s 超时那条路上没回来）。这里等一小段，
+     拿不到就明说"换不了"，不要拿着 pane=0 去 forget（Go 会回"盘上没有"，
+     而格子已经被关掉，用户没有第二次机会）。 */
+async function waitFreshPane(t, timeoutMs) {
+  const until = Date.now() + (timeoutMs || 5000);
+  while (Date.now() < until) {
+    if (!t || !TAB_LIST.includes(t)) return 0;
+    const p = t.paneID | 0;
+    if (p > 0) return p;
+    if (t.resumeRefused) return 0;   // 已经明确被拒：没有可忘掉的座位
+    await new Promise((r) => setTimeout(r, 80));
+  }
+  return (t && (t.paneID | 0)) || 0;
+}
+
+async function switchFreshAgent(t, agentId) {
+  if (!t || !TAB_LIST.includes(t) || !t.fresh || t.freshSwitching) return;
+  const a = opAgentById(agentId);
+  if (!opLaunchable(a)) {
+    showToast("换不了", `${(a && a.name) || agentId} 现在不可用（未安装/不能启动）。`, "err");
+    sendCtrl({ type: "log", msg: `新格换 Agent 拒绝：${agentId} 不可启动 tab=${t.id || 0}` });
+    return;
+  }
+  const cur = (t.spec && t.spec.agent) || "";
+  if (cur === agentId) {
+    sendCtrl({ type: "log", msg: `新格换 Agent：已经是 ${agentId}，不动 tab=${t.id}` });
+    return;
+  }
+  t.freshSwitching = true;
+  // 正常情况下 newTabIn 是在 tab.ok 之后才 arm 的，paneId 已经在；这里防的是
+  // "tab.ok 超时但格子留着"那条路（见 spawnTab 的兜底注释）。
+  const pane = (t.paneID | 0) || await waitFreshPane(t, 5000);
+  // 等待期间用户可能打了字（门已关），也可能把格子关了 —— 两种都不许再动手。
+  if (!TAB_LIST.includes(t) || !t.fresh) {
+    sendCtrl({ type: "log", msg:
+      `新格换 Agent 放弃 tab=${t.id || 0}：等待期间已开始工作或被关掉` });
+    return;
+  }
+  if (!pane) {
+    t.freshSwitching = false;
+    showToast("还换不了", "这一格还没拿到座位号（PTY 还在启动或没有应答）。稍等一下再试。", "err");
+    sendCtrl({ type: "log", msg: `新格换 Agent 放弃 tab=${t.id || 0}：没有 paneId` });
+    return;
+  }
+  const at = TAB_LIST.indexOf(t);
+  const cwd = (t.spec && t.spec.cwd) || "";
+  sendCtrl({ type: "log", msg: `新格换 Agent tab=${t.id} pane=${pane} ` +
+    `${cur} → ${agentId} cwd=${cwd || "(默认)"} 座位序=${at}` });
+  /* forget = 删掉刚起的空座位；reseat = 别发 lib.reload（那是一次同步重扫，
+     会把紧接着的 tab.new 顶掉两秒多，见 closeTab 末尾那段实测）。 */
+  closeTab(t, { forget: true, reseat: true, why: `新格换 Agent → ${agentId}` });
+  const nt = await createTab({ agent: agentId, cwd,
+    resume: { kind: "new", id: "" } }, { fresh: true });
+  if (!nt || !TAB_LIST.includes(nt)) {
+    // 旧格已经关了，这一步失败没有退路 —— 必须说出来，不能静默丢一格。
+    showToast("换 Agent 没成", "这一格已经关掉，旧座位也清掉了；再新开一格试试。", "err");
+    sendCtrl({ type: "log", msg: `新格换 Agent 失败：旧 tab=${t.id} 已关，新格没起来（agent=${agentId}）` });
+    return;
+  }
+  // 插回原来的座位序（网格的列序就是 TAB_LIST 序；关掉之后原下标正好是新插入点）。
+  if (at >= 0) {
+    const i = TAB_LIST.indexOf(nt);
+    if (i >= 0) {
+      TAB_LIST.splice(i, 1);
+      TAB_LIST.splice(Math.min(at, TAB_LIST.length), 0, nt);
+    }
+    renderGrid();
+  }
+  armFreshCell(nt, `从 ${cur || "?"} 换过来`);
+  jumpInto(nt, "换 Agent");
+  armRailRebuild();
+  sendCtrl({ type: "log", msg: `新格换 Agent 完成 tab=${nt.id} pane=${nt.paneID || 0} ` +
+    `agent=${agentId} 座位序=${TAB_LIST.indexOf(nt)}` });
+}
+
+/* ---- 新建格快捷键（2026-10-20）------------------------------------------
+   快捷键是**唯一**不走选择卡片的添加路径：它明确地说"用这个文件夹上次的
+   Agent"。落在当前格所在的文件夹（currentWorkspacePath 已经把 cwd 归到
+   最近的项目行）；没有格就落在默认工作区。
+   解析顺序：文件夹记忆 → 全局默认/自动。
+   · 记忆里有、但现在起不来：打开卡片说明，不静默换人（用户 2026-10-20 选 A）。
+   · 没有记忆：用全局默认；这是正常的默认路径，不弹卡片。
+   · 快捷键**不写记忆** —— 只有卡片里的明确选择写。
+   · 捕获阶段 preventDefault：xterm 的 keydown 在冒泡阶段，不拦的话组合键
+     会先被发给 PTY（同 Ctrl+Shift+B 那条注释）。 */
+function shortcutTargetFolder() {
+  return (typeof currentWorkspacePath === "function" && currentWorkspacePath()) || "";
+}
+function runNewAgentShortcut() {
+  const cwd = shortcutTargetFolder();
+  const remembered = lastAgentFor(cwd);
+  const cat = opCatalog();
+  const avail = cat.filter(opLaunchable);
+  const nameOf = (id) => (cat.find((a) => a && a.id === id) || {}).name || id;
+  if (remembered && !avail.some((a) => a.id === remembered)) {
+    sendCtrl({ type: "log", msg: `快捷键：文件夹记忆 ${remembered} 不可用 → 打开选择卡片 cwd=${cwd || "(默认)"}` });
+    showToast("上次的 Agent 不可用", `${nameOf(remembered)} 现在起不来；先选一个再建。`, "err");
+    openNewSpace({ folder: cwd, why: "快捷键（上次的 Agent 不可用）" });
+    return;
+  }
+  const agent = remembered || defaultAgentId();
+  if (!avail.some((a) => a.id === agent)) {
+    sendCtrl({ type: "log", msg: `快捷键：没有可启动的 Agent（尝试 ${agent}）→ 打开选择卡片` });
+    showToast("没有可启动的 Agent", "先安装一个，或选「不启动 Agent」。", "err");
+    openNewSpace({ folder: cwd, why: "快捷键（没有可启动的 Agent）" });
+    return;
+  }
+  sendCtrl({ type: "log", msg: `快捷键新开一格 agent=${agent} cwd=${cwd || "(默认)"} ` +
+    `来源=${remembered ? "文件夹记忆" : "默认"}` });
+  newTabIn(cwd, "快捷键", agent);
+}
+/* 输入框/下拉里不抢键；但 xterm 的隐藏 textarea 是终端输入，必须放行。 */
+function shortcutTypingTarget(t) {
+  const el = t && t.closest ? t.closest("input, textarea, select, [contenteditable='true']") : null;
+  if (!el) return false;
+  if (el.classList && el.classList.contains("xterm-helper-textarea")) return false;
+  return true;
+}
+function shortcutOverlayOpen() {
+  for (const id of ["newspace", "fview", "confirm"]) {
+    const el = document.getElementById(id);
+    if (el && !el.hidden) return true;
+  }
+  const menu = document.getElementById("cardmenu");
+  return !!(menu && menu.classList.contains("on"));
+}
+document.addEventListener("keydown", (e) => {
+  if (SHORTCUT_RECORDING) return;
+  if (e.repeat || e.metaKey) return;
+  if (!shortcutMatches(e, SETTINGS.newAgentShortcut)) return;
+  if (shortcutTypingTarget(e.target)) return;
+  if (shortcutOverlayOpen()) return;
+  // 只 preventDefault（不 stopPropagation）：xterm 的监听器第一行查
+  // defaultPrevented，看到就整条跳过 —— 和 Ctrl+Shift+B 同一条路。
+  e.preventDefault();
+  runNewAgentShortcut();
+}, true);
 
 /* 进入一个 agent：先把"群组看板"那一屏切回网格，再把右栏对话流的主语交回
    实时格（用户 2026-10-17 的原话：点一个 agent，右栏呈现的就是它的对话流）。
@@ -1001,7 +1243,8 @@ function projMenuItems(p, inPool) {
      "为什么没有这个动作"说出来，像 Claude / Codex 桌面端对它们那个默认项目一样。 */
   if (p && p.synthetic) {
     return [
-      { act: "new", icon: ICON_PLAY, label: "在这个目录新开一个 agent", hint: p.path },
+      { act: "new", icon: ICON_PLAY, label: "在这个目录新开一个 agent",
+        hint: `先打开新建卡片选 Agent（会预选这个文件夹上次用的）：${p.path}` + newAgentShortcutTip() },
       { sep: true },
       { act: "opendir", icon: ICON_DIR, label: "打开这个目录", hint: p.path },
       { act: "reveal", icon: ICON_DIR, label: "在资源管理器里定位", hint: p.path },
@@ -1017,7 +1260,8 @@ function projMenuItems(p, inPool) {
       { act: "adopt", icon: ICON_PLUS, label: "收编为项目",
         hint: `把这个目录加进项目池：${p.path}` },
       { sep: true },
-      { act: "new", icon: ICON_PLAY, label: "在这个目录新开一个 agent", hint: p.path },
+      { act: "new", icon: ICON_PLAY, label: "在这个目录新开一个 agent",
+        hint: `先打开新建卡片选 Agent（会预选这个文件夹上次用的）：${p.path}` + newAgentShortcutTip() },
       { sep: true },
       { act: "opendir", icon: ICON_DIR, label: "打开这个目录", hint: p.path },
       { act: "reveal", icon: ICON_DIR, label: "在资源管理器里定位", hint: p.path },
@@ -1030,7 +1274,8 @@ function projMenuItems(p, inPool) {
     { act: "rename", icon: ICON_PENCIL, label: "重命名",
       hint: `只改左栏显示的名字，磁盘上的目录不动：${p.path}` },
     { sep: true },
-    { act: "new", icon: ICON_PLAY, label: "在这个目录新开一个 agent", hint: p.path },
+    { act: "new", icon: ICON_PLAY, label: "在这个目录新开一个 agent",
+      hint: `先打开新建卡片选 Agent（会预选这个文件夹上次用的）：${p.path}` + newAgentShortcutTip() },
     { sep: true },
     { act: "opendir", icon: ICON_DIR, label: "打开这个目录", hint: p.path },
     { act: "reveal", icon: ICON_DIR, label: "在资源管理器里定位", hint: p.path },
@@ -1087,7 +1332,9 @@ function agentMenuItems(t) {
         : "这个 agent 还没报出会话 id —— 等它起来再改名" },
     { sep: true },
     { act: "new", icon: ICON_PLUS, label: "在这个工作区新开一个 agent",
-      hint: `新 agent 是一条**全新的对话**（不在这一条上续）：${dir || "（默认工作区）"}` },
+      hint: `打开新建卡片先选 Agent（会预选这个文件夹上次用的）。\n`
+          + `新 agent 是一条**全新的对话**（不在这一条上续）：${dir || "（默认工作区）"}`
+          + newAgentShortcutTip() },
     { sep: true },
     { act: "opendir", icon: ICON_DIR, label: "打开工作目录", cls: dir ? "" : " na",
       hint: dir || "这一格没有工作目录" },
@@ -1138,7 +1385,7 @@ function doAgentAct(act, el, t, rowEl) {
       openSessionRename({ id: sid }, nm);
       break;
     }
-    case "new": newTabIn((t.spec && t.spec.cwd) || "", "左栏 agent 菜单"); break;
+    case "new": openNewSpace({ folder: effCwd(t), why: "左栏 agent 菜单" }); break;
     case "opendir": {
       const d = effCwd(t);
       if (d) sendCtrl({ type: "open", mode: "open", path: d });
@@ -1176,7 +1423,9 @@ function closedMenuItems(r) {
         : "这个 agent 没报出过会话 id —— 没有可改名的那条记录" },
     { sep: true },
     { act: "new", icon: ICON_PLUS, label: "在这个工作区新开一个 agent",
-      hint: `新 agent 是一条**全新的对话**（不在这一条上续）：${dir || "（默认工作区）"}` },
+      hint: `打开新建卡片先选 Agent（会预选这个文件夹上次用的）。\n`
+          + `新 agent 是一条**全新的对话**（不在这一条上续）：${dir || "（默认工作区）"}`
+          + newAgentShortcutTip() },
     { sep: true },
     { act: "opendir", icon: ICON_DIR, label: "打开工作目录", cls: dir ? "" : " na",
       hint: dir || "它没有工作目录" },
@@ -1223,7 +1472,7 @@ function doClosedAct(act, el, r, rowEl) {
       openSessionRename({ id: sid }, nm);
       break;
     }
-    case "new": newTabIn(r.cwd || "", "已关闭 agent 菜单"); break;
+    case "new": openNewSpace({ folder: r.cwd || defaultWorkspacePath(), why: "已关闭 agent 菜单" }); break;
     case "opendir": {
       const d = r.cwd || defaultWorkspacePath();
       if (d) sendCtrl({ type: "open", mode: "open", path: d });
@@ -1255,7 +1504,7 @@ function doProjAct(act, el, p) {
     case "pin":     poolSend({ type: "project.pin", path: p.path, on: !p.pinned }); break;
     case "rename":  beginProjRename(p.path); break;
     case "adopt":   adoptDir(p.path); break;
-    case "new":     newTabIn(p.path, "项目菜单"); break;
+    case "new":     openNewSpace({ folder: p.path, why: "项目菜单「新建 agent」" }); break;
     case "opendir": sendCtrl({ type: "open", mode: "open", path: p.path }); break;
     case "reveal":  sendCtrl({ type: "open", mode: "reveal", path: p.path }); break;
     case "copy":    copyText(p.path).then((ok) => { if (ok) showToast("已复制路径", p.path, "ok", true); }); break;
@@ -1351,24 +1600,56 @@ function cancelProjRename() {
 // 事件
 // ---------------------------------------------------------------------------
 
-function toggleProj(path) {
+/* 展开/收起一个工作区。⚠️ 不再整表重画 —— 组一直都在 DOM 里，只切
+   `.open` / `inert`，高度交给 CSS 的 0fr↔1fr 过渡（220ms）。
+   整表重画会把展开动作变成"内容突然出现"，还会杀掉 hover 和滚动位置。 */
+function toggleProj(row) {
+  if (!row || !row.dataset) return;
+  const path = row.dataset.path || "";
   if (!path) return;
   const on = !projOpen(path);
   setProjOpen(path, on);
-  renderLists(searchKey());
+  row.classList.toggle("open", on);
+  // 组是行的**兄弟**（.proj 和 .agroup 平级），不能 closest。
+  const grp = row.nextElementSibling;
+  if (grp && grp.classList.contains("agroup") && !grp.classList.contains("closed-list")) {
+    grp.classList.toggle("open", on);
+    if (on) grp.removeAttribute("inert");
+    else grp.setAttribute("inert", "");
+  }
   sendCtrl({ type: "log", msg: `左栏 ${on ? "展开" : "收起"} 项目 ${path}` });
 }
 
 function onLeftClick(e) {
+  /* 「已关闭 N」的 disclosure：只改这一组的展开态，不碰 agent 本身。 */
+  const ct = e.target.closest("[data-ctoggle]");
+  if (ct) {
+    e.stopPropagation(); e.preventDefault();
+    // toggle 在展开后的 .agroup 里（是 .proj 的**兄弟**，不是子节点）——
+    // 路径要从 group 上读，别去 closest(".proj")（那会永远拿到空串）。
+    const grp = ct.closest(".agroup");
+    const path = grp?.dataset.path || "";
+    const on = !closedOpen(path);
+    setClosedOpen(path, on);
+    ct.classList.toggle("open", on);
+    ct.setAttribute("aria-expanded", on ? "true" : "false");
+    const n = ct.querySelector(".ctcount")?.textContent || "";
+    ct.title = on ? "收起已关闭的 agent" : `展开 ${n} 个已关闭的 agent`;
+    // 也在原地切，不重画 —— 和 toggleProj 同一条理由。
+    const list = ct.nextElementSibling;
+    if (list && list.classList.contains("closed-list")) list.hidden = !on;
+    sendCtrl({ type: "log", msg: `左栏 ${on ? "展开" : "收起"}已关闭 agent 项目=${path || "(无目录)"}` });
+    return;
+  }
   const act = e.target.closest("[data-pact]");
   if (act) {
     e.stopPropagation(); e.preventDefault();
     const row = act.closest(".proj");
     const what = act.dataset.pact;
     if (what === "menu") openProjMenu(row);
-    else if (what === "add") { sendCtrl({ type: "project.add" }); sendCtrl({ type: "log", msg: "点「添加项目」→ 开系统文件夹选择器" }); }
+    else if (what === "add") openNewSpace({ why: "空态「添加项目」" });
     else if (what === "adopt") adoptDir(row?.dataset.path || "");
-    else if (what === "new") newTabIn(row?.dataset.path || "", "左栏项目 +");
+    else if (what === "new") openNewSpace({ folder: row?.dataset.path || "", why: "左栏项目 +" });
     return;
   }
   /* agent 行行尾的两颗（停了才有的 ▶ / 常驻 ⋯，2026-10-17）。
@@ -1419,7 +1700,7 @@ function onLeftClick(e) {
     return;
   }
   const row = e.target.closest(".proj");
-  if (row) toggleProj(row.dataset.path);
+  if (row) toggleProj(row);
 }
 
 function onLeftKey(e) {
@@ -1446,7 +1727,7 @@ function onLeftKey(e) {
     else jumpInto(t, "键盘进 agent");
     return;
   }
-  toggleProj(el.closest(".proj")?.dataset.path || "");
+  toggleProj(el.closest(".proj"));
 }
 
 /* 导航栏的点击。三个真区（总览 / 工作区 / 设置）走 setNavView；以后若有还没做的项，
@@ -1488,8 +1769,9 @@ for (const id of ["proj-list", "un-view"]) {
   $(id).addEventListener("keydown", onLeftKey);
 }
 $("add-proj").addEventListener("click", () => {
-  sendCtrl({ type: "project.add" });
-  sendCtrl({ type: "log", msg: "点头部「添加项目」→ 开系统文件夹选择器" });
+  // 2026-10-19：不再直接开选择器 —— 先进「文件夹 + Agent」卡片，
+  // 用户可以在同一处选 Agent（只加文件夹也仍然可以）。
+  openNewSpace({ why: "左栏「添加项目」" });
 });
 
 // 池子变了（Go 推回来的全量）：**整表重画** —— 增删改都会动排序，而排序是
@@ -1500,9 +1782,14 @@ function applyPool(m) {
   if (Array.isArray(m.projects)) STATE.projects = m.projects;
   if (m.assign && typeof m.assign === "object") STATE.assign = m.assign;
   STATE.poolErr = m.err || "";
+  // 新建工作区卡片正在等"选择其他文件夹"的结果时，先让它吃掉这次更新
+  // （新路径落到卡片里，不把用户跳去工作区）。函数在 81-newspace.js 里；
+  // 可能还没求值完（defer 顺序），只认它在不在。
+  const nsTook = (typeof newSpacePoolUpdate === "function")
+    ? newSpacePoolUpdate(m.projects || [], m.picked || "", m.err || "") : false;
   // 总览「新建工作区」：选择器成功时 Go 会推一份带新路径的池子；取消时**什么都不推**，
   // 所以靠"快照里没有的路径"来判断成功，并在两分钟后作废（见 85-dash）。
-  if (newWsPending && typeof newWsPending === "object") {
+  if (!nsTook && newWsPending && typeof newWsPending === "object") {
     if (m.err || Date.now() - newWsPendingAt > 120000) {
       // 池子报错 = 这次没加成（包括"选择器打不开"）；作废，别等下一次池子变动。
       newWsPending = null;

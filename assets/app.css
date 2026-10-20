@@ -154,8 +154,15 @@ svg{display:block;flex:none}
    两层是要的。现在照原样两段，各自的底色和右缝都对得上下面那一列。） */
 .tb-rail{width:var(--rail-w);flex:none;display:flex;align-items:center;gap:8px;padding:0 10px;
          background:var(--rail);border-right:1px solid var(--line-soft)}
-.tb-rail .mark{width:22px;height:22px;border-radius:999px;background:var(--fg);
-               display:grid;place-items:center;flex:none}
+.tb-rail .mark{position:relative;width:22px;height:22px;border-radius:0;background:none;
+               display:block;flex:none;overflow:hidden}
+/* 设计稿 1254 见方，图形只占中间约 750（四周是透明留白）。直接按 22px 放，
+   图形只剩 13px；这里放大到 34px 再由槽裁掉透明边 —— **只裁留白，不裁图形，
+   比例不变**。⚠️ 必须绝对定位居中：grid 的 auto 轨道会被 34px 的图撑大，
+   图就从槽的左边起、只有右边被裁掉，图形会缺一块（量到 15px 而不是 20px）。 */
+.tb-rail .mark img{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+                   width:34px;height:34px;max-width:none;display:block;
+                   object-fit:contain;user-select:none;-webkit-user-drag:none}
 .tb-rail .tb-name{font-weight:600;font-size:13px;letter-spacing:.2px}
 /* 中段宽度 = 会话列表 240px，地面同色 */
 .tb-list{width:240px;flex:none;background:var(--side);
@@ -1019,7 +1026,8 @@ svg{display:block;flex:none}
        留出的 4px，见 activity-thread-presentation.ts:255-285 的子代理层级）
      · `.pacts` 的浮现照抄 `.cardacts`（同一套 hover 预算，理由见那边） */
 .proj{display:flex;align-items:center;gap:7px;padding:5px 6px 5px 4px;
-      border-radius:var(--r-sm);cursor:pointer;user-select:none}
+      border-radius:var(--r-sm);cursor:pointer;user-select:none;
+      transition:background-color 160ms ease,color 160ms ease}
 .proj:hover{background:var(--card-hov)}
 .proj.sel{background:var(--card-sel)}
 .proj .tw{flex:none;width:12px;height:12px;display:grid;place-items:center;color:var(--faint)}
@@ -1097,7 +1105,8 @@ svg{display:block;flex:none}
    "它属于上面那个工作区"。 */
 .arow{display:flex;align-items:center;gap:7px;padding:4px 6px 4px 12px;
       margin-left:22px;border-left:2px solid var(--line-soft);
-      border-radius:0 var(--r-sm) var(--r-sm) 0;cursor:pointer;user-select:none}
+      border-radius:0 var(--r-sm) var(--r-sm) 0;cursor:pointer;user-select:none;
+      transition:background-color 160ms ease,color 160ms ease}
 .arow:hover{background:var(--card-hov)}
 .arow.sel{background:var(--card-sel)}
 /* 「已关闭」的行（点过 ×、记录还在）：降一档亮度，但**仍然可点** ——
@@ -1520,6 +1529,13 @@ svg{display:block;flex:none}
 .bhead .rt .sub{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
                 white-space:nowrap}
 .bhead .rt{margin-left:auto;display:flex;align-items:center;gap:7px;flex:none}
+/* 流水模块的上下文行（2026-10-20）：没有图标、没有模块名 —— 活动条上
+   已经有「流水」，这一行只说**这条流讲的是谁**和几条。 */
+.rmod-bar{flex:none;display:flex;align-items:center;gap:8px;
+  height:var(--pane-title-height);padding:0 10px;box-sizing:border-box;
+  border-bottom:1px solid var(--line-soft);user-select:none;overflow:hidden}
+.rmod-bar .sub{min-width:0;flex:1 1 auto;font:11px var(--mono);color:var(--faint)}
+.rmod-bar .pill{flex:none}
 /* 分隔条 —— **整块照 Orca 的 pane-divider.ts 搬**（这次是把"抓取区"那半也搬全）。
    原文件 lib/pane-manager/pane-divider.ts:9-40、:53-72：
 
@@ -1660,7 +1676,10 @@ svg{display:block;flex:none}
    那条底边横条：网格里每个头下面紧贴的就是终端，横条会被读成一条分隔线。 */
 .cell.cur .cellhead{background:color-mix(in srgb,var(--fg) 6%,transparent);color:var(--fg)}
 .cell.cur .cellhead::after{left:0;top:0;right:auto;bottom:0;width:2px;height:auto}
-.cellhead .nm{font-size:11.5px}
+.cellhead .nm{font-size:11.5px;flex:0 1 auto}
+/* 下拉箭头要**紧跟名字**（用户 2026-10-20：logo 和 Agent 名称后面），
+   所以格子里不让名字吃掉剩余宽度；用 × 的 margin 把它顶到最右端。 */
+.cellhead .x{margin-left:auto}
 
 /* 终端的地面。**boxOk() 断言的是"宿主 = 它的父容器内缩 4px"** —— 原来那个
    父是 .pbody，现在下沉到这一层。这层必须真实存在且有确定尺寸，
@@ -1699,6 +1718,22 @@ svg{display:block;flex:none}
                color:var(--faint);background:none;border:0;cursor:pointer;font-size:13px;line-height:1;
                font-family:inherit;padding:0;border-radius:3px}
 .cellbanner .x:hover{background:color-mix(in srgb,var(--fg) 10%,transparent);color:var(--fg)}
+/* 格子头上那颗**常驻**的换 Agent 下拉（2026-10-20 用户定的形态）：
+   未开始 = accent 蓝（这一格还能改），开始后 = faint 灰（只在菜单里解释）。
+   它和 × 同尺寸，位置在名字后面 —— 不用格内横幅，不再多占一条 24px。 */
+.cellhead .aswap{width:16px;height:16px;flex:none;display:grid;place-items:center;
+  padding:0;border:0;border-radius:3px;background:none;color:var(--faint);cursor:pointer;
+  transition:color 140ms ease,background-color 140ms ease}
+.cellhead .aswap:hover{background:rgba(255,255,255,.12);color:var(--fg)}
+.cell.fresh .aswap{color:var(--accent)}
+.cell.fresh .aswap:hover{background:color-mix(in srgb,var(--accent) 16%,transparent);
+  color:var(--accent)}
+/* 独立页里格子头默认是藏的（Orca chromeless）。但新格还没开始时必须把入口
+   露出来 —— 否则"换个 Agent"这一格的唯一动作在放大后就消失了。
+   一旦开始干活（.fresh 摘掉）头自动收回，恢复 chromeless。 */
+#termbody.solo .cell.solo.fresh > .cellhead{display:flex}
+/* 菜单里的 Agent 图标统一收到 14px（.ico-mask 默认 17px，在菜单行里偏大）。 */
+#cardmenu .mi .ico-img,#cardmenu .mi .ico-mask{width:14px;height:14px}
 /* 独立页（一个格子占满主区）时横幅一样要在 —— 它是这一格自己的话，与摆法无关。 */
 
 /* .termhost 是**每个 agent 一个**（原来叫 #termhost，全局只有一个）。
@@ -2245,9 +2280,18 @@ svg{display:block;flex:none}
 #rsb-head .rt{display:flex;align-items:center;flex:none;gap:4px;padding-right:6px}
 /* 模块面板：一次只显示一个。用 [hidden] 而不是 display:none 的类 —— 它本来
    就是给这个用的，而且"另一个模块的标记还在但不可见"这件事在 DOM 里读得出来。 */
-.rsb-mod{flex:1;display:flex;flex-direction:column;min-height:0;min-width:0}
+.rsb-mod{flex:1;display:flex;flex-direction:column;min-height:0;min-width:0;
+  animation:rsbModIn 120ms ease-out}
 .rsb-mod[hidden]{display:none}
+/* 模块切换的入场：只淡入 + 2px 上移。display:none→flex 会重启动画，
+   所以不用额外的"切换"类。 */
+@keyframes rsbModIn{from{opacity:0;transform:translateY(2px)}}
+@media (prefers-reduced-motion:reduce){.rsb-mod{animation:none}}
 #rsb .scroll{padding:0 8px 12px}
+/* 子代理模块没有工具条，滚动区自己留一点上边距；流水有 24px 上下文行，
+   滚动内容同样需要呼吸。 */
+.rsb-mod[data-mod="side"] .scroll{padding-top:6px}
+.rsb-mod[data-mod="flow"] .scroll{padding-top:6px}
 
 /* —— 右栏分上下两段 ————————————————————————————————————————————————
    上段 = 四个**格子级**模块，一次显示一个（逻辑和以前一字不差）；
@@ -2365,25 +2409,11 @@ svg{display:block;flex:none}
    染成同一族橙会被读成"它在等我"（它其实已经停在那儿不动了）。 */
 .need.k-fail .g{color:var(--red)}
 
-/* ---------- ③ 改动 ----------
-   列：op 字母 / 文件图标 / 名字（目录暗、文件名亮）/ ±N。
-   字母与配色照 git 那套（A 绿 M 橙）：Orca 的改动行就是这个读法 ——
-   状态给颜色、字母只留一个、±N 是两端对齐的一小串数字。 */
-.led{display:grid;grid-template-columns:13px 13px minmax(0,1fr) auto;gap:0 7px;
-     align-items:center;padding:5px 8px;font-size:12px}
-.led .op{font:700 10.5px/1 var(--mono);text-align:center}
-.led .op.A{color:var(--green)} .led .op.M{color:var(--ask)} .led .op.R{color:var(--faint)}
-.led .fi{display:grid;place-items:center;color:var(--faint)}
-.led .nm{min-width:0;display:flex;align-items:baseline}
-.led .nm i{font-style:normal;font:10.5px var(--mono);color:var(--faint);
-           min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.led .nm b{font-weight:500;color:var(--fg2);white-space:nowrap;flex:none}
-.led .d{flex:none;display:flex;gap:6px;justify-content:flex-end;font:10.5px var(--mono)}
-/* ±N 是**字面量**不是计数器：Orca 的改动行里 +/- 各是一段带色的文本，
-   两位都为 0 时整段不出现（读文件那种动作不该在"改动"里留一行空读数）。 */
+/* ±N 是**字面量**不是计数器：文件树和预览里的 +/- 各是一段带色文本，
+   两位都为 0 时整段不出现（读文件那种动作不该留一行空读数）。 */
 .d-add{color:var(--green)} .d-del{color:var(--red)}
 
-/* ---------- ④ 流水 ----------
+/* ---------- ③ 流水 ----------
    列：种类字形 / 正文 / 时间。正文里的工具名与目标分开上色，让"这一步在干什么"
    不用读完整行就看得出来。 */
 .fd{display:grid;grid-template-columns:13px minmax(0,1fr) auto;gap:0 7px;
@@ -2562,6 +2592,10 @@ svg{display:block;flex:none}
 .set-btn{height:26px;padding:0 10px;border:1px solid var(--line);border-radius:6px;
          background:rgba(255,255,255,.035);font-size:12px;color:var(--fg2);
          transition:background .14s,border-color .14s,color .14s}
+/* 快捷键录制键：等宽 + 给组合键留够宽度；录制中描边用 accent（不是 opacity，
+   焦点环还得看得见）。 */
+.set-key{min-width:118px;font-family:var(--mono);font-size:11.5px;letter-spacing:.01em}
+.set-key.rec{border-color:var(--accent);color:var(--accent)}
 .set-btn:hover{background:rgba(255,255,255,.075);border-color:rgba(255,255,255,.16);color:var(--fg)}
 .set-btn.quiet{border-color:transparent;background:none;color:var(--faint)}
 .set-btn.quiet:hover{background:rgba(255,255,255,.06);color:var(--fg2)}
@@ -2653,3 +2687,343 @@ svg{display:block;flex:none}
 @keyframes cfFade{from{opacity:0}}
 @keyframes cfIn{from{opacity:0;transform:translateY(4px) scale(.985)}}
 @media (prefers-reduced-motion:reduce){#confirm,.cf-card{animation:none}}
+
+/* ===========================================================================
+   2026-10-19：需要你 → 标题栏铃铛；右栏第一个模块 → 文件
+   =========================================================================== */
+
+/* 铃铛。徽标沿用 .badge 的语言（橙底深字、等宽数字）；把它钉在按钮右上，
+   按钮自己 position:relative 是前提 —— 否则 absolute 会去找 #tabs。 */
+.icon-btn.bell{position:relative;color:var(--muted)}
+.icon-btn.bell:hover{color:var(--fg)}
+.icon-btn.bell.has{color:var(--ask-text)}
+.icon-btn.bell .badge{top:-2px;right:-2px;box-shadow:0 0 0 1.5px var(--side)}
+
+/* 「需要你」浮层。fixed 定位，落点由 80-live 的 placeNeedPop 量铃铛算出来。 */
+#need-pop{position:fixed;z-index:80;width:min(340px,calc(100vw - 16px));
+  max-height:min(60vh,480px);display:flex;flex-direction:column;
+  background:#232329;border:1px solid #33333c;border-radius:10px;
+  box-shadow:0 12px 32px rgba(0,0,0,.5);overflow:hidden;
+  animation:npIn .14s cubic-bezier(.16,1,.3,1)}
+#need-pop[hidden]{display:none}
+#need-pop .np-head{display:flex;align-items:center;gap:8px;padding:9px 10px 7px;
+  border-bottom:1px solid #2c2c34}
+#need-pop .np-title{font-size:12px;font-weight:600}
+#need-pop .np-x{width:20px;height:20px;flex:none}
+#need-pop .np-body{overflow:auto;padding:6px 8px 8px}
+#need-pop .empty{padding:12px 8px}
+@keyframes npIn{from{opacity:0;transform:translateY(-4px)}}
+@media (prefers-reduced-motion:reduce){#need-pop{animation:none}}
+
+/* —— 文件模块（2026-10-20 重画）——————————————————————————————
+   一条 32px 工具条 + 24px 行高的树。工具条里只有"这一列要用的控件"，
+   不再重复模块图标/名字（活动条上已经有了）。
+   行几何照 Orca 的 FileExplorerRow：每层 14px 缩进、chevron 转 90°、
+   folder / folder-open 两态、按类型取文件图标（82-file-icons.js）。 */
+#files-bar{display:flex;align-items:center;gap:2px;height:32px;padding:0 8px;
+  flex:none;border-bottom:1px solid var(--line-soft);box-sizing:border-box}
+#files-bar .icon-btn{width:22px;height:22px;margin-left:2px;flex:none;
+  color:var(--faint)}
+#files-bar .icon-btn:hover{color:var(--fg)}
+.fsegs{display:flex;align-items:center;gap:2px;flex:none}
+.fseg{height:22px;padding:0 9px;border:0;border-radius:5px;background:transparent;
+  color:var(--muted);font-size:11px;cursor:pointer;
+  transition:background-color 120ms ease,color 120ms ease}
+.fseg:hover{color:var(--fg2)}
+.fseg.on{background:rgba(255,255,255,.09);color:var(--fg)}
+.fsp{flex:1;min-width:0}
+.files-cnt{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;font:9.5px/1 var(--mono);color:var(--faint);padding:0 4px}
+.fdot{padding:1px 5px;border:1px solid transparent;border-radius:4px;
+  background:transparent;color:var(--faint);font:9.5px/1.5 var(--mono);cursor:pointer}
+.fdot:hover{color:var(--fg2);border-color:var(--line)}
+.fdot.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 55%,transparent);
+  background:color-mix(in srgb,var(--accent) 12%,transparent)}
+/* 根目录条只在「全部」视图出现（行高 30px，比工具条低一档）。 */
+#files-rootrow{padding:4px 8px;border-bottom:1px solid var(--line-soft);
+  box-sizing:border-box}
+#files-root{width:100%;box-sizing:border-box;height:22px;padding:0 5px;
+  border:1px solid #3a3a44;border-radius:5px;background:#242429;color:var(--fg2);
+  font:10.5px/1.4 var(--mono)}
+#files-root:focus{outline:none;border-color:#5a5a68}
+#files-tree{font-size:12px;padding:4px 0 8px}
+/* 行高 24px、圆角 5px、hover 120ms —— 和左栏同一套手感。 */
+.frow{display:flex;align-items:center;gap:6px;width:100%;box-sizing:border-box;
+  height:24px;padding:0 6px;border:0;border-radius:5px;background:transparent;
+  color:var(--fg2);text-align:left;font:11.5px/1 var(--ui);min-width:0;cursor:pointer;
+  transition:background-color 120ms ease,color 120ms ease}
+.frow:hover{background:var(--card-hov);color:var(--fg)}
+/* 目录的 chevron 永远朝右，展开由 aria-expanded 转 90°（和左栏同一条）。 */
+.fchev{flex:none;width:12px;height:12px;display:grid;place-items:center;color:var(--faint)}
+.fchev svg{transition:transform 140ms ease}
+.frow[aria-expanded="true"] .fchev svg{transform:rotate(90deg)}
+.fico,.ficoslot{flex:none;width:14px;height:14px;display:grid;place-items:center;
+  color:var(--muted)}
+.ficoslot{color:var(--muted)}
+.fnm{flex:1;min-width:0}
+.fcount{margin-left:auto;flex:none;font:9.5px/1 var(--mono);color:var(--faint)}
+/* 右端三列固定宽度：A/M/R → +N −N → 拒/错/缺。
+   固定宽度是为了**跨行对齐**：没有改动行数的文件也占住那一列，名字不会被
+   相邻行的 +N 推来推去。只在「碰过的」视图出现（全部树没有这些数据）。 */
+.fop{flex:none;width:12px;text-align:center;font:700 9.5px/1 var(--mono)}
+.fop.A{color:var(--green)} .fop.M{color:var(--ask-text)} .fop.R{color:var(--faint)}
+.fbad-slot{flex:none;width:18px;display:flex;justify-content:flex-end}
+.fbad{flex:none;padding:0 3px;border-radius:3px;font:9px/1.5 var(--ui)}
+.fbad.rej{color:var(--red);background:rgba(255,101,104,.12)}
+.fbad.fail{color:var(--ask-text);background:rgba(249,115,22,.12)}
+.fbad.miss{color:var(--amber);background:rgba(234,179,8,.12)}
+/* ⚠️ 不能叫 .fd —— 流水条目 `.vrow.fd` 已经用了这个名字（app.css 上面那段
+   13px/minmax/auto 的 grid）。同名规则后写的那条会把流水整行压成 52px，
+   文字变成一列一个字。这是 2026-10-20 真机验出来的。 */
+.fdiff{flex:none;width:52px;text-align:right;font:9.5px/1 var(--mono);color:var(--faint);
+  white-space:nowrap;font-variant-numeric:tabular-nums}
+.frow .d-add{color:var(--green)} .frow .d-del{color:var(--red)}
+.frow.ext{opacity:.55;cursor:default}
+.fext{flex:none;padding:0 3px;border:1px solid var(--line);border-radius:3px;
+  font:9px/1.4 var(--mono);color:var(--faint)}
+.fstate{height:auto;min-height:24px;color:var(--faint);font:10.5px/1.5 var(--ui);
+  cursor:default;padding:4px 6px;white-space:normal}
+.fstate:hover{background:transparent;color:var(--faint)}
+.fstate.ferr{color:var(--ask-text)}
+.flink{margin-left:6px;padding:0;border:0;background:transparent;
+  color:var(--accent);font-size:10.5px;cursor:pointer}
+#files-tree .empty{padding:12px 6px;font-size:11.5px;line-height:1.5}
+
+/* —— 只读预览 —— */
+#fview{position:fixed;inset:0;z-index:90;display:grid;place-items:center;
+  background:rgba(0,0,0,.58);padding:28px;animation:cfFade .14s ease-out}
+#fview[hidden]{display:none}
+.fv-card{width:min(980px,calc(100vw - 56px));height:min(760px,calc(100vh - 56px));
+  display:flex;flex-direction:column;background:#141416;
+  border:1px solid rgba(255,255,255,.12);border-radius:12px;
+  box-shadow:0 24px 70px rgba(0,0,0,.6);overflow:hidden}
+.fv-head{display:flex;align-items:center;gap:10px;padding:11px 12px;
+  border-bottom:1px solid var(--line-soft)}
+.fv-ico{flex:none;display:grid;place-items:center;width:26px;height:26px;
+  border-radius:7px;background:rgba(255,255,255,.06);color:var(--muted)}
+.fv-id{min-width:0;flex:1}
+.fv-id b{display:block;font-size:12.5px;font-weight:600;color:var(--fg);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fv-path{display:block;font:10.5px/1.5 var(--mono);color:var(--faint);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fv-meta{flex:none;font:10.5px/1.4 var(--mono);color:var(--muted)}
+.fv-x{flex:none;width:24px;height:24px;display:grid;place-items:center;border:0;
+  border-radius:5px;background:transparent;color:var(--faint);cursor:pointer}
+.fv-x:hover{background:#2b2b32;color:var(--fg)}
+.fv-note{padding:7px 12px;font-size:11px;line-height:1.55;color:var(--ask-text);
+  background:rgba(249,115,22,.08);border-bottom:1px solid rgba(249,115,22,.16)}
+.fv-note[hidden]{display:none}
+.fv-note.warn{color:#fcd34d;background:rgba(251,191,36,.07);
+  border-bottom-color:rgba(251,191,36,.16)}
+/* 改动 / 文件 两个页签：和文件模块的 fseg 同一套手感（同一个产品里同类控件
+   不该长两副样子），只是字号大一号、贴在预览头下面。 */
+.fv-tabs{display:flex;align-items:center;gap:4px;height:32px;padding:0 12px;
+  border-bottom:1px solid var(--line-soft);background:#141416;flex:none}
+.fv-tabs[hidden]{display:none}
+.fv-tab{height:22px;padding:0 9px;border:0;border-radius:5px;background:transparent;
+  color:var(--muted);font:11.5px/1 var(--sans);cursor:pointer}
+.fv-tab:hover{background:rgba(255,255,255,.06);color:var(--fg2)}
+.fv-tab.on{background:rgba(255,255,255,.1);color:var(--fg)}
+.fv-tab:focus-visible{outline:2px solid rgba(255,255,255,.5);outline-offset:1px}
+.fv-sum{font:10.5px/1 var(--mono);color:var(--muted);white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+.fv-sum .fv-nchg{color:var(--faint);margin-left:7px}
+.fv-body{flex:1;overflow:auto;padding:10px 0 14px;font:12px/1.55 var(--mono);
+  tab-size:2;background:#141416}
+.fv-body .fl{display:flex;min-width:max-content}
+.fv-body .fl:hover{background:rgba(255,255,255,.035)}
+.fv-body .ln{flex:none;width:52px;padding-right:12px;text-align:right;
+  color:#4b4b55;user-select:none;position:sticky;left:0;background:#141416}
+.fv-body .lc{white-space:pre;padding-right:18px;color:var(--fg2)}
+/* 改动页：两列行号 + 前缀 + 正文。行号不粘（diff 里横向滚动时让它跟着走，
+   比两条 sticky 背景在 add/del 行上对不齐好）。 */
+.fv-body .df{display:flex;min-width:max-content}
+.fv-body .df .dln{flex:none;width:42px;padding-right:8px;text-align:right;
+  color:#4b4b55;user-select:none}
+.fv-body .df .dsig{flex:none;width:16px;text-align:center;color:#6b6b76;user-select:none}
+.fv-body .df .dc{white-space:pre;padding-right:18px;color:var(--fg2)}
+.fv-body .df.add{background:rgba(46,160,67,.13)}
+.fv-body .df.del{background:rgba(248,81,73,.12)}
+.fv-body .df.add .dc{color:#b7f7c0}
+.fv-body .df.del .dc{color:#ffb4ad}
+.fv-body .df.add .dln,.fv-body .df.del .dln{color:#7d7d88}
+.fv-body .df.meta .dc{color:var(--faint);font-style:italic}
+.fv-body .dfh{min-width:max-content;padding:4px 16px;margin-top:4px;
+  color:#8b8b98;background:rgba(255,255,255,.035);font:11.5px/1.55 var(--mono)}
+.fv-body .dfchg + .dfchg{margin-top:8px;border-top:1px solid var(--line-soft)}
+.fv-body .dfhead{display:flex;align-items:center;gap:8px;padding:7px 14px 6px;
+  font:11px/1.4 var(--ui);color:var(--muted);position:sticky;top:0;
+  background:#141416;z-index:1}
+.fv-body .dftool{font-weight:600;color:var(--fg2)}
+.fv-body .dfwhen{color:var(--faint);font-family:var(--mono)}
+.fv-body .dfsp{flex:1;min-width:8px}
+.fv-body .dfsum{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.fv-body .dfbad{padding:1px 5px;border-radius:4px;color:var(--red);
+  background:rgba(255,101,104,.1);font-size:10px}
+.fv-body .dfbad.fail{color:var(--ask-text);background:rgba(249,115,22,.1)}
+.fv-body .dfsec{padding:4px 16px;color:var(--faint);font:10.5px/1.5 var(--ui)}
+.fv-body .dfnote{padding:6px 16px 9px;color:var(--ask-text);font:11px/1.55 var(--ui);
+  white-space:pre-wrap;word-break:break-word}
+.fv-body .dfempty{padding:10px 16px;color:var(--faint);font:11px var(--ui)}
+.fv-loading{padding:14px 16px;color:var(--faint);font:12px/1.6 var(--ui)}
+.fv-loading.fv-err{color:var(--red)}
+.fv-cut{padding:10px 16px;color:var(--faint);font:11px var(--ui)}
+.fv-foot{display:flex;align-items:center;gap:8px;padding:9px 12px;
+  border-top:1px solid var(--line-soft)}
+.fv-foot button{height:26px;padding:0 10px;border:1px solid var(--line);
+  border-radius:6px;background:rgba(255,255,255,.04);color:var(--fg2);
+  font-size:11.5px;cursor:pointer}
+.fv-foot button:hover{background:rgba(255,255,255,.09);color:var(--fg)}
+.fv-foot button:focus-visible{outline:2px solid rgba(255,255,255,.5);outline-offset:2px}
+
+/* —— 新建工作区卡片 —— */
+#newspace{position:fixed;inset:0;z-index:95;display:grid;place-items:center;
+  background:rgba(0,0,0,.52);padding:24px;animation:cfFade .14s ease-out}
+#newspace[hidden]{display:none}
+.ns-card{width:min(520px,calc(100vw - 48px));max-height:calc(100vh - 48px);
+  display:flex;flex-direction:column;background:#1a1a1d;
+  border:1px solid rgba(255,255,255,.12);border-radius:12px;
+  box-shadow:0 18px 60px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.4);
+  animation:cfIn .16s cubic-bezier(.2,.8,.2,1);overflow:hidden}
+.ns-head{display:flex;align-items:center;padding:14px 16px 10px}
+.ns-title{flex:1;font-size:13.5px;font-weight:600}
+.ns-x{width:24px;height:24px;display:grid;place-items:center;border:0;border-radius:5px;
+  background:transparent;color:var(--faint);cursor:pointer}
+.ns-x:hover{background:#2b2b32;color:var(--fg)}
+.ns-body{padding:0 16px 4px;overflow:auto;min-height:0}
+.ns-lab{margin:12px 0 6px;font:10.5px/1 var(--mono);color:var(--faint);
+  letter-spacing:.06em;text-transform:uppercase}
+.ns-opt{margin-left:4px;padding:0 4px;border:1px solid var(--line);border-radius:999px;
+  font:9px/1.5 var(--mono);letter-spacing:0;text-transform:none;color:var(--faint)}
+#ns-folder{width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #3a3a44;
+  border-radius:7px;background:#242429;color:var(--fg);font-size:12px}
+#ns-folder:focus{outline:none;border-color:#5a5a68}
+#ns-folder:disabled{color:var(--faint);border-color:#33333c;background:#202024}
+.ns-folder-row{display:flex;align-items:center;gap:8px;margin-top:7px;min-width:0}
+#ns-pick{flex:none;padding:5px 9px;border:1px solid #3a3a44;border-radius:6px;
+  background:transparent;color:var(--muted);font-size:11px;cursor:pointer}
+#ns-pick:hover{color:var(--fg);border-color:#4a4a56}
+.ns-path{min-width:0;font:10px/1.4 var(--mono);color:var(--faint)}
+.ns-agents{display:flex;flex-direction:column;gap:1px;max-height:240px;overflow:auto;
+  padding:3px;border:1px solid #2f2f37;border-radius:7px;background:#1f1f24}
+.ns-agent{display:flex;align-items:center;gap:8px;width:100%;padding:6px;
+  border:0;border-radius:5px;background:transparent;color:var(--fg);
+  text-align:left;cursor:pointer}
+.ns-agent:hover{background:#2b2b32}
+.ns-agent.on{background:color-mix(in srgb,var(--accent) 15%,transparent)}
+.ns-agent:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
+.ns-agico{flex:none;width:16px;height:16px;display:grid;place-items:center}
+.ns-agico .ico-img,.ns-agico .ico-mask{width:16px;height:16px}
+.ns-agwho{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.ns-agnm{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ns-agent.on .ns-agnm{color:var(--fg)}
+.ns-agsub{font:10px/1.3 var(--mono);color:var(--faint);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ns-agpill{flex:none;padding:0 5px;border:1px solid #3d5a44;border-radius:999px;
+  color:var(--green);font:9px/1.5 var(--mono)}
+.ns-agck{flex:none;width:13px;color:transparent}
+.ns-agent.on .ns-agck{color:var(--accent)}
+.ns-agempty{padding:10px;color:var(--faint);font-size:11px;line-height:1.6}
+.ns-note{margin:10px 0 2px;min-height:32px;font-size:11px;line-height:1.6;color:var(--faint)}
+.ns-foot{display:flex;justify-content:flex-end;gap:8px;padding:10px 16px 14px;
+  border-top:1px solid var(--line-soft)}
+.ns-foot button{height:30px;padding:0 14px;border:1px solid var(--line);border-radius:7px;
+  background:rgba(255,255,255,.04);color:var(--fg2);font-size:12px;cursor:pointer}
+.ns-foot button:hover{background:rgba(255,255,255,.09);color:var(--fg)}
+.ns-foot button.primary{background:var(--accent);border-color:transparent;color:#fff;
+  font-weight:600}
+.ns-foot button.primary:hover{filter:brightness(1.12)}
+.ns-foot button.primary.na{background:rgba(255,255,255,.05);border-color:var(--line);
+  color:var(--faint);filter:none}
+.ns-foot button:focus-visible{outline:2px solid rgba(255,255,255,.5);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){#newspace,.ns-card{animation:none}}
+
+/* ===========================================================================
+   左栏装修（2026-10-19）：两行工作区头 + 行尾只留一个读数 + 动作 hover 浮出
+   =========================================================================== */
+.proj{position:relative;align-items:flex-start;padding-top:6px;padding-bottom:6px}
+.proj .tw,.proj .ricon{align-self:flex-start;margin-top:2px}
+.proj .pbody{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.proj .nml{display:flex;align-items:center;gap:5px;min-width:0}
+.proj .nml .nm{flex:1;min-width:0}
+.proj .meta{display:flex;align-items:center;gap:6px;min-width:0}
+/* 第二行是"这个工作区在哪、有几个 agent"——它必须整行可读。
+   2026-10-20：字号提一档、路径从 faint 提到 muted；路径过长时自己打点，
+   不许钻到右边的 sum 底下。 */
+.proj .meta .path{min-width:0;color:var(--muted);font:10.5px/1.35 var(--mono);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.proj .meta .sum{margin-left:auto;flex:none;font:10.5px/1.35 var(--mono);color:var(--faint)}
+
+/* 行尾动作**出流**：不再占名字的宽度，只在 hover / 键盘聚焦时浮在右端。
+   这是 Orca 的 hover 预算；240px 的列里常驻一颗 ⋯ 就是名字总被截的原因。 */
+.proj,.arow{--row-bg:transparent}
+.arow{position:relative}
+.proj:hover,.arow:hover{--row-bg:var(--card-hov)}
+.proj.sel,.arow.sel{--row-bg:var(--card-sel)}
+.proj .pacts,.arow .sacts{position:absolute;right:4px;
+  display:flex;align-items:center;gap:1px;flex:none;padding-left:16px;
+  border-radius:0 var(--r-sm) var(--r-sm) 0;
+  background:linear-gradient(90deg,transparent,var(--row-bg) 30%);
+  opacity:0;pointer-events:none;
+  transition:opacity .16s ease,transform .16s ease}
+/* ⚠️ 两种行的高度语义不同，**不能共用一个 top**：
+     · .arow 是单行（名字 + 状态），动作区垂直居中。
+     · .proj 是两行（名字 / 路径 + N agent），动作区必须锚在**第一行**。
+       原来用 top:50%+translateY(-50%)：收起时它压在第二行上，展开后
+       .proj 整块变高，它还会跑到整块中间 —— 用户报的"路径和 N agent
+       被吞掉"就是这一条。锚到 top 之后，收起/展开都只挨着名字行，
+       第二行整行空出来。 */
+.proj .pacts{top:4px;transform:translateX(4px)}
+.arow .sacts{top:50%;transform:translate(4px,-50%)}
+/* 名字行给动作区让出固定宽度：按钮浮出时不再压住名字（打点提前）。 */
+.proj .pbody .nml{padding-right:48px}
+.proj:hover .pacts,.proj:focus-within .pacts,
+.arow:hover .sacts,.arow:focus-within .sacts{opacity:1;pointer-events:auto}
+/* 动作不是硬浮现：从右往里推 4px，和 160ms 的淡入同拍（Orca 的 hover
+   budget 也是"淡入 + 一点位移"，不是只改 opacity）。 */
+.proj:hover .pacts,.proj:focus-within .pacts{transform:none}
+.arow:hover .sacts,.arow:focus-within .sacts{transform:translate(0,-50%)}
+/* 旧的那套 max-width 收放已经不适用（父级自己会整体浮出）。 */
+.proj .pg,.arow .pg{max-width:none;margin-left:0;overflow:visible;opacity:1;
+  pointer-events:auto}
+@media (hover:none){.proj .pacts,.arow .sacts{opacity:1;pointer-events:auto}
+  .proj .pacts{transform:none}
+  .arow .sacts{transform:translate(0,-50%)}}
+
+/* 行尾只留一个读数：有状态词就不显示相对时间（时间在 title 里）。
+   ⚠️ `.sw` 与 `.tm` 仍是两个元素：60s 定时器按 data-at 重写 `.tm`，
+   合并成一个就会被时间顶掉状态词。 */
+.arow .sw:not(:empty)+.tm{display:none}
+
+/* 「已关闭 N」的 disclosure。 */
+.closed-toggle{display:flex;align-items:center;gap:6px;width:calc(100% - 22px);
+  margin-left:22px;padding:3px 6px 3px 12px;border:0;
+  border-left:2px solid var(--line-soft);border-radius:0 var(--r-sm) var(--r-sm) 0;
+  background:transparent;color:var(--faint);font:10.5px/1.4 var(--ui);
+  text-align:left;cursor:pointer}
+.closed-toggle:hover{background:var(--card-hov);color:var(--muted)}
+.closed-toggle .ctlabel{flex:1;min-width:0}
+.closed-toggle .ctcount{flex:none;font:9.5px/1 var(--mono);color:var(--faint)}
+/* 展开/收起：chevron 转 90°，不是换字形 —— 看得见"往哪边开"。
+   工作区行和「已关闭」disclosure 用同一套（Orca 的 chevron 也是 rotate-90）。 */
+.proj .tw svg,.closed-toggle .fchev svg{
+  transition:transform 180ms cubic-bezier(.2,.8,.2,1)}
+.proj.open .tw svg,.closed-toggle.open .fchev svg{transform:rotate(90deg)}
+
+/* agent 组的折叠：**常驻在 DOM 里**，高度用 grid 0fr↔1fr 过渡（220ms）。
+   这是本文件里已有的 `.agent-fold` 范式，用在这里是为了"展开"不再等于
+   "整表重画后突然出现"。收起组带 inert：点不到、Tab 进不去（见 agentRowsHTML）。
+   ⚠️ grid 的一行只能量一个子项，所以行都包在 `.agwrap` 里 ——
+   wrapper 必须 min-height:0 + overflow:hidden，否则 0fr 不会真的收成 0。
+   ⚠️ `.closed-list` 是嵌套的 .agroup，但它沿用 hidden 那套，不能吃这条规则。 */
+.agroup{display:grid;grid-template-rows:0fr;
+  transition:grid-template-rows 220ms cubic-bezier(.2,.8,.2,1)}
+.agroup.open{grid-template-rows:1fr}
+.agroup>.agwrap{min-height:0;overflow:hidden}
+.agroup.closed-list{display:block;grid-template-rows:none;transition:none}
+.agroup[hidden]{display:none}
+@media (prefers-reduced-motion:reduce){
+  .agroup{transition:none}
+  .proj .tw svg,.closed-toggle .fchev svg{transition:none}
+}
