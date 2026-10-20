@@ -430,7 +430,7 @@
   <main id="dash">
     <!-- 总览 ↔ 左栏的缝（可拖，改 --rail-w）。抓取带落在总览这一侧，
          可见线画在缝上 —— 和 #list-divider 同一套几何。 -->
-    <div id="rail-divider" class="divider" title="拖动调整左栏宽度"></div>
+    <div id="rail-divider" class="divider" title="拖动调整左栏宽度" data-i18n-title="dash.railDivider.title"></div>
     <div class="dash-scroll">
       <div class="dash-wrap">
         <section class="dash-pane" id="dash-overview">
@@ -444,18 +444,18 @@
             <div class="console-cols">
               <div class="console-main">
                 <div class="mod-head">
-                  <div><b>每日活动</b><span class="sub" id="dash-heat-sub"></span></div>
-                  <div class="mini-segs" id="heat-metric" role="tablist" aria-label="热力图口径">
-                    <button type="button" class="mini on" data-hm="turns" role="tab">轮次</button>
-                    <button type="button" class="mini" data-hm="calls" role="tab">请求</button>
+                  <div><b data-i18n="dash.heat.title">每日活动</b><span class="sub" id="dash-heat-sub"></span></div>
+                  <div class="mini-segs" id="heat-metric" role="tablist" aria-label="热力图口径" data-i18n-aria-label="dash.heat.metricAria">
+                    <button type="button" class="mini on" data-hm="turns" role="tab" data-i18n="dash.heat.turns">轮次</button>
+                    <button type="button" class="mini" data-hm="calls" role="tab" data-i18n="dash.heat.calls">请求</button>
                   </div>
                 </div>
                 <div class="heat-scroll"><div class="heat-grid" id="dash-heat"></div></div>
                 <div class="heat-tip" id="dash-heat-tip" hidden></div>
                 <div class="heat-foot">
-                  <span>少</span>
+                  <span data-i18n="dash.heat.less">少</span>
                   <span class="sw"></span><span class="sw lv1"></span><span class="sw lv2"></span><span class="sw lv3"></span><span class="sw lv4"></span>
-                  <span>多</span>
+                  <span data-i18n="dash.heat.more">多</span>
                 </div>
 
                 <!-- 热力图下面的两条读数：token 构成和最近请求的耗时形状。
@@ -463,7 +463,7 @@
                      左边这一列因此和右边的实时流一样高，不会留一大片空。 -->
                 <section class="console-sub" id="dash-mix-card">
                   <div class="mod-head">
-                    <div><b>今日 token</b><span class="sub" id="dash-mix-sub"></span></div>
+                    <div><b data-i18n="dash.mix.title">今日 token</b><span class="sub" id="dash-mix-sub"></span></div>
                     <span class="note" id="dash-mix-cost"></span>
                   </div>
                   <div class="mix-bar" id="dash-mix-bar"></div>
@@ -471,8 +471,8 @@
                 </section>
                 <section class="console-sub" id="dash-lat-card">
                   <div class="mod-head">
-                    <div><b>最近请求耗时</b><span class="sub" id="dash-lat-sub"></span></div>
-                    <span class="note">柱高 = 耗时</span>
+                    <div><b data-i18n="dash.lat.title">最近请求耗时</b><span class="sub" id="dash-lat-sub"></span></div>
+                    <span class="note" data-i18n="dash.lat.note">柱高 = 耗时</span>
                   </div>
                   <div class="lat-bars" id="dash-lat-bars"></div>
                 </section>
@@ -480,13 +480,13 @@
               <aside class="console-side">
                 <section class="side-block">
                   <div class="mod-head">
-                    <div><b>实时</b><span class="sub" id="dash-live-sub"></span></div>
+                    <div><b data-i18n="dash.live.title">实时</b><span class="sub" id="dash-live-sub"></span></div>
                   </div>
                   <div id="dash-live"></div>
                 </section>
                 <section class="side-block" id="dash-need-card">
                   <div class="mod-head">
-                    <b>在等你</b><span class="pill" id="dash-need-cnt">0</span>
+                    <b data-i18n="dash.need.title">在等你</b><span class="pill" id="dash-need-cnt">0</span>
                   </div>
                   <div class="vlist" id="dash-need"></div>
                 </section>
@@ -500,8 +500,8 @@
                  推理强度、分档、子代理、登录方式。 -->
             <section class="console-foot" id="dash-agent-card">
               <div class="mod-head">
-                <div><b>Agent CLI</b><span class="sub" id="dash-agent-sub"></span></div>
-                <span class="note">只列本机 CLI agent · 点一行配置网关 · 图标来自 magpie / lobe-icons</span>
+                <div><b data-i18n="dash.agents.title">Agent CLI</b><span class="sub" id="dash-agent-sub"></span></div>
+                <span class="note" data-i18n="dash.agents.note">只列本机 CLI agent · 点一行配置网关 · 图标来自 magpie / lobe-icons</span>
               </div>
               <div class="roster" id="dash-agent-list"></div>
             </section>

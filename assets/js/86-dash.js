@@ -275,31 +275,41 @@ function renderDashKpis() {
   const need = needModel();
 
   const m = mg(), on = mgLive();
-  const t = (m && m.today) || {};
+  const mt = (m && m.today) || {}; // magpie 的今日读数；别叫 today，上面有日期
   const ctx = (m && m.context) || {};
-  const cache = on ? mgCacheRate(t) : null;
+  const cache = on ? mgCacheRate(mt) : null;
   const ctxPct = ctx.window ? Math.round((100 * ctx.prompt) / ctx.window) : null;
   const ctxSub = ctx.window
     ? `${mgCompact(ctx.prompt)} / ${mgCompact(ctx.window)} · ${ctx.model || ""}`
-    : on ? (ctx.model ? `窗口未知 · ${ctx.model}` : "还没有请求") : "网关未运行";
+    : on ? (ctx.model
+        ? t("dash.kpi.windowUnknown", { model: ctx.model })
+        : t("dash.kpi.noRequests"))
+      : t("dash.kpi.gatewayDown");
   const failSub = on
-    ? `${dashNum(t.errors || 0)} 失败${t.retried ? ` · ${dashNum(t.retried)} 重试` : ""}`
-    : "网关未运行";
+    ? (mt.retried
+        ? t("dash.kpi.failedRetried", { n: dashNum(mt.errors || 0), retried: dashNum(mt.retried) })
+        : t("dash.kpi.failed", { n: dashNum(mt.errors || 0) }))
+    : t("dash.kpi.gatewayDown");
   const cacheSub = on
-    ? `缓存读 ${mgCompact(t.cache_read || 0)} / 提示 ${mgCompact(mgPromptOf(t))}`
-    : "网关未运行";
+    ? t("dash.kpi.cacheSub", {
+        read: mgCompact(mt.cache_read || 0),
+        prompt: mgCompact(mgPromptOf(mt)),
+      })
+    : t("dash.kpi.gatewayDown");
 
   const kpi = (n, label, sub, bad) =>
     `<div class="ck"><b>${n}</b><span>${label}</span>` +
     `<small${bad ? ' class="bad"' : ""}>${esc(sub)}</small></div>`;
   host.innerHTML =
-    kpi(dashNum(running) + " 格", "在跑",
-      `${live.length} 格 · 在等你 ${need.wait.length}`) +
-    kpi(dashNum(todayN), "今日轮次", `近 7 天 ${dashNum(week)} · ${act.length} 个活跃日`) +
-    kpi(on ? mgCompact(t.calls || 0) : "—", "今日请求", failSub, on && t.errors > 0) +
-    kpi(cache == null ? "—" : cache + "%", "缓存命中", cacheSub) +
-    kpi(ctxPct == null ? "—" : ctxPct + "%", "上下文", ctxSub) +
-    kpi(on ? mgSpeed(t) : "—", "输出速度", on ? `平均首字 ${mgTTFT(t)}` : "网关未运行");
+    kpi(tCount("dash.kpi.panes", running), t("dash.kpi.running"),
+      tCount("dash.kpi.runningSub", live.length, { panes: live.length, need: need.wait.length })) +
+    kpi(dashNum(todayN), t("dash.kpi.turnsToday"),
+      t("dash.kpi.turnsSub", { week: dashNum(week), days: act.length })) +
+    kpi(on ? mgCompact(mt.calls || 0) : "—", t("dash.kpi.requestsToday"), failSub, on && mt.errors > 0) +
+    kpi(cache == null ? "—" : cache + "%", t("dash.kpi.cacheHit"), cacheSub) +
+    kpi(ctxPct == null ? "—" : ctxPct + "%", t("dash.kpi.context"), ctxSub) +
+    kpi(on ? mgSpeed(mt) : "—", t("dash.kpi.outputSpeed"),
+      on ? t("dash.kpi.avgFirstToken", { ttft: mgTTFT(mt) }) : t("dash.kpi.gatewayDown"));
 }
 
 /* 53 周 × 7 天。周一在最上、月份在顶行 —— 和 magpie 的 Usage 热力图同一副骨架。
@@ -336,7 +346,9 @@ function renderHeat() {
   // 正悬停的格子从 DOM 里换掉 —— tooltip 随之消失（实测）。所以同一天内只
   // 就地改格子的 class / 数据，不重建节点；换天或首次才建骨架。
   const todayKey = dashDay(today);
+  // 语言切换要重建骨架：月份/星期的标签是画在骨架上的一次性文本。
   const canPatch = grid.dataset.day === todayKey &&
+    grid.dataset.locale === PERCH_LOCALE &&
     grid.querySelectorAll("i").length === 371;
   if (canPatch) {
     for (const el of grid.querySelectorAll("i[data-day]")) {
@@ -349,7 +361,9 @@ function renderHeat() {
       el.dataset.metric = heatMetric;
     }
   } else {
-    const WD = ["一", "", "三", "", "五", "", "日"];
+    const WD = [t("dash.wd.mon"), "", t("dash.wd.wed"), "", t("dash.wd.fri"), "", t("dash.wd.sun")];
+    // 月份标签交给 Intl：中文给「11月」，英文给「Nov」。骨架只在换天/换语言时重建。
+    const monthFmt = new Intl.DateTimeFormat(PERCH_LOCALE === "zh" ? "zh-CN" : "en", { month: "short" });
     let html = `<span class="mo" style="grid-column:1;grid-row:1"></span>`;
     let lastMonth = -1;
     for (let c = 0; c < 53; c++) {
@@ -360,7 +374,7 @@ function renderHeat() {
         // 给三格；月份最短也有 4 周，下一枚标签从 c+6 起，不会撞上。
         const span = (c + 4 <= 54) ? 3 : 2;
         html += `<span class="mo" style="grid-column:${c + 2} / span ${span};grid-row:1">` +
-          `${lastMonth + 1}月</span>`;
+          `${esc(monthFmt.format(monday))}</span>`;
       }
     }
     for (let r = 0; r < 7; r++) {
@@ -378,6 +392,7 @@ function renderHeat() {
     }
     grid.innerHTML = html;
     grid.dataset.day = todayKey;
+    grid.dataset.locale = PERCH_LOCALE;
     const tip = $("dash-heat-tip");
     if (tip) tip.hidden = true;
   }
@@ -386,18 +401,25 @@ function renderHeat() {
   if (sub) {
     if (heatMetric === "calls") {
       const m = mg();
+      const calls = pts.reduce((n, p) => n + p.v, 0);
       sub.textContent = !m
-        ? "magpie 读数还没到"
+        ? t("dash.heat.pending")
         : m.state !== "running"
-          ? "网关未运行 —— 切回「轮次」仍可看本机会话"
+          ? t("dash.heat.down")
           : pts.some((p) => p.v > 0)
-            ? `累计 ${dashNum(pts.reduce((n, p) => n + p.v, 0))} 次请求 · ${pts.filter((p) => p.v > 0).length} 个活跃日 · 来自 magpie`
-            : "网关还没有请求";
+            ? tCount("dash.heat.callsSub", calls, {
+                total: dashNum(calls),
+                days: pts.filter((p) => p.v > 0).length,
+              })
+            : t("dash.heat.noCalls");
     } else {
       const total = (STATE?.sessions || []).reduce((n, s) => n + (s.turns | 0), 0);
       sub.textContent = pts.length
-        ? `累计 ${dashNum(total)} 轮 · ${pts.filter((p) => p.v > 0).length} 个活跃日 · 含子代理`
-        : "还没有轮次数据";
+        ? tCount("dash.heat.turnsSub", total, {
+            total: dashNum(total),
+            days: pts.filter((p) => p.v > 0).length,
+          })
+        : t("dash.heat.noTurns");
     }
   }
 }
@@ -408,21 +430,23 @@ function renderDashMix() {
   const bar = $("dash-mix-bar"), leg = $("dash-mix-legend");
   if (!bar || !leg) return;
   const m = mg(), on = mgLive();
-  const t = on ? (m?.today || {}) : {};
+  const today = on ? (m?.today || {}) : {};
   const segs = [
-    { k: "cache", label: "缓存读", v: t.cache_read || 0 },
-    { k: "input", label: "输入", v: t.input || 0 },
-    { k: "output", label: "输出", v: t.output || 0 },
-    { k: "write", label: "缓存写", v: t.cache_write || 0 },
+    { k: "cache", label: t("dash.mix.cache"), v: today.cache_read || 0 },
+    { k: "input", label: t("dash.mix.input"), v: today.input || 0 },
+    { k: "output", label: t("dash.mix.output"), v: today.output || 0 },
+    { k: "write", label: t("dash.mix.write"), v: today.cache_write || 0 },
   ];
   const total = segs.reduce((n, s) => n + s.v, 0);
   const sub = $("dash-mix-sub"), cost = $("dash-mix-cost");
   if (sub) {
-    sub.textContent = !m ? "等 magpie 读数"
-      : !on ? "网关未运行"
-      : total ? `合计 ${mgCompact(total)} tokens` : "今天还没有用量";
+    sub.textContent = !m ? t("dash.mix.pending")
+      : !on ? t("dash.kpi.gatewayDown")
+      : total ? t("dash.mix.total", { n: mgCompact(total) }) : t("dash.mix.noUsage");
   }
-  if (cost) cost.textContent = on && (t.cost || 0) > 0 ? `成本 $${t.cost.toFixed(2)}` : "";
+  if (cost) cost.textContent = on && (today.cost || 0) > 0
+    ? t("dash.mix.cost", { n: today.cost.toFixed(2) })
+    : "";
   bar.innerHTML = total
     ? segs.filter((s) => s.v > 0).map((s) =>
         `<i class="${s.k}" style="flex:${s.v} 0 0" title="${s.label} ${mgCompact(s.v)}"></i>`).join("")
@@ -434,7 +458,7 @@ function renderDashMix() {
   leg.innerHTML = total
     ? segs.map((s) => `<span><i class="${s.k}"></i>${s.label} <b>${mgCompact(s.v)}</b>` +
         `<em>${share(s.v)}</em></span>`).join("")
-    : `<span>今天网关还没有处理请求。</span>`;
+    : `<span>${esc(t("dash.mix.empty"))}</span>`;
 }
 
 /* 最近请求的耗时形状：旧 → 新，一根一根柱；红柱是失败。
@@ -450,12 +474,14 @@ function renderDashLat() {
     ? Math.round(good.reduce((n, r) => n + (r.ms | 0), 0) / good.length) : 0;
   const sub = $("dash-lat-sub");
   if (sub) {
-    sub.textContent = !m ? "等 magpie 读数"
-      : !on ? "网关未运行"
-      : rows.length ? `最近 ${rows.length} 条 · 平均 ${dashNum(avg)}ms` : "今天还没有请求";
+    sub.textContent = !m ? t("dash.mix.pending")
+      : !on ? t("dash.kpi.gatewayDown")
+      : rows.length
+        ? t("dash.lat.sub", { n: rows.length, ms: dashNum(avg) })
+        : t("dash.lat.noRequests");
   }
   if (!rows.length) {
-    host.innerHTML = `<span class="lat-empty">今天网关还没有处理请求。</span>`;
+    host.innerHTML = `<span class="lat-empty">${esc(t("dash.live.empty"))}</span>`;
     return;
   }
   const max = Math.max(1, ...rows.map((r) => r.ms | 0));
@@ -476,27 +502,35 @@ function renderDashLat() {
 function renderDashStatus() {
   const host = $("dash-status");
   if (!host) return;
-  // ⚠️ 结构只建一次，之后只改数字 —— 这一行每 700ms 跟着 renderDashLive 重画，
-  // 整块 innerHTML 会把按钮换掉；mousedown 与 mouseup 落在两个不同元素上，
-  // 那次点击就静默丢了（和 seg 的 thumb 是同一类毛病）。
-  if (!host.querySelector("[data-wsact]")) {
-    host.innerHTML =
-      `<span class="brand"><b>工作区</b></span>` +
-      `<span class="ws-stat">在跑 <b id="dash-ws-run">0</b> 格</span><span class="sep">·</span>` +
-      `<span class="ws-stat">在等你 <b id="dash-ws-need">0</b></span><span class="sep">·</span>` +
-      `<span class="ws-stat"><b id="dash-ws-proj">0</b> 个项目</span>` +
-      `<span class="right">` +
-      `<button type="button" class="ws-act" data-wsact="enter">进入工作区</button>` +
-      `<button type="button" class="ws-act primary" data-wsact="new">新建工作区</button>` +
-      `</span>`;
-  }
   const live = TAB_LIST.filter((t) => t.id > 0);
   const running = live.filter((t) => !t.connDown).length;
   const need = needModel();
   const projs = (STATE?.projects || []).length;
+  // ⚠️ 结构只建一次，之后只改数字 —— 这一行每 700ms 跟着 renderDashLive 重画，
+  // 整块 innerHTML 会把按钮换掉；mousedown 与 mouseup 落在两个不同元素上，
+  // 那次点击就静默丢了（和 seg 的 thumb 是同一类毛病）。
+  // 语言切换时也要重建：这一行的文字只在建骨架时写一次，之后只改数字。
+  if (!host.querySelector("[data-wsact]") || host.dataset.locale !== PERCH_LOCALE) {
+    host.dataset.locale = PERCH_LOCALE;
+    // 数词和单位分开：0/1 的单复数只换单位那一段，骨架不必重建
+    // （重建会把按钮换掉，mousedown/mouseup 落在两颗元素上就丢点击）。
+    host.innerHTML =
+      `<span class="brand"><b>${esc(t("dash.status.workspace"))}</b></span>` +
+      `<span class="ws-stat">${esc(t("dash.status.runningLabel"))} <b id="dash-ws-run">0</b> ` +
+        `<span id="dash-ws-run-unit">${esc(tCount("dash.status.panesUnit", running))}</span></span><span class="sep">·</span>` +
+      `<span class="ws-stat">${t("dash.status.need", { n: '<b id="dash-ws-need">0</b>' })}</span><span class="sep">·</span>` +
+      `<span class="ws-stat"><b id="dash-ws-proj">0</b> ` +
+        `<span id="dash-ws-proj-unit">${esc(tCount("dash.status.projectsUnit", projs))}</span></span>` +
+      `<span class="right">` +
+      `<button type="button" class="ws-act" data-wsact="enter">${esc(t("dash.status.enter"))}</button>` +
+      `<button type="button" class="ws-act primary" data-wsact="new">${esc(t("dash.status.new"))}</button>` +
+      `</span>`;
+  }
   $("dash-ws-run").textContent = dashNum(running);
   $("dash-ws-need").textContent = dashNum(need.wait.length);
   $("dash-ws-proj").textContent = dashNum(projs);
+  $("dash-ws-run-unit").textContent = tCount("dash.status.panesUnit", running);
+  $("dash-ws-proj-unit").textContent = tCount("dash.status.projectsUnit", projs);
 }
 
 /* 「新建工作区」= 打开「文件夹 + Agent」卡片（2026-10-19 用户点名的形态）。
@@ -529,14 +563,14 @@ function renderDashNeed() {
   const cnt = $("dash-need-cnt");
   if (cnt) cnt.textContent = String(M.wait.length);
   if (!M.rows.length) {
-    host.innerHTML = `<div class="empty">现在没有在等你的格子。<br>
-      跑完一轮、挂着提问、要你批权限，都会出现在这里。</div>`;
+    host.innerHTML = `<div class="empty">${t("dash.need.empty")}</div>`;
     return;
   }
   const rows = M.wait.length ? M.wait : M.quiet;
   // 标题固定叫「在等你」，所以没有待办时不能说「在等你 · 3」——那三行是空闲。
-  const cap = M.wait.length ? `在等你 · ${M.wait.length}`
-    : `空闲 · ${M.quiet.length} 格（此刻没有在等你）`;
+  const cap = M.wait.length
+    ? t("dash.need.capWaiting", { n: M.wait.length })
+    : tCount("dash.need.capIdle", M.quiet.length, { n: M.quiet.length });
   host.innerHTML = `<div class="cap">${cap}</div>` +
     rows.slice(0, 8).map(needRowHTML).join("");
 }
@@ -575,37 +609,37 @@ function renderDashAgents() {
   const routed = list.filter((a) => (a.calls | 0) > 0);
   if (sub) {
     const bits = [];
-    if (full.length) bits.push(`${full.length} 个完整`);
-    if (basic.length) bits.push(`${basic.length} 个基础`);
-    if (launchOnly.length) bits.push(`${launchOnly.length} 个仅启动`);
-    if (noLaunch.length) bits.push(`${noLaunch.length} 个未接入`);
-    bits.push(`${missing.length} 个未检测到`);
+    if (full.length) bits.push(t("dash.agents.sumFull", { n: full.length }));
+    if (basic.length) bits.push(t("dash.agents.sumBasic", { n: basic.length }));
+    if (launchOnly.length) bits.push(t("dash.agents.sumLaunch", { n: launchOnly.length }));
+    if (noLaunch.length) bits.push(t("dash.agents.sumNone", { n: noLaunch.length }));
+    bits.push(t("dash.agents.sumMissing", { n: missing.length }));
     sub.textContent = list.length
-      ? bits.join(" · ") + (routed.length ? ` · 今日经过网关 ${routed.length} 个` : "")
-      : "正在探测本机安装情况…";
+      ? bits.join(" · ") + (routed.length ? t("dash.agents.sumRouted", { n: routed.length }) : "")
+      : t("dash.agents.scanning");
   }
   if (!list.length) {
-    host.innerHTML = `<div class="gw-empty">Agent 清单还没到。</div>`;
+    host.innerHTML = `<div class="gw-empty">${esc(t("dash.agents.listPending"))}</div>`;
     return;
   }
 
   const row = (a, gid) => {
     const c = capsOf(a);
-    const level = c.waiting ? "完整状态"
-      : c.status ? "基础状态"
-      : c.launch ? "仅启动"
-      : "未接入";
+    const level = c.waiting ? t("dash.agents.levelFull")
+      : c.status ? t("dash.agents.levelBasic")
+      : c.launch ? t("dash.agents.levelLaunch")
+      : t("dash.agents.levelNone");
     // 没探测到 ≠ 没装：GUI 进程的 PATH 常常比终端里短，有的 agent 也把配置
     // 放在别处。所以写「未检测到」，不写「未安装」——前者说的是我们的证据。
     const st = gid === "missing"
-      ? (a.windows === false ? "仅 macOS/Linux" : "未检测到")
+      ? (a.windows === false ? t("dash.agents.macOnly") : t("dash.agents.notDetected"))
       : level;
     const stClass = c.status ? " ok" : (gid === "missing" || !c.launch) ? " off" : "";
     // 这份名单只列 CLI agent：每行副标题都带 CLI，和网关层的桌面客户端分开。
     const detail = gid === "missing"
-      ? `CLI · 官方安装 · ${a.vendor}`
-      : `CLI · ${a.path || a.vendor || ""}`;
-    const calls = (a.calls | 0) > 0 ? ` · 今日 ${dashNum(a.calls)} 次` : "";
+      ? t("dash.agents.detailCli", { vendor: a.vendor || "" })
+      : t("dash.agents.detailPath", { path: a.path || a.vendor || "" });
+    const calls = (a.calls | 0) > 0 ? t("dash.agents.calls", { n: dashNum(a.calls) }) : "";
     const busy = INSTALL && INSTALL.id === a.id && INSTALL.state === "running";
     // 没有安装配方 ≠ 桌面应用：这份名单是**使用层**，只认 CLI 能不能装。
     // 没配方就给官方安装说明的出口；桌面客户端属于网关层，由 magpie 管，
@@ -613,37 +647,38 @@ function renderDashAgents() {
     const action = gid === "missing"
       ? (a.install
           ? (busy
-              ? `<span class="st">${typeof INSTALL !== "undefined" && INSTALL && INSTALL.phase === "scanning" ? "检测中…" : "安装中…"}</span>`
+              ? `<span class="st">${esc(typeof INSTALL !== "undefined" && INSTALL && INSTALL.phase === "scanning"
+                  ? t("dash.agents.installScanning") : t("dash.agents.installBusy"))}</span>`
               : `<button type="button" class="dl" data-install="${esc(a.id)}"` +
-                ` title="在 Perch 里运行 ${esc(a.name)} 的官方安装命令">安装</button>`)
+                ` title="${esc(t("dash.agents.installTitle", { name: a.name || "" }))}">${esc(t("dash.agents.install"))}</button>`)
           : a.url
             ? `<button type="button" class="dl" data-docs="${esc(a.id)}"` +
-              ` title="打开 ${esc(a.name)} 的官方安装说明">安装说明</button>`
+              ` title="${esc(t("dash.agents.docsTitle", { name: a.name || "" }))}">${esc(t("dash.agents.docs"))}</button>`
             : "")
       : c.launch
         ? `<button type="button" class="dl" data-launch="${esc(a.id)}"` +
-          ` title="在 Perch 里开一格 ${esc(a.name)}">打开</button>`
+          ` title="${esc(t("dash.agents.openTitle", { name: a.name || "" }))}">${esc(t("dash.agents.open"))}</button>`
         : "";
     const stTitle = gid === "missing"
-      ? "本机配置目录与 PATH 里都没有找到 —— 不等于没装（GUI 的 PATH 可能更短）"
+      ? t("dash.agents.stTitleMissing")
       : c.waiting
-        ? "能看忙闲，也能看到它在等你回答/批准"
+        ? t("dash.agents.stTitleFull")
         : c.status
-          ? "能看忙闲；还看不到它在等你回答/批准"
+          ? t("dash.agents.stTitleBasic")
           : c.launch
-            ? "能在 Perch 里开一格；还没有状态接入"
-            : "Perch 还没有这个 agent 的启动适配器";
+            ? t("dash.agents.stTitleLaunch")
+            : t("dash.agents.stTitleNone");
     // 已检测到的行可以点开右侧配置抽屉（89-agent-cfg.js）。网关那个点只有
     // 读到 magpie 的 agent 列表之后才画 —— 没读到时不假装"未接入"。
     const cfg = gid !== "missing";
     const ga = cfg && typeof gwAgentOf === "function" ? gwAgentOf(a.id) : null;
     const gdot = ga
-      ? `<span class="gwdot${ga.wired ? " on" : ""}" title="${ga.wired
-          ? "已接入 magpie 网关" : "未接入 magpie 网关"}"></span>`
+      ? `<span class="gwdot${ga.wired ? " on" : ""}" title="${esc(ga.wired
+          ? t("dash.agents.wired") : t("dash.agents.notWired"))}"></span>`
       : "";
     return `<div class="ag${cfg ? " cfg" : ""}"` +
       (cfg ? ` data-agentcfg="${esc(a.id)}" role="button" tabindex="0"` +
-        ` aria-label="${esc(a.name)} 配置"` : "") + `>` +
+        ` aria-label="${esc(t("dash.agents.configAria", { name: a.name || "" }))}"` : "") + `>` +
       iconHTML(a.icon) +
       `<span class="who"><span class="nm">${esc(a.name)}${gdot}</span>` +
       `<span class="sub" title="${esc(detail + calls)}">${esc(detail + calls)}</span></span>` +
@@ -659,21 +694,23 @@ function renderDashAgents() {
     `<div class="roster">${items.map((a) => row(a, gid)).join("")}</div>`;
 
   let html = "";
-  if (full.length) html += group("完整状态", full, "full");
-  if (basic.length) html += group("基础状态", basic, "basic");
-  if (launchOnly.length) html += group("仅启动", launchOnly, "launch");
-  if (noLaunch.length) html += group("未接入", noLaunch, "nolaunch");
+  if (full.length) html += group(t("dash.agents.levelFull"), full, "full");
+  if (basic.length) html += group(t("dash.agents.levelBasic"), basic, "basic");
+  if (launchOnly.length) html += group(t("dash.agents.levelLaunch"), launchOnly, "launch");
+  if (noLaunch.length) html += group(t("dash.agents.levelNone"), noLaunch, "nolaunch");
   if (!installed.length) {
-    html += `<div class="gw-empty">还没有检测到本机安装的 Agent —— 下面的清单可以直接装。</div>`;
+    html += `<div class="gw-empty">${esc(t("dash.agents.emptyAll"))}</div>`;
   }
   if (missing.length) {
     html +=
       `<button type="button" class="agent-more${agentsFoldOpen ? " open" : ""}"` +
       ` id="dash-agent-more" data-agents-fold>` +
-      `<span id="dash-agent-more-label">${agentsFoldOpen ? "收起" : `显示 ${missing.length} 个未检测到的`}</span>` +
+      `<span id="dash-agent-more-label">${esc(agentsFoldOpen
+        ? t("dash.agents.foldHide")
+        : t("dash.agents.foldShow", { n: missing.length }))}</span>` +
       `<span class="chev" aria-hidden="true">▾</span></button>` +
       `<div class="agent-fold${agentsFoldOpen ? " open" : ""}" id="dash-agent-fold"><div>` +
-      group("未检测到", missing, "missing") +
+      group(t("dash.agents.notDetected"), missing, "missing") +
       `</div></div>`;
   }
   host.innerHTML = html;
@@ -741,27 +778,27 @@ function renderDashLiveFeed() {
   const m = mg(), on = mgLive();
   const sub = $("dash-live-sub");
   if (sub) {
-    sub.textContent = !m ? "等 magpie 读数"
-      : !on ? "网关未运行"
-      : (m.conc?.requests ? `正在处理 ${m.conc.requests} 个请求` :
-         `空闲 · 最近 ${(m.recent || []).length} 条`);
+    sub.textContent = !m ? t("dash.live.pending")
+      : !on ? t("dash.kpi.gatewayDown")
+      : (m.conc?.requests
+          ? tCount("dash.live.processing", m.conc.requests, { n: m.conc.requests })
+          : t("dash.live.idleRecent", { n: (m.recent || []).length }));
   }
   if (!m) {
-    host.innerHTML = `<div class="live-now idle">正在读取网关…</div>`;
+    host.innerHTML = `<div class="live-now idle">${esc(t("dash.live.reading"))}</div>`;
     return;
   }
   if (!on) {
-    host.innerHTML = `<div class="live-now idle">magpie 网关未运行 —— ` +
-      (m.state === "stopped" ? "配置在，打开 magpie 就会接上。" : "还没有检测到 magpie。") +
-      `</div>`;
+    host.innerHTML = `<div class="live-now idle">${esc(m.state === "stopped"
+      ? t("dash.live.downStopped") : t("dash.live.downMissing"))}</div>`;
     return;
   }
   const c = m.conc || {};
   const head = c.requests
-    ? `<div class="live-now"><span class="spin"></span>正在处理 <b>${dashNum(c.requests)}</b> 个请求` +
-      (c.waiting ? ` · ${dashNum(c.waiting)} 个排队` : "") +
-      (c.tools ? ` · ${dashNum(c.tools)} 个工具等待` : "") + `</div>`
-    : `<div class="live-now idle"><span class="dot on"></span>网关空闲 · 最近 ${(m.recent || []).length} 条</div>`;
+    ? `<div class="live-now"><span class="spin"></span>${tCount("dash.live.headProcessing", c.requests, { n: dashNum(c.requests) })}` +
+      (c.waiting ? esc(t("dash.live.queued", { n: dashNum(c.waiting) })) : "") +
+      (c.tools ? esc(tCount("dash.live.tools", c.tools, { n: dashNum(c.tools) })) : "") + `</div>`
+    : `<div class="live-now idle"><span class="dot on"></span>${esc(t("dash.live.headIdle", { n: (m.recent || []).length }))}</div>`;
   const rows = (m.recent || []).slice(0, 6);
   host.innerHTML = head + (rows.length
     ? rows.map((r) => {
@@ -769,14 +806,14 @@ function renderDashLiveFeed() {
         const at = (r.t || "").slice(11, 19);
         return `<div class="live-row" title="${esc(at)} · ${esc(r.providerName || r.provider || "")}` +
           ` · ${esc(r.served || r.model || "")}${r.effort ? " · effort " + esc(r.effort) : ""}` +
-          `${r.ttft_ms ? " · 首字 " + dashNum(r.ttft_ms) + "ms" : ""}">` +
+          `${r.ttft_ms ? esc(t("dash.live.firstToken", { ms: dashNum(r.ttft_ms) })) : ""}">` +
           `<span class="st${bad ? " bad" : ""}"></span>` +
           `<span class="who">${iconHTML(r.icon, "sm")}<span class="nm">${esc(r.agentName || r.agent || "?")}</span></span>` +
           `<span class="to">${esc(r.model || r.served || "")}</span>` +
           `<span class="ms${bad ? " bad" : ""}">${bad ? "HTTP " + (r.status | 0) : dashNum(r.ms) + "ms"}</span>` +
           `</div>`;
       }).join("")
-    : `<div class="live-now idle">今天还没有请求经过网关。</div>`);
+    : `<div class="live-now idle">${esc(t("dash.live.empty"))}</div>`);
 }
 
 /* 总览的自证读数：盒子多大、哪一页、几格、几个活跃日、多少轮。

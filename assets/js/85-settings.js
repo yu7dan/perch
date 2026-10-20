@@ -666,6 +666,11 @@ $("set-language").addEventListener("change", (e) => {
 function onLocaleChanged() {
   if (typeof renderNav === "function") renderNav();
   if (typeof renderDashTabs === "function") renderDashTabs();
+  // 总览的读数、Agent 名单、热力图骨架都是 JS 现画的，静态翻译管不到。
+  if (typeof NAV_HERE !== "undefined" && NAV_HERE === "dash" &&
+      typeof renderDashboard === "function") {
+    renderDashboard("locale");
+  }
   if (typeof paintFontStatus === "function") paintFontStatus();
   if (typeof paintRenderStatus === "function") paintRenderStatus();
   if (typeof paintConnStatus === "function" && typeof activeTab !== "undefined" && activeTab) {
