@@ -106,6 +106,34 @@ func PerchEngineHomeDir() string {
 	return filepath.Join(local, "Perch", isolatedEngineSubdir, "home")
 }
 
+// desktopNodePath 返回真实用户环境里的 npm/node 目录，用来垫在引擎 PATH
+// 前面。GUI 进程的 PATH 通常只有系统项，npm 装的 CLI 会因此“像没装”。
+func desktopNodePath(realHome string) string {
+	var dirs []string
+	add := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
+		}
+		for _, have := range dirs {
+			if strings.EqualFold(have, p) {
+				return
+			}
+		}
+		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+			dirs = append(dirs, p)
+		}
+	}
+	add(filepath.Join(realHome, "AppData", "Roaming", "npm"))
+	add(filepath.Join(os.Getenv("ProgramFiles"), "nodejs"))
+	add(filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "nodejs"))
+	add(filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "node"))
+	if node, err := exec.LookPath("node"); err == nil {
+		add(filepath.Dir(node))
+	}
+	return strings.Join(dirs, ";")
+}
+
 func engineInstalled() bool {
 	exe := PerchEngineExe()
 	if exe == "" {
@@ -269,6 +297,27 @@ func engineEnv(key string) ([]string, error) {
 			}
 		}
 	}
+	// npm 全局安装的 CLI（Gemini/Qwen/Copilot…）在 %APPDATA%\npm，GUI
+	// 进程的 PATH 常常没有它；magpie 的 detect 和 dsh-tui 都按 PATH 找。
+	// Windows 的环境变量名大小写不敏感，os.Environ 可能给的是 "Path"；
+	// 先合并成唯一的 "PATH"，否则我们新加的那条会被旧值盖掉。
+	var curPath string
+	for k, v := range m {
+		if strings.EqualFold(k, "PATH") {
+			curPath = v
+			if k != "PATH" {
+				delete(m, k)
+			}
+		}
+	}
+	if realHome, err := os.UserHomeDir(); err == nil && realHome != "" {
+		if p := desktopNodePath(realHome); p != "" {
+			curPath = p + ";" + curPath
+		}
+	}
+	if curPath != "" {
+		m["PATH"] = curPath
+	}
 	out := make([]string, 0, len(m))
 	for k, v := range m {
 		out = append(out, k+"="+v)
@@ -393,6 +442,16 @@ func seedGenericAgentConfigs(realHome, home string) {
 			filepath.Join(realHome, filepath.FromSlash(rel)),
 			filepath.Join(home, filepath.FromSlash(rel)),
 		)
+	}
+	// Gemini CLI 已经装好、但用户还没登录/写过配置时，真实 ~/.gemini 里
+	// 没有 settings.json；给引擎沙盒放一个空对象，magpie 才能识别并接入它。
+	// 这只是沙盒里的占位，真实文件不会被创建。
+	geminiSettings := filepath.Join(home, ".gemini", "settings.json")
+	if _, err := os.Stat(filepath.Join(realHome, ".gemini", "settings.json")); os.IsNotExist(err) {
+		if _, err := os.Stat(geminiSettings); os.IsNotExist(err) {
+			_ = os.MkdirAll(filepath.Dir(geminiSettings), 0700)
+			_ = os.WriteFile(geminiSettings, []byte("{}\n"), 0600)
+		}
 	}
 }
 

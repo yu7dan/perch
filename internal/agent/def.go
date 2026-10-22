@@ -56,7 +56,13 @@ func GenericDef(bin string) Def {
 func EngineDef(id, bin string) Def {
 	d := GenericDef(bin)
 	d.Prepare = func(string, int, string, []string) (map[string]string, []string, func(context.Context), error) {
-		return host.EngineHomeEnvFor(id), nil, nil, nil
+		// npm 全局装出来的 CLI 是 .cmd shim，shim 里还要找 node；GUI 的
+		// PATH 往往比终端短。PATH 始终补上，沙盒 home 只在已接入时加。
+		env := map[string]string{"PATH": dshChildPath()}
+		for k, v := range host.EngineHomeEnvFor(id) {
+			env[k] = v
+		}
+		return env, nil, nil, nil
 	}
 	return d
 }

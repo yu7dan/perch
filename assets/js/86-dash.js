@@ -741,9 +741,15 @@ function gwDefaultLabel(g, f) {
 
 // 引擎字段里有 magpie/… 选项 = 这个字段能接进 Perch 的网关。只有这类
 // agent 才画模型 chip 和接入开关；Cursor 这种官方只让选 auto 的仍是本机配置。
+// magpie 的选项值不一定带 magpie/ 前缀：Gemini 用自己的拼法（gemini-4-argon，
+// workbuddy/auto…），但会带 ref / “via magpie” 标记。ref 是更稳的判据。
+function gwIsGatewayOption(o) {
+  return !!o && !gwIsRoutingGroup(o) &&
+    (!!o.ref || String(o.value || "").startsWith("magpie/"));
+}
+
 function gwGatewayOptions(f) {
-  return (f && Array.isArray(f.options) ? f.options : [])
-    .filter((o) => o && String(o.value || "").startsWith("magpie/"));
+  return (f && Array.isArray(f.options) ? f.options : []).filter(gwIsGatewayOption);
 }
 
 // magpie 的 Routing groups 是路由组别名，不是供应商模型。`group/perch-*`
@@ -760,7 +766,7 @@ function gwVisibleFieldOptions(f) {
   // DeepSeek 直连模型，选了就等于绕过网关（甚至断开）。这里只留
   // magpie/… 的网关模型，直连留在「使用自己的配置」那一侧。
   if (f && f.key === "model") {
-    out = out.filter((o) => String((o && o.value) || "").startsWith("magpie/"));
+    out = out.filter(gwIsGatewayOption);
   }
   return out;
 }
