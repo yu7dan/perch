@@ -90,4 +90,6 @@ type Msg struct {
 	SetName string `json:"setName,omitempty"`
 	// agent.profile.tier 用：Claude 的 opus/sonnet/haiku/fable。
 	Tier string `json:"tier,omitempty"`
+	// agent.profile.models 用：这个 agent 的模型选择器里要收起的模型 id。
+	Hidden []string `json:"hidden,omitempty"`
 }

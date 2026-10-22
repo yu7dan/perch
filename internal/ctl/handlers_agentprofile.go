@@ -29,6 +29,8 @@ func (s *Server) handleAgentProfile(m *Msg) {
 		go s.setAgentProfile(trimSpace(m.ID), trimSpace(m.Value), trimSpace(m.Effort))
 	case "agent.profile.tier":
 		go s.setAgentTier(trimSpace(m.ID), trimSpace(m.Tier), trimSpace(m.Value), trimSpace(m.Effort))
+	case "agent.profile.models":
+		go s.setAgentModels(trimSpace(m.ID), m.Hidden)
 	case "agent.profile.save":
 		go s.saveAgentProfileSet(trimSpace(m.SetName))
 	case "agent.profile.use":
@@ -98,9 +100,10 @@ func (s *Server) setAgentProfile(id, model, effort string) {
 		Model:  model,
 		Effort: effort,
 	}
-	// 换主模型不要顺手把各档位自己的模型清掉。
+	// 换主模型不要顺手把各档位自己的模型、模型列表的隐藏项清掉。
 	if hadOld {
 		p.Tiers = old.Tiers
+		p.Hidden = old.Hidden
 	}
 	if err := s.deps.Profiles.Set(p); err != nil {
 		log.Printf("[agentprofile] 保存 %s 失败：%v", id, err)
@@ -167,6 +170,22 @@ func (s *Server) setAgentTier(id, tier, model, effort string) {
 	}
 	agentProfileOps.Unlock()
 	log.Printf("[agentprofile] %s 档位 %s -> %s（推理强度 %q）", id, tier, model, effort)
+	s.pushAgentProfiles()
+}
+
+// setAgentModels 记下这个 agent 的模型选择器里要收起的模型。
+func (s *Server) setAgentModels(id string, hidden []string) {
+	if id == "" || s.deps.Profiles == nil {
+		return
+	}
+	agentProfileOps.Lock()
+	_, err := s.deps.Profiles.SetHidden(id, hidden)
+	agentProfileOps.Unlock()
+	if err != nil {
+		s.pushAgentProfilesErr(err)
+		return
+	}
+	log.Printf("[agentprofile] %s 隐藏 %d 个模型", id, len(hidden))
 	s.pushAgentProfiles()
 }
 

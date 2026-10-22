@@ -71,6 +71,33 @@ func TestStoreTiers(t *testing.T) {
 	}
 }
 
+func TestStoreHiddenModels(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	s := Load(path)
+	if _, err := s.SetHidden("claude", []string{"x"}); err == nil {
+		t.Fatal("hidden set without a main model accepted")
+	}
+	if err := s.Set(Profile{Agent: "claude", Model: "deepseek/deepseek-flash"}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.SetHidden("claude", []string{"a/b", " a/b ", "", "c/d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Hidden) != 2 || p.Hidden[0] != "a/b" || p.Hidden[1] != "c/d" {
+		t.Fatalf("hidden=%v", p.Hidden)
+	}
+	s2 := Load(path)
+	got, _ := s2.Get("claude")
+	if len(got.Hidden) != 2 {
+		t.Fatalf("reloaded hidden=%v", got.Hidden)
+	}
+	got, err = s2.SetHidden("claude", nil)
+	if err != nil || len(got.Hidden) != 0 {
+		t.Fatalf("clear hidden=%v err=%v", got.Hidden, err)
+	}
+}
+
 func TestSetStoreRejectsBadNamesAndEmpty(t *testing.T) {
 	s := LoadSets(filepath.Join(t.TempDir(), "sets.json"))
 	if err := s.Save("  ", []Profile{{Agent: "claude", Model: "x"}}); err == nil {

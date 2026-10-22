@@ -32,6 +32,9 @@ type Profile struct {
 	// Tiers 只有 Claude 用：opus/sonnet/haiku/fable 各自可以指向不同的
 	// 网关模型/推理强度；没有的键跟随 Model/Effort。
 	Tiers map[string]TierProfile `json:"tiers,omitempty"`
+	// Hidden 是这个 agent 的模型选择器里被收起的模型 id。当前主模型/档位
+	// 模型始终显示，不会被 Hidden 藏掉。
+	Hidden []string `json:"hidden,omitempty"`
 }
 
 // AliasFor 是 Perch 给 agent 的稳定模型别名。只保留字母数字和连字符，
@@ -90,6 +93,9 @@ func cloneProfile(p Profile) Profile {
 		}
 		p.Tiers = m
 	}
+	if p.Hidden != nil {
+		p.Hidden = append([]string(nil), p.Hidden...)
+	}
 	return p
 }
 
@@ -113,6 +119,37 @@ func (s *Store) Set(p Profile) error {
 		s.m[p.Agent] = cloneProfile(p)
 	}
 	return s.saveLocked()
+}
+
+// SetHidden 记录这个 agent 的模型选择器里收起的模型 id；去重、去空。
+func (s *Store) SetHidden(agent string, hidden []string) (Profile, error) {
+	agent = strings.TrimSpace(agent)
+	if agent == "" {
+		return Profile{}, fmt.Errorf("缺少 agent")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.m[agent]
+	if !ok || strings.TrimSpace(p.Model) == "" {
+		return Profile{}, fmt.Errorf("先给 %s 选一个主模型", agent)
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(hidden))
+	for _, id := range hidden {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	if len(out) == 0 {
+		p.Hidden = nil
+	} else {
+		p.Hidden = out
+	}
+	s.m[agent] = cloneProfile(p)
+	return cloneProfile(p), s.saveLocked()
 }
 
 // SetTier 改一个 Claude 档位的模型/推理强度；空 model 是回到跟随主模型。

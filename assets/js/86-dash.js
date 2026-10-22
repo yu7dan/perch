@@ -612,6 +612,7 @@ let AGENT_PROFILE_ASKED = false;
 let AGENT_PROFILE_ERR = "";
 let AGENT_DETAIL_ID = "";
 let AGENT_MODEL_POP = null;
+let AGENT_MODELS_POP = null;
 let AGENT_SETS = [];
 let AGENT_SET_PENDING = "";
 let AGENT_SET_NAMING = false;
@@ -668,6 +669,24 @@ function perchProfileOf(id) { return AGENT_PROFILES[id] || null; }
 function perchModelOf(p) {
   if (!p || !p.model) return null;
   return AGENT_MODELS.find((m) => m && m.id === p.model) || null;
+}
+
+function perchHiddenSet(id) {
+  const p = perchProfileOf(id);
+  return new Set(Array.isArray(p && p.hidden) ? p.hidden : []);
+}
+
+// 这个 agent 的模型选择器里实际展示的模型：收起的去掉，但当前主模型/
+// 档位模型始终保留（magpie 也不允许把正在用的模型藏掉）。
+function perchVisibleModels(id, extraKeep) {
+  const p = perchProfileOf(id);
+  const hidden = perchHiddenSet(id);
+  const keep = new Set(extraKeep || []);
+  if (p && p.model) keep.add(p.model);
+  if (p && p.tiers) for (const t of Object.keys(p.tiers)) {
+    if (p.tiers[t] && p.tiers[t].model) keep.add(p.tiers[t].model);
+  }
+  return AGENT_MODELS.filter((m) => m && m.id && (!hidden.has(m.id) || keep.has(m.id)));
 }
 
 function perchModelLabel(p) {
@@ -858,7 +877,7 @@ function perchRowHTML(a, gid) {
   const modelTitle = wired ? t("dash.agents.perchModelHint") : t("dash.agents.perchPickHint");
   const linkLabel = a.id === "claude"
     ? t("dash.agents.perchTiersLink")
-    : t("dash.agents.perchModelsLink", { n: AGENT_MODELS.length });
+    : t("dash.agents.perchModelsLink", { n: perchVisibleModels(a.id).length });
   const link = wired
     ? `<button type="button" class="agp-link" data-perchdetail="${id}" aria-expanded="${open}">` +
       `${esc(linkLabel)}<span class="chev" aria-hidden="true">${open ? "⌄" : "›"}</span></button>`
@@ -888,7 +907,8 @@ function perchRowHTML(a, gid) {
       .concat(efforts.map((e) => chip(e, e))).join("");
     const provs = [];
     const byProv = Object.create(null);
-    for (const m of AGENT_MODELS) {
+    const visible = perchVisibleModels(a.id);
+    for (const m of visible) {
       const key = m.provider || m.providerName || "?";
       if (!byProv[key]) {
         byProv[key] = { name: m.providerName || key, icon: m.icon || "", n: 0 };
@@ -896,6 +916,7 @@ function perchRowHTML(a, gid) {
       }
       byProv[key].n++;
     }
+    const hiddenN = Math.max(0, AGENT_MODELS.length - visible.length);
     const provChips = provs.map((k) => {
       const g = byProv[k];
       return `<span class="agp-pchip">${g.icon ? iconHTML(g.icon, "agp-pic") : ""}` +
@@ -943,7 +964,10 @@ function perchRowHTML(a, gid) {
       `<div class="agp-kv"><div class="agp-k">${esc(t("dash.agents.perchEffortLabel"))}</div>` +
       `<div class="agp-v"><span class="agp-efforts"${efforts.length ? "" : ` title="${esc(t("dash.agents.perchEffortNone"))}"`}>${effortsHTML}</span></div></div>` +
       `<div class="agp-kv"><div class="agp-k">${esc(t("dash.agents.perchModelList"))}</div>` +
-      `<div class="agp-v agp-mlist"><span class="agp-pchips">${provChips}</span>` +
+      `<div class="agp-v agp-mlist"><span class="agp-pchips">${provChips}` +
+      (hiddenN ? `<span class="agp-pchip agp-pdim">${esc(t("dash.agents.perchHiddenCount", { n: hiddenN }))}</span>` : "") +
+      `</span>` +
+      `<button type="button" class="agp-quiet" data-perchmodels="${id}">${esc(t("dash.agents.perchManageModels"))}</button>` +
       `<button type="button" class="agp-quiet" data-perchpick="${id}">${esc(t("dash.agents.perchPick"))}</button>` +
       `</div></div>` +
       `<div class="agp-kv"><div class="agp-k">${esc(t("dash.agents.perchDetailAlias"))}</div>` +
@@ -1000,8 +1024,9 @@ function dashModelPickOpen(anchor, id, tier) {
       `<span class="dm-txt"><span class="nm">${esc(tier ? t("dash.agents.perchTierFollow") : t("dash.agents.perchModelDefault"))}</span>` +
       `<span class="dm-prov">${esc(tier ? t("dash.agents.perchTierFollowSub") : t("dash.agents.perchModelDefaultSub"))}</span></span>` +
       `${curModel ? "" : `<span class="dm-check" aria-hidden="true">✓</span>`}</button>`;
+    const pickModels = perchVisibleModels(id, tier && tp && tp.model ? [tp.model] : []);
     let grp = null;
-    for (const m of AGENT_MODELS) {
+    for (const m of pickModels) {
       const g = m.providerName || m.provider || "";
       if (g !== grp) {
         listHTML += `<div class="ac-pop-grp">${esc(g)}</div>`;
@@ -1019,6 +1044,9 @@ function dashModelPickOpen(anchor, id, tier) {
         `<span class="dm-ctx">${esc(ctx)}</span>` +
         (on ? `<span class="dm-check" aria-hidden="true">✓</span>` : ``) +
         `</button>`;
+    }
+    if (!pickModels.length) {
+      listHTML += `<div class="dash-model-empty"><p>${esc(t("dash.agents.perchAllModelsHidden"))}</p></div>`;
     }
     pop.innerHTML = `<input class="ac-pop-find" type="search" autocomplete="off"` +
       ` placeholder="${esc(t("dash.agents.perchSearch"))}"` +
@@ -1128,14 +1156,148 @@ function dashModelClose(refocus) {
   }
 }
 
+function dashModelListClose() {
+  if (!AGENT_MODELS_POP) return;
+  const { pop } = AGENT_MODELS_POP;
+  AGENT_MODELS_POP = null;
+  if (pop) pop.remove();
+}
+
+function dashModelListOpen(anchor, id) {
+  if (!anchor || !anchor.isConnected) return;
+  if (AGENT_MODELS_POP && AGENT_MODELS_POP.id === id) { dashModelListClose(); return; }
+  dashModelListClose();
+  dashModelClose(false);
+  const p = perchProfileOf(id);
+  if (!p) return;
+  const keep = new Set([p.model].filter(Boolean));
+  if (p.tiers) for (const t of Object.keys(p.tiers)) {
+    if (p.tiers[t] && p.tiers[t].model) keep.add(p.tiers[t].model);
+  }
+  const pop = document.createElement("div");
+  pop.className = "ac-pop dash-model-pop agp-models-pop";
+  let listHTML = "";
+  let grp = null;
+  for (const m of AGENT_MODELS) {
+    const g = m.providerName || m.provider || "";
+    if (g !== grp) {
+      listHTML += `<div class="ac-pop-grp">${esc(g)}</div>`;
+      grp = g;
+    }
+    const on = keep.has(m.id) || !perchHiddenSet(id).has(m.id);
+    const locked = keep.has(m.id);
+    const mi = m.icon ? iconHTML(m.icon) : "";
+    const ctx = m.context ? dashContextLabel(m.context) : "";
+    listHTML += `<button type="button" class="ac-pop-opt dm-opt dm-manage${on ? " on" : ""}"` +
+      ` data-mhide="${esc(m.id)}"${locked ? " disabled" : ""}>` +
+      `<span class="dm-box" aria-hidden="true">${on ? "✓" : ""}</span>` +
+      `<span class="dm-ic">${mi}</span>` +
+      `<span class="dm-txt"><span class="nm">${esc(m.name || m.id)}</span>` +
+      `<span class="dm-prov">${esc(g)}</span></span>` +
+      `<span class="dm-ctx">${locked ? esc(t("dash.agents.perchCurrentModel")) : esc(ctx)}</span>` +
+      `</button>`;
+  }
+  pop.innerHTML = `<div class="agp-mpop-head"><span>${esc(t("dash.agents.perchModelList"))}</span>` +
+    `<button type="button" class="agp-mpop-x" data-mpopclose aria-label="${esc(t("common.close"))}">×</button></div>` +
+    `<input class="ac-pop-find" type="search" autocomplete="off"` +
+    ` placeholder="${esc(t("dash.agents.perchSearch"))}"` +
+    ` aria-label="${esc(t("dash.agents.perchSearch"))}">` +
+    `<div class="ac-pop-list" role="listbox">${listHTML}</div>` +
+    `<div class="agp-mpop-foot"><span class="agp-mpop-count"></span>` +
+    `<button type="button" class="agp-quiet" data-mpopall>${esc(t("dash.agents.perchShowAllModels"))}</button>` +
+    `<button type="button" class="agp-quiet accent" data-mpopdone>${esc(t("dash.agents.perchManageDone"))}</button></div>`;
+  document.body.appendChild(pop);
+
+  const count = () => {
+    const hidden = perchHiddenSet(id);
+    const shown = AGENT_MODELS.filter((m) => keep.has(m.id) || !hidden.has(m.id)).length;
+    pop.querySelector(".agp-mpop-count").textContent =
+      t("dash.agents.perchModelsSelected", { n: shown, total: AGENT_MODELS.length });
+  };
+  count();
+
+  const r = anchor.getBoundingClientRect();
+  const w = pop.offsetWidth || 460;
+  const h = pop.offsetHeight || 440;
+  let left = r.left;
+  if (left + w > window.innerWidth - 8) left = Math.max(8, r.right - w);
+  let top = r.bottom + 6;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - 6 - h);
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+
+  AGENT_MODELS_POP = { anchor, pop, id };
+  pop.addEventListener("pointerdown", (e) => e.stopPropagation());
+  pop.addEventListener("click", (e) => {
+    if (e.target.closest("[data-mpopclose]") || e.target.closest("[data-mpopdone]")) {
+      dashModelListClose();
+      return;
+    }
+    if (e.target.closest("[data-mpopall]")) {
+      const p2 = perchProfileOf(id) || {};
+      AGENT_PROFILES[id] = { ...p2, hidden: [] };
+      sendCtrl({ type: "agent.profile.models", id, hidden: [] });
+      for (const b of pop.querySelectorAll("[data-mhide]")) {
+        const m = b.dataset.mhide;
+        if (!keep.has(m)) {
+          b.classList.remove("on");
+          const box = b.querySelector(".dm-box");
+          if (box) box.textContent = "";
+        }
+      }
+      // "Show all" means every model visible: re-mark all rows on.
+      for (const b of pop.querySelectorAll("[data-mhide]")) {
+        b.classList.add("on");
+        const box = b.querySelector(".dm-box");
+        if (box) box.textContent = "✓";
+      }
+      count();
+      return;
+    }
+    const b = e.target.closest("[data-mhide]");
+    if (!b || b.disabled) return;
+    const mid = b.dataset.mhide;
+    const hidden = new Set(perchHiddenSet(id));
+    if (hidden.has(mid)) hidden.delete(mid); else hidden.add(mid);
+    const arr = [...hidden];
+    const p2 = perchProfileOf(id) || {};
+    AGENT_PROFILES[id] = { ...p2, hidden: arr };
+    sendCtrl({ type: "agent.profile.models", id, hidden: arr });
+    const on = !hidden.has(mid);
+    b.classList.toggle("on", on);
+    const box = b.querySelector(".dm-box");
+    if (box) box.textContent = on ? "✓" : "";
+    count();
+  });
+  pop.addEventListener("input", (e) => {
+    if (!e.target.classList.contains("ac-pop-find")) return;
+    const q = e.target.value.trim().toLowerCase();
+    for (const b of pop.querySelectorAll("[data-mhide]")) {
+      b.hidden = !!q && !b.textContent.toLowerCase().includes(q);
+    }
+  });
+  const inp = pop.querySelector(".ac-pop-find");
+  if (inp) inp.focus();
+}
+
 document.addEventListener("pointerdown", (e) => {
+  if (AGENT_MODELS_POP && !e.target.closest(".agp-models-pop") && !e.target.closest("[data-perchmodels]")) {
+    dashModelListClose();
+  }
   if (!AGENT_MODEL_POP) return;
   if (e.target.closest(".dash-model-pop") || e.target.closest("[data-perchmodel]")) return;
   dashModelClose(false);
 }, true);
 
 document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape" || !AGENT_MODEL_POP) return;
+  if (e.key !== "Escape") return;
+  if (AGENT_MODELS_POP) {
+    e.preventDefault();
+    e.stopPropagation();
+    dashModelListClose();
+    return;
+  }
+  if (!AGENT_MODEL_POP) return;
   e.preventDefault();
   e.stopPropagation();
   dashModelClose(true);
@@ -1206,6 +1368,13 @@ $("dash-agent-list").addEventListener("click", (e) => {
         ? t("dash.agents.perchFoldHide")
         : t("dash.agents.perchFoldShow", { n });
     }
+    return;
+  }
+  const mdl = e.target.closest("[data-perchmodels]");
+  if (mdl) {
+    e.preventDefault();
+    e.stopPropagation();
+    dashModelListOpen(mdl, mdl.dataset.perchmodels);
     return;
   }
   const pk = e.target.closest("[data-perchpick]");

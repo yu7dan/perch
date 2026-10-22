@@ -308,6 +308,20 @@
 .dash-model-pop .dm-prov{font-size:10.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dash-model-pop .dm-ctx{flex:none;font-size:10px;color:var(--faint);font-variant-numeric:tabular-nums}
 .dash-model-pop .dm-check{flex:none;width:14px;color:var(--accent);font-size:11px;text-align:right}
+.dash-model-pop .dm-box{flex:none;display:inline-flex;align-items:center;justify-content:center;
+                        width:15px;height:15px;border:1px solid var(--line);border-radius:4px;
+                        color:var(--accent);font-size:10px}
+.dm-manage.on .dm-box{border-color:var(--accent);background:rgba(77,107,254,.12)}
+.dm-manage[disabled]{opacity:.65;cursor:default}
+.agp-mpop-head{display:flex;align-items:center;gap:8px;padding:8px 10px 0;
+               color:var(--fg2);font-size:12px;font-weight:600}
+.agp-mpop-x{margin-left:auto;width:22px;height:22px;border:0;border-radius:6px;
+            background:transparent;color:var(--muted);font-size:15px;cursor:pointer}
+.agp-mpop-x:hover{background:rgba(255,255,255,.06);color:var(--fg)}
+.agp-mpop-foot{display:flex;align-items:center;gap:6px;padding:7px 8px 8px;
+               border-top:1px solid var(--line-soft)}
+.agp-mpop-count{margin-right:auto;color:var(--faint);font-size:10.5px;font-variant-numeric:tabular-nums}
+.agp-pdim{color:var(--faint)}
 .dash-model-empty{padding:12px 14px;display:flex;flex-direction:column;align-items:flex-start;gap:8px}
 .dash-model-empty p{margin:0;font-size:11px;line-height:1.65;color:var(--muted)}
 
