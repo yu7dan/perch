@@ -748,7 +748,7 @@ function renderPerchAgentList(host, list, sub) {
   const installed = list.filter((a) => a.installed);
   // 只有 Claude/Codex 已经接通了 Perch 的每格注入。别的 CLI 仍然由 Perch
   // 打开，但用它们自己的配置；不能在这里摆一个选了也不生效的模型开关。
-  const wireable = (a) => a.id === "claude" || a.id === "codex";
+  const wireable = (a) => a.id === "claude" || a.id === "codex" || a.id === "pi";
   const wired = installed.filter((a) => {
     const p = perchProfileOf(a.id);
     return wireable(a) && !!(p && p.model);

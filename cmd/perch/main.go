@@ -487,6 +487,17 @@ func (a *perchApp) agentWireProfile(id string) (map[string]string, []string, boo
 		return env, nil, true
 	case "codex":
 		return nil, gateway.CodexProfileArgs(p.Alias), true
+	case "pi":
+		home, herr := os.UserHomeDir()
+		if herr != nil || home == "" {
+			return nil, nil, false
+		}
+		env, err := gateway.PiProfileEnv(home, p.Alias, p.Model, p.Effort)
+		if err != nil {
+			log.Printf("[gw] agent %s 的 Pi 配置没有生成：%v", id, err)
+			return nil, nil, false
+		}
+		return env, nil, true
 	default:
 		return nil, nil, false
 	}
