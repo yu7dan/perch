@@ -239,15 +239,23 @@ func importProvidersFromDesktop() (int, error) {
 		return 0, nil
 	}
 	marker := filepath.Join(targetDir, ".perch-imported")
-	if fi, err := os.Stat(marker); err == nil && !fi.IsDir() {
-		return 0, nil
-	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return 0, nil
 	}
 	srcDir := magpieConfigDir(home)
 	if fi, err := os.Stat(srcDir); err != nil || !fi.IsDir() {
+		return 0, nil
+	}
+	// 模型列表缓存（providers-state.json）也带上：provider 的 key 在
+	// providers.json 里，但首次启动不会主动重拉所有模型；没有这份缓存，
+	// 用户会看到 DeepSeek 这类供应商有 key 但 0 个模型，Agent 里选不了。
+	// 缓存按目标缺失才复制，之后在 Perch 里的刷新不会被覆盖。
+	_ = copyFileIfMissing(
+		filepath.Join(magpieCacheDir(home), "providers-state.json"),
+		filepath.Join(targetDir, "cache", "providers-state.json"),
+	)
+	if fi, err := os.Stat(marker); err == nil && !fi.IsDir() {
 		return 0, nil
 	}
 	if err := os.MkdirAll(targetDir, 0700); err != nil {

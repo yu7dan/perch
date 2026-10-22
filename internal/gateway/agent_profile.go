@@ -51,6 +51,7 @@ func (g *Gateway) AgentModels() ([]AgentModel, error) {
 	if err != nil {
 		return nil, err
 	}
+	b = g.seedProviderModels(b)
 	out, err := parseAgentModels(b)
 	if err != nil {
 		return nil, err
@@ -130,6 +131,53 @@ func sortAgentModels(out []AgentModel) {
 		}
 		return out[i].ID < out[j].ID
 	})
+}
+
+// seedProviderModels 只在 Perch 引擎的第一次 Agent 模型目录请求时跑：
+// 从桌面 magpie 导入的 API-key 供应商可能有 key、有地址，但模型列表是空的
+// （模型列表是缓存/点过刷新才有的）。不补这一下，Agent 里看得到 DeepSeek
+// 却选不了任何模型。刷新失败只记日志，不挡 Agent 区；标记文件保证只试一次，
+// 用户之后清空模型列表不会被自动塞回去。
+func (g *Gateway) seedProviderModels(b []byte) []byte {
+	dir := PerchEngineDataDir()
+	if dir == "" {
+		return b
+	}
+	marker := filepath.Join(dir, ".perch-models-seeded")
+	if _, err := os.Stat(marker); err == nil {
+		return b
+	}
+	var res struct {
+		Providers []struct {
+			ID     string            `json:"id"`
+			Models []json.RawMessage `json:"models"`
+		} `json:"providers"`
+	}
+	if json.Unmarshal(b, &res) != nil {
+		return b
+	}
+	refreshed := 0
+	for _, p := range res.Providers {
+		if p.ID == "" || len(p.Models) > 0 {
+			continue
+		}
+		if _, err := g.API("POST", "/api/provider/models", map[string]string{"id": p.ID}); err != nil {
+			log.Printf("[gw] 供应商 %s 的模型列表刷新失败：%v", p.ID, err)
+			continue
+		}
+		refreshed++
+		log.Printf("[gw] 已刷新供应商 %s 的模型列表", p.ID)
+	}
+	if err := os.WriteFile(marker, []byte("seeded\n"), 0600); err != nil {
+		log.Printf("[gw] 写模型列表标记失败：%v", err)
+	}
+	if refreshed == 0 {
+		return b
+	}
+	if nb, err := g.API("GET", "/api/providers", nil); err == nil {
+		return nb
+	}
+	return b
 }
 
 func parseAgentModels(b []byte) ([]AgentModel, error) {

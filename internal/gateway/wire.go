@@ -512,6 +512,15 @@ func magpieConfigDir(home string) string {
 	return filepath.Join(home, ".config", "magpie")
 }
 
+// magpieCacheDir 和 magpie 的 appdir 缓存规则一致：XDG_CACHE_HOME 优先，
+// 否则 ~/.cache/magpie。providers-state.json 在这里。
+func magpieCacheDir(home string) string {
+	if d := strings.TrimSpace(os.Getenv("XDG_CACHE_HOME")); d != "" {
+		return filepath.Join(d, "magpie")
+	}
+	return filepath.Join(home, ".cache", "magpie")
+}
+
 func scanMagpieProviders(dir string) []Provider {
 	b, err := os.ReadFile(filepath.Join(dir, "providers.json"))
 	if err != nil {

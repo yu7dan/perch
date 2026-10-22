@@ -106,13 +106,22 @@ func TestEngineStartArgs(t *testing.T) {
 func TestImportProvidersFromDesktopOnce(t *testing.T) {
 	home := t.TempDir()
 	local := t.TempDir()
+	cache := t.TempDir()
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_CACHE_HOME", cache)
 	t.Setenv("LOCALAPPDATA", local)
 
 	srcDir := filepath.Join(home, ".config", "magpie")
 	if err := os.MkdirAll(srcDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	cacheSrc := filepath.Join(cache, "magpie", "providers-state.json")
+	if err := os.MkdirAll(filepath.Dir(cacheSrc), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cacheSrc, []byte(`{"version":1,"providers":{}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	src := filepath.Join(srcDir, "providers.json")
@@ -135,6 +144,13 @@ func TestImportProvidersFromDesktopOnce(t *testing.T) {
 	}
 	if string(got) != body {
 		t.Fatalf("target content changed: %q", got)
+	}
+	cacheGot, err := os.ReadFile(filepath.Join(PerchEngineDataDir(), "cache", "providers-state.json"))
+	if err != nil {
+		t.Fatalf("providers cache not imported: %v", err)
+	}
+	if string(cacheGot) != `{"version":1,"providers":{}}` {
+		t.Fatalf("providers cache content changed: %q", cacheGot)
 	}
 
 	// A later user change in Perch must not be overwritten by a restart.
