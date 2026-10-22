@@ -51,13 +51,28 @@ func TestCodexProfileArgs(t *testing.T) {
 	}
 }
 
+func TestAgentGroupTarget(t *testing.T) {
+	if got, err := agentGroupTarget("workbuddy/hy3", "high"); err != nil || got != "workbuddy/hy3:high" {
+		t.Fatalf("high: %q %v", got, err)
+	}
+	if got, err := agentGroupTarget(" deepseek/deepseek-flash ", ""); err != nil || got != "deepseek/deepseek-flash" {
+		t.Fatalf("no effort: %q %v", got, err)
+	}
+	if _, err := agentGroupTarget("workbuddy/hy3", "ultra"); err == nil {
+		t.Fatal("ultra must be refused")
+	}
+	if _, err := agentGroupTarget("", "high"); err == nil {
+		t.Fatal("empty model must be refused")
+	}
+}
+
 func TestPluginAgentModels(t *testing.T) {
 	dir := t.TempDir()
 	body := `[
 		{"id":"workbuddy-ai","name":"WorkBuddy AI","signedIn":false,"models":[{"id":"default-model","name":"Default"}]},
 		{"id":"workbuddy","name":"WorkBuddy","signedIn":true,"authType":"oauth","models":[
 			{"id":"auto","name":"Auto","context":256000},
-			{"id":"hy3","name":"Hy3","context":192000}
+			{"id":"hy3","name":"Hy3","context":192000,"efforts":["low","high"]}
 		]}
 	]`
 	if err := os.WriteFile(dir+"/plugin-providers.json", []byte(body), 0600); err != nil {
@@ -70,7 +85,7 @@ func TestPluginAgentModels(t *testing.T) {
 	if out[0].ID != "workbuddy/auto" || out[0].ProviderName != "WorkBuddy" || out[0].Context != 256000 {
 		t.Fatalf("out[0]=%+v", out[0])
 	}
-	if out[1].ID != "workbuddy/hy3" {
+	if out[1].ID != "workbuddy/hy3" || len(out[1].Efforts) != 2 || out[1].Efforts[1] != "high" {
 		t.Fatalf("out[1]=%+v", out[1])
 	}
 }

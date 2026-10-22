@@ -796,9 +796,21 @@ function perchRowHTML(a, gid) {
       `</div>` +
       `<div class="ag-det-row"><span>${esc(t("dash.agents.perchDetailModel"))}</span>` +
       `<b>${esc(p ? perchModelLabel(p) : t("dash.agents.perchUnset"))}</b></div>` +
-      (p && p.effort
-        ? `<div class="ag-det-row"><span>${esc(t("dash.agents.perchDetailEffort"))}</span>` +
-          `<b>${esc(p.effort)}</b></div>` : "") +
+      (p ? (() => {
+        const efforts = model && Array.isArray(model.efforts)
+          ? model.efforts.map((e) => String(e).toLowerCase()).filter(Boolean) : [];
+        const cur = String(p.effort || "").toLowerCase();
+        if (cur && !efforts.includes(cur)) efforts.push(cur);
+        const chip = (v, label) =>
+          `<button type="button" class="ag-effort${cur === v ? " on" : ""}"` +
+          ` data-percheffort="${id}" data-effort="${esc(v)}"` +
+          ` title="${esc(t("dash.agents.perchEffortHint"))}">${esc(label)}</button>`;
+        const buttons = [chip("", t("dash.agents.perchEffortDefault"))]
+          .concat(efforts.map((e) => chip(e, e))).join("");
+        return `<div class="ag-det-row"><span>${esc(t("dash.agents.perchDetailEffort"))}</span>` +
+          `<span class="ag-efforts"${efforts.length ? "" : ` title="${esc(t("dash.agents.perchEffortNone"))}"`}>` +
+          `${buttons}</span></div>`;
+      })() : "") +
       `<div class="ag-det-row"><span>${esc(t("dash.agents.perchDetailAlias"))}</span>` +
       `<code>${esc(alias)}</code></div>` +
       `<p class="ag-det-note">${esc(t("dash.agents.perchDetailNote"))}</p>` +
@@ -876,11 +888,17 @@ function dashModelPickOpen(anchor, id) {
     dashModelClose(false);
     if (!val) return;
     const m = AGENT_MODELS.find((x) => x && x.id === val);
+    // 换模型时只保留新模型也支持的档位；不支持就回到默认，别把上一款
+    // 模型的档位硬塞进新组的成员写法里。
+    const levels = (m && Array.isArray(m.efforts) ? m.efforts : [])
+      .map((e) => String(e).toLowerCase());
+    const keep = p && p.effort && levels.includes(String(p.effort).toLowerCase())
+      ? String(p.effort).toLowerCase() : "";
     if (m) {
-      AGENT_PROFILES[id] = { agent: id, alias: perchAlias(id), model: val, effort: (p && p.effort) || "" };
+      AGENT_PROFILES[id] = { agent: id, alias: perchAlias(id), model: val, effort: keep };
       if (NAV_HERE === "dash") renderDashAgents();
     }
-    sendCtrl({ type: "agent.profile.set", id, value: val });
+    sendCtrl({ type: "agent.profile.set", id, value: val, effort: keep });
   });
   pop.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
@@ -933,6 +951,19 @@ $("dash-agent-list").addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
     dashModelPickOpen(mb, mb.dataset.perchmodel);
+    return;
+  }
+  const eb = e.target.closest("[data-percheffort]");
+  if (eb) {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = eb.dataset.percheffort;
+    const p = perchProfileOf(id);
+    if (!p || !p.model) return;
+    const effort = String(eb.dataset.effort || "").toLowerCase();
+    AGENT_PROFILES[id] = { ...p, effort };
+    renderDashAgents();
+    sendCtrl({ type: "agent.profile.set", id, value: p.model, effort });
     return;
   }
   const cb = e.target.closest("[data-perchclear]");

@@ -18,7 +18,7 @@ func (s *Server) handleAgentProfile(m *Msg) {
 	case "agent.profiles":
 		go s.pushAgentProfiles()
 	case "agent.profile.set":
-		go s.setAgentProfile(trimSpace(m.ID), trimSpace(m.Value))
+		go s.setAgentProfile(trimSpace(m.ID), trimSpace(m.Value), trimSpace(m.Effort))
 	}
 }
 
@@ -50,7 +50,7 @@ func (s *Server) pushAgentProfiles() {
 	s.Push(out)
 }
 
-func (s *Server) setAgentProfile(id, model string) {
+func (s *Server) setAgentProfile(id, model, effort string) {
 	if id == "" || s.deps.Profiles == nil {
 		return
 	}
@@ -59,7 +59,7 @@ func (s *Server) setAgentProfile(id, model string) {
 		Agent:  id,
 		Alias:  agentprofile.AliasFor(id),
 		Model:  model,
-		Effort: old.Effort,
+		Effort: effort,
 	}
 	if err := s.deps.Profiles.Set(p); err != nil {
 		log.Printf("[agentprofile] 保存 %s 失败：%v", id, err)
@@ -67,7 +67,7 @@ func (s *Server) setAgentProfile(id, model string) {
 		return
 	}
 	if model != "" && s.deps.Gateway != nil && s.deps.Gateway.Isolated() {
-		if err := s.deps.Gateway.EnsureAgentGroup(p.Alias, p.Model); err != nil {
+		if err := s.deps.Gateway.EnsureAgentGroup(p.Alias, p.Model, p.Effort); err != nil {
 			log.Printf("[agentprofile] %s 的网关路由组设置失败：%v", id, err)
 			// 回退到旧配置，别让 UI/磁盘和网关路由各说各话。
 			if hadOld {

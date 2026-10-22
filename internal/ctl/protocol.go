@@ -82,4 +82,7 @@ type Msg struct {
 	// Value 不套 omitempty：别让"清空"在编码这一层变成静默无效。
 	Field string `json:"field,omitempty"`
 	Value string `json:"value"`
+	// agent.profile.set 用：effort 是网关路由组固定的档位（high/xhigh/...），
+	// 空串 = 不固定，用模型自己的默认。Value 仍然是模型 id。
+	Effort string `json:"effort,omitempty"`
 }

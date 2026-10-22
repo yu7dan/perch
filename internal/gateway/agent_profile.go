@@ -55,10 +55,20 @@ func (g *Gateway) AgentModels() ([]AgentModel, error) {
 	if err != nil {
 		return nil, err
 	}
-	// 插件供应商（WorkBuddy）不在 /api/providers 的 providers 数组里：
-	// 它们的模型在插件缓存 plugin-providers.json 中。只收已登录的条目，
-	// 否则会把一堆点不动的模型塞给用户。
-	out = append(out, pluginAgentModels(PerchEngineDataDir())...)
+	// 插件供应商（WorkBuddy）的模型通常已经在 /api/providers 里了；插件缓存
+	// plugin-providers.json 是兜底（例如插件刚登录、引擎还没刷新目录时）。
+	// 按 id 去重，别在模型选择器里出现两份 WorkBuddy。
+	seen := make(map[string]bool, len(out))
+	for _, m := range out {
+		seen[strings.ToLower(m.ID)] = true
+	}
+	for _, m := range pluginAgentModels(PerchEngineDataDir()) {
+		if seen[strings.ToLower(m.ID)] {
+			continue
+		}
+		seen[strings.ToLower(m.ID)] = true
+		out = append(out, m)
+	}
 	sortAgentModels(out)
 	return out, nil
 }
@@ -78,9 +88,10 @@ func pluginAgentModels(dir string) []AgentModel {
 		SignedIn bool   `json:"signedIn"`
 		AuthType string `json:"authType"`
 		Models   []struct {
-			ID      string `json:"id"`
-			Name    string `json:"name"`
-			Context int    `json:"context"`
+			ID      string   `json:"id"`
+			Name    string   `json:"name"`
+			Context int      `json:"context"`
+			Efforts []string `json:"efforts"`
 		} `json:"models"`
 	}
 	if json.Unmarshal(b, &rows) != nil {
@@ -102,7 +113,7 @@ func pluginAgentModels(dir string) []AgentModel {
 			}
 			out = append(out, AgentModel{
 				Provider: p.ID, ProviderName: p.Name, Icon: p.Icon,
-				ID: id, Name: name, On: true, Context: m.Context,
+				ID: id, Name: name, On: true, Efforts: m.Efforts, Context: m.Context,
 			})
 		}
 	}
@@ -193,13 +204,43 @@ func CodexProfileArgs(alias string) []string {
 	}
 }
 
+// AgentEfforts 是网关组成员能固定的推理档位，和 magpie 的
+// provider.MemberEfforts 一致（低 → 高）。
+var AgentEfforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+// agentGroupTarget 把模型和档位拼成 magpie 的组成员写法：model:high。
+// 空档位就是模型本身；非法档位直接拒绝，别让 group set 静默失败。
+func agentGroupTarget(model, effort string) (string, error) {
+	model = strings.TrimSpace(model)
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if model == "" {
+		return "", uimsg.New("gw.agentProfileBad", "agent 配置缺少模型别名或模型")
+	}
+	if effort == "" {
+		return model, nil
+	}
+	for _, e := range AgentEfforts {
+		if e == effort {
+			return model + ":" + effort, nil
+		}
+	}
+	return "", uimsg.NewParams("gw.agentProfileEffort",
+		fmt.Sprintf("不支持的档位：%s", effort),
+		map[string]string{"effort": effort})
+}
+
 // EnsureAgentGroup 在 Perch 引擎里建/改这个 agent 的稳定别名组。
-// 组名 = alias 去掉 "group/"。模型必须是引擎目录里已有的 provider/model。
-func (g *Gateway) EnsureAgentGroup(alias, model string) error {
+// 组名 = alias 去掉 "group/"。模型必须是引擎目录里已有的 provider/model；
+// 档位用组成员后缀固定（model:high），下一轮请求生效，不用重启。
+func (g *Gateway) EnsureAgentGroup(alias, model, effort string) error {
 	alias = strings.TrimSpace(alias)
 	model = strings.TrimSpace(model)
-	if !strings.HasPrefix(alias, "group/") || model == "" {
+	if !strings.HasPrefix(alias, "group/") {
 		return uimsg.New("gw.agentProfileBad", "agent 配置缺少模型别名或模型")
+	}
+	target, err := agentGroupTarget(model, effort)
+	if err != nil {
+		return err
 	}
 	if !g.Isolated() {
 		return uimsg.New("gw.agentProfileMode", "agent 配置只在 Perch 自己的网关引擎下生效")
@@ -234,11 +275,11 @@ func (g *Gateway) EnsureAgentGroup(alias, model string) error {
 	var lastErr error
 	var lastOut string
 	for attempt := 0; attempt < 2; attempt++ {
-		if _, err := run("group", "set", name, "models="+model); err == nil {
+		if _, err := run("group", "set", name, "models="+target); err == nil {
 			lastErr = nil
 			break
 		}
-		if out, err := run("group", "add", name, "models="+model, "routing=order"); err == nil {
+		if out, err := run("group", "add", name, "models="+target, "routing=order"); err == nil {
 			lastErr = nil
 			break
 		} else {
@@ -256,6 +297,6 @@ func (g *Gateway) EnsureAgentGroup(alias, model string) error {
 			fmt.Sprintf("网关路由组 %s 设置失败：%s", name, tail),
 			map[string]string{"group": name, "err": tail})
 	}
-	log.Printf("[gw] agent %s 的模型别名 %s → %s", name, alias, model)
+	log.Printf("[gw] agent %s 的模型别名 %s → %s", name, alias, target)
 	return nil
 }

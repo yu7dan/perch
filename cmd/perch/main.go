@@ -446,7 +446,7 @@ func (a *perchApp) agentWireProfile(id string) (map[string]string, []string, boo
 	}
 	// 每次开格都确认一次组存在；CLI 只改 Perch 引擎的 portable data，
 	// 不碰桌面 magpie，也不碰 agent 配置。
-	if err := a.gw.EnsureAgentGroup(p.Alias, p.Model); err != nil {
+	if err := a.gw.EnsureAgentGroup(p.Alias, p.Model, p.Effort); err != nil {
 		log.Printf("[gw] agent %s 的 Perch 模型配置没有生效：%v", id, err)
 		return nil, nil, false
 	}

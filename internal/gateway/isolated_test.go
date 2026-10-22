@@ -53,18 +53,39 @@ func TestEngineEnvSandboxesAgentHomes(t *testing.T) {
 	}
 	home := PerchEngineHomeDir()
 	checks := map[string]string{
-		"USERPROFILE":        home,
-		"HOME":               home,
 		"APPDATA":            filepath.Join(home, "appdata"),
 		"LOCALAPPDATA":       filepath.Join(home, "localappdata"),
 		"CLAUDE_CONFIG_DIR":  filepath.Join(home, ".claude"),
 		"CODEX_HOME":         filepath.Join(home, ".codex"),
 		"DSH_HOME":           filepath.Join(home, ".dsh"),
-		"MAGPIE_NO_ACCOUNTS": "1",
+		"MAGPIE_NO_ACCOUNTS": "0",
 		"MAGPIE_ADDR":        "127.0.0.1:64749",
 		"MAGPIE_WEB_KEY":     "sandbox-key",
 		"XDG_CONFIG_HOME":    filepath.Join(home, ".config"),
 		"XDG_CACHE_HOME":     filepath.Join(home, ".cache"),
+		"XDG_DATA_HOME":      filepath.Join(home, ".local", "share"),
+	}
+	// USERPROFILE/HOME stay real: the WorkBuddy plugin reads the desktop app's
+	// sign-in from %USERPROFILE%\AppData\Local\CodeBuddyExtension. Agent config
+	// homes are redirected by the explicit variables checked above.
+	realHome := t.TempDir()
+	t.Setenv("USERPROFILE", realHome)
+	t.Setenv("HOME", realHome)
+	env, err = engineEnv("sandbox-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = map[string]string{}
+	for _, kv := range env {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			t.Fatalf("bad env entry %q", kv)
+		}
+		got[k] = v
+	}
+	if got["USERPROFILE"] != realHome || got["HOME"] != realHome {
+		t.Errorf("USERPROFILE/HOME must stay real for WorkBuddy desktop sign-in: %q/%q",
+			got["USERPROFILE"], got["HOME"])
 	}
 	for k, want := range checks {
 		if got[k] != want {

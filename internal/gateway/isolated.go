@@ -9,9 +9,13 @@ package gateway
 // 这里的目标是**隔离**：
 //   - 用 Perch 自己安装的 magpie CLI（%LOCALAPPDATA%\Perch\magpie\magpie.exe）
 //     的 portable 模式：配置、供应商、用量都落在 exe 旁边的 data\ 里；
-//   - 引擎进程再套一个 Perch 自己的 home（USERPROFILE/HOME/APPDATA/
-//     LOCALAPPDATA/XDG_*/CLAUDE_CONFIG_DIR/CODEX_HOME/DSH_HOME 全部指向它），
+//   - 引擎进程把 agent 的配置目录（APPDATA/LOCALAPPDATA/XDG_*/
+//     CLAUDE_CONFIG_DIR/CODEX_HOME/DSH_HOME）全部指向 Perch 自己的沙盒，
 //     这样 magpie 的 agent 自动同步即使写文件，也只写进沙盒；
+//   - USERPROFILE/HOME **不换**：WorkBuddy 插件要从
+//     %USERPROFILE%\AppData\Local\CodeBuddyExtension 读桌面端自己的登录态；
+//     换掉它，插件会报“WorkBuddy desktop isn't signed in”，反代就不可用。
+//     这只读桌面登录态，不写；Claude/Codex 等会被换配置目录的 agent 仍隔离。
 //   - 网关端口固定为 Perch 自己的端口（默认 64730 起找空闲），永远不是 3425。
 //
 // 桌面 magpie、桌面 Claude/Codex、当前正在用的网关都不受影响。agent 的
@@ -157,8 +161,10 @@ func (g *Gateway) engineDataDir() string {
 	return PerchEngineDataDir()
 }
 
-// engineEnv 构造引擎子进程的环境：先继承，再把所有“用户目录”换到沙盒。
+// engineEnv 构造引擎子进程的环境：先继承，再把 agent 的配置目录换到沙盒。
 // 不设置 PATH，agent 二进制仍然能被探测到；但它们写配置时只会写沙盒。
+// USERPROFILE/HOME 保持真实值，只为了让 WorkBuddy 插件读到桌面端登录态；
+// 它的读取是只读的，Claude/Codex 的目录已由下面的显式变量隔开。
 func engineEnv(key string) ([]string, error) {
 	home := PerchEngineHomeDir()
 	if home == "" {
@@ -170,6 +176,7 @@ func engineEnv(key string) ([]string, error) {
 		home, appdata, localappdata,
 		filepath.Join(home, ".config"),
 		filepath.Join(home, ".cache"),
+		filepath.Join(home, ".local", "share"),
 		filepath.Join(home, ".claude"),
 		filepath.Join(home, ".codex"),
 		filepath.Join(home, ".dsh"),
@@ -186,16 +193,20 @@ func engineEnv(key string) ([]string, error) {
 			m[k] = v
 		}
 	}
-	m["USERPROFILE"] = home
-	m["HOME"] = home
+	// 不覆盖 USERPROFILE/HOME（见上面的 WorkBuddy 说明）。只把 agent 自己
+	// 的配置目录和 Windows 的 AppData/XDG 目录搬到沙盒。
 	m["APPDATA"] = appdata
 	m["LOCALAPPDATA"] = localappdata
 	m["XDG_CONFIG_HOME"] = filepath.Join(home, ".config")
 	m["XDG_CACHE_HOME"] = filepath.Join(home, ".cache")
+	m["XDG_DATA_HOME"] = filepath.Join(home, ".local", "share")
 	m["CLAUDE_CONFIG_DIR"] = filepath.Join(home, ".claude")
 	m["CODEX_HOME"] = filepath.Join(home, ".codex")
 	m["DSH_HOME"] = filepath.Join(home, ".dsh")
-	m["MAGPIE_NO_ACCOUNTS"] = "1"
+	// 不能设 1：magpie 的账号发现一旦关闭，plugin-auth.json 也会被跳过，
+	// WorkBuddy 插件供应商就不会出现在 /v1/models。agent 的目录已隔开，
+	// 这里显式写 0，避免父进程环境里带进来的 1 生效。
+	m["MAGPIE_NO_ACCOUNTS"] = "0"
 	m["MAGPIE_ADDR"] = IsolatedGatewayAddr()
 	m["MAGPIE_WEB_KEY"] = key
 	out := make([]string, 0, len(m))
@@ -250,6 +261,7 @@ func importProvidersFromDesktop() (int, error) {
 		"plugins.json",
 		"plugins.yml",
 		"plugin-icons.json",
+		"migrations.json",
 	}
 	for _, name := range files {
 		if err := copyFileIfMissing(filepath.Join(srcDir, name), filepath.Join(targetDir, name)); err != nil {
