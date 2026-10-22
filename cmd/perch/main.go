@@ -47,12 +47,13 @@ type perchApp struct {
 	stateDir    string
 	fallbackCWD string
 
-	titles   *session.TitleStore
-	prefs    *settings.Store
-	pool     *project.Pool
-	panes    *panes.Store
-	tabs     *session.Manager
-	profiles *agentprofile.Store
+	titles      *session.TitleStore
+	prefs       *settings.Store
+	pool        *project.Pool
+	panes       *panes.Store
+	tabs        *session.Manager
+	profiles    *agentprofile.Store
+	profileSets *agentprofile.SetStore
 
 	defs map[string]agent.Def
 
@@ -76,6 +77,12 @@ func main() {
 		a.profiles = agentprofile.Load(p)
 	} else {
 		a.profiles = agentprofile.Load("")
+	}
+	// 配置方案（Profiles）：当前 per-agent 配置的快照，存成独立文件。
+	if p, err := appdir.PerchFile("agent-profile-sets.json"); err == nil {
+		a.profileSets = agentprofile.LoadSets(p)
+	} else {
+		a.profileSets = agentprofile.LoadSets("")
 	}
 
 	// 状态根按 Claude Code 自己的规则取：环境里有 CLAUDE_CONFIG_DIR 就用它，
@@ -329,6 +336,7 @@ func main() {
 		Prefs:          a.prefs,
 		Gateway:        a.gw,
 		Profiles:       a.profiles,
+		ProfileSets:    a.profileSets,
 		Installer:      a.installer,
 		Transcript:     a.follower,
 		DefaultCWD:     a.defaultCWD,

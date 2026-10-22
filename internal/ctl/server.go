@@ -60,15 +60,16 @@ type Deps struct {
 	StateDir       string
 	SecondInstance bool
 
-	Tabs       *session.Manager
-	Panes      *panes.Store
-	Titles     *session.TitleStore
-	Pool       *project.Pool
-	Prefs      *settings.Store
-	Gateway    *gateway.Gateway
-	Profiles   *agentprofile.Store
-	Installer  *install.Installer
-	Transcript *transcript.Follower
+	Tabs        *session.Manager
+	Panes       *panes.Store
+	Titles      *session.TitleStore
+	Pool        *project.Pool
+	Prefs       *settings.Store
+	Gateway     *gateway.Gateway
+	Profiles    *agentprofile.Store
+	ProfileSets *agentprofile.SetStore
+	Installer   *install.Installer
+	Transcript  *transcript.Follower
 
 	DefaultCWD    func() string
 	SessionExists func(agentName, cwd, id string) bool
@@ -168,7 +169,8 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		s.handleGateway(m)
 
 	// Perch 自己的 per-agent 配置（隔离网关；不写 agent 全局配置）
-	case "agent.profiles", "agent.profile.set":
+	case "agent.profiles", "agent.profile.set",
+		"agent.profile.save", "agent.profile.use", "agent.profile.delete":
 		s.handleAgentProfile(m)
 
 	// 安装器 / “只启动”agent 的状态接入

@@ -258,6 +258,29 @@
 .ag-det-row code{font:10.5px/1.6 var(--mono);color:var(--muted);min-width:0;
                  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ag-det-note{margin:6px 0 0;font-size:10.5px;line-height:1.6;color:var(--faint)}
+.ag-profiles{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:2px 0 10px;
+            padding:6px 8px;border:1px solid var(--line-soft);border-radius:7px;
+            background:rgba(255,255,255,.014)}
+.ag-profiles .lbl{color:var(--faint);font-size:10.5px;margin-right:2px}
+.ag-profiles .hint{color:var(--muted);font-size:10.5px}
+.ag-profiles .ed{margin-left:auto;display:flex;align-items:center;gap:4px;min-width:0}
+.ag-pset{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px;
+         border:1px solid var(--line);border-radius:6px;background:var(--card);
+         color:var(--fg2);font-size:10.5px;white-space:nowrap;cursor:pointer}
+.ag-pset:hover{border-color:var(--fg2);color:var(--fg)}
+.ag-pset.pending{opacity:.55;pointer-events:none}
+.ag-pset .nm{overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.ag-pset em{font-style:normal;color:var(--faint);font-size:9.5px;font-variant-numeric:tabular-nums}
+.ag-pset .x{margin-left:1px;color:var(--faint);font-size:12px;line-height:1}
+.ag-pset .x:hover{color:var(--red)}
+.ag-set-save,.ag-set-do,.ag-set-cancel{height:22px;padding:0 8px;border:1px solid var(--line);
+         border-radius:5px;background:transparent;color:var(--muted);font-size:10.5px;cursor:pointer}
+.ag-set-save:hover,.ag-set-cancel:hover{color:var(--fg);border-color:var(--fg2)}
+.ag-set-do{color:var(--fg);border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.05)}
+.ag-set-do:hover{border-color:var(--fg2)}
+.ag-set-name{width:150px;height:22px;padding:0 7px;border:1px solid var(--line);
+             border-radius:5px;background:var(--bg);color:var(--fg);font-size:10.5px;outline:none}
+.ag-set-name:focus{border-color:var(--accent)}
 .ag-det-row .ag-efforts{display:flex;flex:1 1 auto;flex-wrap:wrap;gap:4px;width:auto;
                         min-width:0;color:var(--muted)}
 .ag-effort{height:20px;padding:0 7px;border:1px solid var(--line);border-radius:5px;

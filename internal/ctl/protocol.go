@@ -85,4 +85,7 @@ type Msg struct {
 	// agent.profile.set 用：effort 是网关路由组固定的档位（high/xhigh/...），
 	// 空串 = 不固定，用模型自己的默认。Value 仍然是模型 id。
 	Effort string `json:"effort,omitempty"`
+	// agent.profile.save/use/delete 用：配置方案的名字。
+	// （不能用 Name：那是 project.rename 的字段。）
+	SetName string `json:"setName,omitempty"`
 }

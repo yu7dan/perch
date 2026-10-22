@@ -612,6 +612,10 @@ let AGENT_PROFILE_ASKED = false;
 let AGENT_PROFILE_ERR = "";
 let AGENT_DETAIL_ID = "";
 let AGENT_MODEL_POP = null;
+let AGENT_SETS = [];
+let AGENT_SET_PENDING = "";
+let AGENT_SET_NAMING = false;
+let AGENT_SET_DRAFT = "";
 
 function ensureAgentProfiles() {
   if (AGENT_PROFILE_ASKED) return;
@@ -627,6 +631,9 @@ function applyAgentProfiles(m) {
   }
   AGENT_PROFILES = next;
   AGENT_MODELS = Array.isArray(m && m.models) ? m.models : [];
+  AGENT_SETS = Array.isArray(m && m.sets) ? m.sets : [];
+  // 不因为一次普通推送关掉正在输入的方案名：只有保存/取消/应用成功才关。
+  AGENT_SET_PENDING = "";
   AGENT_PROFILE_ERR = (m && typeof errMsgOf === "function") ? (errMsgOf(m) || "") : "";
   if (AGENT_MODEL_POP) dashModelClose(false);
   if (AGENT_UI_ISOLATED && typeof AC_ID !== "undefined" && AC_ID &&
@@ -669,6 +676,40 @@ function perchCaps(a) {
   return a.caps || { launch: !!a.adapter, status: !!a.adapter, waiting: !!a.adapter };
 }
 
+function perchConfirm(opts) {
+  if (typeof askConfirm === "function") return askConfirm(opts);
+  return Promise.resolve(true);
+}
+
+// Profiles 条：已保存的方案 + 保存当前。方案存的是 per-agent 模型/档位，
+// 应用时由后端把每个 agent 写回并同步网关别名组；运行中的会话下一轮生效。
+function perchProfilesHTML() {
+  const chips = AGENT_SETS.map((s) => {
+    const n = Array.isArray(s && s.agents) ? s.agents.length : 0;
+    const pending = AGENT_SET_PENDING === s.name;
+    return `<span class="ag-pset${pending ? " pending" : ""}" data-perchset="${esc(s.name)}"` +
+      ` role="button" tabindex="0" title="${esc(t("dash.agents.perchProfileHint", { name: s.name, n }))}">` +
+      `<span class="nm">${esc(s.name)}</span><em>${n}</em>` +
+      `<span class="x" data-perchsetdel="${esc(s.name)}"` +
+      ` title="${esc(t("dash.agents.perchProfileDelete"))}" aria-label="${esc(t("dash.agents.perchProfileDelete"))}">×</span>` +
+      `</span>`;
+  }).join("");
+  let editor = "";
+  if (AGENT_SET_NAMING) {
+    editor = `<input id="perch-set-name" class="ag-set-name" type="text" maxlength="60"` +
+      ` value="${esc(AGENT_SET_DRAFT)}" placeholder="${esc(t("dash.agents.perchProfileName"))}"` +
+      ` aria-label="${esc(t("dash.agents.perchProfileName"))}">` +
+      `<button type="button" class="ag-set-do" data-perchsetapply>${esc(t("dash.agents.perchProfileSave"))}</button>` +
+      `<button type="button" class="ag-set-cancel" data-perchsetcancel>${esc(t("common.cancel"))}</button>`;
+  } else {
+    editor = `<button type="button" class="ag-set-save" data-perchsetsave>` +
+      `${esc(t("dash.agents.perchSaveProfile"))}</button>`;
+  }
+  return `<div class="ag-profiles"><span class="lbl">${esc(t("dash.agents.perchProfiles"))}</span>` +
+    (chips || `<span class="hint">${esc(t("dash.agents.perchNoProfiles"))}</span>`) +
+    `<span class="ed">${editor}</span></div>`;
+}
+
 function renderPerchAgentList(host, list, sub) {
   if (AGENT_MODEL_POP) dashModelClose(false);
   const installed = list.filter((a) => a.installed);
@@ -689,6 +730,7 @@ function renderPerchAgentList(host, list, sub) {
   }
 
   let html = "";
+  if (AGENT_SETS.length || AGENT_MODELS.length) html += perchProfilesHTML();
   if (!AGENT_MODELS.length) {
     html += `<div class="ag-guide">` +
       `<b>${esc(t("dash.agents.perchGuideTitle"))}</b>` +
@@ -719,6 +761,25 @@ function renderPerchAgentList(host, list, sub) {
       `</div></div>`;
   }
   host.innerHTML = html;
+  if (AGENT_SET_NAMING) {
+    const inp = $("perch-set-name");
+    if (inp) {
+      inp.focus();
+      try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (_) {}
+      inp.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          perchCommitProfileSave(inp.value.trim());
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          AGENT_SET_NAMING = false;
+          AGENT_SET_DRAFT = "";
+          renderDashAgents();
+        }
+      });
+    }
+  }
 }
 
 function perchRowHTML(a, gid) {
@@ -942,10 +1003,94 @@ document.addEventListener("keydown", (e) => {
   dashModelClose(true);
 }, true);
 
+function perchSetEditorName() {
+  const inp = $("perch-set-name");
+  return (inp ? inp.value : AGENT_SET_DRAFT).trim();
+}
+
+function perchCommitProfileSave(name) {
+  if (!name) return;
+  const same = AGENT_SETS.some((s) => s && s.name === name);
+  const go = () => {
+    AGENT_SET_PENDING = name;
+    AGENT_SET_NAMING = false;
+    AGENT_SET_DRAFT = "";
+    sendCtrl({ type: "agent.profile.save", setName: name });
+    renderDashAgents();
+  };
+  if (!same) { go(); return; }
+  perchConfirm({
+    title: t("dash.agents.perchProfileOverwriteTitle"),
+    body: t("dash.agents.perchProfileOverwriteBody", { name }),
+    ok: t("dash.agents.perchProfileOverwriteOk"),
+  }).then((yes) => { if (yes) go(); });
+}
+
+function perchApplyProfileSet(name) {
+  if (!name || AGENT_SET_PENDING) return;
+  AGENT_SET_PENDING = name;
+  sendCtrl({ type: "agent.profile.use", setName: name });
+  renderDashAgents();
+}
+
+function perchDeleteProfileSet(name) {
+  if (!name) return;
+  perchConfirm({
+    title: t("dash.agents.perchProfileDeleteTitle"),
+    body: t("dash.agents.perchProfileDeleteBody", { name }),
+    ok: t("dash.agents.perchProfileDeleteOk"),
+    danger: true,
+  }).then((yes) => {
+    if (!yes) return;
+    AGENT_SET_PENDING = name;
+    sendCtrl({ type: "agent.profile.delete", setName: name });
+    renderDashAgents();
+  });
+}
+
 $("dash-agent-list").addEventListener("click", (e) => {
   if (!AGENT_UI_ISOLATED) return;
   const gw = e.target.closest("[data-gwlink]");
   if (gw) { e.preventDefault(); e.stopPropagation(); perchGoGateway(); return; }
+  const del = e.target.closest("[data-perchsetdel]");
+  if (del) {
+    e.preventDefault();
+    e.stopPropagation();
+    perchDeleteProfileSet(del.dataset.perchsetdel);
+    return;
+  }
+  const set = e.target.closest("[data-perchset]");
+  if (set) {
+    e.preventDefault();
+    e.stopPropagation();
+    perchApplyProfileSet(set.dataset.perchset);
+    return;
+  }
+  const save = e.target.closest("[data-perchsetsave]");
+  if (save) {
+    e.preventDefault();
+    e.stopPropagation();
+    AGENT_SET_NAMING = true;
+    AGENT_SET_DRAFT = "";
+    renderDashAgents();
+    return;
+  }
+  const apply = e.target.closest("[data-perchsetapply]");
+  if (apply) {
+    e.preventDefault();
+    e.stopPropagation();
+    perchCommitProfileSave(perchSetEditorName());
+    return;
+  }
+  const cancel = e.target.closest("[data-perchsetcancel]");
+  if (cancel) {
+    e.preventDefault();
+    e.stopPropagation();
+    AGENT_SET_NAMING = false;
+    AGENT_SET_DRAFT = "";
+    renderDashAgents();
+    return;
+  }
   const mb = e.target.closest("[data-perchmodel]");
   if (mb) {
     e.preventDefault();
@@ -988,8 +1133,19 @@ $("dash-agent-list").addEventListener("click", (e) => {
   }
 });
 
+$("dash-agent-list").addEventListener("input", (e) => {
+  if (e.target && e.target.id === "perch-set-name") AGENT_SET_DRAFT = e.target.value;
+});
+
 $("dash-agent-list").addEventListener("keydown", (e) => {
-  if (!AGENT_UI_ISOLATED || (e.key !== "Enter" && e.key !== " ")) return;
+  if (!AGENT_UI_ISOLATED) return;
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const set = e.target.closest("[data-perchset]");
+  if (set && !e.target.closest("[data-perchsetdel]")) {
+    e.preventDefault();
+    perchApplyProfileSet(set.dataset.perchset);
+    return;
+  }
   const row = e.target.closest("[data-perchrow]");
   if (!row || e.target.closest("button")) return;
   e.preventDefault();
