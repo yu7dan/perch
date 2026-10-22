@@ -161,6 +161,33 @@ func (g *Gateway) engineDataDir() string {
 	return PerchEngineDataDir()
 }
 
+// desktopBunPath 是桌面 magpie 已下载的 Bun（当前版本）。插件供应商的
+// 插件宿主要在 Bun 上跑；Perch 引擎的数据目录里没有 Bun 时会去 GitHub
+// 下载，在只走本地代理的网络里会卡到请求超时。直接借用桌面这份，不复制，
+// 省下 ~90MB 磁盘，也跟着桌面 magpie 的升级走。"" 表示没有可用的。
+func desktopBunPath(home string) string {
+	root := filepath.Join(magpieCacheDir(home), "bun")
+	b, err := os.ReadFile(filepath.Join(root, "state.json"))
+	if err != nil {
+		return ""
+	}
+	var st struct {
+		Current string `json:"current"`
+	}
+	if json.Unmarshal(b, &st) != nil {
+		return ""
+	}
+	v := strings.TrimSpace(st.Current)
+	if v == "" || strings.ContainsAny(v, `/\`) || strings.Contains(v, "..") {
+		return ""
+	}
+	exe := filepath.Join(root, v, "magpie-bun.exe")
+	if fi, err := os.Stat(exe); err != nil || fi.IsDir() {
+		return ""
+	}
+	return exe
+}
+
 // engineEnv 构造引擎子进程的环境：先继承，再把 agent 的配置目录换到沙盒。
 // 不设置 PATH，agent 二进制仍然能被探测到；但它们写配置时只会写沙盒。
 // USERPROFILE/HOME 保持真实值，只为了让 WorkBuddy 插件读到桌面端登录态；
@@ -209,6 +236,15 @@ func engineEnv(key string) ([]string, error) {
 	m["MAGPIE_NO_ACCOUNTS"] = "0"
 	m["MAGPIE_ADDR"] = IsolatedGatewayAddr()
 	m["MAGPIE_WEB_KEY"] = key
+	// 插件宿主用桌面 magpie 已下载的 Bun，避免引擎自己去 GitHub 下载。
+	// 用户显式设了 MAGPIE_BUN 就尊重用户的。
+	if strings.TrimSpace(m["MAGPIE_BUN"]) == "" {
+		if realHome, err := os.UserHomeDir(); err == nil && realHome != "" {
+			if bun := desktopBunPath(realHome); bun != "" {
+				m["MAGPIE_BUN"] = bun
+			}
+		}
+	}
 	out := make([]string, 0, len(m))
 	for k, v := range m {
 		out = append(out, k+"="+v)

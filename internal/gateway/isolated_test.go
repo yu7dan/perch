@@ -71,6 +71,20 @@ func TestEngineEnvSandboxesAgentHomes(t *testing.T) {
 	realHome := t.TempDir()
 	t.Setenv("USERPROFILE", realHome)
 	t.Setenv("HOME", realHome)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(realHome, ".cache"))
+	t.Setenv("MAGPIE_BUN", "")
+	bunDir := filepath.Join(realHome, ".cache", "magpie", "bun", "1.4.3")
+	if err := os.MkdirAll(bunDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realHome, ".cache", "magpie", "bun", "state.json"),
+		[]byte(`{"current":"1.4.3"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	bunExe := filepath.Join(bunDir, "magpie-bun.exe")
+	if err := os.WriteFile(bunExe, []byte("fake-bun"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	env, err = engineEnv("sandbox-key")
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +100,9 @@ func TestEngineEnvSandboxesAgentHomes(t *testing.T) {
 	if got["USERPROFILE"] != realHome || got["HOME"] != realHome {
 		t.Errorf("USERPROFILE/HOME must stay real for WorkBuddy desktop sign-in: %q/%q",
 			got["USERPROFILE"], got["HOME"])
+	}
+	if got["MAGPIE_BUN"] != bunExe {
+		t.Errorf("MAGPIE_BUN=%q want desktop Bun %q", got["MAGPIE_BUN"], bunExe)
 	}
 	for k, want := range checks {
 		if got[k] != want {
@@ -152,7 +169,6 @@ func TestImportProvidersFromDesktopOnce(t *testing.T) {
 	if string(cacheGot) != `{"version":1,"providers":{}}` {
 		t.Fatalf("providers cache content changed: %q", cacheGot)
 	}
-
 	// A later user change in Perch must not be overwritten by a restart.
 	if err := os.WriteFile(target, []byte(`{"kept":{}}`), 0600); err != nil {
 		t.Fatal(err)
