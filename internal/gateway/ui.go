@@ -233,6 +233,43 @@ try{document.documentElement.dataset.theme="dark";document.title="Perch"}catch(e
   --code:"Cascadia Code WB","JetBrains Mono WB",Consolas,"Microsoft YaHei",monospace;
 }
 </style>
+<script>(function(){
+  // The engine's UI still says "magpie" in a few visible places (the routing
+  // diagram's node, "through magpie's Agent", plugin copy). The product name
+  // is Perch: rewrite the standalone word in visible text and a few labels.
+  // Package names such as @magpie-community and ids such as magpie-web are
+  // left alone, so the copy stays truthful about what is running.
+  var rx=/(^|[^\w@-])magpie(?=$|[^\w-])/gi;
+  var skip={SCRIPT:1,STYLE:1,TEXTAREA:1};
+  function fix(s){return s.replace(rx,function(_,p){return p+"Perch";});}
+  function walk(n){
+    if(n.nodeType===3){
+      var p=n.parentElement;
+      if(p && skip[p.tagName]) return;
+      var v=fix(n.nodeValue||"");
+      if(v!==n.nodeValue) n.nodeValue=v;
+      return;
+    }
+    if(n.nodeType!==1) return;
+    ["title","aria-label","placeholder","alt"].forEach(function(a){
+      var v=n.getAttribute(a);
+      if(v && /magpie/i.test(v)) n.setAttribute(a,fix(v));
+    });
+    var w=document.createTreeWalker(n,NodeFilter.SHOW_TEXT), t;
+    while((t=w.nextNode())) walk(t);
+  }
+  function start(){
+    walk(document.body);
+    new MutationObserver(function(ms){
+      ms.forEach(function(m){
+        if(m.type==="characterData") walk(m.target);
+        else m.addedNodes.forEach(walk);
+      });
+    }).observe(document.body,{subtree:true,childList:true,characterData:true});
+  }
+  if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",start,{once:true});
+  else start();
+})();</script>
 `
 
 // uiEmbedHTML 在 </head> 前塞进 uiEmbed。读失败就原样放回，别让页面变空白。
