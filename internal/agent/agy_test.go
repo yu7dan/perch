@@ -33,7 +33,7 @@ func TestAgyDefInjectsWireLaunch(t *testing.T) {
 	defer SetHost(defaultHost{})
 
 	d := AgyDef()
-	env, args, _, err := d.Prepare("tag", 1, `C:\work`)
+	env, args, _, err := d.Prepare("tag", 1, `C:\work`, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestAgyDefFallsBackWhenUnwired(t *testing.T) {
 	defer SetHost(defaultHost{})
 
 	d := AgyDef()
-	env, args, obs, err := d.Prepare("tag", 1, `C:\work`)
+	env, args, obs, err := d.Prepare("tag", 1, `C:\work`, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

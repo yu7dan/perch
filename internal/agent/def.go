@@ -34,7 +34,7 @@ type Def struct {
 	// Prepare 在每次开格前调用，用来做“这一格才有的”准备：分配端口、生成口令、
 	// 决定事件文件路径。返回的 env/args 只作用于这一次启动；observe 在 PTY
 	// 起来之后跑，ctx 一取消就退出。
-	Prepare func(tag string, tabID int, cwd string) (env map[string]string, args []string, observe func(context.Context), err error)
+	Prepare func(tag string, tabID int, cwd string, profileArgs []string) (env map[string]string, args []string, observe func(context.Context), err error)
 }
 
 // GenericDef 是最小适配：能开一格新会话，没有续接和状态。
@@ -69,7 +69,7 @@ func PiDef() Def { return piDef() }
 // 没接线时 WireLaunch 返回 ok=false，退回 GenericDef 的普通启动。
 func AgyDef() Def {
 	d := GenericDef("agy")
-	d.Prepare = func(_ string, _ int, _ string) (map[string]string, []string, func(context.Context), error) {
+	d.Prepare = func(_ string, _ int, _ string, _ []string) (map[string]string, []string, func(context.Context), error) {
 		env, args, ok := host.WireLaunch("agy")
 		if !ok {
 			return nil, nil, nil, nil
@@ -91,7 +91,7 @@ func AgyDef() Def {
 func DshDef() Def {
 	d := GenericDef("dsh-tui")
 	d.Args = func(intent ResumeIntent, _ string) []string { return dshArgs(intent) }
-	d.Prepare = func(tag string, _ int, _ string) (map[string]string, []string, func(context.Context), error) {
+	d.Prepare = func(tag string, _ int, _ string, _ []string) (map[string]string, []string, func(context.Context), error) {
 		return map[string]string{
 			// dsh 的 shell executor 会剥掉名字里含 KEY/TOKEN/SECRET/PASSWORD 的
 			// 环境变量（Orca 在 dsh-hook.cmd 里实测过）。这个变量名必须继续

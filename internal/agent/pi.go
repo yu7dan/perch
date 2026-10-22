@@ -105,7 +105,7 @@ func ensurePiObserver() (string, error) {
 	return path, nil
 }
 
-func preparePi(tag string, tabID int, _ string) (map[string]string, []string, func(context.Context), error) {
+func preparePi(tag string, tabID int, _ string, _ []string) (map[string]string, []string, func(context.Context), error) {
 	ext, err := ensurePiObserver()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("准备 Pi 观察扩展: %w", err)

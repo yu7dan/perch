@@ -66,6 +66,15 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 	// 2026-10-16 起是默认工作区，不是 fallbackCWD。这也正是记进登记表的那个值。
 	// Prepare 也要它：Codex 的 app-server 必须和 TUI 在同一个目录里起来。
 	cwd := m.EffectiveCWD(tab.Spec)
+	// Perch 自己的 per-agent 配置：模型别名/档位。只在隔离网关模式下有；
+	// 拿不到就按旧路径启动。Claude 的 env 会合并进 --settings，Codex 用 -c.
+	// **必须在 Prepare 之前拿到**：Codex 的 app-server 才是真正跑模型的进程，
+	// 它也要拿到同一组 -c 覆盖，否则 TUI 连上的还是桌面 magpie 的配置。
+	var profEnv map[string]string
+	var profArgs []string
+	if e, a, ok := m.profileFor(tab.Spec.Agent); ok {
+		profEnv, profArgs = e, a
+	}
 	// Prepare 是“这一格才有的”启动准备（OpenCode 的端口/口令、Codex 的
 	// app-server 都是它给的）。
 	var prepEnv map[string]string
@@ -73,17 +82,10 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 	var observe func(context.Context)
 	if def.Prepare != nil {
 		var perr error
-		prepEnv, prepArgs, observe, perr = def.Prepare(tag, tab.ID, cwd)
+		prepEnv, prepArgs, observe, perr = def.Prepare(tag, tab.ID, cwd, profArgs)
 		if perr != nil {
 			return nil, &StartError{Stage: StagePrepare, Agent: tab.Spec.Agent, Err: perr}
 		}
-	}
-	// Perch 自己的 per-agent 配置：模型别名/档位。只在隔离网关模式下有；
-	// 拿不到就按旧路径启动。Claude 的 env 会合并进 --settings，Codex 用 -c.
-	var profEnv map[string]string
-	var profArgs []string
-	if e, a, ok := m.profileFor(tab.Spec.Agent); ok {
-		profEnv, profArgs = e, a
 	}
 	// hooks 是**每格子一份**：事件文件路径写死进这一份 --settings 里，
 	// 于是"这条事件属于哪个格子"由文件名决定，不需要任何反查。
