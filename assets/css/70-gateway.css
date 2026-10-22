@@ -12,18 +12,6 @@
 #gw-frame{flex:1;min-height:0;width:100%;display:block;border:0;background:var(--bg)}
 #gw-frame[hidden]{display:none}
 
-/* ---- 已接入：版本 / 更新条 ---------------------------------------------
-   一行 Perch 自己的状态（不是 magpie 的页面）：当前版本、可更新的版本、
-   用户点出来的「更新」。更新由 magpie 自己的 /api/update 完成。 */
-.gw-ver{flex:none;display:flex;align-items:center;gap:8px;height:26px;padding:0 12px;
-        border-bottom:1px solid var(--line-soft);background:var(--bg);
-        font-size:10.5px;color:var(--faint);white-space:nowrap}
-.gw-ver[hidden]{display:none}
-.gw-ver .sep{color:var(--line)}
-.gw-ver .upd{color:#f5d06a}
-.gw-ver .err{color:var(--red)}
-.gw-ver .gw-btn{margin-left:2px}
-
 /* ---- 未接入：安装 / 接入卡 --------------------------------------------- */
 .gw-cover{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column}
 .gw-cover[hidden]{display:none}

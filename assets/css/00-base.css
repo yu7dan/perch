@@ -148,7 +148,7 @@ svg{display:block;flex:none}
    =========================================================================== */
 :root{--titlebar-h:36px;--rail-w:132px}
 #titlebar{grid-area:tb;height:var(--titlebar-h);display:flex;align-items:stretch;
-          position:relative;/* #dash-tabs（绝对居中）的定位基准 */
+          position:relative;
           background:var(--side);border-bottom:1px solid var(--line-soft);
           user-select:none;--wails-draggable:drag}
 /* 左段宽度 = 导航栏 132px，地面同色，右缝与 #rail 的 border-right 对齐
@@ -190,7 +190,7 @@ svg{display:block;flex:none}
 /* 交互子元素必须显式 no-drag：`--wails-draggable` 是**继承**属性，
    不写的话它们会跟着标题栏一起变成拖拽区，点不动。 */
 #titlebar .tab,#titlebar .tab-add,#titlebar .tabs-right,
-#titlebar .icon-btn,#titlebar .segs{--wails-draggable:no-drag}
+#titlebar .icon-btn{--wails-draggable:no-drag}
 
 /* ---------------------------------------------------------------------------
    三个窗口按钮 —— 复刻 Windows 11 原生 caption 按钮

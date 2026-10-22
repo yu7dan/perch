@@ -50,14 +50,6 @@
     </div>
     <div class="tb-list"></div>
 
-    <!-- 总览的模块切换：搬进窗口顶栏，形态照 magpie 的 .seg ——
-         绝对居中在窗口上（left:50%），**没有轨道**，只有活动项底下那枚白片。
-         只在 #app.dash 下显示（CSS），顶栏其余部分仍可拖动窗口。 -->
-    <div class="segs" id="dash-tabs" role="tablist" aria-label="总览分区" data-i18n-aria-label="dash.tabs.aria"></div>
-    <button class="icon-btn" id="dash-refresh" title="重扫会话库（轮次、活跃天数随之刷新）" data-i18n-title="dash.refresh.title">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></svg>
-    </button>
-
     <div id="tabs">
       <!-- 标签条的语义（C4 起）= **页面**，不是 agent。
            第一格固定是「并行」：那是主区的常态视图，所有 agent 同屏跑在网格里。
@@ -435,6 +427,14 @@
     <!-- 总览 ↔ 左栏的缝（可拖，改 --rail-w）。抓取带落在总览这一侧，
          可见线画在缝上 —— 和 #list-divider 同一套几何。 -->
     <div id="rail-divider" class="divider" title="拖动调整左栏宽度" data-i18n-title="dash.railDivider.title"></div>
+    <!-- 总览页内部的子切换：面板（现有总览内容）/ 网关（完整网关控制台）。
+         它住在页面里，不再占窗口标题栏 —— 层级只有「左栏 总览 → 页内子页」。 -->
+    <div class="dash-head">
+      <div class="segs" id="dash-tabs" role="tablist" aria-label="总览分区" data-i18n-aria-label="dash.tabs.aria"></div>
+      <button class="icon-btn" id="dash-refresh" title="重扫会话库（轮次、活跃天数随之刷新）" data-i18n-title="dash.refresh.title">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></svg>
+      </button>
+    </div>
     <div class="dash-scroll">
       <div class="dash-wrap">
         <section class="dash-pane" id="dash-overview">
@@ -520,12 +520,10 @@
              iframe 地址里没有 key —— 鉴权 cookie 由服务端注入。
              控制面没接上时 iframe 不设 src，盖一张安装/接入卡。 -->
         <section class="dash-pane gw-pane" id="dash-gateway" hidden>
-          <!-- 版本/更新条：magpie 自己管更新（/api/update），Perch 只显示和
-               转发用户那一下点击。接上控制面后才出现 —— 未接上时安装卡里
-               已经有版本。 -->
-          <div class="gw-ver" id="gw-ver" hidden></div>
+          <!-- 网关子页：控制面接上后内嵌网关控制台；没接上时显示 Perch
+               自己的安装/接入卡。它不再有 magpie 的版本/更新条。 -->
           <div class="gw-cover" id="gw-cover"></div>
-          <iframe id="gw-frame" title="magpie" hidden></iframe>
+          <iframe id="gw-frame" title="网关" hidden></iframe>
         </section>
       </div>
     </div>

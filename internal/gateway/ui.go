@@ -197,11 +197,41 @@ func (h uiAssets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
  * 2) 再把不属于网关的导航拿掉：Agents / Sessions / Library（我们自己有总览
  *    和 Agent 页）、Settings、更新/同步/窗口按钮。视图 DOM 本身不动，magpie
  *    页面内自己的跳转仍然可用。 */
-const uiEmbed = `<script>try{localStorage.setItem("magpie.navLayout","top")}catch(e){}</script>
+const uiEmbed = `<script>try{localStorage.setItem("magpie.navLayout","top")}catch(e){}
+try{document.documentElement.dataset.theme="dark";document.title="Perch"}catch(e){}</script>
 <style id="perch-embed">
 #side,#sideEdge,#sideToggle,#prefs,#sync,#update,.update-wrap,#open,#openMain,#quit,#winclose,#ptabs{display:none!important}
 #nav .nav-gl{display:none!important}
 #nav button[data-view="agents"],#nav button[data-view="sessions"],#nav button[data-view="library"]{display:none!important}
+/* 品牌区整个退场：logo + magpie 字样都不要。五个网关标签改为左对齐，
+   和上面 Perch 的「面板 / 网关」页头同一条左基准线。 */
+.brand{display:none!important}
+.top .seg{position:relative!important;left:auto!important;top:auto!important;
+          transform:none!important;margin-left:2px!important}
+/* 把网关页的深蓝主题换成 Perch 的近黑中性色 + Perch 蓝。
+   只覆盖变量，magpie 自己的组件结构、密度、交互都不动。 */
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0a0a0a; --card:#171717; --card-2:#121212;
+  --pill:#1f1f1f; --pill-hover:#2a2a2a;
+  --seg-track:rgba(255,255,255,.04); --seg-thumb:rgba(255,255,255,.12);
+  --seg-edge:inset 0 .5px 0 rgba(255,255,255,.06),0 1px 2px rgba(0,0,0,.3);
+  --line:rgba(255,255,255,.07); --line-2:rgba(255,255,255,.045);
+  --fg:#fafafa; --fg-2:#d4d4d4; --muted:#a1a1a1; --faint:#737373; --ctl-fg:#a1a1a1;
+  --accent:#4d6bfe; --accent-soft:rgba(77,107,254,.16); --accent-fg:#ffffff;
+  --sel:rgba(77,107,254,.20);
+  --green:#86efac; --green-soft:rgba(134,239,172,.12);
+  --red:#ff6568; --red-soft:rgba(255,101,104,.12);
+  --amber:#eab308; --amber-soft:rgba(234,179,8,.12);
+  --drift:#ff6568; --drift-soft:rgba(255,101,104,.12);
+  --pop-bg:rgba(23,23,23,.96);
+  --shadow:0 16px 44px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.3),0 0 0 .5px rgba(255,255,255,.1);
+  --logo-invert:1;
+  --tk-s:#86efac; --tk-k:#c4b5fd; --tk-f:#93c5fd; --tk-n:#eab308; --tk-v:#67e8f9; --tk-o:#f0abfc; --tk-c:#737373;
+  --c1:#6b8cff; --c2:#67e8f9; --c3:#86efac; --c4:#eab308; --c5:#f0abfc; --c6:#c4b5fd; --c7:#94a3b8;
+  --font:"Geist","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+  --code:"Cascadia Code WB","JetBrains Mono WB",Consolas,"Microsoft YaHei",monospace;
+}
 </style>
 `
 

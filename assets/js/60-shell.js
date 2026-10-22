@@ -1933,9 +1933,9 @@ function renderShell() {
     // （我第一次还探成了 `#tablist .tab` = 「并行」那张页标签，它根本没有 ×，
     //   报回来是 `关=无`。格子头上的 × 才是"结束这个 agent"，见 :2963 那段。）
     bootFact(`标签条 加号=${box($("tab-add"))} 并行页=${box($("tab-parallel"))}`);
-    /* 顶栏模块切换的**命中读数**（2026-10-17 搬进窗口顶栏时加）：这个控件在
-       标题栏的拖拽区里，位置/尺寸/命中元素/继承到的 --wails-draggable 全都是
-       "截图看着对、点了没反应"时唯一能说清问题的字节证据。 */
+    /* 总览页头「面板 / 网关」切换的**命中读数**：位置/尺寸/命中元素/继承到的
+       --wails-draggable 全都是"截图看着对、点了没反应"时唯一能说清问题的字节证据。
+       2026-10-22 起它从窗口标题栏搬进了总览页头，不再依赖标题栏的拖拽区。 */
     {
       const seg = $("dash-tabs");
       const r = seg.getBoundingClientRect();
@@ -1943,7 +1943,7 @@ function renderShell() {
       const hit = document.elementFromPoint(cx, cy);
       const cs = hit ? getComputedStyle(hit) : null;
       const on = seg.querySelector(".on");
-      bootFact(`顶栏切换 ${box(seg)} 中心命中=${hit ? hit.tagName + (hit.id ? "#" + hit.id : "") : "无"}` +
+      bootFact(`面板切换 ${box(seg)} 中心命中=${hit ? hit.tagName + (hit.id ? "#" + hit.id : "") : "无"}` +
         ` drag=${cs ? JSON.stringify(cs.getPropertyValue("--wails-draggable").trim()) : "?"}` +
         ` 活动项=${on ? on.textContent : "无"} 白片=${box(seg.querySelector(":scope > .thumb"))}`);
     }

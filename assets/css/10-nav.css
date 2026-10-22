@@ -54,16 +54,15 @@
           margin-right:4px}
 #app.settings #settings{display:flex}
 
-/* 模块切换在窗口顶栏里：不占 flex 空间，所以顶栏其余部分照旧可拖窗。
-   ⚠️ 水平基准是**总览版面**（左栏右沿 → 窗口右沿），不是整窗：左栏占着
-   132~320px，按 left:50% 居中的话会偏左 railW/2（用户 2026-10-17 明确纠正）。
-   (W + railW)/2 = railW + (W - railW)/2；--rail-w 是变量，拖左栏时同一帧
-   跟着走，thumb 坐标相对 .segs，不受盒子整体平移影响。
-   源码里它**没有灰色轨道**（magpie app.css:229 的注释），只有活动项底下那一枚
-   白片；网站截图里那种轨道是旧样式，以源码为准。 */
-.segs{position:absolute;left:calc((100% + var(--rail-w)) / 2);top:50%;
-      transform:translate(-50%,-50%);display:none;padding:2px;border-radius:8px}
-#app.dash .segs{display:inline-flex}
+/* 总览页头：面板 / 网关的子切换 + 刷新。2026-10-22 用户定了层级 ——
+   网关不再是和总览平级的顶层页，而是总览下的子页；所以这排控件从窗口
+   标题栏搬进页面里，标题栏只留品牌和窗口按钮。
+   形态照 magpie 的 .seg：没有灰色轨道，只有活动项底下那一枚白片。 */
+.dash-head{flex:none;display:flex;align-items:center;gap:8px;height:38px;
+           padding:0 12px;border-bottom:1px solid var(--line-soft);
+           background:var(--bg);position:relative}
+.segs{position:relative;display:none;padding:2px;border-radius:8px}
+.dash-head .segs{display:inline-flex}
 .segs .opt{position:relative;z-index:1;white-space:nowrap;height:24px;padding:0 12px;
            border-radius:6px;font-size:12.5px;color:var(--muted);
            transition:color .18s cubic-bezier(.2,.8,.2,1),
@@ -80,10 +79,8 @@
              transform:translateX(0);transition:opacity .15s;
              pointer-events:none}
 .segs .thumb.still{transition:none}
-/* 刷新按钮跟 magpie 的 actions 一样贴在窗口按钮左侧，垂直居中。 */
-#dash-refresh{position:absolute;right:calc(138px + 8px);top:50%;
-              transform:translateY(-50%);display:none}
-#app.dash #dash-refresh{display:grid}
+/* 刷新按钮退到页头右端，不再贴着窗口按钮。 */
+.dash-head #dash-refresh{display:grid;margin-left:auto}
 @media (prefers-reduced-motion:reduce){
   .segs .opt{transition:none}
 }

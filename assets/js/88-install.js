@@ -224,8 +224,6 @@ function applyInstall(m) {
       GW_INSTALL.state = m.ok ? "done" : "failed";
       GW_INSTALL.err = m.ok ? null : errMsgOf(m);
       if (m.ok) {
-        // 新装的一份：版本状态要重新问（旧值属于上一个 exe）。
-        GW_UPD = null; GW_UPD_BUSY = ""; GW_UPD_ERR = null; GW_UPD_TRIES = 0;
         sendCtrl({ type: "gw.refresh" });
         sendCtrl({ type: "magpie.refresh" });
       }

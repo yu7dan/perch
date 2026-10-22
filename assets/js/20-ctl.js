@@ -501,8 +501,6 @@ function dispatchCtl(m) {
     case "gw.agents": applyGwAgents(m); return;
     case "gw.agents.drift": applyGwAgentsDrift(m); return;
     case "gw.agent.preview": applyGwPreview(m); return;
-    // magpie 本体的版本 / 更新（magpie_update.go）：只落状态，壳在 87-gateway.js。
-    case "magpie.update": applyGwUpdate(m); return;
     // 项目池（左栏那一轮）。它和 state 是两回事：state 是"扫出来的会话库"，
     // 这一条是"用户声明的项目池 + 归属"。分开发的理由和三条腿分开是同一条 ——
     // 池子只在动作时变（低频、全量），会话库每关一格就要重扫。
