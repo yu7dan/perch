@@ -33,22 +33,12 @@ const RESTORE = { state: "init", panes: [], err: "", asked: false };
    scanAgentCatalog），前端只读，不自己再探一遍。 */
 let BOOT_AGENTS = [];
 let BOOT_DEFAULT_AGENT = "";
-/* 接入记录：agent id → internal/agentstate.Record。它是“打开之后走到哪一步”的
-   唯一一份事实；总览/抽屉都读它，不许再从静态 caps 自己推“完整”。
-   panes.list、shell 首帧、agent.state 三条路都会更新它。 */
-let AGENT_STATE = {};
-function applyAgentState(agents) {
-  AGENT_STATE = agents && typeof agents === "object" ? agents : {};
-  // 目前只有总览和抽屉读它；两条路都重画一次（数据低频，不值得做增量）。
-  if (typeof NAV_HERE !== "undefined" && NAV_HERE === "dash" &&
-      typeof renderDashAgents === "function") {
-    renderDashAgents();
-  }
-  if (typeof AC_ID !== "undefined" && AC_ID &&
-      typeof renderAgentDrawer === "function") {
-    renderAgentDrawer();
-  }
-}
+/* 正在写入的主模型：{id, field, value}。抽屉和终端 chip 共用同一套
+   “等 gw.agents 回来再把结果说清楚”的收尾；高级字段不设它。 */
+let AGENT_MODEL_PENDING = null;
+/* 这次写模型是不是用户点了「接入并打开/应用并重开」。false = 只接入，
+   afterAgentModelSet 不替他打开/重开格子。 */
+let AGENT_MODEL_OPEN_INTENT = true;
 let restoreTimer = 0;
 function askRestorePlan() {
   if (RESTORE.asked) { ctl.send({ type: "log", msg: "冷恢复：已经问过了，不重问（重问可能让同一批会话被接两遍）" }); return; }
@@ -441,8 +431,6 @@ function dispatchCtl(m) {
          defaultAgentId）。它和总览的 catalog 是同一份 Go 探测结果。 */
       BOOT_AGENTS = Array.isArray(m.agents) ? m.agents : [];
       BOOT_DEFAULT_AGENT = typeof m.defaultAgent === "string" ? m.defaultAgent : "";
-      // 建第一格之前就要有的第二份事实：每个 agent 上次走到哪一步。
-      AGENT_STATE = m.agentState && typeof m.agentState === "object" ? m.agentState : {};
       const installed = BOOT_AGENTS.filter((a) => a && a.installed).length;
       const launchable = BOOT_AGENTS.filter((a) => a && a.installed &&
         a.caps && a.caps.launch).length;
@@ -479,7 +467,6 @@ function dispatchCtl(m) {
       }
       return;
     }
-    case "agent.state": applyAgentState(m.agents); return;
     case "hook":  applyHook(m);  return;
     case "agent": applyAgent(m); return;
     case "acts":  applyActs(m);  return;
@@ -494,12 +481,17 @@ function dispatchCtl(m) {
     case "state": applyLibrary(m.state); return;
     // 网关读数：shell 首帧里也带一份，之后由 Go 的 watcher 每 2.5s 推整份。
     case "magpie": applyMagpie(m.magpie); return;
-    // 控制面：整份原生读数（网关页的 iframe 直接用 magpie 自己的界面，
-    // 用量/账本/插件市场不再经过 Perch 中转）。
+    // 控制面（引擎）：连接状态、端口、Perch 写进 agent 配置的稳定网关地址。
     case "gw": applyGw(m.gw); return;
-    // 后端把 Perch 的语言写进了 magpie 自己的 settings.lang（gateway/language.go）；
-    // 内嵌页重载一次，让它用新的 lang 走 bootPrefs 重画。
-    case "gw.lang": applyGwLang(m); return;
+    // 供应商：列表、保存、删除、密钥测试。全部是用户动作的应答；
+    // 引擎不会在后台主动推供应商（没有 watcher）。
+    case "gw.providers": applyGwProviders(m); return;
+    case "gw.provider.saved": applyGwProviderSaved(m); return;
+    case "gw.provider.deleted": applyGwProviderDeleted(m); return;
+    case "gw.credential.test": applyGwCredentialTest(m); return;
+    case "gw.provider.error": applyGwProviderError(m); return;
+    // 总览用量卡：7d / 30d / all 按需读；today 主要来自 2.5s 快照。
+    case "gw.usage": applyGwUsage(m); return;
     // 安装器：start / log / phase / done 四条；done 里也带一份重扫过的 catalog。
     case "install.start":
     case "install.log":
@@ -520,8 +512,6 @@ function dispatchCtl(m) {
     case "gw.agents": applyGwAgents(m); return;
     case "gw.agents.drift": applyGwAgentsDrift(m); return;
     case "gw.agent.preview": applyGwPreview(m); return;
-    // magpie 本体的版本 / 更新（magpie_update.go）：只落状态，壳在 87-gateway.js。
-    case "magpie.update": applyGwUpdate(m); return;
     // 项目池（左栏那一轮）。它和 state 是两回事：state 是"扫出来的会话库"，
     // 这一条是"用户声明的项目池 + 归属"。分开发的理由和三条腿分开是同一条 ——
     // 池子只在动作时变（低频、全量），会话库每关一格就要重扫。

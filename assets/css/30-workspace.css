@@ -341,7 +341,21 @@
     paneTitleBackground = resolveOpaqueTerminalBackground(terminalBackground, …)），
    不是另一块 UI 色板 —— 这也是为什么有标题时那条栏读起来仍像终端的一部分。 */
 .phead{--pane-title-bg:var(--term-bg)}
-.phead .rt{display:flex;align-items:center;flex:none;pointer-events:auto}
+.phead .rt{display:flex;align-items:center;gap:2px;flex:none;pointer-events:auto}
+/* 终端面板上的模型 chip：始终可见（不像 .pbtn 只在 hover 浮出），因为用户
+   需要在打开后马上找到“换模型”的入口。仍然压在终端第一行上，所以底色用
+   .phead 同一个清底渐变，避免把 CLI 自己画的那行字吃掉。 */
+.pmodel{position:relative;display:flex;align-items:center;gap:4px;max-width:190px;
+  height:var(--pane-title-height);padding:0 6px;border:0;border-radius:4px;
+  background:transparent;color:var(--pane-title-button-fg);
+  font:10.5px/1 var(--mono);white-space:nowrap;cursor:pointer;
+  opacity:.78;transition:opacity 120ms ease,color 120ms ease,background 120ms ease}
+.pmodel:hover,.pmodel:focus-visible{opacity:1;color:var(--fg);
+  background:color-mix(in srgb,var(--pane-title-bg) 82%,transparent);outline:none}
+.pmodel .pmodel-txt{overflow:hidden;text-overflow:ellipsis;max-width:160px}
+.pmodel i{font-style:normal;color:var(--faint);font-size:9px}
+.pmodel.stale{color:var(--ask)}
+.pmodel[hidden]{display:none}
 /* 按钮：18px 宽 × 整条高度、默认 opacity:0，hover/focus-within 才浮现。
    Orca 的揭示规则有个容易抄漏的地方 —— split 按钮在「激活面板」时就显示，
    而 close 按钮**只在 hover/focus 时**显示（见 terminal.css:446-457）。

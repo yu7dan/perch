@@ -49,6 +49,18 @@ func PerchFile(name string) (string, error) {
 	return filepath.Join(d, name), nil
 }
 
+// LocalPerchDir 返回 %LOCALAPPDATA%\Perch。
+//
+// 网关引擎与它自己的数据放这里，不放 %APPDATA%：它们是机器本地的可执行
+// 内容，不该跟着漫游配置走。拿不到 LocalAppData 时退回配置目录 —— 路径
+// 仍在，只是不再区分"本机"和"漫游"。
+func LocalPerchDir() (string, error) {
+	if d, err := os.UserCacheDir(); err == nil && d != "" {
+		return filepath.Join(d, PerchDirName), nil
+	}
+	return PerchDir()
+}
+
 // ClaudeState 是 Claude Code 自己的状态根：环境里有 CLAUDE_CONFIG_DIR 就用它，
 // 否则 <用户主目录>\.claude。拿不到主目录时退回相对路径。
 func ClaudeState() string {

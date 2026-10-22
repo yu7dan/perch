@@ -1,196 +1,197 @@
 "use strict";
-/* 08-agent-model.js 的纯函数测试：从零开始的各种场景都必须是**同一套判断**。
-   node --test assets/js/08-agent-model.test.js
-
-   这里刻意不读本机探测结果：每条用例都是一台“想象中的机器”。 */
+/* 08-agent-model.js 的纯函数测试：一行只回答“装没装 / 走哪条路由 / 当前模型”。
+   node --test assets/js/08-agent-model.test.js */
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
-  AGENT_GROUPS, agentIntegrationView,
+  AGENT_SETUP_MARKERS, agentMainModelField, agentGatewayOptions, agentModelLabel,
+  agentRouteView, agentSetupKind, agentReopenDecision,
 } = require("./08-agent-model.js");
 
-const CAPS = (over) => Object.assign({
-  launch: true, resume: true, resumeKind: "exact",
-  status: true, waiting: true, mechanism: "hook",
-}, over || {});
-
+const CAPS = (over) => Object.assign({ launch: true }, over || {});
 const CARD = (over) => Object.assign({
   id: "claude", name: "Claude Code", installed: true,
-  caps: CAPS(), install: true, setup: false, windows: true,
-  url: "https://example.test/docs",
+  caps: CAPS(), install: true, windows: true, url: "https://example.test/docs",
+}, over || {});
+const MG = (known) => ({ state: "running", agentsKnown: known !== false });
+const OPT = (value, extra) => Object.assign({ value, label: value }, extra || {});
+const FIELD = (value, options) => ({
+  key: "model", label: "model", value,
+  options: options || [],
+});
+const ROW = (over) => Object.assign({
+  id: "claude", wired: false, source: "",
+  fields: [FIELD("", [OPT("deepseek/flash", { ref: "deepseek/flash" })])],
 }, over || {});
 
-const MG = (state, known) => ({ state: state || "running", agentsKnown: known !== false });
-
-const byKey = (v) => Object.fromEntries(v.steps.map((s) => [s.key, s]));
-
-/* 一条“已经走完 1–6 步”的记录（网关另给）。 */
-function coreRecord(over) {
-  return Object.assign({
-    steps: {
-      detect: { state: "done", at: "2026-10-21T00:00:00Z" },
-      install: { state: "done", at: "2026-10-21T00:00:00Z" },
-      launch: { state: "done", at: "2026-10-21T00:01:00Z", verified: true, evidence: "pane=1" },
-      auth: { state: "done", at: "2026-10-21T00:01:10Z", verified: true, source: "readiness:ready" },
-      status: { state: "done", at: "2026-10-21T00:01:20Z", mechanism: "hook", verified: true },
-      resume: { state: "done", at: "2026-10-21T00:00:00Z", mechanism: "exact", source: "adapter" },
-    },
-    readiness: "ready",
-  }, over || {});
-}
-
-test("空机器：每个 agent 都是未检测到，主行动是安装", () => {
-  const v = agentIntegrationView(CARD({ installed: false, path: "" }), null, null, MG("absent", false));
-  assert.equal(v.group, "missing");
-  assert.equal(v.complete, false);
-  assert.equal(v.primary.action, "install");
-  const s = byKey(v);
-  assert.equal(s.detect.state, "todo");
-  assert.equal(s.install.state, "todo");
-  assert.equal(s.launch.state, "todo");
+test("未安装：missing + install", () => {
+  const v = agentRouteView(CARD({ installed: false }), null, MG(false));
+  assert.equal(v.route, "missing");
+  assert.equal(v.action, "install");
+  assert.equal(v.canOpen, false);
 });
 
-test("已安装没打开过：不是完整，主行动是打开", () => {
-  const v = agentIntegrationView(CARD(), null, null, MG("running", false));
-  assert.equal(v.group, "action");
-  assert.equal(v.primary.action, "open");
-  const s = byKey(v);
-  assert.equal(s.detect.state, "done");
-  assert.equal(s.install.state, "done");
-  assert.equal(s.launch.state, "todo");
-  assert.equal(s.auth.state, "todo");
-  assert.equal(v.complete, false);
+test("装了但 Perch 没有终端适配：no-launch", () => {
+  const v = agentRouteView(CARD({ caps: { launch: false } }), null, MG(false));
+  assert.equal(v.route, "no-launch");
+  assert.equal(v.action, "docs");
 });
 
-test("打开成功但还没登录/状态：下一步明确，不冒充完整", () => {
-  const rec = {
-    steps: { launch: { state: "done", verified: true, evidence: "pane=58" } },
-    readiness: "needs-login",
+test("网关状态没读到：unknown，不冒充本机已配置", () => {
+  const v = agentRouteView(CARD(), null, MG(false));
+  assert.equal(v.route, "unknown");
+  assert.equal(v.action, "open");
+});
+
+test("已接网关：gateway + 当前模型", () => {
+  const row = ROW({ wired: true, fields: [FIELD("deepseek/flash", [OPT("deepseek/flash", { ref: "deepseek/flash" })])] });
+  const v = agentRouteView(CARD(), row, MG(true));
+  assert.equal(v.route, "gateway");
+  assert.equal(v.modelLabel, "deepseek/flash");
+  assert.equal(v.wired, true);
+});
+
+test("未接但有网关模型：unconfigured + connectable", () => {
+  const v = agentRouteView(CARD(), ROW(), MG(true));
+  assert.equal(v.route, "unconfigured");
+  assert.equal(v.hasGatewayModels, true);
+  assert.equal(v.connectable, true);
+  assert.equal(v.modelLabel, "");
+});
+
+test("本机已有 source：native，不因为网关可接就改口", () => {
+  const v = agentRouteView(CARD(), ROW({ source: "chatgpt" }), MG(true));
+  assert.equal(v.route, "native");
+});
+
+test("本机已有自己的模型：native", () => {
+  const row = ROW({ fields: [FIELD("gpt-5", [OPT("gpt-5", { direct: "OpenAI" }), OPT("deepseek/flash", { ref: "deepseek/flash" })])] });
+  const v = agentRouteView(CARD(), row, MG(true));
+  assert.equal(v.route, "native");
+  assert.equal(v.modelLabel, "gpt-5");
+});
+
+test("magpie 明确不能接（Cursor）：native，不显示可接", () => {
+  const row = ROW({ connectable: false, fields: [FIELD("auto", [OPT("auto")])] });
+  const v = agentRouteView(CARD({ id: "cursor" }), row, MG(true));
+  assert.equal(v.route, "native");
+  assert.equal(v.hasGatewayModels, false);
+  assert.equal(v.connectable, false);
+});
+
+test("magpie 读到了但没有这个 agent：native，不假装能接", () => {
+  const v = agentRouteView(CARD({ id: "pi" }), null, MG(true));
+  assert.equal(v.route, "native");
+  assert.equal(v.hasGatewayModels, false);
+});
+
+test("当前值是网关模型但 wired=false：仍按网关路由（drift/半接）", () => {
+  const row = ROW({ fields: [FIELD("deepseek/flash", [OPT("deepseek/flash", { ref: "deepseek/flash" })])] });
+  const v = agentRouteView(CARD(), row, MG(true));
+  assert.equal(v.route, "gateway");
+});
+
+test("主模型字段：优先带 ref 的字段，而不是死认 key=model", () => {
+  const row = {
+    fields: [
+      { key: "auth", value: "x", options: [OPT("x")] },
+      { key: "primary", value: "deepseek/flash", options: [OPT("deepseek/flash", { ref: "deepseek/flash" })] },
+    ],
   };
-  const v = agentIntegrationView(CARD(), null, rec, MG("running", false));
-  assert.equal(v.group, "action");
-  assert.equal(v.primary.action, "open");
-  assert.equal(v.primary.step, "auth");
-  const s = byKey(v);
-  assert.equal(s.launch.state, "done");
-  assert.equal(s.auth.state, "todo");
-  assert.equal(s.status.state, "todo");
-  assert.equal(v.complete, false);
+  const f = agentMainModelField(row);
+  assert.equal(f.key, "primary");
+  assert.equal(agentGatewayOptions(f).length, 1);
+  assert.equal(agentModelLabel(f, "deepseek/flash"), "deepseek/flash");
 });
 
-test("内置状态 + 网关都接好才算完整（网关）", () => {
-  const rec = coreRecord({
-    steps: Object.assign(coreRecord().steps, {
-      gateway: { state: "done", mechanism: "magpie", verified: true },
-    }),
-  });
-  const v = agentIntegrationView(CARD(), { id: "claude", wired: true }, rec, MG("running"));
-  assert.equal(v.completeKind, "gateway");
-  assert.equal(v.group, "complete");
-  assert.equal(v.primary.action, "open");
+test("主模型字段：provider 型网关字段在前时仍选 model（Ante/Pencil）", () => {
+  const row = {
+    fields: [
+      { key: "provider", value: "magpie", options: [OPT("magpie")] },
+      { key: "model", value: "", options: [OPT("magpie/stepfun/step-1", { ref: "stepfun/step-1" })] },
+    ],
+  };
+  const f = agentMainModelField(row);
+  assert.equal(f.key, "model");
+  assert.equal(agentGatewayOptions(f).length, 1);
 });
 
-test("网关明确不支持 + 其余全通 = 可用（原生），不是完整", () => {
-  const rec = coreRecord();
-  const v = agentIntegrationView(
-    CARD({ id: "cursor", caps: CAPS({ title: true }) }),
-    { id: "cursor", wired: false, connectable: false },
-    rec, MG("running"));
-  assert.equal(v.completeKind, "native");
-  assert.equal(v.group, "native");
-  assert.equal(v.complete, true);
-  const s = byKey(v);
-  assert.equal(s.gateway.state, "unsupported");
+test("主模型字段：没有 ref 的模型字段退在 provider 型字段之前", () => {
+  const row = {
+    fields: [
+      { key: "provider", value: "", options: [OPT("magpie")] },
+      { key: "model", value: "", options: [OPT("magpie/some/model")] },
+    ],
+  };
+  assert.equal(agentMainModelField(row).key, "model");
 });
 
-test("标题状态是弱信号：显示 title，不写成 hooks", () => {
-  const card = CARD({ id: "agy", caps: CAPS({ resume: false, resumeKind: "", status: false, title: true, mechanism: "" }) });
-  const rec = { steps: { launch: { state: "done", verified: true } }, readiness: "ready" };
-  const v = agentIntegrationView(card, { id: "agy", wired: true }, rec, MG("running"));
-  const s = byKey(v);
-  assert.equal(s.status.state, "todo");
-  assert.equal(s.status.mechanism, "title");
-  assert.equal(s.status.noteKey, "agent.note.titleWaiting");
-  assert.equal(s.resume.state, "unsupported");
-  assert.equal(v.complete, false);
+test("ownMenu：模型在 agent 自己的菜单里选（ZCode / Cursor Private Inference）", () => {
+  const v = agentRouteView(CARD({ id: "zcode" }), ROW({ id: "zcode", wired: true, menu: true, fields: [] }), MG(true));
+  assert.equal(v.route, "gateway");
+  assert.equal(v.ownMenu, true);
+  assert.equal(v.hasGatewayModels, false);
 });
 
-test("状态钩子可装时先装：不被“还没登录”挡住", () => {
-  const card = CARD({ id: "agy", setup: true, caps: { launch: true, resume: true, resumeKind: "exact" } });
-  const rec = { steps: { launch: { state: "done", verified: true } }, readiness: "needs-login" };
-  const v = agentIntegrationView(card, { id: "agy", wired: false }, rec, MG("running"));
-  assert.equal(v.primary.action, "setup");
-  assert.equal(v.primary.step, "status");
-  const s = byKey(v);
-  assert.equal(s.status.mechanism, "hook");
-  assert.equal(s.status.noteKey, "agent.note.statusSetup");
-  assert.equal(v.group, "action");
+test("输出不再包含七步/五条腿/完整度", () => {
+  const v = agentRouteView(CARD(), ROW(), MG(true));
+  assert.equal(v.steps, undefined);
+  assert.equal(v.legs, undefined);
+  assert.equal(v.complete, undefined);
+  assert.equal(v.group, undefined);
 });
 
-test("没有状态源：打开之后是「仅启动」，带原因不静默", () => {
-  const card = CARD({ id: "mystery", caps: { launch: true, status: false, resume: false } });
-  const rec = { steps: { launch: { state: "done", verified: true } }, readiness: "ready" };
-  const v = agentIntegrationView(card, { id: "mystery", wired: false }, rec, MG("running"));
-  assert.equal(v.group, "launch");
-  const s = byKey(v);
-  assert.equal(s.status.state, "unsupported");
-  assert.equal(s.status.noteKey, "agent.note.noStatusSource");
-  assert.equal(s.resume.state, "unsupported");
+test("首启标记：agy 的主题/条款/登录错误都认得出", () => {
+  assert.equal(agentSetupKind("agy", ["Welcome to Antigravity CLI!", "Choose your color scheme:"]), "agy-color");
+  assert.equal(agentSetupKind("agy", ["Terms of Service & Data Use", "I agree to help improve Antigravity CLI"]), "agy-tos");
+  assert.equal(agentSetupKind("agy", ["Got an error: token exchange failed", "Press any key to go back."]), "agy-login");
+  // 未接线的 agy 1.4.4 首屏：登录方式菜单（实测）。
+  assert.equal(agentSetupKind("agy", [
+    "Welcome to the Antigravity CLI. You are", "currently not signed in.",
+    "Select login method:", "1. Google OAuth", "2. Use a Google Cloud project",
+  ]), "agy-login");
+  // 聊天里讨论 OAuth 不是登录页：标记要「标题 + 菜单项」同时出现。
+  assert.equal(agentSetupKind("agy", ["How do I configure Google OAuth in my app?"]), "");
+  assert.equal(agentSetupKind("agy", ["The error says Select login method but there is no menu"]), "");
+  assert.equal(agentSetupKind("agy", [
+    "Select login method:", "1. Google OAuth", "2. Use a Google Cloud project",
+  ]), "agy-login");
 });
 
-test("未安装且 Perch 不能启动：nolaunch，不混进未检测到", () => {
-  const v = agentIntegrationView(CARD({ installed: true, caps: { launch: false } }), null, null, MG("running", false));
-  assert.equal(v.group, "nolaunch");
-  assert.equal(v.primary.action, "docs");
+test("首启标记：dsh 的中英引导/启动画面都认得出", () => {
+  assert.equal(agentSetupKind("dsh", ["欢迎使用 dsh-TUI", "第 1 / 4 步", "还没检测到 DEEPSEEK_API_KEY"]), "dsh-onboarding");
+  assert.equal(agentSetupKind("dsh", ["Welcome to dsh-TUI", "Step 1 / 4", "Esc to skip"]), "dsh-onboarding");
+  assert.equal(agentSetupKind("dsh", ["DEEPSEEK HARNESS", "正在启动 DSH..."]), "dsh-starting");
+  // 单独出现 DEEPSEEK_API_KEY 不当作首启页：普通终端输出/日志里完全可能有它。
+  assert.equal(agentSetupKind("dsh", ["DEEPSEEK_API_KEY=sk-...", "some build output"]), "");
 });
 
-test("magpie 没装：网关腿是『未运行』，主行动去设置，不是 agent 坏了", () => {
-  const rec = coreRecord();
-  const v = agentIntegrationView(CARD(), null, rec, MG("absent", false));
-  assert.equal(v.group, "action");
-  const s = byKey(v);
-  assert.equal(s.gateway.state, "todo");
-  assert.equal(s.gateway.noteKey, "agent.note.magpieAbsent");
-  assert.equal(v.primary.action, "settings");
+test("首启标记：不认识的 agent / 普通终端内容不误判", () => {
+  assert.equal(agentSetupKind("claude", ["Choose your color scheme"]), "");
+  assert.equal(agentSetupKind("agy", ["❯ explain this code"]), "");
+  assert.equal(agentSetupKind("dsh", ["deepseek/deepseek-flash · max"]), "");
+  assert.equal(agentSetupKind("agy", []), "");
+  assert.ok(AGENT_SETUP_MARKERS.agy.length >= 3);
 });
 
-test("magpie 读到了但没有这个 agent：网关 unsupported，不假装能接", () => {
-  const rec = coreRecord();
-  const v = agentIntegrationView(CARD({ id: "pi" }), null, rec, MG("running", true));
-  const s = byKey(v);
-  assert.equal(s.gateway.state, "unsupported");
-  assert.equal(s.gateway.noteKey, "agent.note.gatewayNotManaged");
+test("接线后动作：没有格子 → 替用户打开；只接入则不打开", () => {
+  assert.equal(agentReopenDecision({ hasTab: false, openIntent: true }), "open");
+  assert.equal(agentReopenDecision({ hasTab: false, openIntent: false }), "none");
 });
 
-test("分组互斥：任意场景只落在一个组里", () => {
-  const cards = [
-    CARD({ installed: false }),
-    CARD({ installed: true, caps: { launch: false } }),
-    CARD(),
-    CARD({ id: "cursor", caps: CAPS({ title: true }) }),
-    CARD({ id: "mystery", caps: { launch: true } }),
-  ];
-  const recs = [null, { steps: { launch: { state: "done" } } }, coreRecord()];
-  const gws = [null, { wired: false }, { wired: true }, { wired: false, connectable: false }];
-  for (const card of cards) {
-    for (const rec of recs) {
-      for (const gw of gws) {
-        for (const m of [MG("absent", false), MG("running", false), MG("running", true)]) {
-          const v = agentIntegrationView(card, gw, rec, m);
-          assert.ok(AGENT_GROUPS.includes(v.group), `未知分组 ${v.group}`);
-          assert.equal(v.steps.length, 7);
-        }
-      }
-    }
-  }
+test("接线后动作：首启/空闲/已停止 → 自动重开", () => {
+  assert.equal(agentReopenDecision({ hasTab: true, setup: "agy-tos", state: "ask", openIntent: true }), "reopen");
+  assert.equal(agentReopenDecision({ hasTab: true, setup: "dsh-onboarding", state: "ask", openIntent: true }), "reopen");
+  assert.equal(agentReopenDecision({ hasTab: true, setup: "", state: "idle", openIntent: true }), "reopen");
+  assert.equal(agentReopenDecision({ hasTab: true, setup: "", state: "off", openIntent: true }), "reopen");
 });
 
-test("没有记录就永远不是完整：内置能力不等于已录入", () => {
-  const v = agentIntegrationView(
-    CARD({ id: "claude" }),
-    { id: "claude", wired: true },
-    null, MG("running"));
-  assert.equal(v.complete, false);
-  assert.notEqual(v.group, "complete");
+test("接线后动作：真正在干活/真正的 ask → 不动进程", () => {
+  assert.equal(agentReopenDecision({ hasTab: true, setup: "", state: "working", openIntent: true }), "defer");
+  assert.equal(agentReopenDecision({ hasTab: true, setup: "", state: "ask", openIntent: true }), "defer");
+  // 屏上是首启页/启动画面：即使 hook 还报 working，也是可安全重开的（不是任务页）。
+  assert.equal(agentReopenDecision({ hasTab: true, setup: "agy-tos", state: "working", openIntent: true }), "reopen");
+  assert.equal(agentReopenDecision({ hasTab: true, setup: "dsh-starting", state: "working", openIntent: true }), "reopen");
+  assert.equal(agentReopenDecision({ hasTab: true, setup: "", state: "idle", openIntent: false }), "none");
 });

@@ -320,12 +320,6 @@ async function createTab(spec, opts) {
     // 任何活证据到了就确认，见 80-live.js 的 confirmRestored / needModel。
     restoredUnconfirmed: !!(spec && spec.restored),
     waitUnconfirmed: false,
-    // 首屏就绪分类只上报一次（ready / needs-login / needs-key）。
-    // 它是“打开之后走到哪一步”的证据，不是能力声明。
-    readinessSent: false,
-    readinessLast: "",
-    // 标题状态只上报一次（“标题这条腿有证据了”）；之后的忙闲仍照常走标题。
-    titleStatusSent: false,
     // —— WebGL：装在一个**容器**里而不是两个散变量。上下文丢失时 addon 会被
     //    置回 null，那份改动必须被外面（状态栏那格读数）看见。
     gfx: { addon: null, on: false },
@@ -670,9 +664,7 @@ installImeAnchor(T);
     return T;
   }
   T.streamName = streamName;
-  // 首屏就绪分类（打开 → 登录 → 就绪 这条链的第 3 步）。异步、只上报一次；
-  // 认不出来就继续等下一次探测，不猜 ready。
-  scheduleReadinessProbe(T);
+  renderPaneModel();
 
   /* ---- 步 6：把"这一格为什么不是上次那条会话"说出来 ----
      ⚠️ 落点必须在 ③（撤格那条）**之后**：被拒且非冷恢复的格子会就地收掉，
@@ -999,6 +991,9 @@ window.addEventListener("resize", refit);
         会因为"term 已经一样"提前返回 —— 这两样就地补（重复调用无害：refit 本来
         就合并到一帧，focus 只是把焦点给它）。 */
   if (activeTab === T) { setActive(T); T.refit(); T.focus(); }
+  // 首启/登录页的观察者：dsh 已接网关时自动按 Esc；agy 只提示。createTab 是
+  // 所有新格子的唯一出口（新开/接上/重开都走它），挂在这里就不会漏。
+  if (typeof watchFirstRun === "function") watchFirstRun(T);
   // 网格重排已经在上面的 DOM 构造处做过了（renderGrid）——那里才是"格数变了"
   // 的那一刻，晚到这里做的话中间那几十行（挂 addon、fit）都在旧列数下量的。
   return T;
@@ -1244,7 +1239,12 @@ function isExePathTitle(s) {
    路径例外仍是单独一条，别合并成宽泛的"看起来像路径就丢"）。 */
 function isGenericShellTitle(s) {
   const v = (s || "").trim().toLowerCase();
-  return /^(administrator:\s*)?(windows powershell|command prompt|powershell|pwsh|cmd|cmd\.exe|conhost|terminal)$/.test(v);
+  const shellOnly = /^(administrator:\s*)?(windows powershell|command prompt|powershell|pwsh|cmd|cmd\.exe|conhost|terminal|perch|perch\.exe)$/;
+  if (shellOnly.test(v)) return true;
+  // Codex 0.163 的 OSC 标题是 `<状态> | <TERM_PROGRAM>`（实测 `ok | Perch`）。
+  // 程序名那一段是**终端自己的名字**，不是这一格的身份；整条标题都不该拿来
+  // 当标签。状态词也只是忙闲，不承载会话名，所以按 `|` 拆开任一段命中就丢。
+  return v.split("|").some((part) => shellOnly.test(part.trim()));
 }
 /* DSH-TUI 的 OSC 标题是 `<状态符> 🐋 <会话名>`（Orca dsh-terminal-title.ts）。
    鲸鱼是唯一不会被别的 agent 发出的字符 —— DSH 的 idle 符 ✦ 正好是 Gemini
@@ -1682,86 +1682,6 @@ function detectAgentStatusFromTitle(title) {
   return null;   // 既没 idle 符也没转圈符 → 判断不了，别硬塞一个状态
 }
 
-/* ---------------------------------------------------------------------------
-   首屏就绪分类（打开 → 登录 → 就绪 这条链的第 3 步）
-   ---------------------------------------------------------------------------
-   只认两种**高置信**信号：
-     · 登录/密钥页的固定短语（Not logged in / Sign in with / API key…）；
-     · agent 自己的输入提示符（Claude 的 ❯、Codex 的 ›…）。
-   认不出来就返回空串，等下一次探测 —— **不猜 ready**：把登录页写成“已就绪”
-   比不写更糟，用户会以为自己已经能用了。
-
-   Cursor 不走这条：`cursor-agent whoami` 是它自己的只读答案，Go 侧探测
-   （internal/session/readiness.go）。标题状态是运行期忙闲，不是这里的就绪。
-   --------------------------------------------------------------------------- */
-const READINESS_LOGIN_RE =
-  /(not logged in|not signed in|signed out|login required|sign in to|log in to|press any key to log in|select login method|sign in with|log in with|authentication required)/i;
-const READINESS_KEY_RE =
-  /(api key is required|enter (your )?api key|paste (your )?api key|missing api key|invalid api key)/i;
-// agy 首次打开会先进 onboarding（选配色），屏幕上也有 `> terminal` 这种行首
-// `>`—— 光看提示符会把“还没登录”读成 ready（实测踩到）。所以 agy 不参与
-// 通用提示符判断，只认 onboarding/登录短语；ready 由 hooks 事件给出。
-const READINESS_AGY_ONBOARD_RE = /(welcome to antigravity cli|choose your color scheme)/i;
-const READINESS_PROMPT_RE = {
-  claude: /(^|\n)\s*❯/,
-  dsh: /(^|\n)\s*❯/,
-  codex: /(^|\n)\s*›/,
-  pi: /(^|\n)\s*[›>]\s/,
-  opencode: /(^|\n)\s*[›>]\s/,
-};
-
-function screenTail(T, n) {
-  const b = T && T.term && T.term.buffer && T.term.buffer.active;
-  if (!b) return "";
-  const out = [];
-  const start = Math.max(0, b.length - (n || 60));
-  for (let i = start; i < b.length; i++) {
-    const line = b.getLine(i);
-    if (line) out.push(line.translateToString(true));
-  }
-  return out.join("\n");
-}
-
-function classifyReadiness(agent, text) {
-  const s = String(text || "");
-  if (s.trim().length < 12) return "";
-  if (agent === "agy" && READINESS_AGY_ONBOARD_RE.test(s)) return "needs-setup";
-  // 密钥页比登录页更具体，先判。
-  if (READINESS_KEY_RE.test(s)) return "needs-key";
-  if (READINESS_LOGIN_RE.test(s)) return "needs-login";
-  const re = READINESS_PROMPT_RE[agent];
-  return re && re.test(s) ? "ready" : "";
-}
-
-function scheduleReadinessProbe(T) {
-  if (!T || !T.term || T.readinessSent) return;
-  // 登录可能发生在打开后的任何时刻（用户去浏览器 OAuth），所以这不是
-  // “三次快照”，而是一段**有界观察**：每 15 秒看一次，最多 3 分钟；
-  // 认成 ready 就停。needs-login/needs-key 只上报变化，不重复刷。
-  let tries = 0;
-  const probe = () => {
-    if (!TAB_LIST.includes(T) || T.readinessSent) return;
-    const readiness = classifyReadiness(T.spec.agent, screenTail(T, 60));
-    if (readiness && T.paneID && readiness !== T.readinessLast) {
-      T.readinessLast = readiness;
-      if (ctlReady) {
-        try {
-          ctl.send({
-            type: "agent.readiness", pane: T.paneID, agent: T.spec.agent,
-            readiness, source: "screen",
-          });
-        } catch (e) { jserr("agent.readiness", e); }
-      }
-      bootFact(`首屏就绪：tab=${T.id} pane=${T.paneID} agent=${T.spec.agent} ` +
-        `→ ${readiness}（来源=screen）`);
-    }
-    if (readiness === "ready") { T.readinessSent = true; return; }
-    if (++tries < 12) setTimeout(probe, 15000);
-  };
-  // 首屏刚画完先看一次，再进入 15 秒的观察节奏。
-  setTimeout(probe, 2500);
-}
-
 /* agent 专属的标题规则（Orca agent-title-status.ts / agent-title-core.ts）。
    ⚠️ 标题是**弱信号**：只在规则明确命中时给状态，命中不了返回 null 让调用方
    保留上一次状态 —— 绝不能拿“没认出来”冒充 idle。
@@ -1771,10 +1691,6 @@ function scheduleReadinessProbe(T) {
    Orca 的关键词阶梯（action required/permission/waiting → 等待；
    ready/idle/done → 空闲；working/thinking/running/转圈 → 工作中）。 */
 const AGY_NAME_RE = /(?<![\w./\\-])agy(?![\w./\\-])/i;
-// 当前**没有** agent 把标题当作能力表里的状态源（实测见 agent/status.go）。
-// 规则留着是为了将来真有 agent 写这些标题；但不上报“状态已接入”，
-// 免得把一条从不出现的标题信号写成完成。
-const TITLE_STATUS_AGENTS = {};
 
 function detectAgentTitleStatus(agent, title) {
   const raw = String(title || "").trim();
@@ -1800,20 +1716,6 @@ function detectAgentTitleStatus(agent, title) {
     return "idle";                                              // Orca 的 name-only 兜底
   }
   return detectAgentStatusFromTitle(raw);
-}
-
-// 标题这条腿“有证据了”只记一次；之后忙闲照旧由标题驱动。
-function noteTitleStatus(t) {
-  if (!t || t.titleStatusSent || !t.paneID) return;
-  t.titleStatusSent = true;
-  if (ctlReady) {
-    try {
-      ctl.send({
-        type: "agent.status", pane: t.paneID, agent: t.spec.agent, mechanism: "title",
-      });
-    } catch (e) { jserr("agent.status", e); }
-  }
-  bootFact(`标题状态：tab=${t.id} pane=${t.paneID} agent=${t.spec.agent}（来源=title，弱信号）`);
 }
 
 // Orca terminal-output-side-effects.ts:29
@@ -1874,6 +1776,388 @@ function renderAgentDot(t) {
   // 就可能被叫醒一次 —— 整表重建会把展开态、滚动位置、正在编辑的名字一起抹掉。
   scheduleProjLive();
 }
+
+/* ---------------------------------------------------------------------------
+   格子头的模型 chip（2026-10-21）
+   ---------------------------------------------------------------------------
+   它回答两件事：这一格现在用哪个模型；想换的话在哪儿换。
+
+   判断和总览抽屉共用一份（08-agent-model 的 agentRouteView），选择器也是
+   同一个（89 的 acModelPickOpen）—— 三处各写一遍“哪些是网关模型”迟早会漂。
+
+   写入是 **agent 级** 的：magpie 的 /api/set 不认 pane，同一 agent 的所有格
+   共享一份配置。已经在跑的其它格不会当场热换，只会把 chip 标成 stale；
+   用户点它再选一次当前模型（或刚写入的那个）才问“重开并续接”。
+   ------------------------------------------------------------------------- */
+let PANE_MODEL_WAIT = false;
+
+function paneModelCard(tab) {
+  if (!tab || !tab.spec || !tab.spec.agent) return null;
+  try {
+    const cat = (typeof mg === "function" && mg() && mg().catalog) || [];
+    return cat.find((x) => x.id === tab.spec.agent) || null;
+  } catch (e) { return null; }
+}
+
+/* 这个 agent 现在活着的格子。和 88-install 的 liveAgentTab 同一条判据，
+   但这里要的是**全部**（换模型要照顾同一 agent 的每一格）。 */
+function liveTabsForAgent(id) {
+  return (typeof TAB_LIST !== "undefined" ? TAB_LIST : [])
+    .filter((t) => t && t.spec && t.spec.agent === id && !t.connDown);
+}
+
+/* 读当前屏（不是整段 scrollback）：首启/登录页只可能出现在眼前这一屏。
+   和 50-ask 的 readPicker 同一个取法，避免把历史里的旧字当成现在的状态。 */
+function paneScreenLines(tab, maxLines) {
+  const b = tab && tab.term && tab.term.buffer.active;
+  if (!b) return [];
+  const R = Math.min(tab.term.rows || 50, maxLines || 60);
+  const lo = Math.max(0, b.viewportY);
+  const hi = Math.min(b.length - 1, lo + R - 1);
+  const out = [];
+  for (let i = lo; i <= hi; i++) {
+    const ln = b.getLine(i);
+    out.push(ln ? ln.translateToString(true) : "");
+  }
+  return out;
+}
+
+/* 这一格是不是停在已知的「首次启动/登录」页。空串 = 普通终端内容。 */
+function paneSetupKind(tab) {
+  if (!tab || !tab.spec) return "";
+  if (typeof agentSetupKind !== "function") return "";
+  try { return agentSetupKind(tab.spec.agent, paneScreenLines(tab, 60)); }
+  catch (e) { return ""; }
+}
+
+function paneModelView(tab) {
+  const card = paneModelCard(tab);
+  if (!card || typeof agentRouteView !== "function") return null;
+  try {
+    const gw = typeof gwInfoFor === "function" ? gwInfoFor(card.id) : null;
+    const st = typeof dashMagpieState === "function" ? dashMagpieState() : null;
+    return { card, v: agentRouteView(card, gw, st) };
+  } catch (e) { return null; }
+}
+
+/* “这一格打开时用的是哪个模型”的快照。只在**路由已经知道**之后记：GW_AGENTS
+   还没回来时先不记 —— 记一个空串的话，等状态到了会把“本来就是这个模型”
+   误判成“后来换过”。 */
+function paneModelSnapshot(tab, v) {
+  if (!v || v.route === "unknown") return;
+  if (tab.modelSeen === undefined || tab.modelSeen === null) {
+    tab.modelSeen = v.currentModel || "";
+  }
+}
+
+function paneModelStale(tab, v) {
+  if (!tab || !v || v.route !== "gateway") return false;
+  if (tab.modelStaleForced) return true;
+  if (tab.modelSeen === undefined || tab.modelSeen === null) return false;
+  return String(tab.modelSeen) !== String(v.currentModel || "");
+}
+
+function paneModelText(v) {
+  if (!v) return "";
+  if (v.route === "gateway") return v.modelLabel || t("term.model.gateway");
+  if (v.route === "native") {
+    return t("term.model.native") + (v.modelLabel ? " · " + v.modelLabel : "");
+  }
+  return t("term.model.choose");
+}
+
+function renderPaneModel() {
+  let btn = null;
+  try {
+    // 启动路径（40-chrome 的 setActive）比 87/89 先跑：那时 RSB_READY 还是
+    // false，GW_AGENTS / gwInfoFor 都还不存在。只在开闸之后画。
+    if (!RSB_READY) return;
+    btn = $("pane-model");
+  } catch (e) { return; }
+  if (!btn) return;
+  const tab = activeTab;
+  const pv = tab ? paneModelView(tab) : null;
+  if (!pv || !pv.v.canOpen) { btn.hidden = true; return; }
+  // 从工作区直接启动时总览可能没被打开过：按需读一次接线状态（只用过网关
+  // 的机器才会真的去连控制面，见 Go 的 AgentPrefetch）。
+  if (!GW_AGENTS && typeof gwAgentsPrefetch === "function") gwAgentsPrefetch();
+  paneModelSnapshot(tab, pv.v);
+  const stale = paneModelStale(tab, pv.v);
+  const setup = paneSetupKind(tab);
+  const txt = btn.querySelector(".pmodel-txt");
+  if (txt) {
+    if (pv.v.wired && setup) txt.textContent = t("term.model.firstRun");
+    else if (stale) txt.textContent = t("term.model.staleShort");
+    else txt.textContent = paneModelText(pv.v);
+  }
+  btn.hidden = false;
+  btn.classList.toggle("stale", stale || (pv.v.wired && !!setup));
+  const title = (pv.v.wired && setup) ? t("term.model.firstRunHint")
+    : stale ? t("term.model.stale") : t("term.model.title");
+  btn.title = title;
+  btn.setAttribute("aria-label", title);
+  // 已经接好网关、屏幕上还停着首启页：观察者若在启动早期超时/收工了，这里
+  // 就地补一个（比如芯片是在状态推送回来之后才重画的）。不重置 dshSkipSent，
+  // 免得同一屏连发两次 Esc。
+  if (pv.v.wired && setup && tab.spec &&
+      (tab.spec.agent === "dsh" || tab.spec.agent === "agy") &&
+      !tab.firstRunWatch && typeof watchFirstRun === "function") {
+    watchFirstRun(tab);
+  }
+}
+
+/* 打开这一格的模型选择器。选中不写；点“应用”才发 gw.agent.set —— 和抽屉里
+   选完再点“接入并使用此模型”是同一条路，不替用户多插一次“接入”动作。 */
+function paneModelVisible() {
+  try {
+    if (typeof NAV_HERE !== "undefined" && NAV_HERE !== "workspace") return false;
+    if (typeof collapsed !== "undefined" && collapsed) return false;
+  } catch (e) { return false; }
+  return true;
+}
+
+function paneModelPick(tab, fromWait) {
+  if (!tab || !tab.spec || !tab.spec.agent) return;
+  // 总览/设置页或终端收起着的时候，chip 不在屏上：别把弹层锚到 0,0。
+  if (!paneModelVisible()) return;
+  const pv = paneModelView(tab);
+  if (!pv || !pv.v.canOpen) return;
+  // 已接网关、但这一格还停在首启/登录页：先让用户看到“为什么”，不要弹模型
+  // 选择器把真正的问题盖过去。
+  const setup = paneSetupKind(tab);
+  if (pv.v.wired && setup) {
+    showToast(t("term.model.firstRun"), t("term.model.firstRunHint"), "info");
+    return;
+  }
+  if (pv.v.ownMenu) {
+    // 模型在 agent 自己的菜单里选；Perch 没有可写的“主模型”字段。
+    showToast(t("agent.model.ownMenu"), "", "info");
+    return;
+  }
+  const field = pv.v.modelField;
+  if (!pv.v.hasGatewayModels) {
+    if (!fromWait && !GW_AGENTS && typeof sendCtrl === "function") {
+      // 还没读过接线状态：先要一份（只读）。回来之后 applyGwAgents 会再叫我们。
+      PANE_MODEL_WAIT = true;
+      setTimeout(() => { PANE_MODEL_WAIT = false; }, 12000);
+      showToast(t("term.model.loading"), "", "info");
+      sendCtrl({ type: "gw.agents" });
+      return;
+    }
+    showToast(t("term.model.noModels"), t("term.model.noSource"), "info");
+    return;
+  }
+  const btn = $("pane-model");
+  const stale = paneModelStale(tab, pv.v);
+  // stale 的主动作就是“重开并续接”，不再要求用户先选一次当前模型。
+  if (stale) { paneModelReopenPrompt(tab); return; }
+  const current = pv.v.currentModel || "";
+  const ok = acModelPickOpen(btn, pv.card.id, field,
+    current || "", (value) => {
+      // 选中的还是当前值：通常没有可写的配置。但两种情况要动手：
+      //   ① 这一格是旧的（stale）→ 这一下就是“重开并续接”的手势；
+      //   ② wired=false（配置里是网关模型但 magpie 的记录丢了）→ 再发一次
+      //     /api/set 让 magpie 重新接入；值不变，选中的仍是用户这个模型。
+      if (value === current) {
+        if (stale) paneModelReopenPrompt(tab);
+        else if (!pv.v.wired) paneModelApply(tab, field, value);
+        return;
+      }
+      paneModelApply(tab, field, value);
+    }, { applyLabel: t("term.model.apply") });
+  if (!ok) showToast(t("term.model.noModels"), t("term.model.noSource"), "info");
+}
+
+function paneModelApply(tab, field, value) {
+  const id = tab && tab.spec && tab.spec.agent;
+  if (!id || !field || !value) return;
+  AGENT_MODEL_PENDING = { id, field: field.key, value };
+  sendCtrl({ type: "log", msg:
+    `chip 写模型 id=${id} tab=${tab.id} pane=${tab.paneID || 0} ${field.key}=${value} ` +
+    `setup=${paneSetupKind(tab) || "-"} state=${typeof cellState === "function" ? cellState(tab) : "?"}` });
+  if (typeof AC_ID !== "undefined" && AC_ID === id) {
+    AC_BUSY = "set:" + field.key;
+    AC_MODEL_SEL = value;
+    if (typeof renderAgentDrawer === "function") renderAgentDrawer();
+  }
+  sendCtrl({ type: "gw.agent.set", id, field: field.key, value });
+  showToast(t("term.model.saving"), agentModelLabel(field, value), "info");
+  bootFact(`格子头换模型 ${id}.${field.key}=${value}（tab=${tab.id} pane=${tab.paneID || 0}）`);
+}
+
+function stopFirstRunWatch(tab, why) {
+  if (!tab) return;
+  if (tab.firstRunWatch) { clearInterval(tab.firstRunWatch); tab.firstRunWatch = 0; }
+  if (tab.firstRunTimer) { clearTimeout(tab.firstRunTimer); tab.firstRunTimer = 0; }
+  if (why) sendCtrl({ type: "log", msg: `首启观察结束 tab=${tab.id} ${why}` });
+}
+
+/* 首启页的观察者：dsh 已接网关时自动按 Esc 跳过（这是 dsh 自己提供的跳过语义，
+   不写它的 onboarding 记录、不改配置）；agy 只提示一次，绝不替用户同意条款。
+   ⚠️ 空白屏不等于“首启页结束了”：新格子的 PTY 要先起进程、dsh 还要先画启动帧，
+   头几百毫秒读到的就是空白。早先这里第一拍就读到空串、把自己停掉，于是等 dsh
+   真画出引导页时已经没人看这一格了（2026-10-21 实测）。只有**先看见过**首启页、
+   随后它消失，才收工；没看见过就继续等，由 3 分钟兜底。 */
+function watchFirstRun(tab) {
+  if (!tab || tab.firstRunWatch || tab.connDown) return;
+  const agent = tab.spec && tab.spec.agent;
+  if (agent !== "agy" && agent !== "dsh") return;
+  let seen = tab.firstRunSeen || "";
+  tab.firstRunWatch = setInterval(() => {
+    if (!TAB_LIST.includes(tab) || tab.connDown) { stopFirstRunWatch(tab, "tab-closed"); return; }
+    const kind = paneSetupKind(tab);
+    if (!kind) {
+      if (!seen) return;                       // 还没吐出字/启动帧：继续等
+      stopFirstRunWatch(tab, "setup-gone");
+      if (tab.firstRunHint) { tab.firstRunHint = ""; renderPaneModel(); }
+      return;
+    }
+    if (kind !== seen) {
+      seen = kind; tab.firstRunSeen = kind;
+      let wired = false;
+      try { const pv = paneModelView(tab); wired = !!(pv && pv.v && pv.v.wired); } catch (e) {}
+      sendCtrl({ type: "log", msg:
+        `首启观察 tab=${tab.id} agent=${agent} kind=${kind} ready=${!!tab.ready} wired=${wired}` });
+    }
+    if (kind === "dsh-onboarding") {
+      // Esc 是 dsh 自己给的“跳过引导”；连发一次没生效（PTY 还没进输入循环）
+      // 就隔 12s 再发，仍然只会落在引导页上。
+      if (tab.dshSkipSent && Date.now() - tab.dshSkipSent < 12000) return;
+      let wired = false;
+      try { const pv = paneModelView(tab); wired = !!(pv && pv.v && pv.v.wired); } catch (e) {}
+      if (!wired) {
+        // 接线状态可能只是没读过：要一份只读的（不写配置、不连控制面以外的东西）。
+        if (typeof gwAgentsPrefetch === "function") gwAgentsPrefetch();
+        return;
+      }
+      if (!tab.ready || !tab.stream) return;
+      const again = !!tab.dshSkipSent;
+      tab.dshSkipSent = Date.now();
+      try { tab.stream.send(enc.encode("\x1b")); } catch (e) { jserr("watchFirstRun/esc", e); }
+      if (!again) showToast(t("term.model.skipGuide"), "", "ok");
+      sendCtrl({ type: "log", msg: `dsh 首启引导自动跳过 tab=${tab.id}${again ? "（重发）" : ""}` });
+      renderPaneModel();
+      return;
+    }
+    if (kind.indexOf("agy-") === 0 && !tab.firstRunHint) {
+      // 正在“先开一次再写网关”的途中：这一屏马上会被重开替换，不要先弹提示。
+      if (typeof AGENT_MODEL_PENDING !== "undefined" && AGENT_MODEL_PENDING &&
+          AGENT_MODEL_PENDING.id === tab.spec.agent) return;
+      tab.firstRunHint = kind;
+      showToast(t("term.model.firstRunHint"), "", "info");
+      sendCtrl({ type: "log", msg: `agy 首启页 ${kind} tab=${tab.id}（等待用户确认，自动按键已抑制）` });
+      renderPaneModel();
+    }
+  }, 500);
+  // 兜底：3 分钟还没看见首启页（或一直没接网关）就不轮询了；格子本身仍可用。
+  tab.firstRunTimer = setTimeout(() => stopFirstRunWatch(tab, "timeout"), 180000);
+}
+
+/* 写入成功后：同一 agent 的每一格都按「这一格现在是什么状态」决定动作。
+   这是产品闭环的核心 —— 不是“保存了就算”，而是让正在跑的进程真的用上新配置：
+     · 首启/登录页、空闲、已停止 → 自动重开（同 paneId、exact resume）
+     · 正在干活、真正的 ask      → 不杀；标 stale，给可见的「重开并续接」
+     · 一个活格都没有            → 替用户打开（“接入并打开”）
+   忙碌时绝不自动杀进程；首启页的停止兜底在 reopenAgentForModel 里。 */
+async function afterAgentModelSet(id, openIntent) {
+  const open = openIntent !== false;
+  renderPaneModel();
+  const tabs = (typeof TAB_LIST !== "undefined" ? TAB_LIST : [])
+    .filter((x) => x && x.spec && x.spec.agent === id);
+  const running = tabs.filter((x) => !x.connDown);
+  for (const x of running) x.modelStaleForced = true;
+  renderPaneModel();
+
+  if (!running.length) {
+    if (!open) {
+      showToast(t("term.model.saved"), t("term.model.savedNext"), "ok");
+      return;
+    }
+    const nt = (typeof launchAgent === "function") ? await launchAgent(id) : null;
+    if (!nt) {
+      showToast(t("term.model.saved"), t("term.model.savedNext"), "info");
+      return;
+    }
+    showToast(t("term.model.saved"), t("ac.model.opened"), "ok");
+    watchFirstRun(nt);
+    renderPaneModel();
+    return;
+  }
+
+  const auto = [];
+  const deferred = [];
+  for (const tab of running) {
+    const setup = paneSetupKind(tab);
+    const st = typeof cellState === "function" ? cellState(tab) : "idle";
+    const d = (typeof agentReopenDecision === "function")
+      ? agentReopenDecision({ hasTab: true, setup, state: st, openIntent: open })
+      : (setup || (st !== "working" && st !== "ask") ? "reopen" : "defer");
+    sendCtrl({ type: "log", msg:
+      `afterAgentModelSet id=${id} tab=${tab.id} pane=${tab.paneID || 0} ` +
+      `setup=${setup || "-"} state=${st} decision=${d} open=${open} bootstrap=${tab.wiringBootstrap ? 1 : 0}` });
+    if (d === "reopen") {
+      // 这一格如果是为了接入才开的，允许走首启页的 Ctrl+C/关 PTY 兜底；
+      // 但只在它没在干活时。用户在窗口里已经打字开跑的情况会走 defer。
+      auto.push({ tab, setup: !!setup || (!!tab.wiringBootstrap && st !== "working") });
+    } else {
+      deferred.push(tab);
+    }
+  }
+
+  if (!auto.length) {
+    showToast(t("term.model.saved"), t("term.model.restartLater"), "info");
+    renderPaneModel();
+    return;
+  }
+  if (typeof acClose === "function") acClose();
+  let fresh = 0;
+  for (const a of auto) {
+    if (!TAB_LIST.includes(a.tab) || a.tab.connDown) continue;
+    const r = await reopenAgentForModel(a.tab, { setup: a.setup, quiet: true });
+    if (r && !r.resumed) fresh++;
+  }
+  if (deferred.length) {
+    showToast(t("term.model.savedBusy"), t("term.model.restartLater"), "info");
+  } else {
+    // 没有会话 id 的格子开的是新会话，不能笼统说“同一条对话”。
+    showToast(t("term.model.reopened"),
+      t(fresh ? "term.model.reopenedNewNote" : "term.model.reopenedNote"), "ok");
+  }
+  renderPaneModel();
+}
+
+function paneModelReopenPrompt(tab) {
+  if (!tab || !TAB_LIST.includes(tab)) return;
+  askConfirm({
+    title: t("term.model.restartTitle"),
+    body: t("term.model.restartResume"),
+    ok: t("term.model.restart"),
+  }).then((ok) => {
+    if (ok) reopenAgentForModel(tab);
+  });
+}
+
+$("pane-model").addEventListener("click", () => {
+  if (PANE_MODEL_WAIT) return;
+  // 再点一次 chip = 收起（和抽屉里那颗按钮的行为一致）。
+  if (typeof AC_MODEL_POP !== "undefined" && AC_MODEL_POP &&
+      AC_MODEL_POP.anchor === $("pane-model")) {
+    acModelPopClose(true);
+    return;
+  }
+  if (activeTab) paneModelPick(activeTab);
+});
+
+// Ctrl+Shift+M：和 chip 是同一个入口。capture 是必需的 —— xterm 的 keydown
+// 在冒泡阶段，晚一步的话这组键已经作为输入发给 PTY 了（同 Ctrl+Shift+B 的注释）。
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return;
+  if (e.key.toLowerCase() !== "m") return;
+  e.preventDefault();
+  if (PANE_MODEL_WAIT || !activeTab) return;
+  paneModelPick(activeTab);
+}, true);
+
 function applyAgentTitleStatus(t, rawTitle) {
   if (!t) return;
   clearTimeout(t.staleTimer); t.staleTimer = 0;
@@ -1896,7 +2180,6 @@ function applyAgentTitleStatus(t, rawTitle) {
          cellState 里 `v.st === "busy"` 会继续赢，格子永远转圈。 */
       if (next === "idle") clearDshHookBusy(t);
     }
-    if (TITLE_STATUS_AGENTS[t.spec.agent]) noteTitleStatus(t);
   }
   renderAgentDot(t);
 }

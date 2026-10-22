@@ -13,7 +13,7 @@ assets/
   vendor/                 xterm.js、xterm.css 与官方 addon（原样分发）
   fonts/                  等宽与界面字体（@font-face，随应用走）
   icons/agents/           agent / 供应商 / 产品图标（SVG 或 PNG）
-  icons/magpie.svg        magpie 品牌图标（网关页标识）
+  icons/magpie.svg        引擎品牌图标（许可归属保留；Perch 界面不显示）
   icons/perch-logo.png    Perch 产品标（透明 PNG，不重绘）
 ```
 
@@ -54,14 +54,35 @@ Wails 的运行时是 ESM，而业务代码共享一份全局状态。拆文件�
 | `83-files.js` | 右栏「文件」：改动视图、目录树（`fs.list`）、只读预览（`fs.read`） | 文件模块的呈现与浏览 |
 | `84-settings-search.js` | 设置搜索的纯评分函数（节/标题/描述/关键词四档，不碰 DOM） | 搜索匹配规则、评分权重 |
 | `85-settings.js` | 设置页交互（搜索显隐、行、默认目录草稿、单选组方向键 / 漫游 tabindex）、确认框单例 `askConfirm`、关窗确认 | 设置页的行与手势、通用确认框 |
-| `86-dash.js` | 总览（读数、热力图、实时、在等你、Agent 名单）与图标 resolver | 总览页的任何 UI |
-| `87-gateway.js` | 网关壳（控制面自动接入、安装卡、版本/更新条、iframe 生命周期）+ 网关/控制面推送的落点（`applyGw` / `applyMagpie` / `applyGwAgents` / `applyGwAgentsDrift`） | 网关的壳与接入/更新流程；新的网关推送消息 |
-| `88-install.js` | 安装进度台（agent 与 magpie 共用同一流式通道）：阶段、计时、进度条、最后一行日志、可展开日志与收尾 | 安装进度与收尾 |
-| `89-agent-cfg.js` | Agent 配置抽屉（总览名单点一行）：接入/断开/字段/预览/保留现状、漂移轮询、可搜索模型选择器 | Agent 接线的呈现与手势 |
+| `86-dash.js` | 总览（本地读数、热力图、在等你、Agent 工作台、网关用量卡）与图标 resolver | 总览页的任何 UI |
+| `87-gateway.js` | 原生网关页（状态条、已添加供应商、供应商目录、右侧编辑器、key 测试/删除）+ 网关推送的落点（`applyGw` / `applyGwProviders` / `applyGwProviderSaved` / `applyMagpie` / `applyGwUsage` / `applyGwAgents`） | 网关页的任何 UI；新的网关推送消息 |
+| `88-install.js` | 安装进度台：阶段、计时、进度条、最后一行日志、可展开日志与收尾 | 安装进度与收尾 |
+| `89-agent-cfg.js` | 行内详情（总览 Agent 工作台点一行）：接入/断开/字段/预览/保留现状、漂移轮询、可搜索模型选择器 | Agent 接线的呈现与手势 |
 | `99-boot.js` | 总览事件绑定 + 首帧证据 | 启动顺序、首屏 |
 
 一条经验：**推送落点（`apply*`）只做「把数据放进状态 + 决定重画哪几块」**，具体 HTML
 留在对应域的文件里。这样"什么时候重画"和"画成什么样"不会缠在一起。
+
+## 总览 / 网关的分工
+
+- 总览是工作台：Agent 的安装、打开、选模型、接入、行内详情都在这里；右栏是
+  网关用量和在等你。不要再把它拆成单独的 Agents 页或右侧抽屉。
+- 网关是模型来源：只放引擎状态、已添加供应商、供应商目录、右侧编辑器。
+  不要再加 Agents / Usage 标签页。
+- 供应商目录始终陈列；点 tile 预填编辑器，保存后不关，模型 chips / 测试 /
+  删除都在同一个 sheet 里。
+
+重画契约（避免 2.5s 推送冲掉正在输入的表单/选择器）：
+
+- `MG_CAT_SIG` 只算安装身份（id / installed / icon / name / path / install /
+  url / caps.launch），今日 calls 不进签名。
+- `MG_GW_SIG` 只在供应商/模型身份变化时重画工作台表头的「N 个供应商 ·
+  M 个模型」；否则保存供应商后表头会停在 0 个模型。
+- 选择器开着或行内详情有输入焦点时，`renderDashAgents` 置
+  `AGENT_RENDER_PENDING`，关闭后再画。
+- `applyMagpie` 的今日用量变化只重画用量卡；网关页的 `#gw-body` 可以自由
+  重画，编辑器是独立的 `#gw-edit`，需要 `isConnected` 守卫挡住“重画后点击
+  目标已脱离文档”的误关。
 
 ## 界面语言
 
@@ -71,8 +92,7 @@ Wails 的运行时是 ESM，而业务代码共享一份全局状态。拆文件�
 - 局部变量 `const t = activeTab` 会遮住全局 `t()`，要调用翻译的函数先把局部变量改名。
 - 增量渲染的签名必须把 `PERCH_LOCALE` 算进去，否则切语言后旧文案留在屏上。
 
-完整约定（字典、后端 `uimsg` code、magpie 语言同步、CI 守卫）见
-[I18N.md](I18N.md)。
+完整约定（字典、后端 `uimsg` code、CI 守卫）见 [I18N.md](I18N.md)。
 
 ## CSS
 
@@ -80,12 +100,12 @@ Wails 的运行时是 ESM，而业务代码共享一份全局状态。拆文件�
 |---|---|
 | `00-base.css` | 字体、颜色/尺寸 token、全局 reset、标题栏 |
 | `10-nav.css` | 导航栏、总览（读数、热力图、图标规则） |
-| `20-list.css` | 会话列表、卡片、Agent 抽屉、打开面板、toast |
+| `20-list.css` | 会话列表、卡片、行内 Agent 详情、打开面板、toast |
 | `30-workspace.css` | 主区、标签、终端、网格、xterm patch、对话流、群组/提问/权限 |
 | `40-sidebar.css` | 右栏、状态栏 |
 | `50-settings.css` | 设置页 |
 | `60-pages.css` | 确认框、铃铛、文件、新工作区、左栏 override |
-| `70-gateway.css` | 网关页外壳（iframe 尺寸、安装/接入卡、版本条） |
+| `70-gateway.css` | 原生网关页（状态条、已添加供应商行、目录 tiles、右侧编辑器 sheet） |
 
 `index.html` 的 `<link>` 顺序就是层叠顺序：基础 token → 各区域 → 第三方/网关覆盖。新增样式
 放进对应的域文件；不要恢复第二份全局样式表，也不要在 `index.html` 里写 inline style。
@@ -94,7 +114,7 @@ Wails 的运行时是 ESM，而业务代码共享一份全局状态。拆文件�
 
 - **终端面板 / 标签页的身份**用星芒，代表"agent 终端"这个形态。
 - **目录、名单、列表、卡片**用各产品的官方图标，从 `assets/icons/agents/` 取。
-- **品牌入口**（网关页的 magpie 标识）用 `icons/magpie.svg`，官方形态。
+- 网关页是 Perch 原生页面，**不放引擎品牌入口**；状态条只显示引擎状态/版本/地址。
 - 图标一律用上游现成的 SVG/PNG，**不要手画**，不要用 emoji 顶替。
 - 同一个图标名只对应一个文件；PNG 图标在 `isPngIcon()` 里登记，其余默认 `.svg`。
 - 图标 id 可能来自 magpie 的运行时状态，**不要按静态引用删文件**。文件缺失时，

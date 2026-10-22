@@ -20,11 +20,8 @@ import (
 	perchassets "github.com/yu7dan/perch"
 	"github.com/yu7dan/perch/internal/agent"
 	"github.com/yu7dan/perch/internal/agentcatalog"
-	"github.com/yu7dan/perch/internal/agentstate"
-	"github.com/yu7dan/perch/internal/agy"
 	"github.com/yu7dan/perch/internal/appdir"
 	"github.com/yu7dan/perch/internal/ctl"
-	"github.com/yu7dan/perch/internal/dsh"
 	"github.com/yu7dan/perch/internal/gateway"
 	"github.com/yu7dan/perch/internal/install"
 	"github.com/yu7dan/perch/internal/panes"
@@ -52,8 +49,6 @@ type perchApp struct {
 	pool   *project.Pool
 	panes  *panes.Store
 	tabs   *session.Manager
-	// agentState 是每个 agent 的接入进度（不是能力表）。
-	agentState *agentstate.Store
 
 	defs map[string]agent.Def
 
@@ -112,22 +107,6 @@ func main() {
 	}
 	a.panes.Warn()
 
-	/* 接入记录（每个 agent 从零走到哪一步）。和 panes.json 一样放在 Perch 自己的
-	   配置目录，**不**写进任何 agent 的状态根。第二个实例只读：两个实例各写一份
-	   会互相覆盖对方的最后一次。 */
-	if f, err := appdir.PerchFile("agent-state.json"); err != nil {
-		log.Printf("[agentstate] 拿不到用户配置目录：%v", err)
-		a.agentState = agentstate.Open("")
-	} else {
-		a.agentState = agentstate.Open(f)
-	}
-	if secondInstance {
-		a.agentState.SetReadOnly("已经有一个我在跑（步 7 的单实例闸）")
-	}
-	a.agentState.SetOnChange(func(rec map[string]agentstate.Record) {
-		a.push.Push(map[string]any{"type": "agent.state", "agents": rec})
-	})
-
 	// C3：第一个动作就是给自己上"随进程退出清理整棵树"的保险 ——
 	// 必须早于任何子进程（窗口的 WebView2、每个格子的 ConPTY 都在这之后才起）。
 	// 挂一次宿主，此后所有进程靠继承覆盖，不需要每格再管一次。
@@ -144,8 +123,7 @@ func main() {
 		Push:         a.push.Push,
 		// 能力矩阵要"能否启动"这条静态清单，由组合根注入 ——
 		// 会话层不反过来认识 agent 名单。
-		Caps:       func(id string) agent.Caps { return agent.CapsFor(id, agentcatalog.Has(id)) },
-		AgentState: a.agentState,
+		Caps: func(id string) agent.Caps { return agent.CapsFor(id, agentcatalog.Has(id)) },
 	})
 	// 步 8：适配器此后拿到的就是真正的会话表（绑定/状态/推送/Exe 解析）。
 	agent.SetHost(a.tabs)
@@ -159,22 +137,6 @@ func main() {
 	// 带一条 launch 命令，网关把它解析成 env+args，开格时由 AgyDef 现取。
 	// 没接线时 Launch 返回 false，启动退回通用路径。
 	a.tabs.SetWireLaunch(a.gw.Launch)
-	// 内嵌网关页的语言跟 Perch 的设置走：先记下偏好，控制面连上时再写进
-	// magpie（它自己的 settings.lang），见 internal/gateway/language.go。
-	a.gw.SetLanguage(a.prefs.Snapshot().Language)
-	// dsh 的“状态”不是启动时顺手能做的：它要写用户的 DSH home patch，
-	// 还要把官方 hook 桥和 peer 装进 dsh-tui profile。所以只放在两个
-	// **用户明确点下**的动作里（安装完成 / 名单里的「接入状态」），不静默跑。
-	setupAgent := func(id string, log func(string)) error {
-		switch id {
-		case "dsh":
-			return dsh.EnsureHooks(a.stateDir, session.HookDir(a.stateDir), session.HookExePath(), log)
-		case "agy":
-			// 只写 ~/.gemini/config/hooks.json 里一个命名条目；保留用户其它 hook。
-			return agy.EnsureHooks(session.HookExePath(), session.HookDir(a.stateDir), log)
-		}
-		return nil
-	}
 	a.installer = install.New(install.Deps{
 		Push: a.push.Push,
 		Cards: func() []agentcatalog.Card {
@@ -185,24 +147,19 @@ func main() {
 		ReloadPath:   winproc.ReloadPathFromRegistry,
 		ProbeVersion: winproc.ProbeVersion,
 		Home:         os.UserHomeDir,
-		Setup:        setupAgent,
 		OnInstalled: func(id string, ok bool) {
-			// 装完 magpie 自动接入控制面（用户 2026-10-17 定的）。
-			if id == "magpie" && ok {
-				go a.gw.Connect()
+			// 新装的 agent 要立刻出现在网关的接入名单里；引擎没起时这一步
+			// 只是静默失败，网关页会显示引擎状态。
+			if ok {
+				go a.gw.RefreshNow()
 			}
 		},
 	})
-
 	app := application.New(application.Options{
 		Name:        "Perch",
 		Description: "面向 agent 终端的 Windows 桌面网关",
 		Assets: application.AssetOptions{
-			// /gwui/ 只做一次跳转：把网关页的 iframe 指到本地反代
-			// （见 internal/gateway/ui.go；真正的 /gwui/* 与 /api/* 在 127.0.0.1 的
-			// 随机端口上，因为 Wails 这一版交给 asset handler 的
-			// POST 请求没有请求体）。其余路径仍由嵌入的 assets 提供。
-			Handler: a.gw.UIHandler(application.BundledAssetFileServer(perchassets.Assets)),
+			Handler: application.BundledAssetFileServer(perchassets.Assets),
 		},
 	})
 
@@ -334,11 +291,9 @@ func main() {
 		Gateway:        a.gw,
 		Installer:      a.installer,
 		Transcript:     a.follower,
-		AgentState:     a.agentState,
 		DefaultCWD:     a.defaultCWD,
 		SessionExists:  a.tabs.SessionFileExistsFor,
 		MergeCalls:     a.mergeCatalogCalls,
-		SetupAgent:     setupAgent,
 		// 顺序是硬约束：**先**注册流、**再**返回 —— ctl 接着就回 tab.ok，
 		// 前端拿到应答会立刻去连那条流（Wails 在连接建立时才按名字查 handler）。
 		CreateTab: func(spec session.SpawnSpec) *session.Tab {
@@ -351,11 +306,11 @@ func main() {
 	a.push.Set(ctlSrv)
 
 	// 网关读数（只读）：本机那份立刻出，HTTP 那条腿在后台 2.5s 一次。
-	// 它不参与任何 PTY/会话逻辑 —— 网关关着时最坏也只是总览少几张读数。
+	// 它不参与任何 PTY/会话逻辑 —— 引擎没起来时最坏也只是总览少几张读数。
 	a.gw.StartWatcher()
-	// 控制面只做**被动探测**：接已经存在的那个，不在这里拉起 magpie web ——
-	// 用户没点「连接」之前，Perch 不该多出一个后台进程。
-	go a.gw.Probe()
+	// 内置引擎随产品启动；它是 Perch 自己的后台进程，不是插件。
+	// 引擎起不来不阻塞窗口，网关页会给出启动/缺失状态。
+	go a.gw.StartEngine()
 
 	/* 关窗那一刻**同步**把登记表写一遍（写的是内存里那份，见 panes.Store.FlushSync）。
 	   ⚠️ 为什么挂在**窗口事件**上而不是 app.OnShutdown —— 2026-10-16 实测：
@@ -372,9 +327,8 @@ func main() {
 	   节流负责"平时一直在写"，这一条负责"真到最后一刻也写完"。 */
 	window.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
 		a.panes.FlushSync("窗口正在关闭")
-		// Perch 自己拉起的 magpie web 随窗口一起收掉；外部控制面（桌面 magpie
-		// 或用户自己起的）只断开连接，不动进程。关窗这条路不经过 OnShutdown，
-		// 所以必须挂在这里（见上面那段实测）。
+		// 内置网关引擎是 Perch 拉起的子进程，随窗口一起收掉。
+		// 关窗这条路不经过 OnShutdown，所以必须挂在这里（见上面那段实测）。
 		a.gw.Stop()
 	})
 	// 兜底（**留着，但它不是关窗那条路**）：App.Quit() / 信号那几条退出路会跑
@@ -386,10 +340,6 @@ func main() {
 		a.gw.Stop()
 		a.panes.FlushSync("应用收尾（Quit/信号）")
 	})
-
-	// 网关页内嵌 magpie 界面所需的本地反代（127.0.0.1，随机端口 + token）。
-	// 必须在 Run 之前起：页面首帧就可能落到网关页。
-	a.gw.StartUI()
 
 	if err := app.Run(); err != nil {
 		log.Fatal(err)

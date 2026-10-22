@@ -241,12 +241,6 @@ func emitAgentStatus(ev agentEvent) {
 	stateChanged := ev.State != "" && ev.State != prevState
 	evidenceChanged := ev.Evidence != "" && ev.Evidence != prevEvidence
 
-	// 第一条真实状态事件 = 这个 agent 的“状态”这条腿有证据了。落盘在会话层，
-	// 只在机制变化时写一次（Store.SetStep 去重），不会每条状态刷盘。
-	switch ev.Evidence {
-	case EvidenceHook, EvidenceHTTP, EvidenceAppServer, EvidenceExtension:
-		host.RecordStatus(ev.Tab, ev.Evidence)
-	}
 	prev, changed := host.SetStatus(ev.Tab, ev.Status)
 	if !changed && !(ev.Status == "waiting" && noteChanged) && !stateChanged && !evidenceChanged {
 		return

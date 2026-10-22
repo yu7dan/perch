@@ -5,6 +5,7 @@ package ctl
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -93,6 +94,25 @@ func TestMsgSpawnSpecShape(t *testing.T) {
 	}
 	if m.Spec.DegradedFrom != "old" {
 		t.Fatalf("degradedFrom lost: %+v", m.Spec)
+	}
+}
+
+func TestMsgProviderAndUsageFields(t *testing.T) {
+	raw := `{"type":"gw.provider.save","preset":"kimi","period":"7d","endpoints":{"chat":"https://api.example/v1"}}`
+	var m Msg
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m.Preset != "kimi" || m.Period != "7d" || m.Endpoints["chat"] != "https://api.example/v1" {
+		t.Fatalf("new fields lost: %+v", m)
+	}
+
+	b, err := json.Marshal(Msg{Type: "gw.usage", Period: "30d"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"period":"30d"`) {
+		t.Fatalf("period missing: %s", b)
 	}
 }
 

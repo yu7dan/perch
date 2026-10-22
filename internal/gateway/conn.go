@@ -23,7 +23,6 @@ package gateway
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -32,12 +31,10 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/yu7dan/perch/internal/appdir"
@@ -45,42 +42,30 @@ import (
 )
 
 const (
-	gwFirstPort  = 3439
-	gwPortTries  = 4
 	gwKeyFile    = "magpie-web.key"
 	gwHTTPWait   = 20 * time.Second
-	gwActionWait = 8 * time.Minute // 首个插件要下载 Bun + npm 包
+	gwActionWait = 3 * time.Minute // 供应商保存可能拉上游模型目录
 )
 
-// Gateway 是控制面连接 + 读数 watcher + 内嵌页反代的持有者。
+// Gateway 是内置引擎的控制面连接 + 读数 watcher 的持有者。
 // 用 New 构造；零值不可用。
 type Gateway struct {
 	push func(any)
 
-	mu      sync.Mutex
-	port    int
-	key     string
-	client  *http.Client
-	proc    *os.Process // 只存 Process：更新会 re-exec 成另一个 PID，句柄要能换
-	ours    bool
-	exe     string
-	lastErr string
+	mu         sync.Mutex
+	port       int
+	key        string
+	client     *http.Client
+	proc       *os.Process // 只存 Process：更新会 re-exec 成另一个 PID，句柄要能换
+	ours       bool
+	exe        string
+	gatewayURL string // 写进 agent 配置的稳定地址（内置引擎）
+	configDir  string // 内置引擎的 magpie 配置目录
+	dataDir    string // 内置引擎的数据目录
+	lastErr    string
 
 	watcherMu  sync.RWMutex
 	docWatcher *watcher
-
-	uiMu sync.Mutex
-	ui   *uiState
-
-	updMu   sync.Mutex // TryLock：同一时间只允许一条更新链路
-	updLast string     // 上一次推给前端的原始状态，进度没变就不重复推
-
-	// 界面语言：langWant 是 Perch 的选择（system/en/zh），langApplied 是已经
-	// 写进 magpie 的那个值。langRun 串行化"读整份设置 → 只改 lang → 写回"。
-	langMu      sync.Mutex
-	langRun     sync.Mutex
-	langWant    string
-	langApplied string
 
 	driftErr string
 
@@ -176,146 +161,6 @@ func gwPing(port int, key string) bool {
 	return res.StatusCode == http.StatusOK
 }
 
-// Ensure 接上或拉起控制面。只由用户点「连接」或启动时的被动探测调用。
-func (g *Gateway) Ensure() error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	if g.client != nil && gwPing(g.port, g.key) {
-		return nil
-	}
-
-	key := g.key
-	if key == "" {
-		key = g.loadKey()
-	}
-	// 1) 已经有一个用同一枚 key 跑在候选端口上的控制面：直接接。
-	for p := gwFirstPort; p < gwFirstPort+gwPortTries; p++ {
-		if gwPing(p, key) {
-			g.port, g.key = p, key
-			g.client = gwClient()
-			g.proc, g.ours = nil, false
-			g.lastErr = ""
-			g.exe = ""
-			log.Printf("[gw] 接到已有的 magpie 控制面 127.0.0.1:%d", p)
-			go g.applyLanguage()
-			return nil
-		}
-	}
-	// 2) 自己拉一个。端口被别的程序占着就换下一个 —— 绝不能停别人的进程。
-	exe := findMagpieExe()
-	if exe == "" {
-		return gwErr(g, uimsg.New("gw.exeMissing", "没有找到 magpie 可执行文件（先安装/打开一次 magpie）"))
-	}
-	var lastStart error
-	for p := gwFirstPort; p < gwFirstPort+gwPortTries; p++ {
-		cmd := exec.Command(exe, "web", "--no-open", "--addr", fmt.Sprintf("127.0.0.1:%d", p))
-		cmd.Env = append(os.Environ(), "MAGPIE_WEB_KEY="+key)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
-		var out bytes.Buffer
-		cmd.Stdout, cmd.Stderr = &out, &out
-		if err := cmd.Start(); err != nil {
-			lastStart = uimsg.Wrap(err, "gw.startFailed", "控制面启动失败："+err.Error(),
-				map[string]string{"err": err.Error()})
-			continue
-		}
-		// 等它就绪。启动日志里带 key，**只在失败时**把 key 抹掉再取尾部。
-		deadline := time.Now().Add(30 * time.Second)
-		for time.Now().Before(deadline) {
-			if gwPing(p, key) {
-				g.port, g.key = p, key
-				g.client = gwClient()
-				g.proc, g.ours = cmd.Process, true
-				g.exe, g.lastErr = exe, ""
-				log.Printf("[gw] 已启动 magpie 控制面 127.0.0.1:%d（pid=%d，只由 Perch 使用）", p, cmd.Process.Pid)
-				go g.applyLanguage()
-				return nil
-			}
-			if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-				break
-			}
-			time.Sleep(250 * time.Millisecond)
-		}
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-		msg := strings.ReplaceAll(out.String(), key, "***")
-		if i := strings.LastIndex(msg, "\n"); i > 0 && len(msg) > 400 {
-			msg = msg[len(msg)-400:]
-		}
-		detail := strings.TrimSpace(msg)
-		lastStart = uimsg.NewParams("gw.startFailedDetail",
-			fmt.Sprintf("magpie web 没能在 127.0.0.1:%d 起来：%s", p, detail),
-			map[string]string{"port": strconv.Itoa(p), "err": detail})
-	}
-	uiErr := error(uimsg.New("gw.startFailed", "控制面启动失败"))
-	if lastStart != nil {
-		uiErr = lastStart
-	}
-	return gwErr(g, uiErr)
-}
-
-// gwErr 记下最后一次连接失败并把它交给调用方（日志与网关页读同一句）。
-func gwErr(g *Gateway, err error) error {
-	g.lastErr = err.Error()
-	return err
-}
-
-// findMagpieExe 找 magpie 本体：先问正在跑的那个进程（最可靠 —— 用户点开的就是它），
-// 再看常见安装位置，最后看 PATH。
-func findMagpieExe() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	ps := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-Command",
-		`$p=Get-CimInstance Win32_Process -Filter "Name LIKE 'magpie%'" -ErrorAction SilentlyContinue | `+
-			`Where-Object { $_.ExecutablePath } | Select-Object -First 1 -ExpandProperty ExecutablePath; `+
-			`if($p){$p}`)
-	ps.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
-	if out, err := ps.Output(); err == nil {
-		if p := strings.TrimSpace(string(out)); p != "" {
-			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-				return p
-			}
-		}
-	}
-	home, _ := os.UserHomeDir()
-	local := os.Getenv("LOCALAPPDATA")
-	var cands []string
-	if local != "" {
-		// Perch 自己装的（见 agentcatalog 的 magpie 配方）优先：它是最可控的一份，
-		// 不会被 Downloads 里残留的旧版本抢走。
-		cands = append(cands, filepath.Join(local, "Perch", "magpie", "magpie.exe"))
-	}
-	for _, n := range []string{"magpie.exe", "magpie-windows-amd64.exe"} {
-		cands = append(cands,
-			filepath.Join(home, "Downloads", n),
-			filepath.Join(home, ".local", "bin", n),
-			filepath.Join(home, ".local", n),
-		)
-		if local != "" {
-			cands = append(cands,
-				filepath.Join(local, "Programs", "magpie", n),
-				filepath.Join(local, "magpie", n),
-			)
-			for _, glob := range []string{filepath.Join(local, "Programs", "magpie*", n), filepath.Join(local, "magpie*", n)} {
-				if m, _ := filepath.Glob(glob); len(m) > 0 {
-					cands = append(cands, m...)
-				}
-			}
-		}
-	}
-	for _, p := range cands {
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-			return p
-		}
-	}
-	for _, n := range []string{"magpie", "magpie.exe", "magpie-windows-amd64.exe"} {
-		if p, err := exec.LookPath(n); err == nil {
-			return p
-		}
-	}
-	return ""
-}
-
 // Stop 只关 Perch 自己拉起来的那个控制面；接上的外部控制面只断开连接。
 // 没接控制面时直接返回：关窗路径也会调它，不要凭空打一行"已断开 0"。
 func (g *Gateway) Stop() {
@@ -326,17 +171,18 @@ func (g *Gateway) Stop() {
 	}
 	proc, ours := g.proc, g.ours
 	g.client, g.proc, g.ours = nil, nil, false
+	g.gatewayURL, g.configDir = "", ""
 	g.lastErr = ""
 	port := g.port
 	g.mu.Unlock()
 	if ours && proc != nil {
 		_ = proc.Kill()
 		_, _ = proc.Wait()
-		log.Printf("[gw] 已停止 Perch 拉起的控制面（端口 %d）；magpie 桌面程序与网关不受影响", port)
-	} else {
-		log.Printf("[gw] 已断开控制面（%d 是外部进程，保持运行）", port)
+		log.Printf("[gw] 已停止内置网关引擎（控制面端口 %d）", port)
+	} else if port != 0 {
+		log.Printf("[gw] 已断开控制面（%d 不是 Perch 拉起的进程）", port)
 	}
-	g.emit(map[string]any{"type": "gw", "gw": map[string]any{"connected": false, "at": nowISO(), "external": true}})
+	g.emit(map[string]any{"type": "gw", "gw": map[string]any{"connected": false, "at": nowISO()}})
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +202,7 @@ func (g *Gateway) API(method, path string, body any) ([]byte, error) {
 		return nil, uimsg.New("gw.controlPlaneDown", "控制面未连接")
 	}
 	if !strings.HasPrefix(path, "/api/") || strings.Contains(path, "..") || strings.Contains(path, "k=") {
-		return nil, uimsg.NewParams("gw.badAPIPath", fmt.Sprintf("不允许的 magpie API 路径：%s", path),
+		return nil, uimsg.NewParams("gw.badAPIPath", fmt.Sprintf("不允许的网关 API 路径：%s", path),
 			map[string]string{"path": path})
 	}
 	if method != "GET" && method != "POST" {
@@ -379,7 +225,8 @@ func (g *Gateway) API(method, path string, body any) ([]byte, error) {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.AddCookie(&http.Cookie{Name: fmt.Sprintf("magpie_web_%d", port), Value: key})
-	// 写操作（插件安装）要等很久：换一个不带短超时的 client，但连接仍复用。
+	// 写操作（供应商保存/测试）可能要拉上游：换一个不带短超时的 client，
+	// 但连接仍复用。
 	c := client
 	if method == "POST" {
 		c = &http.Client{Timeout: gwActionWait, Transport: client.Transport}
@@ -394,34 +241,54 @@ func (g *Gateway) API(method, path string, body any) ([]byte, error) {
 		return nil, requestFailed(err)
 	}
 	if res.StatusCode/100 != 2 {
-		// 错误正文可能是一整段 JSON。用户看到的应该是**原因**，不是响应体：
-		// 先取 {"error": "…"} 里那句；取不出来才退到截断后的原文。
-		// 已知的上游边界给稳定码（前端有本地化文案），不再把英文正文抛上去。
-		var je struct {
-			Error string `json:"error"`
-		}
-		body := strings.TrimSpace(string(data))
-		reason := ""
-		if json.Unmarshal(data, &je) == nil {
-			reason = strings.TrimSpace(je.Error)
-		}
-		if reason == "" {
-			reason = body
-			if len(reason) > 240 {
-				reason = reason[:240]
-			}
-		}
-		status := strconv.Itoa(res.StatusCode)
-		if strings.Contains(strings.ToLower(reason), "can't be connected") {
-			return nil, uimsg.NewParams("gw.agentNotConnectable",
-				"magpie 不能接入这个 agent（该 agent 没有可路由的 provider 选项）",
-				map[string]string{"status": status})
-		}
-		return nil, uimsg.NewParams("gw.httpError",
-			fmt.Sprintf("magpie 回答 HTTP %d：%s", res.StatusCode, reason),
-			map[string]string{"status": status, "reason": reason})
+		return nil, apiError(data, res.StatusCode)
 	}
 	return data, nil
+}
+
+// apiError 把非 2xx 的响应变成**用户可读**的错误。用户看到的应该是原因，
+// 不是响应体：先取 {"error": "…"} 里那句；取不出来就只报状态码，绝不把
+// 原始正文（可能是 HTML、堆栈或带凭据的片段）抛到界面上。
+// 已知的上游边界给稳定码（前端有本地化文案），不再把英文正文抛上去。
+func apiError(data []byte, statusCode int) error {
+	var je struct {
+		Error   string `json:"error"`
+		Code    string `json:"code"`
+		Agent   string `json:"agent"`
+		Offline string `json:"offline"`
+	}
+	reason := ""
+	if json.Unmarshal(data, &je) == nil {
+		reason = strings.TrimSpace(je.Error)
+	}
+	status := strconv.Itoa(statusCode)
+	switch je.Code {
+	case "no_models":
+		return uimsg.NewParams("gw.noModels",
+			"网关还没有任何模型来源，先去网关添加 provider 或订阅",
+			map[string]string{"agent": je.Agent})
+	case "all_hidden":
+		return uimsg.NewParams("gw.allHidden",
+			"这个 agent 的网关模型列表是空的，先去网关为它选择模型",
+			map[string]string{"agent": je.Agent})
+	case "runtime_unavailable":
+		return uimsg.NewParams("gw.runtimeUnavailable",
+			"这个 agent 的运行时没有启动，先打开它再接入",
+			map[string]string{"agent": je.Agent, "offline": je.Offline})
+	}
+	if strings.Contains(strings.ToLower(reason), "can't be connected") {
+		return uimsg.NewParams("gw.agentNotConnectable",
+			"网关不能接入这个 agent（该 agent 没有可路由的 provider 选项）",
+			map[string]string{"status": status})
+	}
+	if reason == "" {
+		return uimsg.NewParams("gw.httpErrorNoBody",
+			fmt.Sprintf("网关回答 HTTP %d", statusCode),
+			map[string]string{"status": status})
+	}
+	return uimsg.NewParams("gw.httpError",
+		fmt.Sprintf("网关回答 HTTP %d：%s", statusCode, reason),
+		map[string]string{"status": status, "reason": reason})
 }
 
 // requestFailed 是控制面请求在传输层失败的统一说法；OS/网络原文作为 {err}。
@@ -445,8 +312,8 @@ func (g *Gateway) Connect() {
 	g.Refresh()
 }
 
-/* Refresh 只确认「控制面还在、端口是多少」。供应商/路由/用量/插件的数据
- * 全部由内嵌的 magpie 页面自己取（ui.go），Perch 不再抄一份到内存里。 */
+/* Refresh 只确认「控制面还在、端口是多少」。供应商与 agent 数据由各自的
+ * 原生接口按需读取；Refresh 不替页面缓存业务数据。 */
 func (g *Gateway) Refresh() {
 	port, key, client, ours := g.connState()
 	if client == nil || !gwPing(port, key) {
@@ -455,31 +322,16 @@ func (g *Gateway) Refresh() {
 	}
 	g.mu.Lock()
 	exe := g.exe
+	gatewayURL := g.gatewayURL
 	g.mu.Unlock()
 	g.pushGW(map[string]any{
 		"connected": true,
 		"port":      port,
+		"gateway":   gatewayURL,
 		"ours":      ours,
 		"exe":       exe,
 		"at":        nowISO(),
 	})
-}
-
-// Probe 是启动时的被动探测：只接已经存在的控制面，绝不拉起进程。
-func (g *Gateway) Probe() {
-	key := g.loadKey()
-	for p := gwFirstPort; p < gwFirstPort+gwPortTries; p++ {
-		if gwPing(p, key) {
-			g.mu.Lock()
-			g.port, g.key = p, key
-			g.client = gwClient()
-			g.proc, g.ours, g.exe = nil, false, ""
-			g.mu.Unlock()
-			log.Printf("[gw] 启动时接到已有的控制面 127.0.0.1:%d", p)
-			g.Refresh()
-			return
-		}
-	}
 }
 
 func firstNonEmpty(xs ...string) string {

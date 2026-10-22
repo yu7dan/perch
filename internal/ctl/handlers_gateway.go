@@ -6,7 +6,11 @@ package ctl
 // 换协程的判据是"会不会阻塞 ctl 收包"：HTTP 最长 5 × 1.8s、安装可能跑
 // 几分钟 —— 这些一律 `go`。Stop 不换（它只是取消上下文/收进程，毫秒级）。
 
-import "log"
+import (
+	"log"
+
+	"github.com/yu7dan/perch/internal/gateway"
+)
 
 func (s *Server) handleGateway(m *Msg) {
 	switch m.Type {
@@ -16,22 +20,43 @@ func (s *Server) handleGateway(m *Msg) {
 			s.deps.Gateway.RefreshNow()
 			log.Printf("[magpie] 手动刷新完成")
 		}()
-	case "magpie.update.get":
-		// 读控制面自己的更新状态（GET /api/update），只读。
-		go s.deps.Gateway.MagpieUpdateGet()
-	case "magpie.update.install":
-		// 用户点了「更新」：驱动 magpie 自己的 check → download → install。
-		go s.deps.Gateway.MagpieUpdateInstall()
-	case "gw.connect":
-		go s.deps.Gateway.Connect()
-	case "gw.disconnect":
+	case "gw.connect", "gw.engine.start":
+		go s.deps.Gateway.StartEngine()
+	case "gw.disconnect", "gw.engine.stop":
 		s.deps.Gateway.Stop()
+	case "gw.engine.restart":
+		go func() {
+			s.deps.Gateway.Stop()
+			s.deps.Gateway.StartEngine()
+		}()
 	case "gw.refresh":
 		go s.deps.Gateway.Refresh()
-	// Agent 接线（总览 → Agent 名单 → 右侧配置抽屉）。
+	case "gw.providers":
+		go s.deps.Gateway.ProviderList()
+	case "gw.usage":
+		go s.deps.Gateway.Usage(trimSpace(m.Period))
+	case "gw.provider.save":
+		in := gateway.ProviderInput{
+			ID:        trimSpace(m.ProviderID),
+			Name:      trimSpace(m.Name),
+			Preset:    trimSpace(m.Preset),
+			Protocol:  trimSpace(m.Protocol),
+			BaseURL:   trimSpace(m.BaseURL),
+			Key:       m.Key,
+			Models:    m.Models,
+			Endpoints: m.Endpoints,
+		}
+		go s.deps.Gateway.SaveProvider(in)
+	case "gw.provider.delete":
+		go s.deps.Gateway.DeleteProvider(trimSpace(m.ProviderID))
+	case "gw.credential.test":
+		go s.deps.Gateway.TestCredential(trimSpace(m.ProviderID), trimSpace(m.CredentialID))
+	// Agent 接线（总览 → Agent 工作台 → 行内详情）。
 	// 只读一次 /api/state 就能拿全部字段；写操作全是用户点出来的。
 	case "gw.agents":
 		go s.deps.Gateway.AgentState()
+	case "gw.agents.rescan":
+		go s.deps.Gateway.AgentRescan()
 	case "gw.agents.prefetch":
 		// 进总览时预取：只在用过网关的机器上接/拉起控制面。
 		go s.deps.Gateway.AgentPrefetch()

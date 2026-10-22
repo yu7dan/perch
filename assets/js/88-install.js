@@ -209,30 +209,6 @@ function instDrop(id) {
 }
 
 function applyInstall(m) {
-  // magpie 本体：同一个流式通道，id 固定是 "magpie"。装完之后 Go 那边会直接
-  // gwConnect（见 install.go 的 finishInstall），这里只需要把日志和状态画出来。
-  if (m.id === "magpie") {
-    if (!GW_INSTALL) GW_INSTALL = { state: "running", lines: [], err: null };
-    if (m.type === "install.start") {
-      GW_INSTALL.state = "running";
-    } else if (m.type === "install.log") {
-      GW_INSTALL.lines.push(m.line);
-      if (GW_INSTALL.lines.length > 1500) {
-        GW_INSTALL.lines.splice(0, GW_INSTALL.lines.length - 1500);
-      }
-    } else if (m.type === "install.done") {
-      GW_INSTALL.state = m.ok ? "done" : "failed";
-      GW_INSTALL.err = m.ok ? null : errMsgOf(m);
-      if (m.ok) {
-        // 新装的一份：版本状态要重新问（旧值属于上一个 exe）。
-        GW_UPD = null; GW_UPD_BUSY = ""; GW_UPD_ERR = null; GW_UPD_TRIES = 0;
-        sendCtrl({ type: "gw.refresh" });
-        sendCtrl({ type: "magpie.refresh" });
-      }
-    }
-    if (NAV_HERE === "dash" && dashTab === "gateway") renderGateway();
-    return;
-  }
   if (m.type === "install.start") {
     const it = instEnsure(m.id);
     it.state = "running";
@@ -285,46 +261,22 @@ async function launchAgent(id) {
     setActive(live);
     setNavView("workspace");
     sendCtrl({ type: "log", msg: `从 Agent 接线台查看 ${id} → 聚焦已有 tab=${live.id}` });
-    return;
+    return live;
   }
   const m = mg();
   const a = ((m && m.catalog) || []).find((x) => x.id === id);
   const t = await createTab({ agent: id, cwd: "", resume: { kind: "new", id: "" } }, { fresh: true });
-  if (!t || !t.id) return;
+  if (!t || !t.id) return null;
   armFreshCell(t, "总览 Agent 启动");
   setActive(t);
   setNavView("workspace");
+  // createTab 里已经挂了首启观察者；这里再调一次是幂等的（firstRunWatch 挡住）。
+  if (typeof watchFirstRun === "function") watchFirstRun(t);
   sendCtrl({ type: "log", msg: `从 Agent 接线台打开 ${a ? a.name : id} → tab=${t.id}` });
+  return t;
 }
 
 $("dash-agent-list").addEventListener("click", (e) => {
-  const fb = e.target.closest("[data-agents-fold]");
-  if (fb) {
-    agentsFoldOpen = !agentsFoldOpen;
-    // 就地切类，不重画：重画会新建折叠容器，grid-rows 没有"从 0fr 到 1fr"的起点，
-    // 动画就没了（magpie 那条 fold 也是靠同一个元素过渡的）。
-    fb.classList.toggle("open", agentsFoldOpen);
-    const fold = $("dash-agent-fold");
-    if (fold) fold.classList.toggle("open", agentsFoldOpen);
-    const label = $("dash-agent-more-label");
-    if (label) {
-      const n = ((mg() && mg().catalog) || []).filter((a) => !a.installed).length;
-      label.textContent = agentsFoldOpen ? t("dash.agents.foldHide")
-        : t("dash.agents.foldShow", { n });
-    }
-    return;
-  }
-  const sb = e.target.closest("[data-setup]");
-  if (sb) {
-    // “只启动” → “接入状态”：和安装共用同一个流式面板，但不动 CLI 本身。
-    const id = sb.dataset.setup;
-    const m = mg();
-    const a = ((m && m.catalog) || []).find((x) => x.id === id) || { id, name: id };
-    instOpen(a);
-    sendCtrl({ type: "agent.setup", id });
-    bootFact(`Agent 状态接入 → ${id}`);
-    return;
-  }
   const ib = e.target.closest("[data-install]");
   if (ib) {
     const id = ib.dataset.install;
@@ -353,50 +305,7 @@ $("dash-agent-list").addEventListener("click", (e) => {
     bootFact(`Agent 打开 → ${lb.dataset.launch}`);
     return;
   }
-  /* 网关那一格的动作：只有模型说“可以接”时才直接发 connect。
-     没读到 magpie 的名单、或模型给的是 unsupported，就先开抽屉 ——
-     绝不让一个已知会 400 的请求发出去（Cursor 普通 CLI 就是这样）。 */
-  const gb = e.target.closest("[data-gwconnect]");
-  if (gb) {
-    const id = gb.dataset.gwconnect;
-    const m = mg();
-    const a = ((m && m.catalog) || []).find((x) => x.id === id);
-    const v = a ? dashAgentView(a) : null;
-    if (!Array.isArray(GW_AGENTS) || !v || v.primary.action !== "connect") {
-      acOpen(id);
-      sendCtrl({ type: "gw.agents" });
-      return;
-    }
-    sendCtrl({ type: "gw.agent.connect", id });
-    bootFact(`Agent 接入网关 → ${id}`);
-    return;
-  }
-  /* magpie 没装/没在跑：去网关页（那里有安装/连接入口），不在这里拉起进程。 */
-  const gsb = e.target.closest("[data-gwsettings]");
-  if (gsb) {
-    setNavView("dash");
-    const tab = [...document.querySelectorAll("[data-dtab]")]
-      .find((x) => x.dataset.dtab === "gateway");
-    if (tab) tab.click();
-    bootFact(`Agent 网关设置 → ${gsb.dataset.gwsettings}`);
-    return;
-  }
-  // 「无状态源 / 网关不支持」：打开抽屉把原因和原生用法说清楚，不只留三个字。
-  const ub = e.target.closest("[data-usage]");
-  if (ub) { acOpen(ub.dataset.usage); return; }
-  // 行本身 = 打开右侧配置抽屉（89-agent-cfg.js）。安装/打开按钮在上面已经
-  // 各自处理并 return，所以点按钮不会顺带打开抽屉。
-  const cb = e.target.closest("[data-agentcfg]");
-  if (cb) acOpen(cb.dataset.agentcfg);
-});
-
-// 行的 role="button" 也要能用键盘打开（Enter / 空格），和鼠标点击同一条路。
-$("dash-agent-list").addEventListener("keydown", (e) => {
-  if (e.key !== "Enter" && e.key !== " ") return;
-  const cb = e.target.closest("[data-agentcfg]");
-  if (!cb) return;
-  e.preventDefault();
-  acOpen(cb.dataset.agentcfg);
+  // 行内详情由 89 的 [data-ac] 处理；这里只管装 / 说明 / 打开。
 });
 
 // 任务条：点名字切换面板；点 × 收起一个已完成的任务。

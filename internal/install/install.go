@@ -88,10 +88,6 @@ type Deps struct {
 	ProbeVersion func(bin string) string
 	Home         func() (string, error)
 	OnInstalled  func(id string, ok bool)
-	// Setup 在官方 CLI 安装成功后、收尾扫描前跑一次“接入状态”的准备工作
-	// （目前只有 dsh：写官方 hook 桥 / profile peer / home patch）。
-	// 失败只记日志，不把 CLI 安装判成失败 —— 终端仍然能开。
-	Setup func(id string, log func(string)) error
 }
 
 // Installer 串行化每个 agent 的安装，构建外部调用面。
@@ -275,12 +271,6 @@ func (in *Installer) runRecipe(id string, r agentcatalog.Recipe, job *run) {
 		werr = uimsg.NewParams("install.timeout", fmt.Sprintf("安装超时（%s 分钟）", minutes),
 			map[string]string{"minutes": minutes})
 	}
-	if werr == nil && !cancelled(ctx) && in.deps.Setup != nil {
-		if serr := in.deps.Setup(id, func(line string) { in.log(id, line) }); serr != nil {
-			// 终端已经装好了；状态钩子失败不影响开格，但必须让用户看见。
-			in.log(id, "状态接入没有完成："+serr.Error())
-		}
-	}
 	in.finish(id, werr == nil, code, werr, cancelled(ctx))
 }
 
@@ -348,19 +338,6 @@ func (in *Installer) finish(id string, ok bool, code int, err error, wasCancelle
 	}
 
 	if ok {
-		if id == "magpie" {
-			// 装完就**自动接入**控制面（用户 2026-10-17 定的：不再有「连接 magpie」
-			// 这个手动动作）。OnInstalled 会自己找到刚装好的那个 exe。
-			in.emit(map[string]any{
-				"type": "install.done", "id": id, "ok": true, "code": code,
-				"elapsedMs": elapsed.Milliseconds(),
-			})
-			if in.deps.OnInstalled != nil {
-				in.deps.OnInstalled(id, true)
-			}
-			return
-		}
-
 		// 重读 PATH 可能要几秒；先告诉界面进入「重新检测」阶段，
 		// 别让行一直显示「安装中」。
 		in.emit(map[string]any{"type": "install.phase", "id": id, "phase": "scanning"})
@@ -377,6 +354,9 @@ func (in *Installer) finish(id string, ok bool, code int, err error, wasCancelle
 			"elapsedMs": elapsed.Milliseconds(),
 		})
 		log.Printf("[install] %s 收尾 ok=true detected=%v 用时=%s", id, detected, elapsed)
+		if in.deps.OnInstalled != nil {
+			in.deps.OnInstalled(id, true)
+		}
 
 		if d := agentcatalog.ByID(id); d != nil && d.Bin != "" && in.deps.ProbeVersion != nil {
 			go func(bin string) {

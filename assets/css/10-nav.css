@@ -127,7 +127,7 @@
         padding:4px 11px;background:var(--card);flex:none;cursor:pointer;white-space:nowrap}
 .ws-act:hover{border-color:var(--fg2);color:var(--fg)}
 .ws-act.primary{background:rgba(255,255,255,.10);color:var(--fg);border-color:var(--line)}
-.console-kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));
+.console-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
               border-bottom:1px solid var(--line-soft)}
 .ck{padding:11px 16px 10px;border-left:1px solid var(--line-soft);min-width:0}
 .console-kpis .ck:first-child{padding-left:20px}
@@ -140,8 +140,7 @@
 .ck small{display:block;font-size:10.5px;color:var(--faint);margin-top:3px;
           white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
           font-variant-numeric:tabular-nums}
-.ck .bad{color:var(--red)}
-.console-cols{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(300px,.85fr)}
+.console-cols{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(340px,.9fr)}
 .console-main{position:relative;padding:14px 20px;min-width:0;
               border-right:1px solid var(--line-soft)}
 .console-side{display:flex;flex-direction:column;min-width:0}
@@ -154,106 +153,138 @@
 .mod-head .sub{display:block;font-size:10.5px;color:var(--muted);margin-top:2px;
                font-variant-numeric:tabular-nums}
 .mod-head .note{font-size:10.5px;color:var(--faint);align-self:center}
-.mini-segs{display:inline-flex;gap:1px;padding:1px;border-radius:6px;
-           background:rgba(255,255,255,.04);flex:none}
-.mini{padding:2px 8px;border-radius:5px;font-size:10.5px;color:var(--muted)}
-.mini:hover{color:var(--fg2)}
-.mini.on{background:rgba(255,255,255,.11);color:var(--fg)}
-@media (max-width:1100px){.console-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .ck:nth-child(4){border-left:0}.ck:nth-child(-n+3){border-bottom:1px solid var(--line-soft)}}
-@media (max-width:980px){.console-cols{grid-template-columns:1fr}
-  .console-main{border-right:0;border-bottom:1px solid var(--line-soft)}}
-@media (max-width:640px){.console-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .ck:nth-child(odd){border-left:0}.ck{border-bottom:1px solid var(--line-soft)}}
+@media (max-width:900px){.console-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ck:nth-child(3){border-left:0}.ck:nth-child(-n+2){border-bottom:1px solid var(--line-soft)}}
+@media (max-width:520px){.console-kpis{grid-template-columns:1fr}
+  .ck{border-left:0;border-bottom:1px solid var(--line-soft)}}
 
-/* 实时请求：一条一行，绿/红点是结果；这是整页"在动"的那一块。 */
-.live-now{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--fg2);
-          padding:2px 0 7px}
-.live-now b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums}
-.live-now .spin{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--accent);
-                border-top-color:transparent;animation:spin .8s linear infinite;flex:none}
-.live-now .dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex:none}
-.live-now.idle{color:var(--faint)}
-.live-row{display:flex;align-items:center;gap:7px;padding:5px 0;
-          border-top:1px solid var(--line-soft);font-size:11px;min-width:0}
-.live-row .st{width:6px;height:6px;border-radius:50%;background:var(--green);flex:none}
-.live-row .st.bad{background:var(--red)}
-.live-row .who{display:flex;align-items:center;gap:5px;min-width:0;color:var(--fg2);flex:none;
-               max-width:44%}
-.live-row .who .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.live-row .to{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-              color:var(--muted)}
-.live-row .ms{margin-left:auto;font:10px var(--mono);color:var(--faint);flex:none;
-              font-variant-numeric:tabular-nums}
-.live-row .ms.bad{color:var(--red)}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-/* Agent 接线台：三列，logo 30px 是主角。
-   2026-10-19 起按**能力**分组：完整状态 / 基础状态 / 仅启动 / 未接入；
-   未检测到的收进下面那条 magpie 式的折叠栏。
-   行与行、列与列之间只用头发丝线分隔，和上面的操作台是同一层语言。 */
-#dash-agent-list{display:flex;flex-direction:column;min-width:0}
-.roster{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));min-width:0}
-.ag-group{display:flex;align-items:center;gap:8px;padding:13px 0 7px;
+/* Agent 工作台：一列行。行上直接完成“选模型 / 接入 / 打开”，
+   点行进详情（不再是右侧抽屉）。分组只按装没装。 */
+#dash-agent-card{padding:14px 20px 0;border-right:1px solid var(--line-soft)}
+#dash-agent-card .mod-head{align-items:center;margin-bottom:10px}
+#dash-agent-list{display:flex;flex-direction:column;min-width:0;margin:0 -20px}
+.ag-group{display:flex;align-items:center;gap:8px;padding:11px 20px 6px;
           font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
-          color:var(--muted)}
+          color:var(--muted);border-top:1px solid var(--line-soft)}
 .ag-group span{font-weight:500;letter-spacing:0;text-transform:none;color:var(--faint);
                font-variant-numeric:tabular-nums}
-.ag{display:flex;align-items:center;gap:11px;height:56px;min-width:0;padding-right:12px;
-    border-bottom:1px solid var(--line-soft)}
-.ag:nth-child(3n+2),.ag:nth-child(3n+3){border-left:1px solid var(--line-soft);padding-left:13px}
+.ag-item{border-top:1px solid var(--line-soft)}
+.ag-item:first-of-type{border-top:0}
+.ag{display:grid;grid-template-columns:30px minmax(0,1fr) 190px 36px 72px 18px;
+    align-items:center;gap:12px;min-height:54px;padding:0 20px;min-width:0;cursor:pointer}
+.ag:hover{background:var(--card-hov)}
+.ag:focus-visible{outline:1px solid var(--accent);outline-offset:-2px}
+.ag.missing{grid-template-columns:30px minmax(0,1fr) auto;cursor:default}
+.ag.missing:hover{background:transparent}
 .ag .ico-img,.ag .ico-mask{width:30px;height:30px}
-.ag .who{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+.ag .who{min-width:0;display:flex;flex-direction:column;gap:2px}
 .ag .nm{font-size:12.5px;font-weight:500;color:var(--fg);white-space:nowrap;
         overflow:hidden;text-overflow:ellipsis}
 .ag .sub{font-size:10.5px;color:var(--faint);white-space:nowrap;overflow:hidden;
          text-overflow:ellipsis;font-variant-numeric:tabular-nums}
-.ag .st{font-size:10.5px;color:var(--muted);white-space:nowrap;flex:none}
-.ag .st.ok{color:var(--green)}
-.ag .st.off{color:var(--faint)}
-/* 五条腿的短标记（L 启动 / S 状态 / R 续接 / G 网关 / A 登录）。颜色即状态：
-   它们是同一条接入链路的浓缩，不另起一套“完整/基础”的说法。 */
-.ag .ag-legs{display:inline-flex;gap:2px;flex:none}
-.ag .ag-leg{font:8px/1 var(--mono);font-style:normal;width:11px;height:14px;
-  display:inline-flex;align-items:center;justify-content:center;border-radius:3px;
-  color:var(--faint);background:rgba(255,255,255,.04)}
-.ag .ag-leg.done{color:var(--green);background:rgba(134,239,172,.10)}
-.ag .ag-leg.doing{color:var(--accent);background:rgba(96,165,250,.12)}
-.ag .ag-leg.failed{color:var(--red);background:rgba(255,101,104,.10)}
-.ag .ag-leg.unsupported{color:#d8b46a;background:rgba(234,179,8,.10)}
-.ag .ag-leg.not_applicable{opacity:.55}
-.ag .dl{font-size:10.5px;color:var(--fg2);border:1px solid var(--line);
-        border-radius:6px;padding:3px 9px;background:var(--card);flex:none}
-.ag .dl:hover{border-color:var(--fg2);color:var(--fg)}
-/* 2026-10-18：已检测到的行 = 打开右侧配置抽屉的入口。
-   网关那个点只有拿到 magpie 的 agent 列表后才画（灰 = 未接入，绿 = 已接入）。 */
-.ag.cfg{cursor:pointer;border-radius:4px}
-.ag.cfg:hover{background:rgba(255,255,255,.035)}
-.ag.cfg:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
-.ag .gwdot{display:inline-block;width:5px;height:5px;margin-left:6px;border-radius:999px;
-           background:#4a4a52;vertical-align:1px}
-.ag .gwdot.on{background:var(--green);box-shadow:0 0 0 2px rgba(134,239,172,.14)}
-.ag .ag-cfg-chev{margin-left:6px;color:#4a4a52;font-size:14px;line-height:1;flex:none}
-.ag.cfg:hover .ag-cfg-chev{color:var(--muted)}
+.ag-live{display:inline-block;width:5px;height:5px;margin:0 4px 1px 0;
+         border-radius:50%;background:var(--green);vertical-align:middle}
+.ag-model{display:inline-flex;align-items:center;gap:5px;min-width:0;max-width:100%;
+  height:25px;padding:0 8px;border:1px solid var(--line);border-radius:6px;
+  background:var(--card);color:var(--fg2);font-size:11px;text-align:left;cursor:pointer}
+.ag-model span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ag-model i{font-style:normal;font-size:9px;color:var(--faint);flex:none}
+.ag-model:hover{border-color:var(--fg2);color:var(--fg)}
+.ag-model.on{border-color:rgba(74,222,128,.28);color:var(--green)}
+.ag-model.none{border-color:var(--line-soft);background:transparent;color:var(--faint)}
+.ag-model.own{background:transparent;border-color:transparent;color:var(--faint);cursor:default}
+.ag-model.no{background:transparent;border-color:transparent;color:var(--faint);cursor:default}
+.ag-sw{position:relative;width:32px;height:18px;border-radius:9px;border:1px solid var(--line);
+  background:rgba(255,255,255,.04);flex:none;cursor:pointer;padding:0}
+.ag-sw i{position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;
+  background:var(--faint);transition:transform .14s,background .14s}
+.ag-sw.on{border-color:rgba(74,222,128,.45);background:rgba(74,222,128,.14)}
+.ag-sw.on i{transform:translateX(14px);background:var(--green)}
+.ag-sw.add i{background:var(--muted)}
+.ag-sw.no{opacity:.55;cursor:not-allowed}
+.ag-sw:disabled{cursor:default;opacity:.55}
+.ag-sw:focus-visible{outline:1px solid var(--accent);outline-offset:2px}
+.ag-open{height:25px;padding:0 10px;border:1px solid var(--line);border-radius:6px;
+  background:var(--card);color:var(--fg2);font-size:11px;cursor:pointer;white-space:nowrap}
+.ag-open:hover{border-color:var(--fg2);color:var(--fg)}
+.ag-open.quiet{background:transparent;color:var(--muted)}
+.ag-open.ghost{visibility:hidden;border:0;background:none;pointer-events:none}
+.ag-chev{font-size:10px;color:var(--faint);text-align:center}
+.ag-inst-busy{font-size:10.5px;color:var(--muted);white-space:nowrap}
+.ag-empty{padding:18px 20px;font-size:11.5px;color:var(--faint)}
+.ag-detail{margin:0 20px;padding:12px 0 16px;border-top:1px solid var(--line-soft);
+  display:flex;flex-direction:column;gap:9px;min-width:0}
+.ag-detail .ac-route-line{margin-bottom:1px}
+.agent-gw{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;
+  font-size:10.5px;color:var(--faint);min-width:0}
+.agent-gw .gw-dot{width:6px;height:6px;flex:none}
+.agent-gw .ag-link{font-size:10.5px;color:var(--muted);background:none;border:0;
+  padding:0 2px;cursor:pointer;white-space:nowrap}
+.agent-gw .ag-link:hover{color:var(--fg);text-decoration:underline}
+.agent-gw .ag-rescan{width:22px;height:22px;border:1px solid var(--line-soft);
+  border-radius:6px;background:transparent;color:var(--faint);font-size:12px;cursor:pointer}
+.agent-gw .ag-rescan:hover{color:var(--fg);border-color:var(--line)}
 
-/* "显示 N 个未检测到的" —— magpie agents 页那条 fold 的同一形态：
-   一行居中文字 + 会转的 chevron，展开用 grid-template-rows 0fr→1fr
-   （高度能动、不需要先量内容，也不会把上面的行挤跳）。 */
-.agent-more{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;
-            margin-top:12px;padding:9px 0 4px;border-top:1px solid var(--line-soft);
-            font-size:11px;color:var(--muted);background:transparent;cursor:pointer}
-.agent-more:hover{color:var(--fg2)}
-.agent-more .chev{font-size:9px;transition:transform .18s ease}
-.agent-more.open .chev{transform:rotate(180deg)}
-.agent-fold{display:grid;grid-template-rows:0fr;transition:grid-template-rows .22s ease;
-            overflow:hidden}
-.agent-fold>div{min-height:0;overflow:hidden}
-.agent-fold.open{grid-template-rows:1fr}
-@media (max-width:1100px){.roster{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .ag:nth-child(3n+2),.ag:nth-child(3n+3){border-left:0;padding-left:0}
-  .ag:nth-child(2n){border-left:1px solid var(--line-soft);padding-left:13px}}
-@media (max-width:700px){.roster{grid-template-columns:1fr}
-  .ag:nth-child(2n){border-left:0;padding-left:0}}
+/* 右栏用量卡：一整格读数 + 一个可切换的排行列表。 */
+#dash-usage-card{padding-bottom:12px}
+#dash-usage-card .mod-head{align-items:center;margin-bottom:8px}
+.usage-period{display:flex;align-items:center;gap:1px;flex-wrap:wrap;justify-content:flex-end}
+.usage-opt{height:22px;padding:0 7px;border:0;border-radius:5px;background:transparent;
+  color:var(--faint);font-size:10.5px;cursor:pointer;white-space:nowrap}
+.usage-opt:hover{color:var(--fg2)}
+.usage-opt.on{background:rgba(255,255,255,.09);color:var(--fg)}
+.usage-kpis{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line-soft);
+  border:1px solid var(--line-soft);border-radius:8px;overflow:hidden;margin:2px 0 9px}
+.uk{background:var(--panel);padding:8px 10px;min-width:0}
+.uk span{display:block;font-size:9.5px;font-weight:600;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--faint);white-space:nowrap}
+.uk b{display:block;margin-top:3px;font-size:17px;font-weight:600;line-height:1.15;
+  font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.uk small{display:block;margin-top:2px;font-size:10px;color:var(--faint);
+  font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.usage-switch{display:flex;gap:2px;margin:0 0 3px}
+.useg{height:22px;padding:0 7px;border:0;border-radius:5px;background:transparent;
+  color:var(--faint);font-size:10.5px;cursor:pointer}
+.useg:hover{color:var(--fg2)}
+.useg.on{color:var(--fg);background:rgba(255,255,255,.07)}
+.usage-list{display:flex;flex-direction:column}
+.ur{display:grid;grid-template-columns:17px minmax(0,1fr) 58px;gap:7px;align-items:center;
+  padding:6px 1px;border-top:1px solid var(--line-soft)}
+.ur:first-child{border-top:0}
+.ur .ico-img,.ur .ico-mask{width:17px;height:17px}
+.un{min-width:0;display:flex;flex-direction:column;gap:1px}
+.un b{font-size:11px;font-weight:500;color:var(--fg2);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.un small{font-size:9.5px;color:var(--faint);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.ubar{display:block;height:2px;margin-top:3px;border-radius:1px;background:var(--line-soft);
+  overflow:hidden}
+.ubar > i{display:block;height:100%;background:var(--accent);opacity:.55}
+.uc{text-align:right;font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.usage-foot{padding-top:7px;margin-top:3px;border-top:1px solid var(--line-soft)}
+.usage-foot .ag-link,.usage-note .ag-link{font-size:10.5px;color:var(--muted);
+  background:none;border:0;padding:0;cursor:pointer}
+.usage-foot .ag-link:hover,.usage-note .ag-link:hover{color:var(--fg);text-decoration:underline}
+.usage-note{font-size:10.5px;line-height:1.6;color:var(--faint);padding:4px 0}
+.usage-note.bad{color:var(--red)}
+.usage-loading{display:flex;justify-content:center;padding:2px 0}
+.usage-loading .spin{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--accent);
+  border-top-color:transparent;animation:spin .8s linear infinite}
+
+/* 1100 仍保留右栏：用量是总览的主读数，不该被长名单压到第二屏。
+   1020 以下才折成一列（main 再窄，行上的模型/按钮会开始挤）。 */
+@media (max-width:1020px){
+  .console-cols{grid-template-columns:1fr}
+  #dash-agent-card{border-right:0;border-bottom:1px solid var(--line-soft)}
+}
+@media (max-width:760px){
+  .ag{grid-template-columns:30px minmax(0,1fr) 36px 66px 18px;gap:9px}
+  .ag .ag-model{display:none}
+  .ag.missing{grid-template-columns:30px minmax(0,1fr) auto}
+}
 
 /* 安装进度台：钉在总览底部（#dash 的 flex 子项），不随 Agent 名单滚动。
    装包没有可信百分比，所以进度条走不定长滑动；读数是阶段 + 秒表 +
@@ -365,40 +396,14 @@
 .heat-tip b{font-weight:600;color:var(--fg)}
 .heat-tip span{color:var(--muted)}
 
-/* 热力图下面那两块读数（token 构成 / 最近耗时）：同一块操作台上用头发丝分节，
-   不再长出新的圆角卡片。 */
-.console-sub{margin-top:12px;padding-top:10px;border-top:1px solid var(--line-soft)}
-.mix-bar{display:flex;height:10px;border-radius:3px;overflow:hidden;
-         background:rgba(255,255,255,.055)}
-.mix-bar i{display:block;height:100%;min-width:0}
-.mix-bar i.cache{background:#3b6ef5}
-.mix-bar i.input{background:#6e7a8c}
-.mix-bar i.output{background:#3fb950}
-.mix-bar i.write{background:#a371f7}
-.mix-legend{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:7px;
-            font-size:10.5px;color:var(--muted)}
-.mix-legend span{display:flex;align-items:center;gap:5px;white-space:nowrap}
-.mix-legend i{width:7px;height:7px;border-radius:2px;flex:none}
-.mix-legend b{color:var(--fg2);font-weight:600;font-variant-numeric:tabular-nums}
-.mix-legend em{font-style:normal;color:var(--faint);font-variant-numeric:tabular-nums}
-.lat-bars{display:flex;align-items:flex-end;gap:3px;height:44px}
-.lat-empty{font-size:11px;color:var(--faint);align-self:center}
-.lat-bars i{flex:1;min-width:2px;min-height:2px;border-radius:2px 2px 0 0;
-            background:#2f6fe0}
-.lat-bars i.bad{background:var(--red)}
-.lat-bars i:hover{outline:1px solid var(--fg2);outline-offset:1px}
 
 /* 「在等你」：读的是右栏「需要你」**同一个模型**（needModel），不是另算一份。
    右栏在这个视图里是退场的，所以同一份数据不会在同一屏说两遍。 */
 #dash-need-card .vlist{max-height:300px;overflow-y:auto}
 #dash-need-card .empty{padding:16px 8px;font-size:12px;line-height:1.6;color:var(--faint)}
 
-/* 网关页的手写样式随实现一起删除（用户 2026-10-18）：
-   页面现在是 magpie 自己的界面（同源反代的 iframe），样式在它自己的 app.css 里。
-   这里只留总览 Agent 名单仍在用的空态。 */
+/* 总览 Agent 名单仍在用的空态。网关页自己的样式全部在 70-gateway.css
+   （2026-10-22 起是 Perch 原生页面，不再是 iframe）。 */
 .gw-empty{padding:26px 16px;text-align:center;color:var(--faint);font-size:12px;
           line-height:1.7}
-
-/* 网关页的其余样式（控制面卡片、表单、表格）已随手写实现删除；
-   安装/接入卡自己的几条规则在 70-gateway.css。 */
 

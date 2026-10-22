@@ -84,7 +84,9 @@ func HooksReady() bool {
 	return true
 }
 
-// EnsureHooks 写入/更新 `perch-status` 条目。用户点「接入状态」才会调用。
+// EnsureHooks 写入/更新 `perch-status` 条目。当前产品主流程**不调用**它 ——
+// Perch 不自动改用户 hooks，「接入状态」入口也已移除；保留给将来真正需要时
+// 由用户显式触发的动作，别在启动/安装路径里接回来。
 func EnsureHooks(hookExe, hookDir string, logf func(string)) error {
 	if strings.TrimSpace(hookExe) == "" {
 		return fmt.Errorf("perch-hook.exe 不在主程序旁边")

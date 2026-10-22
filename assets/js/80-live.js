@@ -564,9 +564,6 @@ const shell = Stream("shell");
 let pendingShell = null;
 function applyShell(p) {
   STATE = p;
-  // 接入记录随壳层首帧下来（同一次 ShellPayload）。它是“上次走到哪一步”的
-  // 唯一事实；总览/抽屉读 AGENT_STATE，不读 STATE 里的静态名单。
-  if (p.agentState && typeof p.agentState === "object") applyAgentState(p.agentState);
   $("s-index").textContent = t("status.index", {
     sessions: STATE.sessions?.length ?? 0,
     projects: (STATE.projects || []).length,
@@ -618,9 +615,6 @@ function applyLibrary(p) {
   // 总览的每日活动也在这份载荷里（同一次扫描算的，见 store.go 的 scanSessions）——
   // 不跟着换的话，"重扫会话库"之后热力图还是旧的。
   if (Array.isArray(p.activity)) STATE.activity = p.activity;
-  // 接入记录也在重扫载荷里（同一次 ShellPayload）：盘上手动装/删过 agent
-  // 之后点「重扫会话库」，卡片上的“下一步”要跟着变。
-  if (p.agentState && typeof p.agentState === "object") AGENT_STATE = p.agentState;
   // 设置也在这份载荷里（同一次 buildShellPayload）。重扫不该改设置，但
   // 手改过 settings.json 的人点一次「重扫」就能看到盘上的值 —— 顺手对齐。
   if (p.settings) applySettings(p.settings, { fromGo: true, effectiveCwd: p.cwd });

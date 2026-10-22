@@ -38,13 +38,13 @@ type Card struct {
 	Adapter   bool       `json:"adapter"` // 有结构化状态/续接（兼容旧字段；新代码读 caps）
 	Caps      agent.Caps `json:"caps"`    // 启动/忙闲/等用户/动作，到哪一层
 	Install   bool       `json:"install"` // 有 Perch 能代跑的官方安装配方
-	// Setup：能启动、但“状态/等待”这条腿还没接上，而 Perch 知道怎么补。
-	// 目前只有 dsh（官方 hook 桥 + dsh-tui profile）。前端据此给一行
-	// 「接入状态」，避免把“只能启动”永久留在名单里。
-	Setup   bool   `json:"setup,omitempty"`
-	Windows bool   `json:"windows"` // 这个 agent 在 Windows 上有原生支持
-	Note    string `json:"note,omitempty"`
-	Calls   int    `json:"calls"`
+	Windows   bool       `json:"windows"` // 这个 agent 在 Windows 上有原生支持
+	// ProfileReady：dsh 这种“先启动才有自己 profile 的 agent”现在能不能写配置。
+	// 前端在“先替用户打开一次、再写网关”的流程里等它，避免 magpie 写进
+	// legacy config.yaml 而 dsh 读的是 profiles/*/cordis.patch.yml。
+	ProfileReady bool   `json:"profileReady,omitempty"`
+	Note         string `json:"note,omitempty"`
+	Calls        int    `json:"calls"`
 }
 
 // entries 是用户 2026-10-17 点名的那份清单（外加几枚同类里最该有的）。
@@ -78,7 +78,7 @@ var entries = []Entry{
 	// host + API cookie”的另一个实现，不是 Orca fixture 用的那一个
 	// （dsh-tui 0.10.2 on @deepseek-ai/dsh 0.1.5-rc.1）。安装配方只装
 	// @deepseek-harness-tui/dsh-tui。
-	{"dsh", "DeepSeek Harness", "deepseek-color", "DeepSeek", "https://github.com/deepseek-ai/deepseek-harness", "终端界面 dsh-TUI（社区）；安装会一并接入状态钩子", true, false,
+	{"dsh", "DeepSeek Harness", "deepseek-color", "DeepSeek", "https://github.com/deepseek-ai/deepseek-harness", "终端界面 dsh-TUI（社区）", true, false,
 		[]string{"~/.dsh/profiles/dsh-tui/package.json", "~/.dsh/config.yaml", "~/.dsh/cordis.patch.yml"}, "dsh-tui", true},
 	{"cursor", "Cursor", "cursor", "Anysphere", "https://cursor.com/cli", "", true, false,
 		[]string{"~/.cursor/cli-config.json"}, "cursor-agent", true},
@@ -222,13 +222,12 @@ func Cards(home string) []Card {
 			}
 		}
 		caps := agent.CapsFor(d.ID, canLaunch)
-		// 状态钩子还没接上时，把 Status/Waiting 如实降为 false，并给前端一个
-		// “Perch 知道怎么补”的入口。不能拿静态能力表骗用户。
-		setup := false
+		// 状态钩子还没接上时，把 Status/Waiting 如实降为 false。产品不再提供
+		// 「接入状态」动作，也不自动写用户 hooks；这里只影响状态显示，不影响
+		// 打开、登录或选模型。
 		if d.ID == "dsh" && canLaunch && !dsh.HooksReady() {
 			caps.Status = false
 			caps.Waiting = false
-			setup = true
 		}
 		// agy 的标题实测只是可执行文件路径（没有忙闲词，也没有 agy token），
 		// 所以它的结构化状态只有 hooks。没接时如实留在「标题（弱）」；
@@ -238,8 +237,6 @@ func Cards(home string) []Card {
 				caps.Status = true
 				caps.Title = false
 				caps.Mechanism = "hook"
-			} else {
-				setup = true
 			}
 		}
 		_, canInstall := Recipes[d.ID]
@@ -249,8 +246,13 @@ func Cards(home string) []Card {
 			// agent 注册一条"只开新会话"，那会把"能启动"写成"已接入"。
 			// 结构化能力只认 agent.CapsFor。
 			Adapter: caps.Status || caps.Resume || caps.Actions,
-			Caps:    caps, Install: canInstall, Setup: setup,
+			Caps:    caps, Install: canInstall,
 			Windows: d.Windows, Note: d.Note,
+		}
+		// dsh 的 terminal profile 是启动时建的；这个字段让前端知道“现在写网关
+		// 会不会写进它真正读的 profile”。其他 agent 没有这个阶段。
+		if d.ID == "dsh" {
+			c.ProfileReady = dsh.ProfileReady()
 		}
 		for _, raw := range d.Paths {
 			p := expandHome(home, raw)

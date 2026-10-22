@@ -17,7 +17,18 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
 // 用户起的名字来自后端（titles.json，键是 sessionId）—— 它是**会话的属性**，
 // 不是这一屏标签/面板的属性，所以列表、历史流面板、标签三处都读同一个来源。
 function sessionTitle(s) {
-  return (STATE && STATE.titles && STATE.titles[s.id]) || s.title || s.id.slice(0, 8);
+  const custom = STATE && STATE.titles && STATE.titles[s.id];
+  if (custom) return custom;
+  const title = String(s.title || "").trim();
+  // A terminal's own name ("Perch", "Windows PowerShell") is not a session
+  // identity. Codex 0.163 writes TERM_PROGRAM into its OSC title, which used
+  // to leave "Perch" in the rail and in the waiting list; fall back to the
+  // agent's name instead. `isGenericShellTitle` lives in 10-term.js (loaded
+  // before this file).
+  if (title && typeof isGenericShellTitle === "function" && isGenericShellTitle(title)) {
+    return s.agentName || s.agent || s.id.slice(0, 8);
+  }
+  return title || s.id.slice(0, 8);
 }
 
 // 极简 markdown。只处理对话流里真正高频的四种：围栏代码、行内代码、粗体、斜体。
@@ -526,6 +537,14 @@ function closedRowHTML(r) {
 function agentRowName(tab) { // 参数别叫 t：会遮住 i18n 的 t()
   const live = realTabTitle(tab);
   if (live) return live;
+  // agent 报了一个**只有终端自己名字**的标题（Codex 0.163 的 `ok | Perch`）：
+  // 标签已经因此落回产品名（defaultTabTitle），左栏要和标签说同一个名字。
+  // 只在这条窄路上用产品名；标题为空（还没说话 / 退出时清空）仍走下面的兜底，
+  // 免得一列还没开始干活的格全顶着同一个产品名。
+  const raw = stripLeadingAgentTitleDecoration(tab.agentTitleRaw);
+  if (raw && isGenericShellTitle(raw) && tab.spec && tab.spec.agent) {
+    return defaultTabTitle(tab);
+  }
   // 进程会把标题清空（claude 退出前发一条 OSC 0 空标题），还没报过标题的新格
   // 也是空的。这一格的身份**不该跟着进程一起消失** —— 用盘上那条会话的标题
   // 兜底，于是「已停止」的 agent 仍然叫它上次的名字，而不是「新 agent」。
@@ -1077,6 +1096,145 @@ async function resumeAgentInSeat(t) {
   }
   jumpInto(nt, "接上 agent");
   armRailRebuild();
+}
+
+/* 让一格**自己退**，并等到它的流真的断了。和 stopAgent 同一个手势（写
+   `/exit`，再单独一次回车，见那里为什么拆成两次），但它是“等结果”的版本：
+   重开必须等旧进程写完会话文件，否则就是在它背后另起一个写者。 */
+async function stopAgentAndWait(tab, ms) {
+  if (!tab) return false;
+  if (tab.connDown) return true;
+  if (!tab.ready || !tab.stream) return false;
+  try { tab.stream.send(enc.encode("/exit")); } catch (e) {
+    jserr("stopAgentAndWait", e);
+    return false;
+  }
+  setTimeout(() => {
+    try { if (!tab.connDown && tab.stream) tab.stream.send(enc.encode("\r")); }
+    catch (e) { jserr("stopAgentAndWait/enter", e); }
+  }, 300);
+  const t0 = Date.now();
+  while (Date.now() - t0 < (ms || 8000)) {
+    if (tab.connDown) return true;
+    if (!TAB_LIST.includes(tab)) return true;
+    await new Promise((r) => setTimeout(r, 120));
+  }
+  return !!tab.connDown;
+}
+
+/* 等这一格的流真的断。stopSetupAgent 用。 */
+async function waitTabDown(tab, ms) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    if (!TAB_LIST.includes(tab) || tab.connDown) return true;
+    await new Promise((r) => setTimeout(r, 80));
+  }
+  return !TAB_LIST.includes(tab) || !!tab.connDown;
+}
+
+/* 首启/登录页的停止：/exit 在引导页里可能被当成普通字符，所以要再试 Ctrl+C。
+   调用方只在「确认不是 working」时才会走强制关闭；这里返回是否已经停了。 */
+async function stopSetupAgent(tab) {
+  if (!tab) return true;
+  if (tab.connDown) return true;
+  if (!tab.ready || !tab.stream) return false;
+  // ⚠️ agy 的首启/登录页是菜单（↑/↓ + Enter）。往菜单里写 `/exit` + Enter 不是
+  // 退出，而是选中高亮项 —— 实测会去点 Google OAuth。所以 agy 只发 Ctrl+C；
+  // 退不掉就交给 reopenAgentForModel 的首启页关 PTY 兜底。
+  const menu = tab.spec && tab.spec.agent === "agy";
+  if (!menu) {
+    try { tab.stream.send(enc.encode("/exit")); } catch (e) { jserr("stopSetupAgent/exit", e); }
+    setTimeout(() => {
+      try { if (!tab.connDown && tab.stream) tab.stream.send(enc.encode("\r")); }
+      catch (e) { jserr("stopSetupAgent/enter", e); }
+    }, 250);
+    if (await waitTabDown(tab, 1400)) return true;
+  }
+  for (let i = 0; i < (menu ? 3 : 2) && !tab.connDown; i++) {
+    try { if (tab.stream) tab.stream.send(enc.encode("\x03")); }
+    catch (e) { jserr("stopSetupAgent/ctrlc", e); }
+    if (await waitTabDown(tab, 900)) break;
+  }
+  // dsh 的 Ctrl+C 是“跳过引导”而不是退出；跳进聊天后再走一次 /exit。
+  if (!menu && !tab.connDown) {
+    try {
+      if (tab.stream) {
+        tab.stream.send(enc.encode("/exit"));
+        setTimeout(() => { try { if (!tab.connDown && tab.stream) tab.stream.send(enc.encode("\r")); } catch (e) {} }, 220);
+      }
+    } catch (e) { jserr("stopSetupAgent/exit2", e); }
+    await waitTabDown(tab, 1200);
+  }
+  return !TAB_LIST.includes(tab) || !!tab.connDown;
+}
+
+/* 「换模型 → 重开并续接」：模型是 agent 级配置，PTY 里已经跑起来的进程不会
+   热换，所以按用户确认重开这一格。先让旧进程**自己退**（不 TerminateProcess：
+   那会截断正在写的会话文件），等它真的停了，再按 resumeAgentInSeat 的同一条
+   路接回来 —— 同一个 paneId + exact 会话、记录不删、座位序不变。
+   opts.setup：这一格停在首启/登录页，可以走 Ctrl+C/关 PTY 的兜底；
+   opts.quiet：批量重开时由调用方统一提示，不逐格 toast。 */
+async function reopenAgentForModel(tab, opts) {
+  opts = opts || {};
+  if (!tab || !TAB_LIST.includes(tab)) return;
+  const at = TAB_LIST.indexOf(tab);
+  const pane = tab.paneID | 0;
+  const sid = tab.sessionID || "";
+  const spec = {
+    agent: (tab.spec && tab.spec.agent) || DEFAULT_SPAWN_SPEC.agent,
+    cwd: (tab.spec && tab.spec.cwd) || "",
+    resume: sid ? { kind: "exact", id: sid } : { kind: "new", id: "" },
+    paneId: pane || undefined,
+  };
+  let forced = false;
+  if (!tab.connDown) {
+    const stopped = opts.setup ? await stopSetupAgent(tab) : await stopAgentAndWait(tab, 8000);
+    if (!stopped) {
+      // 首启页不响应 /exit 和 Ctrl+C：确认屏上仍是首启页（或已经回到空闲），
+      // 就关掉 PTY。若用户已经打字、agent 正在干活，就不动它。
+      // 这不是“杀一个正在工作的会话”——setup 页里没有正在写的任务；
+      // 会话记录和 paneId 都还在，下面按原座位重开。
+      const stillSetup = paneSetupKind(tab) !== "";
+      const st = cellState(tab);
+      if (opts.setup && (stillSetup || st === "idle" || st === "off")) {
+        forced = true;
+        sendCtrl({ type: "log", msg:
+          `首启页停止兜底：关 PTY tab=${tab.id} pane=${pane} setup=${stillSetup ? "yes" : "no"} state=${st}` });
+        closeTab(tab, { reseat: true });
+      } else {
+        showToast(t("term.model.stopFailed"), t("term.model.stopFailedNote"), "err");
+        return;
+      }
+    }
+    if (!forced && !TAB_LIST.includes(tab)) return;   // 等待期间用户自己关掉了
+  }
+  sendCtrl({
+    type: "log",
+    msg: `换模型重开 tab=${tab.id} pane=${pane} sid=${sid ? sid.slice(0, 8) : "(无)"} ` +
+      `座位序=${at} setup=${opts.setup ? "yes" : "no"} forced=${forced ? "yes" : "no"}`,
+  });
+  // 不带 forget（记录是证据）；reseat 挡掉 lib.reload，见 closeTab 末尾那段。
+  if (!forced) closeTab(tab, { reseat: true });
+  const nt = await createTab(spec);
+  if (!nt || !TAB_LIST.includes(nt)) return null;
+  if (at >= 0) {
+    const i = TAB_LIST.indexOf(nt);
+    if (i >= 0) {
+      TAB_LIST.splice(i, 1);
+      TAB_LIST.splice(Math.min(at, TAB_LIST.length), 0, nt);
+    }
+    renderGrid();
+  }
+  if (typeof watchFirstRun === "function") watchFirstRun(nt);
+  jumpInto(nt, "换模型后重开");
+  armRailRebuild();
+  // resumed=false = 没有会话 id，开的是新会话。调用方不能再说“同一条对话”。
+  const resumed = !!sid;
+  if (!opts.quiet) {
+    showToast(t("term.model.reopened"),
+      t(resumed ? "term.model.reopenedNote" : "term.model.reopenedNewNote"), "ok");
+  }
+  return { tab: nt, resumed };
 }
 
 /* 「停止这个 agent」= 让它自己退，**不是杀进程**。
@@ -1776,7 +1934,8 @@ $("rail").addEventListener("click", (e) => {
   }
   const v = el.dataset.view;
   if (v === "workspace" || v === "dash" || v === "settings") {
-    // 同一区：工作区重画列表，总览重画读数（= 手动刷新），设置重读一次权威值。
+    // 同一区：工作区重画列表，总览重画读数（= 手动刷新），
+    // 设置重读一次权威值。
     if (v === NAV_HERE) {
       if (v === "dash") renderDashboard("重复点总览");
       else if (v === "settings") {

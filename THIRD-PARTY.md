@@ -36,7 +36,8 @@ VS Code base/common）补齐了许可全文。
 | 项目 | 参考了什么 | 许可 |
 |---|---|---|
 | [Orca](https://github.com/stablyai/orca) | 界面样式与一批实现细节（终端面板的排版、状态点的字形、活动流"一个 agent 一行"的降噪合同、自动滚动状态机等）。源码注释里逐处写明了出处。 | MIT（Copyright (c) 2026 Lovecast Inc.，全文见 `licenses/MIT-Orca.txt`） |
-| [Magpie](https://github.com/yetone/magpie) | 桌面质感与用量面板的信息怎么组织（用它当品质参照，**没有**把它的代码放进本仓库） | MIT（Copyright (c) 2026 yetone，全文见 `licenses/MIT-magpie.txt`） |
+| [Magpie](https://github.com/yetone/magpie) | 随产品分发的无头网关引擎（provider 适配、agent 配置写法、请求路由）。它的 Web UI 不由 Perch 加载或反代；Perch 只通过本机控制面 API 读写。引擎二进制不提交到本仓库，分发时放进 Perch 安装包并保留许可全文。 | MIT（Copyright (c) 2026 yetone，全文见 `licenses/MIT-magpie.txt`） |
 
-数据面（转录 / hook / 屏幕三路的优先级与护栏）、看板形态、状态判定、以及这个网关本身的
-架构是我们自己定的；上表说的是**我们读着别人的开源实现学来的那些具体工序**。
+数据面（转录 / hook / 屏幕三路的优先级与护栏）、看板形态、状态判定、以及 Perch 的网关
+页面与产品流程是我们自己定的；上表说的是**我们读着别人的开源实现学来的那些具体工序**，
+以及直接随产品分发的那一枚引擎。

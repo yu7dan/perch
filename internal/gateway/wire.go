@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -22,14 +21,6 @@ const (
 	pollEvery = 2500 * time.Millisecond
 	httpWait  = 1800 * time.Millisecond
 )
-
-// gatewayURL 是 magpie 网关的默认地址。用 var 而不是 const，唯一原因是
-// 文档截图/演示可以构建一个读到独立端口、带虚构数据的 magpie：
-//
-//	go build -ldflags "-X github.com/yu7dan/perch/internal/gateway.gatewayURL=http://127.0.0.1:3450"
-//
-// 正常构建不传这个 ldflags，行为与写死 3425 完全相同。
-var gatewayURL = "http://127.0.0.1:3425"
 
 // ---------------------------------------------------------------------------
 // wire 形状
@@ -66,27 +57,29 @@ type Day struct {
 }
 
 type AgentTotal struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Icon       string `json:"icon"`
-	Calls      int    `json:"calls"`
-	Input      int64  `json:"input"`
-	Output     int64  `json:"output"`
-	CacheRead  int64  `json:"cache_read"`
-	CacheWrite int64  `json:"cache_write"`
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	Icon       string  `json:"icon"`
+	Calls      int     `json:"calls"`
+	Input      int64   `json:"input"`
+	Output     int64   `json:"output"`
+	CacheRead  int64   `json:"cache_read"`
+	CacheWrite int64   `json:"cache_write"`
+	Cost       float64 `json:"cost"`
 }
 
 type ModelTotal struct {
-	ID        string `json:"id"`
-	Provider  string `json:"provider"`
-	Model     string `json:"model"`
-	Name      string `json:"name"`
-	Sub       string `json:"sub"`
-	Icon      string `json:"icon"`
-	Calls     int    `json:"calls"`
-	Input     int64  `json:"input"`
-	Output    int64  `json:"output"`
-	CacheRead int64  `json:"cache_read"`
+	ID        string  `json:"id"`
+	Provider  string  `json:"provider"`
+	Model     string  `json:"model"`
+	Name      string  `json:"name"`
+	Sub       string  `json:"sub"`
+	Icon      string  `json:"icon"`
+	Calls     int     `json:"calls"`
+	Input     int64   `json:"input"`
+	Output    int64   `json:"output"`
+	CacheRead int64   `json:"cache_read"`
+	Cost      float64 `json:"cost"`
 }
 
 type ProviderKey struct {
@@ -185,12 +178,6 @@ type Ctx struct {
 	At        string `json:"at,omitempty"`
 }
 
-type Plugins struct {
-	Preset    string   `json:"preset,omitempty"`
-	Installed []string `json:"installed"`
-	Entries   int      `json:"entries"`
-}
-
 // Snapshot 是发给前端的整份读数。
 type Snapshot struct {
 	State     string `json:"state"` // running | stopped | absent
@@ -201,19 +188,19 @@ type Snapshot struct {
 	Err       string `json:"err,omitempty"`
 	// ErrCode/ErrParams 与 Err 并行：Err 始终是原文（日志/旧前端），
 	// 这一对让当前前端把同一句按用户语言重画。
-	ErrCode   string              `json:"errCode,omitempty"`
-	ErrParams map[string]string   `json:"errParams,omitempty"`
-	Today     Totals              `json:"today"`
-	All       Totals              `json:"all"`
-	Series    []Day               `json:"series"`
-	Recent    []Req               `json:"recent"`
-	Conc      Conc                `json:"conc"`
-	Providers []Provider          `json:"providers"`
-	Models    []Model             `json:"models"`
-	Context   Ctx                 `json:"context"`
-	Catalog   []agentcatalog.Card `json:"catalog"`
-	Plugins   Plugins             `json:"plugins"`
-	UsageAt   string              `json:"usageAt,omitempty"`
+	ErrCode    string              `json:"errCode,omitempty"`
+	ErrParams  map[string]string   `json:"errParams,omitempty"`
+	Today      Totals              `json:"today"`
+	All        Totals              `json:"all"`
+	TodayUsage UsageView           `json:"todayUsage"`
+	Series     []Day               `json:"series"`
+	Recent     []Req               `json:"recent"`
+	Conc       Conc                `json:"conc"`
+	Providers  []Provider          `json:"providers"`
+	Models     []Model             `json:"models"`
+	Context    Ctx                 `json:"context"`
+	Catalog    []agentcatalog.Card `json:"catalog"`
+	UsageAt    string              `json:"usageAt,omitempty"`
 	// 今天的三个榜（接口算好的，前端只排序取前几）：agent / 模型 / provider 账号。
 	TodayAgents       []AgentTotal  `json:"todayAgents"`
 	TodayModels       []ModelTotal  `json:"todayModels"`
@@ -235,6 +222,10 @@ type watcher struct {
 	lastCat  string // 本地 Agent 名单的指纹：变了就先推，不等 HTTP
 	client   *http.Client
 	push     func(any)
+	// The managed engine is started by Perch; these read its live address and
+	// private config dir. Empty means "engine not up yet" (local scan only).
+	baseURL   func() string
+	configDir func() string
 }
 
 // StartWatcher 先扫本机（瞬时），再把 HTTP 那条腿放进协程。
@@ -247,8 +238,18 @@ func (g *Gateway) StartWatcher() {
 			Transport: &http.Transport{Proxy: nil},
 		},
 		push: g.push,
+		baseURL: func() string {
+			g.mu.Lock()
+			defer g.mu.Unlock()
+			return g.gatewayURL
+		},
+		configDir: func() string {
+			g.mu.Lock()
+			defer g.mu.Unlock()
+			return g.configDir
+		},
 	}
-	// 本机那份先出（版本 / Provider / 插件 / Agent 名单），网关读数稍后补。
+	// 本机那份先出（版本 / Provider / Agent 名单），网关读数稍后补。
 	w.mu.Lock()
 	w.snap = w.scanLocal()
 	w.mu.Unlock()
@@ -329,32 +330,51 @@ func (w *watcher) refresh() bool {
 	return true
 }
 
-// scanLocal 只碰磁盘：配置目录、版本、Provider 清单、插件、Agent 名单。
+// scanLocal 只碰磁盘：配置目录、版本、Provider 清单、Agent 名单。
 // 网关关着的时候这些仍然是对的 —— 「装了没开」和「没装」必须分得开。
 func (w *watcher) scanLocal() *Snapshot {
 	home, _ := os.UserHomeDir()
-	dir := magpieConfigDir(home)
+	dir := ""
+	if w.configDir != nil {
+		dir = w.configDir()
+	}
+	base := ""
+	if w.baseURL != nil {
+		base = w.baseURL()
+	}
 	s := &Snapshot{
 		State:     "absent",
-		Gateway:   gatewayURL,
+		Gateway:   base,
 		ConfigDir: dir,
 		At:        time.Now().Format(time.RFC3339),
 		Catalog:   agentcatalog.Cards(home),
-		Plugins:   scanMagpiePlugins(dir),
 	}
-	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
-		s.State = "stopped"
+	if dir != "" {
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			s.State = "stopped"
+		}
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, "last-version")); err == nil {
 		s.Version = strings.TrimSpace(string(b))
 	}
-	s.Providers = scanMagpieProviders(dir)
+	if dir != "" {
+		s.Providers = scanMagpieProviders(dir)
+	} else {
+		s.Providers = []Provider{}
+	}
 	return s
 }
 
 // fillRemote 覆盖 HTTP 那部分。任何一个接口失败都不抹掉别的 —— 比如网关开着、
 // usage 却因为一个受限 key 回答 403 时，Provider 清单和「在跑」仍然要看得见。
 func (w *watcher) fillRemote(s *Snapshot) {
+	base := ""
+	if w.baseURL != nil {
+		base = w.baseURL()
+	}
+	if base == "" {
+		return
+	}
 	var today, all Usage
 	var recent ReqResp
 	var conc struct {
@@ -373,11 +393,11 @@ func (w *watcher) fillRemote(s *Snapshot) {
 		} `json:"data"`
 	}
 
-	errToday := w.getJSON("/v1/magpie/usage?period=today", &today)
-	errAll := w.getJSON("/v1/magpie/usage?period=all", &all)
-	errReq := w.getJSON("/v1/magpie/usage/requests?period=today&limit=16", &recent)
-	errConc := w.getJSON("/v1/magpie/concurrency", &conc)
-	errModels := w.getJSON("/v1/models", &models)
+	errToday := w.getJSON(base, "/v1/magpie/usage?period=today", &today)
+	errAll := w.getJSON(base, "/v1/magpie/usage?period=all", &all)
+	errReq := w.getJSON(base, "/v1/magpie/usage/requests?period=today&limit=16", &recent)
+	errConc := w.getJSON(base, "/v1/magpie/concurrency", &conc)
+	errModels := w.getJSON(base, "/v1/models", &models)
 
 	if errConc == nil {
 		s.State = "running"
@@ -389,6 +409,7 @@ func (w *watcher) fillRemote(s *Snapshot) {
 	if errToday == nil {
 		s.Today = today.Totals
 		s.UsageAt = time.Now().Format(time.RFC3339)
+		s.TodayUsage = usageView(today, "today")
 		s.TodayAgents = today.Agents
 		s.TodayModels = today.Models
 		s.TodayProviderKeys = today.ProviderKeys
@@ -480,8 +501,8 @@ func setSnapErr(s *Snapshot, code, text string) {
 	s.ErrParams = nil
 }
 
-func (w *watcher) getJSON(path string, v any) error {
-	res, err := w.client.Get(gatewayURL + path)
+func (w *watcher) getJSON(base, path string, v any) error {
+	res, err := w.client.Get(strings.TrimRight(base, "/") + path)
 	if err != nil {
 		return err
 	}
@@ -492,16 +513,6 @@ func (w *watcher) getJSON(path string, v any) error {
 	}
 	// 上限 64MB 只是防一条坏响应把内存吃光；实际最大的是 usage?period=all 的 ~20KB。
 	return json.NewDecoder(io.LimitReader(res.Body, 64<<20)).Decode(v)
-}
-
-// magpieConfigDir 和 magpie 自己的 appdir 规则一致：
-// XDG_CONFIG_HOME 优先，否则 ~/.config/magpie。不猜 portable 目录 ——
-// 猜错会把别人的配置当成"没装"。
-func magpieConfigDir(home string) string {
-	if d := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); d != "" {
-		return filepath.Join(d, "magpie")
-	}
-	return filepath.Join(home, ".config", "magpie")
 }
 
 func scanMagpieProviders(dir string) []Provider {
@@ -533,51 +544,6 @@ func scanMagpieProviders(dir string) []Provider {
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
-}
-
-func scanMagpiePlugins(dir string) Plugins {
-	out := Plugins{Installed: []string{}}
-	b, err := os.ReadFile(filepath.Join(dir, "plugins.yml"))
-	if err != nil {
-		return out
-	}
-	seen := map[string]bool{}
-	inPlugins := false
-	for _, ln := range strings.Split(string(b), "\n") {
-		t := strings.TrimSpace(ln)
-		if t == "" || strings.HasPrefix(t, "#") {
-			continue
-		}
-		if strings.HasPrefix(t, "preset:") {
-			out.Preset = strings.TrimSpace(strings.TrimPrefix(t, "preset:"))
-			continue
-		}
-		if t == "plugins:" {
-			inPlugins = true
-			continue
-		}
-		if !inPlugins {
-			continue
-		}
-		if !strings.HasPrefix(ln, " ") && !strings.HasPrefix(ln, "\t") {
-			inPlugins = false
-			continue
-		}
-		// 两种写法都收：`- spec` 和 `name:`。只记名字，不解释其余配置。
-		name := ""
-		if strings.HasPrefix(t, "- ") {
-			name = strings.TrimSpace(strings.TrimPrefix(t, "- "))
-		} else if i := strings.Index(t, ":"); i > 0 {
-			name = strings.TrimSpace(t[:i])
-		}
-		name = strings.Trim(name, `"'`)
-		if name != "" && pluginNameOK.MatchString(name) && !seen[name] && len(out.Installed) < 200 {
-			seen[name] = true
-			out.Installed = append(out.Installed, name)
-		}
-	}
-	out.Entries = len(out.Installed)
 	return out
 }
 
@@ -618,6 +584,3 @@ func orNone(s string) string {
 	}
 	return s
 }
-
-// 插件名的宽校验：免得把 YAML 里的标点当成插件名。
-var pluginNameOK = regexp.MustCompile(`^[@A-Za-z0-9][@A-Za-z0-9._/-]*$`)

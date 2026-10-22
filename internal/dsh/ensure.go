@@ -16,8 +16,9 @@ import (
 	"github.com/yu7dan/perch/internal/winproc"
 )
 
-// EnsureHooks 把“状态”这条腿接到 DSH 上。它只在用户明确点下安装或“接入状态”
-// 之后跑，不做隐式后台安装。
+// EnsureHooks 把“状态”这条腿接到 DSH 上。当前产品主流程**不调用**它：
+// Perch 不在安装后自动写用户 hooks，「接入状态」入口也已移除。保留给将来
+// 真正需要时由用户显式触发的动作，别在启动/安装路径里接回来。
 //
 // 顺序是有原因的：
 //  1. 先装桥、再装桥的 peer —— 桥的 package.json 是 peer 列表的权威来源；

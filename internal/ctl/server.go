@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/yu7dan/perch/internal/agentcatalog"
-	"github.com/yu7dan/perch/internal/agentstate"
 	"github.com/yu7dan/perch/internal/gateway"
 	"github.com/yu7dan/perch/internal/install"
 	"github.com/yu7dan/perch/internal/panes"
@@ -68,16 +67,12 @@ type Deps struct {
 	Gateway    *gateway.Gateway
 	Installer  *install.Installer
 	Transcript *transcript.Follower
-	AgentState *agentstate.Store
 
 	DefaultCWD    func() string
 	SessionExists func(agentName, cwd, id string) bool
 	// MergeCalls 把 magpie 的今日调用数合并进 agentcatalog.Cards 的结果，
-	// 让“接入状态”成功后推回去的名单和总览使用同一份数据。
+	// 让安装完成后推回去的名单和总览使用同一份数据。
 	MergeCalls func([]agentcatalog.Card)
-	// SetupAgent 是“只启动 → 接入状态”的动作（目前只有 dsh）。它是用户
-	// 点下按钮才跑的，不静默；失败由 ctl 折成 install.done(ok=false)。
-	SetupAgent func(id string, log func(string)) error
 	// CreateTab 在组合根里**先** app.HandleStream(host.Stream, …)、再返回 ——
 	// 顺序是硬约束：前端拿到 tab.ok 就会立刻去连那条流。
 	CreateTab func(session.SpawnSpec) *session.Tab
@@ -109,6 +104,12 @@ func (s *Server) Serve(c Conn) {
 	s.setPush(c)
 	defer s.clearPush(c)
 	log.Printf("[ctl] 控制通道已连接")
+	// 网关在窗口/通道连上之前就可能已经启动完成；那时发出的 gw 推送没有
+	// 接收者。前端一连上就让它重发一次连接状态，避免界面停在“引擎未运行”
+	// 而进程其实好好的（2026-10-22 实测）。
+	if s.deps.Gateway != nil {
+		go s.deps.Gateway.Refresh()
+	}
 	/* 令牌去重表：**同一根连接上，同一个 req 只允许建一次格子**。
 	   前端在没等到应答时会拿同一个令牌重发（见 assets 里 sendSpawn 的兜底重发），
 	   所以这里必须认得出"这是我刚答过的那一条"并**重放**应答 —— 少了这一层，
@@ -142,10 +143,6 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		s.paneClose(m)
 	case "pane.forget":
 		s.paneForget(m)
-	case "agent.readiness":
-		s.agentReadiness(m)
-	case "agent.status":
-		s.agentStatus(m)
 	case "title.set":
 		s.titleSet(m)
 	case "lib.reload":
@@ -163,16 +160,18 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 	case "log", "acts.snapshot", "files.snapshot", "trace.diff", "open.url":
 		s.handleMisc(m)
 
-	// 网关（magpie）
-	case "magpie.refresh", "magpie.update.get", "magpie.update.install",
-		"gw.connect", "gw.disconnect", "gw.refresh",
-		"gw.agents", "gw.agents.prefetch", "gw.agent.set",
+	// 网关：内置引擎的生命周期、供应商/密钥、agent 接入。
+	case "magpie.refresh", "gw.connect", "gw.disconnect", "gw.refresh",
+		"gw.engine.start", "gw.engine.stop", "gw.engine.restart",
+		"gw.providers", "gw.provider.save", "gw.provider.delete",
+		"gw.credential.test",
+		"gw.agents", "gw.agents.prefetch", "gw.agents.rescan", "gw.agent.set",
 		"gw.agent.connect", "gw.agent.disconnect", "gw.agent.reapply",
-		"gw.agent.keep", "gw.agent.preview", "gw.agents.drift":
+		"gw.agent.keep", "gw.agent.preview", "gw.agents.drift", "gw.usage":
 		s.handleGateway(m)
 
-	// 安装器 / “只启动”agent 的状态接入
-	case "install.agent", "install.magpie", "install.cancel", "agent.setup":
+	// 安装器
+	case "install.agent", "install.cancel":
 		s.handleInstall(m)
 
 	// 设置

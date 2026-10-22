@@ -1,350 +1,196 @@
 "use strict";
-/* 08-agent-model.js —— 一个 agent「从零到完整/可用」的**纯视图模型**。
+/* 08-agent-model.js —— agent 名单/抽屉需要的**最小事实**：装没装、走不走网关、
+ * 当前是哪个模型。这里没有步骤、没有“完整”、没有 L/S/R/G/A。
  *
- * 为什么单独一份（不塞进 86-dash）：总览那一行、右侧配置抽屉、以后的欢迎页
- * 说的是同一个问题 —— 这个 agent 现在走到第几步、下一步是什么。把判断写在
- * 渲染函数里，三处会各写一遍，然后悄悄漂开。
+ * 为什么单独一份：总览行、行内详情、终端里的模型 chip 必须对“当前模型/能不能
+ * 接网关”给出同一个答案。判断写在三个渲染函数里，迟早会漂开。
  *
- * 输入（全部是外部事实，本文件不认识 DOM、不读全局）：
- *   card        agentcatalog.Card：installed / caps / install / setup / url …
- *   gwInfo      magpie /api/state 里的那一行（{id,wired,connectable?}），没读到时 null
- *   record      internal/agentstate.Record（assets 侧的 AGENT_STATE[id]），没有时 null
- *   magpieState {state:"running|stopped|absent|unknown", agentsKnown:bool}
- *
- * 输出：
- *   { steps, legs, complete, completeKind, group, primary, nextStep, reason }
- *
- * ⚠️ 「录入」不是「打开过一次」：每一步都要有记录/机制/证据。内置适配器的
- * 机制由 caps 给出（hook / app-server / http / extension）；标题状态是弱信号，
- * 必须显式标 title；没有任何来源就写 unsupported，不拿空白冒充完成。
- *
- * ⚠️ 分组必须**互斥**：旧总览按三个独立布尔过滤，同一个 agent 会同时出现在
- * 「完整」和「仅启动」里（实测）。这里的 group 是一个单值。
+ * 输入全部是外部事实：
+ *   card       agentcatalog.Card（installed / caps / install / url）
+ *   gwInfo     控制面 /api/state 里的那一行（fields/options/wired/source/connectable/menu）
+ *   magpieState {state, agentsKnown}：只用来区分“网关没读到”和“网关不管理它”
  */
 
-/* 七步的键（检测 / 安装 / 启动 / 就绪 / 状态 / 续接 / 网关）。
-   Go 侧 internal/agentstate 的 Step* 常量与这里一一对应。 */
-const AGENT_STEP_KEYS = ["detect", "install", "launch", "auth", "status", "resume", "gateway"];
-/* 卡片上那五条腿的短标记（L 启动 / S 状态 / R 续接 / G 网关 / A 登录）。 */
-const AGENT_LEG_KEYS = ["launch", "status", "resume", "gateway", "auth"];
-const AGENT_STEP_STATES = ["todo", "doing", "done", "failed", "unsupported", "not_applicable"];
+const AGENT_ROUTE_KEYS = ["missing", "no-launch", "gateway", "native", "unconfigured", "unknown"];
 
-function agvIsState(v) {
-  return AGENT_STEP_STATES.indexOf(v) >= 0;
+function agvOptions(field) {
+  return field && Array.isArray(field.options) ? field.options : [];
 }
 
-function agvStep(key, state, extra) {
-  return Object.assign({
-    key: key,
-    state: agvIsState(state) ? state : "todo",
-    mechanism: "",
-    source: "",
-    errorCode: "",
-    evidence: "",
-    verified: false,
-    noteKey: "",
-    noteParams: null,
-    action: "",
-  }, extra || {});
+/* magpie 的模型选项带 ref；有的 agent 把 magpie 本身作为 provider 值。 */
+function agvIsGatewayOption(o) {
+  return !!(o && (o.ref || o.value === "magpie"));
 }
 
-function agvRecStep(record, key) {
-  if (!record || !record.steps || typeof record.steps !== "object") return null;
-  const s = record.steps[key];
-  if (!s || !agvIsState(s.state)) return null;
-  return s;
+/* 主模型字段：优先找真正列出网关模型的字段（和 magpie connectField 同口径）。
+   不能只看“第一个带网关选项的字段”：有的 agent（Ante/Pencil 这类）把
+   provider 字段放在前面，它的唯一选项是 magpie 本身 —— 那是“接不接网关”，
+   不是“用哪个模型”。所以先认带 ref 的目录模型，其次才认只有 magpie 值
+   的 provider 型字段；没有模型来源时退回 key=model，至少能显示 agent 自己的值。 */
+function agentMainModelField(row) {
+  if (!row || !Array.isArray(row.fields)) return null;
+  const fields = row.fields.filter(Boolean);
+  const withRef = fields.filter((f) => agvOptions(f).some((o) => o && o.ref));
+  const byKey = withRef.find((f) => f.key === "model");
+  if (byKey) return byKey;
+  if (withRef.length) return withRef[0];
+  const modelWithAny = fields.find((f) => f.key === "model" && agvOptions(f).length);
+  if (modelWithAny) return modelWithAny;
+  const anyGateway = fields.find((f) => agvOptions(f).some(agvIsGatewayOption));
+  if (anyGateway) return anyGateway;
+  return fields.find((f) => f.key === "model") ||
+    fields.find((f) => agvOptions(f).length) || null;
 }
 
-function agvCaps(card) {
-  return (card && card.caps) || {};
+function agentGatewayOptions(field) {
+  return agvOptions(field).filter(agvIsGatewayOption);
 }
 
-function agvReadiness(record) {
-  const r = record && record.readiness;
-  return r === "ready" || r === "needs-login" || r === "needs-key" ||
-    r === "needs-setup" || r === "unknown" ? r : "";
+function agentModelOption(field, value) {
+  if (!field || !value) return null;
+  return agvOptions(field).find((o) => o && o.value === value) || null;
 }
 
-/* magpie 的状态只分三档（internal/gateway/wire.go 的 Snapshot.State）。
-   absent = 没有控制面；stopped = 有但没跑；unknown = watcher 还没出第一份。 */
-function agvMagpie(magpieState) {
-  const s = magpieState && magpieState.state;
-  return {
-    state: s === "running" || s === "stopped" || s === "absent" ? s : "unknown",
-    agentsKnown: !!(magpieState && magpieState.agentsKnown),
-  };
+function agentModelLabel(field, value) {
+  if (!value) return "";
+  const o = agentModelOption(field, value);
+  return (o && (o.label || o.value)) || value;
 }
 
-/* 主行动。action 是**手势**，不是文案；文案由渲染层按 i18n 给。
-   install / docs / open / setup / connect / settings / usage / drawer / none */
-function agvPrimary(card, group, steps) {
-  const by = {};
-  for (const s of steps) by[s.key] = s;
-  const caps = agvCaps(card);
-  const installed = !!card.installed;
-
-  if (!installed) {
-    if (card.install) return { action: "install", step: "install" };
-    if (card.url) return { action: "docs", step: "install" };
-    return { action: "none", step: "install" };
+function agvRouteLabelKey(route) {
+  switch (route) {
+    case "gateway": return "agent.route.gateway";
+    case "native": return "agent.route.native";
+    case "missing": return "agent.route.missing";
+    case "no-launch": return "agent.route.noLaunch";
+    case "unknown": return "agent.route.unknown";
+    default: return "agent.route.unconfigured";
   }
-  if (!caps.launch) {
-    return { action: card.url ? "docs" : "none", step: "launch" };
-  }
-  if (by.launch.state !== "done") {
-    if (by.launch.state === "failed" && card.install) return { action: "install", step: "launch" };
-    return { action: "open", step: "launch" };
-  }
-  // 状态钩子能装就先装：它和登录是两条独立的腿，不该被“还没登录”挡住。
-  // （agy/dsh 的 hooks 装上之后，第一条事件会同时把就绪写成 ready。）
-  if (card.setup && by.status.state !== "done" && by.status.state !== "not_applicable") {
-    return { action: "setup", step: "status" };
-  }
-  // 登录/key：再开一格就是入口（不自动登录、不碰凭据）。
-  const rd = by.auth.state;
-  if (rd !== "done" && rd !== "unsupported" && rd !== "not_applicable") {
-    return { action: "open", step: "auth" };
-  }
-  // 状态：Perch 知道怎么补的（dsh/agy hooks）给一键接入；其余只能说明。
-  if (by.status.state !== "done" && by.status.state !== "not_applicable") {
-    if (card.setup) return { action: "setup", step: "status" };
-    if (by.status.state === "unsupported") {
-      return { action: card.url ? "docs" : "usage", step: "status" };
-    }
-    return { action: "open", step: "status" };
-  }
-  if (by.gateway.state !== "done" && by.gateway.state !== "unsupported" &&
-      by.gateway.state !== "not_applicable") {
-    if (by.gateway.noteKey === "agent.note.magpieAbsent" ||
-        by.gateway.noteKey === "agent.note.magpieStopped") {
-      return { action: "settings", step: "gateway" };
-    }
-    return { action: "connect", step: "gateway" };
-  }
-  if (by.gateway.state === "unsupported") {
-    return { action: card.url ? "docs" : "usage", step: "gateway" };
-  }
-  if (group === "complete" || group === "native") return { action: "open", step: "" };
-  return { action: "drawer", step: "" };
 }
 
 /**
- * 主入口。纯函数：同一份输入永远得到同一份输出（测试见 08-agent-model.test.js）。
+ * 一个 agent 现在是什么路由、当前模型、主行动。
+ * 纯函数：不读 DOM、不读全局状态、不写配置。
  */
-function agentIntegrationView(card, gwInfo, record, magpieState) {
+function agentRouteView(card, gwInfo, magpieState) {
   card = card || {};
-  record = record || null;
-  const caps = agvCaps(card);
-  const mg = agvMagpie(magpieState);
-  const installed = !!card.installed;
-  const readiness = agvReadiness(record);
-  const steps = [];
-
-  // 1 检测 -------------------------------------------------------------------
-  // 探测是**每一次**都由 Go 现算的（配置目录 / exe），不是“以前打开过”。
-  steps.push(agvStep("detect", installed ? "done" : "todo", {
-    mechanism: "probe",
-    source: installed ? "card.path" : "",
-    evidence: installed ? (card.path || "") : "",
-    noteKey: installed ? "" : "agent.note.notDetected",
-    action: installed ? "" : (card.install ? "install" : "docs"),
-  }));
-
-  // 2 安装 -------------------------------------------------------------------
-  const recInstall = agvRecStep(record, "install");
-  let installState = installed ? "done" : (recInstall ? recInstall.state : "todo");
-  if (!installed && installState === "done") installState = "todo"; // 卸掉了：探测是权威
-  if (!installed && !card.install && !card.url && card.windows === false) {
-    installState = "unsupported";
-  }
-  steps.push(agvStep("install", installState, {
-    mechanism: installed ? "existing" : (card.install ? "recipe" : ""),
-    source: installed ? "card.path" : "",
-    evidence: installed ? (card.path || "") : "",
-    noteKey: installed ? "" : (card.install ? "agent.note.installable" : "agent.note.docsOnly"),
-    action: installed ? "" : (card.install ? "install" : "docs"),
-  }));
-
-  // 2 启动 -------------------------------------------------------------------
-  const recLaunch = agvRecStep(record, "launch");
-  let launchState = "todo";
-  if (!installed) launchState = "todo";
-  else if (!caps.launch) launchState = "unsupported";
-  else if (recLaunch) launchState = recLaunch.state;
-  steps.push(agvStep("launch", launchState, {
-    mechanism: caps.launch ? "terminal" : "",
-    source: recLaunch ? recLaunch.source : "",
-    errorCode: recLaunch ? recLaunch.errorCode : "",
-    evidence: recLaunch ? recLaunch.evidence : "",
-    verified: !!(recLaunch && recLaunch.verified),
-    noteKey: !installed ? "agent.note.installFirst"
-      : !caps.launch ? "agent.note.noTerminal"
-      : launchState === "failed" ? "agent.note.launchFailed" : "",
-    action: installed && caps.launch ? "open" : "",
-  }));
-
-  // 3 就绪 / 登录 ------------------------------------------------------------
-  const recAuth = agvRecStep(record, "auth");
-  let authState = "todo";
-  if (recAuth && recAuth.state === "done") authState = "done";
-  else if (readiness === "ready") authState = "done";
-  else if (!installed || (launchState !== "done" && !recAuth)) authState = "todo";
-  steps.push(agvStep("auth", authState, {
-    source: readiness ? ("readiness:" + readiness) : (recAuth ? recAuth.source : ""),
-    evidence: recAuth ? recAuth.evidence : "",
-    verified: authState === "done",
-    noteKey: authState === "done" ? "agent.note.ready"
-      : readiness === "needs-login" ? "agent.note.needsLogin"
-      : readiness === "needs-key" ? "agent.note.needsKey"
-      : readiness === "needs-setup" ? "agent.note.needsSetup"
-      : "agent.note.readinessUnknown",
-    action: installed ? "open" : "",
-  }));
-
-  // 4 状态 -------------------------------------------------------------------
-  const recStatus = agvRecStep(record, "status");
-  let statusState = "todo";
-  let statusMech = caps.mechanism || "";
-  if (recStatus) {
-    statusState = recStatus.state;
-    if (recStatus.mechanism) statusMech = recStatus.mechanism;
-  } else if (!installed) {
-    statusState = "todo";
-  } else if (caps.status) {
-    statusState = "todo"; // 适配器在，但还没有第一条真实事件
-  } else if (caps.title) {
-    statusState = "todo";
-    statusMech = "title";
-  } else if (card.setup) {
-    // Perch 知道怎么补（dsh / agy 的 hooks）：不是“无来源”，是“还没接”。
-    statusState = "todo";
-    statusMech = "hook";
-  } else {
-    statusState = "unsupported";
-    statusMech = "";
-  }
-  steps.push(agvStep("status", statusState, {
-    mechanism: statusMech,
-    source: recStatus ? recStatus.source : "",
-    evidence: recStatus ? recStatus.evidence : "",
-    verified: !!(recStatus && recStatus.verified),
-    noteKey: statusState === "done" ? "agent.note.statusWired"
-      : statusMech === "title" ? "agent.note.titleWaiting"
-      : statusMech === "hook" && card.setup && !caps.status ? "agent.note.statusSetup"
-      : statusMech && statusState !== "unsupported" ? "agent.note.statusAuto"
-      : statusState === "unsupported" ? "agent.note.noStatusSource" : "",
-    action: statusState === "unsupported" ? "" : (card.setup && !caps.status ? "setup" : ""),
-  }));
-
-  // 5 续接 -------------------------------------------------------------------
-  const recResume = agvRecStep(record, "resume");
-  let resumeState;
-  let resumeKind = caps.resumeKind || "";
-  if (recResume) {
-    resumeState = recResume.state;
-    if (recResume.mechanism) resumeKind = recResume.mechanism;
-  } else if (caps.resume) {
-    // 适配器本身就是证据：启动参数由 agent.Defs 统一给，不靠用户再走一遍。
-    resumeState = "done";
-    resumeKind = resumeKind || "exact";
-  } else {
-    resumeState = "unsupported";
-  }
-  steps.push(agvStep("resume", resumeState, {
-    mechanism: resumeKind,
-    source: recResume ? recResume.source : (caps.resume ? "adapter" : ""),
-    evidence: recResume ? recResume.evidence : "",
-    verified: !!(recResume && recResume.verified),
-    noteKey: resumeState === "done" ? "agent.note.resumeBuiltin"
-      : resumeState === "unsupported" ? "agent.note.resumeNotWired" : "",
-    action: "",
-  }));
-
-  // 6 网关 -------------------------------------------------------------------
-  const recGw = agvRecStep(record, "gateway");
-  let gwState = "todo";
-  let gwNote = "";
+  const caps = card.caps || {};
+  const field = agentMainModelField(gwInfo);
+  const gatewayOptions = agentGatewayOptions(field);
+  const current = field ? String(field.value || "") : "";
+  const currentOpt = agentModelOption(field, current);
   const wired = !!(gwInfo && gwInfo.wired);
-  const connectable = gwInfo && typeof gwInfo.connectable === "boolean" ? gwInfo.connectable : null;
-  if (wired) {
-    gwState = "done";
-    gwNote = "agent.note.gatewayWired";
-  } else if (connectable === false) {
-    gwState = "unsupported";
-    gwNote = gwInfo && gwInfo.reasonKey ? gwInfo.reasonKey : "agent.note.gatewayNotConnectable";
-  } else if (!mg.agentsKnown) {
-    gwState = "todo";
-    gwNote = mg.state === "absent" ? "agent.note.magpieAbsent"
-      : mg.state === "stopped" ? "agent.note.magpieStopped"
-      : "agent.note.gatewayUnknown";
-  } else if (!gwInfo) {
-    // 控制面读到了，但没有这个 agent 的行：magpie 没注册它，Perch 不假装能接。
-    gwState = "unsupported";
-    gwNote = "agent.note.gatewayNotManaged";
-  } else if (recGw && recGw.state === "failed") {
-    gwState = "failed";
-    gwNote = "agent.note.gatewayFailed";
-  } else {
-    gwState = "todo";
-    gwNote = "agent.note.gatewayAvailable";
-  }
-  steps.push(agvStep("gateway", gwState, {
-    mechanism: "magpie",
-    source: recGw ? recGw.source : "",
-    errorCode: recGw ? recGw.errorCode : "",
-    evidence: recGw ? recGw.evidence : "",
-    verified: wired,
-    noteKey: gwNote,
-    action: gwState === "todo" ? "connect" : "",
-  }));
+  const hasGatewayModels = gatewayOptions.length > 0;
+  const connectable = !!(gwInfo && gwInfo.connectable !== false && hasGatewayModels);
+  const stateKnown = !!(magpieState && magpieState.agentsKnown);
 
-  // 完整 / 可用 ---------------------------------------------------------------
-  const core = ["detect", "install", "launch", "auth", "status", "resume"];
-  const by = {};
-  for (const s of steps) by[s.key] = s;
-  const coreDone = core.every((k) => by[k].state === "done");
-  let completeKind = null;
-  if (coreDone && by.gateway.state === "done") completeKind = "gateway";
-  else if (coreDone && by.gateway.state === "unsupported") completeKind = "native";
+  let route;
+  if (!card.installed) route = "missing";
+  else if (!caps.launch) route = "no-launch";
+  else if (wired || (currentOpt && agvIsGatewayOption(currentOpt))) route = "gateway";
+  else if (gwInfo && gwInfo.connectable === false) route = "native";
+  else if (gwInfo && gwInfo.source) route = "native";
+  else if (current && !(currentOpt && agvIsGatewayOption(currentOpt))) route = "native";
+  else if (!gwInfo && stateKnown) route = "native"; // 网关读到了，但不管理这个 agent
+  else if (!gwInfo && !stateKnown) route = "unknown"; // 还没读到接线，不冒充“本机已配置”
+  else route = "unconfigured";
 
-  // 互斥分组（一个 agent 只属于一个）。
-  let group;
-  if (!installed) group = "missing";
-  else if (!caps.launch) group = "nolaunch";
-  else if (completeKind === "gateway") group = "complete";
-  else if (completeKind === "native") group = "native";
-  else if (by.status.state === "unsupported" && by.launch.state === "done" && !card.setup) {
-    // 有补救动作的（agy 的 hooks）留在「待处理」，别把用户钉在「仅启动」。
-    group = "launch";
-  }
-  else group = "action";
-
-  const legs = AGENT_LEG_KEYS.map((k) => ({ key: k, state: by[k].state }));
-  const primary = agvPrimary(card, group, steps);
-  const next = primary.step ? by[primary.step] : null;
+  let action = "open";
+  if (!card.installed) action = card.install ? "install" : (card.url ? "docs" : "none");
+  else if (!caps.launch) action = card.url ? "docs" : "none";
 
   return {
-    steps: steps,
-    legs: legs,
-    complete: !!completeKind,
-    completeKind: completeKind,
-    group: group,
-    primary: primary,
-    nextStep: next ? next.key : "",
-    reason: next ? next.noteKey : "",
-    wired: wired,
+    route,
+    labelKey: agvRouteLabelKey(route),
+    modelLabel: agentModelLabel(field, current),
+    modelField: field,
+    modelFieldKey: field ? field.key : "",
+    gatewayOptions,
+    hasGatewayModels,
+    connectable,
+    wired,
+    // magpie 的 menu agent：模型在它自己的菜单里选（ZCode / Cursor Private
+    // Inference 这类），Perch 没有一颗“主模型”字段可以替用户改。
+    ownMenu: !!(gwInfo && gwInfo.menu),
+    canOpen: !!(card.installed && caps.launch),
+    action,
+    currentModel: current,
   };
 }
 
-/* 总览的五个分组（显示顺序）。缺省组不画。 */
-const AGENT_GROUPS = ["complete", "native", "action", "launch", "nolaunch", "missing"];
+/* ---------------------------------------------------------------------------
+   首次启动 / 登录页的识别
+   ---------------------------------------------------------------------------
+   为什么不能只看 cellState：登录页、key 页、首启引导在状态机上都是「在等你」
+   （ask），但它们是**可以安全重开的**；真正的权限框/提问不能杀。所以这里只认
+   已知 agent 的首启标记，命中才允许自动重开。纯函数，输入是终端当前屏的文本行，
+   方便单测；读 xterm 的那一层在 10-term 的 paneSetupKind()。 */
+const AGENT_SETUP_MARKERS = {
+  agy: [
+    // 首启向导：主题 → 条款/数据采集 → 登录失败
+    { kind: "agy-color", re: /Choose your color scheme|Welcome to Antigravity CLI/i },
+    { kind: "agy-tos", re: /Terms of Service\s*&\s*Data Use|I agree to help improve Antigravity CLI/i },
+    // 未接线时 agy 1.4.4 的首屏是「登录方式」菜单（Google OAuth / GCP 项目）。
+    // 这是登录墙，不是任务页；必须认出来，否则接入后无法走首启页的关 PTY 兜底
+    // （实测 2026-10-21：setup 认不出 → 只能 toast “没能停掉这一格”）。
+    { kind: "agy-login", re: /token exchange failed|Press any key to go back|sign in to antigravity/i },
+    // 「登录方式」菜单要**标题 + 具体选项**两样一起认：只凭 "Select login method"
+    // 或 "not signed in" 一句话，用户在聊天里讨论登录时会被误判成首启页。
+    { kind: "agy-login", re: /Select login method[\s\S]{0,300}(Google OAuth|Google Cloud project)/i },
+  ],
+  dsh: [
+    // dsh-tui 的 4 步首启引导（中英两套文案）。注意：**不把单独的
+    // DEEPSEEK_API_KEY 当标记** —— 用户完全可能让 agent 在终端里编辑一个
+    // 含这个字符串的文件；只有引导页的标题/步骤条/启动画面才是强证据。
+    { kind: "dsh-onboarding", re: /欢迎使用\s*dsh-TUI|第\s*\d+\s*\/\s*\d+\s*步|Esc\s*跳过引导/i },
+    { kind: "dsh-onboarding", re: /Welcome to\s*dsh-TUI|Step\s*\d+\s*\/\s*\d+|Esc to skip/i },
+    // 启动画面：profile 刚建好、首启页还没画出来的那一两秒。它是“这一格
+    // 还在启动”，不是用户在干活；重开是安全的。
+    { kind: "dsh-starting", re: /正在启动\s*DSH|Starting\s+DSH/i },
+  ],
+};
 
-/* Node 测试入口；浏览器里 module 不存在，这一段不执行。 */
+function agentSetupKind(agent, lines) {
+  const list = AGENT_SETUP_MARKERS[agent];
+  if (!list || !Array.isArray(lines) || !lines.length) return "";
+  const text = lines.join("\n");
+  for (const m of list) if (m.re.test(text)) return m.kind;
+  return "";
+}
+
+/* 接线成功之后，这一格该怎么办。纯函数，输入只有事实：
+     hasTab     这一格还在不在（活格）
+     setup      agentSetupKind() 的结果
+     state      cellState() 的结果：idle / working / ask / failed / off …
+     openIntent 用户点的是「接入并打开/应用并重开」还是「只接入」
+   返回值：open / reopen / defer / none
+     open    没有活格，替用户开一格
+     reopen  可以安全重开（首启/登录/空闲/已停止）
+     defer   有真正的活或者用户明确说只接入 —— 不动进程
+     none    只接入且没有活格 */
+function agentReopenDecision(o) {
+  o = o || {};
+  if (!o.hasTab) return o.openIntent === false ? "none" : "open";
+  if (o.openIntent === false) return "none";
+  // 首启/登录/启动画面是**屏上的强证据**，不是猜测：这时杀掉重开是安全的。
+  // 真正的任务页不会出现这些标记；若用户已经打字进入对话，标记就消失了，
+  // 下面会按 working/ask 延后。标记表刻意不放单独的 DEEPSEEK_API_KEY 这类
+  // 可能出现在普通终端输出里的弱词。
+  if (o.setup) return "reopen";
+  if (o.state === "working" || o.state === "ask") return "defer";
+  return "reopen";
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    AGENT_STEP_KEYS: AGENT_STEP_KEYS,
-    AGENT_LEG_KEYS: AGENT_LEG_KEYS,
-    AGENT_GROUPS: AGENT_GROUPS,
-    agentIntegrationView: agentIntegrationView,
+    AGENT_ROUTE_KEYS,
+    AGENT_SETUP_MARKERS,
+    agentMainModelField,
+    agentGatewayOptions,
+    agentModelOption,
+    agentModelLabel,
+    agentRouteView,
+    agentSetupKind,
+    agentReopenDecision,
   };
 }

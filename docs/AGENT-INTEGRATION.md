@@ -1,99 +1,107 @@
-# Agent 接入：七步链路与「完整 / 可用」
+# Agent 接入：用户选模型，Perch 不替你选
 
-这份文档回答一个用户会问的问题：**我把一个 agent 装上了、也点开过了，为什么总览还
-说我“没接完”？下一步到底是什么？**
+这份文档回答一个用户会问的问题：**我把一个 agent 装上了，怎么让它用上我想要的模型？**
 
-答案不是一个“完整状态”的开关，而是七步里的每一步各自有记录、有证据。总览和配置
-抽屉读同一份记录（`internal/agentstate`），不再从静态能力表推“完整”。
+答案不是一串必须走完的步骤，也不是 Perch 替你接一个它猜的模型。产品只做两件事：
+把 agent 打开到终端；在你想换模型的时候，把网关引擎给出的模型列表原样放在你面前。
+**选哪个模型是用户的决定。** Perch 不自动选模型，也不自动接通一个用户没点过的网关。
 
-## 七步
+状态、续接、登录是后台能力，不是使用前的关卡：
 
-| 步 | 用户看到的 | 完成证据 |
-|---|---|---|
-| 检测 | 未检测到 | 配置目录或 exe 真实存在（Go 每次现扫） |
-| 安装 | 安装 | 官方 recipe 跑完并重新扫描到 |
-| 启动 | 打开 | 这一格真的起了 PTY（记录 `pane=`） |
-| 就绪 / 登录 | 登录 | `whoami` / 首屏分类 / hooks 给出 ready |
-| 状态 | 状态 | 收到第一条真实状态事件（hook / HTTP / app-server / 扩展） |
-| 续接 | 续接 | 启动参数已接（exact / latest），必要时真实续接过 |
-| 网关 | 接入网关 | magpie 回读 `wired=true`；不支持则如实写 unsupported |
+- 登录在 agent 自己的终端里完成，Perch 不拦、不代填；
+- 状态从已有的 hook / app-server / 扩展 / 本机 HTTP 读取；Perch **不自动写**用户的
+  hooks，也不再要求用户为了“完成接入”去点一次；
+- 续接只在“换模型后重开”这一件事上自动使用（见下），其它时候沿用已有的恢复路径。
 
-每一步的状态是 `todo / doing / done / failed / unsupported / not_applicable`，
-带 `mechanism`、`source`、`errorCode`、`evidence`、`verified`。**“打开过一次”只算
-启动这一步**，不会自动把其余步骤写成完成。
+## 两条使用路径
 
-记录落在 `%APPDATA%\Perch\agent-state.json`，只存分类和短证据，不存 prompt、工具参数、
-key、token 或响应正文。
+### A. 先配置，再打开
 
-## 四种结论
+1. 总览 → Agent 工作台点该 agent 的**模型 chip**（未接入时写「选择模型」）；
+   也可以展开行内详情，从那里进入同一份模型列表；
+2. 点 chip 只展开网关引擎的模型列表，**不写配置、不预选**；
+3. 用户选一个模型，再点「接入并使用此模型」；
+4. 这一下才发 `POST /api/set`。引擎对未接入的 agent 会先 connect，再把用户选的
+   **那个值**写进去 —— 不存在“先接上、再让 Perch 挑一个默认”；
+5. 回读 `/api/state` 确认 `wired=true` 后，行上的开关变绿，主按钮变「打开」；
+   点「打开」进入终端。
 
-- **完整（网关）**：七步全部 done。
-- **可用（原生）**：1–6 步 done，第 7 步 unsupported（例如普通 Cursor CLI 不能被
-  magpie 路由）。用户仍可完整使用，只是不走网关。
-- **待处理**：有可执行的下一步（登录、装状态钩子、接网关…），卡片和抽屉都给出动作。
-- **仅启动 · 无状态源**：产品确实没有这个 agent 的状态来源；给原因、原生入口和说明，
-  不假装完成。
-- **未检测到**：本机没找到；给安装/官方说明。
+### B. 先打开，再换模型
 
-分组是互斥的：一个 agent 只出现在一个组里。旧版按三个独立布尔过滤，会把同一个 agent
-同时列进「完整」和「仅启动」。
+1. 总览点「打开」（或左栏 / `+`）→ 终端格子；
+2. 格子头右侧有一颗模型 chip，显示这一格当前走网关还是本机、模型是什么；
+   点 chip 或按 `Ctrl+Shift+M` 打开同一个可搜索模型列表；
+3. 选中一个模型即写入（agent 级配置）：
+   - 这一格没在跑：保存，下次打开生效；
+   - 这一格空闲：提示「重开并续接」，用户确认后先让旧进程自己 `/exit`，再在
+     **同一个 paneId、同一条会话**上重开；
+   - 这一格忙碌：保存，提示任务结束后重开，**不自动杀进程**。
+4. 取消确认不会丢配置；chip 保持 stale 标记，等用户下次点它再选一次当前模型即可重开。
 
-## 每个 agent 从零怎么走
+「用本机配置打开」在未接入时一直可用：打开不依赖网关，也不会写任何配置。
+接入之后主行动是「打开」（用网关配置启动）；想回本机配置走「断开并还原」，
+引擎会把接入前的配置恢复回去。
 
-| Agent | 状态来源 | 续接 | 网关 | 备注 |
-|---|---|---|---|---|
-| Claude Code | hooks（内置） | exact | magpie | 默认开格即接 |
-| Codex | app-server（内置） | exact | magpie | 默认开格即接 |
-| Pi | 观察扩展（内置） | exact | magpie | 默认开格即接 |
-| OpenCode | 自带 HTTP（内置） | 待补 | magpie | 默认开格即接 |
-| DeepSeek Harness | 官方 hooks 桥（点击接入） | exact | magpie | 未装桥时如实降级，行内给「接入状态」 |
-| Antigravity CLI | 生命周期 hooks（点击接入） | `--conversation` / `--continue` | magpie | 标题不可用（实测是 exe 路径）；hooks 未接时状态为无来源 |
-| Cursor | **无** | `--resume` / `--continue` | **不支持普通 CLI** | 首屏识别登录；网关给出原生路径与 Cursor Private Inference |
-| 其余 CLI | 无（先用标题/无来源审计） | 待审计 | magpie 未注册则不假装 | 卡片给原因和官方说明 |
-| ZCode | 无 | — | — | 只探测，不安装/启动 |
+## 模型是 agent 级的
 
-## Antigravity hooks 细节
+网关引擎的 `/api/set` 不认 pane。同一 agent 的所有格子共享一份配置：
 
-`internal/agy` 只写 `~/.gemini/config/hooks.json` 里的命名条目 `perch-status`：
+- 已经跑着的格子不会热换模型；Perch 把它们标成 stale，提示重开；
+- 新开的格子读到新配置；
+- 总览行、行内详情和终端 chip 读同一份 `/api/state`、用同一个纯函数判断路由，
+  不各写一套。
 
-- 事件：`SessionStart` / `PreInvocation` / `Stop`。
-- **不订阅 `PreToolUse`**：它是权限门，空输出可能改变默认 allow/ask；观察型 hook 不能
-  替用户放行。因此 agy 的“等待批准”仍不可见。
-- 写入前备份；坏 JSON 拒绝覆盖；其它命名条目原样保留。
-- 命令形如
-  `"<perch-hook.exe>" --agy "<hook-events>" SessionStart`，格子归属由
-  `PERCH_AGENT_PANE` 决定（`AgyDef.Prepare` 注入）。
-- `perch-hook --agy` 把 camelCase payload 归一成 `AgySessionStart` / `AgyWorking` /
-  `AgyIdle`，stdout 永远输出 `{}`（不注入、不阻止 Stop）。
-- 全局 hooks 对 Perch 之外的 agy 会话也会运行；没有 `PERCH_AGENT_PANE` 时接收器直接
-  exit 0，不写任何事件。
+## 名单与行内详情
+
+- **总览**的 Agent 工作台只按**装没装**分两组：已安装 / 未安装。已安装行上有
+  模型 chip、接入开关、打开/查看、chevron；点行展开行内详情。
+- 名单 = 本机可安装目录 + 引擎已识别但目录没有的 agent（合并去重）。
+- 行内详情只回答路由和模型。引擎的其它字段收进「高级字段」，不在主路径上。
+- 不可用的动作做灰（`aria-disabled` / 灰颜色），点击给原因；不摆一个点了报 400
+  的按钮，也不把动作藏起来。
+- 详情有输入焦点、模型选择器开着时，后台 2.5s 推送不重画名单；关闭后再补画。
+
+## 错误怎么说
+
+引擎的错误正文可能很长，也可能带配置片段。Perch 只取可分类的那一层，
+并在已知边界上给稳定码（en/zh 都有文案）：
+
+| code | 含义 |
+|---|---|
+| `no_models` | 网关还没有任何模型来源，先去 Providers 添加供应商 |
+| `all_hidden` | 网关有模型，但这个 agent 的列表里一个都没留下 |
+| `runtime_unavailable` | agent 的运行时没起来，先打开再接入 |
+| 普通 HTTP 错误 | 只显示状态码（`gw.httpErrorNoBody`），**绝不把原始正文抛到界面** |
 
 ## 网关边界
 
-- 普通 Cursor CLI：magpie 的 `cursor` agent 只有 `model=auto`，`connect()` 直接返回
-  `Cursor CLI can't be connected to magpie`。Perch 在 POST 之前 preflight，界面给灰按钮
-  + 原因 + 原生路径，不发 400。
-- magpie 没装/没跑：网关腿是「未运行/未安装」，不是 agent 坏了；原生使用不受影响。
-- magpie 没注册这个 agent：网关腿 unsupported，不假装能接。
-- 写操作（接入/断开/改字段）只在用户点击后发生；不静默改用户配置。
+- 普通 Cursor CLI：magpie 的 `cursor` agent 只有 `model=auto`，connect 直接返回
+  `Cursor CLI can't be connected to magpie`。Perch 标成不可接，给原生使用、
+  `cursor-agent login`、Cursor Private Inference 三条路，不发 400。
+- 引擎没跑：网关页显示「引擎未运行」和启动按钮；总览仍可打开已有格子，行内详情
+  仍可用本机配置打开。
+- 引擎没注册这个 agent：行上按本机路由处理，不假装能接。
 
-## 怎么验收（从零）
+## 验收
 
-1. 全新 Windows 用户 / VM，不预置任何 agent 配置。
-2. 在 Perch 里安装 → 打开 → 看卡片是否从「已安装」走到「下一步：登录/接入状态」。
-3. agy：点击「接入状态」→ `hooks.json` 出现 `perch-status` → 重新打开一格 →
-   完成登录 → 第一条 `PreInvocation` 后状态腿变成 hooks。
-4. Cursor：打开后首屏是登录页 → 记录 `needs-login` → 登录后 `cursor-agent whoami`
-   给出 ready → 网关腿保持「不支持」并给原生路径。
-5. magpie 未安装/未运行/不支持/可接四种情况分别验一遍。
-6. 重启 Perch：记录还在，卡片仍显示上次走到哪一步。
+1. 未安装的 agent 只出现在「未安装」组；点安装按钮能装，装完名单立即重扫。
+2. 总览 Agent 工作台点一行展开行内详情；点「打开」直接进终端，不写配置。
+3. 未接入且有网关模型的 agent：模型 chip 打开列表，没有预选项；选中前没有写入；
+   点「接入并使用此模型」后 `/api/state` 回读 wired=true 且模型就是用户选的那个。
+4. 「用本机配置打开」在未接入时可用，且不改变任何配置。
+5. 终端 chip 显示当前模型；`Ctrl+Shift+M` 打开同一个列表。
+6. 空闲格子换模型 → 出现「重开并续接」确认；取消则不重开；确认后旧进程走 `/exit`，
+   新格子同 paneId、exact 会话。
+7. 忙碌格子换模型 → 只提示保存成功，不出现确认、不发退出、不杀进程；
+   chip 标 stale，任务结束后再选当前模型可重开。
+8. `/api/set` 返回 `no_models` / `all_hidden` / `runtime_unavailable` 时显示本地化原因，
+   不出现原始响应正文。
+9. 切 en/zh：工作台行、行内详情、chip、toast、错误文案齐全
+   （`node scripts/i18n-check.mjs`）。
+10. 重启 Perch：名单、路由、模型仍来自最新 `/api/state`；没有任何“接入进度”文件。
 
 ## 已知边界
 
-- 标题不是 agy/Cursor 的状态源：实测 agy 的 OSC 标题是可执行文件路径，Cursor 的
-  `cursor ready` / `cursor - action required` 是 Orca 用 hooks 合成的，不是 CLI 原生输出。
-  产品不把这两者写成 Title 能力。
-- Cursor 的会话 id 目前没有可靠来源，跨重启的精确 `--resume <id>` 仍待补；`--continue`
-  参数已接。
-- agy 的等待批准不可见（见上）。
-- 无状态源的 agent 不可能“完整”；产品只承诺说清原因、原生入口和下一步。
+- 标题是弱信号；它只影响忙闲显示，不影响模型选择或能否使用。
+- 没有状态源的 agent 仍然可以打开、登录、使用；Perch 不把它写成“接入完成”。
+- 模型列表由网关引擎提供。引擎没提供的 agent，Perch 不虚构一个可选列表。

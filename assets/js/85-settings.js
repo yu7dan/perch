@@ -679,6 +679,10 @@ function onLocaleChanged() {
   // 池子错误横幅的文字来自后端 code（60-shell.js 的 poolErrText）。
   if (typeof syncPoolBanner === "function") syncPoolBanner();
   // 格子头：默认标题、关闭键 title、换 Agent 的 aria/title、状态点 aria-label。
+  if (typeof renderPaneModel === "function") renderPaneModel();
+  if (typeof renderAgentDrawer === "function" && typeof AC_ID !== "undefined" && AC_ID) {
+    renderAgentDrawer();
+  }
   if (typeof TAB_LIST !== "undefined") {
     for (const tab of TAB_LIST) {
       if (typeof renderTabTitle === "function") renderTabTitle(tab);

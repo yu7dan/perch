@@ -70,6 +70,13 @@ var codexPortRe = regexp.MustCompile(`ws://127\.0\.0\.1:(\d+)`)
 
 func codexDef() Def {
 	d := GenericDef("codex")
+	// Codex builds its HTTP originator from the terminal program (we set
+	// TERM_PROGRAM=perch for truthful terminal identity), and magpie's
+	// per-agent usage reads that originator. Without this override every
+	// Codex request is filed under "perch" instead of "codex". The variable
+	// is Codex's own escape hatch (present in codex.exe 0.163.0); it only
+	// changes the client name, not routing or auth.
+	d.Env = map[string]string{"CODEX_INTERNAL_ORIGINATOR_OVERRIDE": "codex"}
 	d.Args = func(r ResumeIntent, _ string) []string {
 		switch r.Kind {
 		case "latest":
@@ -161,7 +168,9 @@ func startCodexAppServer(tag, cwd, digest string) (*exec.Cmd, chan error, int, e
 		cmd.Dir = cwd
 	}
 	// 和 PTY 里那份环境一致：不继承 CLAUDE*、终端身份由我们声明。
-	cmd.Env = BuildEnv(nil)
+	// 还要固定 Codex 的 originator：模型请求是 app-server 发的，不是 TUI；
+	// 只给 TUI 设覆盖的话，usage 仍会被记成 "perch"（见 codexDef 的注释）。
+	cmd.Env = BuildEnv(map[string]string{"CODEX_INTERNAL_ORIGINATOR_OVERRIDE": "codex"})
 	// 同一个 job：Perch 一退，server 跟着退（见 job_windows.go）。
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 

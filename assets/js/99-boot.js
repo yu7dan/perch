@@ -7,8 +7,7 @@
 
 $("dash-refresh").addEventListener("click", () => {
   sendCtrl({ type: "lib.reload" });
-  sendCtrl({ type: "magpie.refresh" });
-  sendCtrl({ type: "log", msg: "总览 点刷新 → lib.reload + magpie.refresh" });
+  sendCtrl({ type: "log", msg: "总览 点刷新 → lib.reload" });
 });
 
 // 点「在等你」的一行 = 回到工作区 + 跳到那一格。
@@ -29,15 +28,10 @@ $("dash-heat").addEventListener("mouseover", (e) => {
   if (!tip) return;
   const v = +cell.dataset.v || 0;
   const extra = +cell.dataset.x || 0;
-  const metric = cell.dataset.metric;
   tip.innerHTML = `<b>${cell.dataset.day}</b><span>` +
-    (metric === "calls"
-      ? (v ? tCount("dash.heat.tip.calls", v, { n: dashNum(v) }) +
-          (extra ? t("dash.heat.tip.failed", { n: dashNum(extra) }) : "")
-        : esc(t("dash.heat.tip.noCalls")))
-      : (v ? tCount("dash.heat.tip.turns", v,
-        { n: dashNum(v), sessions: dashNum(extra) }) :
-        esc(t("dash.heat.tip.noActivity")))) + `</span>`;
+    (v ? tCount("dash.heat.tip.turns", v,
+      { n: dashNum(v), sessions: dashNum(extra) }) :
+      esc(t("dash.heat.tip.noActivity"))) + `</span>`;
   tip.hidden = false;
   const card = cell.closest(".console-main").getBoundingClientRect();
   const r = cell.getBoundingClientRect();
@@ -82,6 +76,9 @@ if (pendingShell) {
   applyShell(p);
 }
 renderLive();
+// 模型 chip 也在这时画第一帧：它要读 gwInfoFor/GW_AGENTS，而那两个在
+// 87/89 求值前都还不存在（setActive 的启动调用被 RSB_READY 挡住了）。
+if (typeof renderPaneModel === "function") renderPaneModel();
 // 首帧之后留一条**读数**（不是"应该没问题"）：几个模块各自拿到了什么、
 // 徽标几个。它同时也是一条"整段脚本跑到底了"的证据 ——
 // 这行在文件最后一行，页面要是白屏，这条就不会出现。

@@ -16,13 +16,12 @@ perch/
 ├── internal/
 │   ├── agent/                agent 适配器运行时（Def / Host / Codex / Pi / OpenCode）
 │   ├── agentcatalog/         身份、元数据、安装配方、LaunchIDs、Defs()、Cards()
-│   ├── agentstate/           每个 agent 的七步接入记录（%APPDATA%\Perch\agent-state.json）
-│   ├── agy/                  Antigravity CLI 的全局 hooks.json 接入（perch-status）
+│   ├── agy/                  Antigravity CLI 的 hooks.json 探测（perch-status）
 │   ├── appdir/               Perch 配置目录、Claude 状态根、Documents\Perch
 │   ├── ctl/                  ctl 协议、按域拆分的 handlers、ShellPayload、关窗守卫
 │   ├── dsh/                  DeepSeek Harness 的 dsh-tui profile / 官方 hook 桥接入
 │   ├── files/                只读 fs.list / fs.read 与路径护栏
-│   ├── gateway/              magpie 快照/客户端/更新/内嵌页反代/Agent 接线
+│   ├── gateway/              内置引擎管理、供应商 API、agent 接线、用量快照
 │   ├── history/              Claude 会话索引、活动、历史尾部
 │   ├── install/              安装器引擎（配方数据来自 agentcatalog）
 │   ├── panes/                PaneStore 持久化（独立、无 session 依赖）
@@ -84,8 +83,11 @@ uimsg      ──> 标准库
 - `internal/ctl/protocol.go`：`Msg` 的字段与 JSON tag 就是前后端契约；改字段等于改协议。
 - `internal/ctl/server.go`：连接循环、每条连接自己的 `tabReqCache`（`tab.new` 去重/重放）、
   推送连接、`CloseGuard`。流在 Wails 的 `HandleStream` 里创建，必须早于前端连接和 `tab.ok`。
-- `internal/ctl/handlers_*.go`：42 个消息类型按域分组——tabs / files / gateway / install /
-  settings / projects / window / misc。新增消息放进对应域，不要回填成一个大 switch。
+- `internal/ctl/handlers_*.go`：控制消息按域分组——tabs / files / gateway（供应商
+  目录/保存/测试、用量周期、agent 接线）/ install / settings / projects / window / misc。
+  新增消息放进对应域，不要回填成一个大 switch。`server.go` 的类型列表是显式白名单：
+  handler 里有 case 还不够，消息类型没加进白名单就会被静默丢掉（`gw.usage` 在
+  2026-10-22 就漏过一次）。
 - `internal/ctl/payload.go`：`ShellPayload` 的组合（history + project + settings + gateway
   snapshot + titles），以及 `poolReply` / `bootAgentCards` / `settingsWire` 这些只在协议层
   成立的拼装。`history` 只负责扫描，聚合在 ctl。
@@ -103,7 +105,7 @@ uimsg      ──> 标准库
    `Def` 会解析可执行文件，顺序不能倒。
 3. gateway / install / transcript / files / Wails app / ctl.Server 依次构造；
    `ctl` 的 `CreateTab` 闭包负责**先** `app.HandleStream`、再返回 tab。
-   gateway 建好后组合根调用 `mgr.SetWireLaunch(gw.Launch)`：magpie 的
+   gateway 建好后组合根调用 `mgr.SetWireLaunch(gw.Launch)`：引擎的
    `/api/state` 对 agy 这类 agent 给一条 `launch` 命令，gateway 只解析其中
    固定形状的 `GEMINI_API_KEY` / `GOOGLE_GEMINI_BASE_URL` / `--model`，
    开格时由 `agent.AgyDef` 取用；`agent` 不认识 gateway，方向不变。
@@ -122,18 +124,20 @@ panes、Job Object 早于 Wails/PTY、watcher 先同步扫一次再 Probe、`Win
 ## 边界与数据
 
 - **Perch 的设置只放自己的偏好**（默认目录、终端外观、确认、启动落点），落
-  `%APPDATA%\Perch\settings.json`。agent 的模型/网关/权限留在 magpie 的 `/api/state`，不互抄。
-  Go 是默认目录与设置的唯一事实；前端 `localStorage` 只做首帧缓存。
-- **使用层只收 CLI agent**。没有安装配方不等于桌面应用；桌面客户端由 magpie 管理，
-  Perch 只透传/只读，不安装、不启动、不停止桌面 magpie。
-- API key、账号密钥、提示词原文不进日志、不回显、不落盘；供应商表单只把 key 交给 magpie。
-  断开预览进 DOM 前把 `TOKEN/KEY/SECRET/PASSWORD` 打码，日志只记 agent 与字段名。
-- 网关页不手写 magpie 页面：`gateway/ui.go` 在 127.0.0.1 固定端口段反代，key 逐请求注入；
-  本地监听用一次性 token 换 cookie，其他进程拿不到 token 会得到 403。
-  内嵌页只保留网关导航（供应商/路由/网关/用量/插件），Agents / Sessions / Library /
-  Settings 在反代层裁掉 —— 它们与 Perch 的总览、Agent 重复。
+  `%APPDATA%\Perch\settings.json`。agent 的模型/网关/权限由内置引擎的 `/api/state`
+  给出，Perch 不另存一份。Go 是默认目录与设置的唯一事实；前端 `localStorage` 只做首帧缓存。
+- **使用层只收 CLI agent**。没有安装配方不等于桌面应用；桌面客户端属于网关层，
+  Perch 不安装、不启动。
+- API key、账号密钥、提示词原文不进日志、不回显、不落盘；供应商表单只把 key 交给
+  本机引擎，前端只拿 `configured/masked/status`。断开预览进 DOM 前把
+  `TOKEN/KEY/SECRET/PASSWORD` 打码，日志只记 agent 与字段名。
+- 总览是工作台，网关是模型来源（2026-10-22 定）：Agent 的安装/打开/选模型/接入/
+  行内详情都在总览；`assets/js/87-gateway.js` 只放引擎状态、已添加供应商、供应商
+  目录和右侧编辑器；用量卡挂在总览右栏，数据来自 `internal/gateway/usage.go`。
+- 两个页面都是 Perch 原生页面：引擎的 Web UI 不加载、不反代、不暴露给前端；
+  控制面只绑回环，供应商/模板/agent/用量都由 Go 归一化后再给前端。
 - 安装器只在用户明确点击后运行；下载物当不可信数据处理，装进 Perch 自己的目录，
-  不就地执行。安装完成顺序：先 `install.done`，再 `OnInstalled("magpie")` 触发网关接入。
+  不就地执行。安装完成先 `install.done`，再刷新本地 agent 名单。
 
 ## 验证
 

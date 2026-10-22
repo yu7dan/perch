@@ -1,5 +1,5 @@
 "use strict";
-/* 86-dash.js —— 总览（读数、热力图、实时、在等你、Agent 名单）。
+/* 86-dash.js —— 总览（本地读数、热力图、在等你、Agent 名单）。
    网关在 87-gateway.js（2026-10-17 拆出，2026-10-20 合回一个域文件）：
    本文件只做总览，别再往这里放网关代码。
    本文件是 index.html 里按序 defer 的一段 classic script；所有文件共享同一个全局词法作用域，
@@ -16,49 +16,36 @@ try {
 } catch { /* 存不了就用默认 */ }
 
 
-/* 热力图口径：轮次来自 Perch 自己的会话库，请求来自 magpie 的网关。
-   两套数据放在同一副 53 周骨架上，用户切一下就能对照"我干了多少"和"网关替我发了多少"。 */
-let heatMetric = "turns";
-try {
-  const k = localStorage.getItem("perch.heatMetric");
-  if (k === "turns" || k === "calls") heatMetric = k;
-} catch { /* 存不了就用默认 */ }
+/* 热力图只读 Perch 自己的会话库（轮次 / 会话数）。网关的请求与 token
+   读数在网关页的用量标签里，不再混进总览 —— 两套事实分开说话。 */
 
-/* MAGPIE：最近一次网关快照（见 magpie.go）。null = 后端还没交付，
-   这时不画"0"，画 "—" —— 零和"没数据"是两件不同的事。 */
+/* MAGPIE：最近一次引擎快照（见 internal/gateway）。null = 后端还没交付。
+   Agent 工作台 / 用量卡要用它；本地读数不依赖它。 */
 let MAGPIE = null;
-let MG_SIG = "";      // 热力图口径用的指纹（避免每 2.5s 重画 371 个格子）
-let MG_CAT_SIG = "";  // Agent 名单指纹（安装状态/今日流量变了才重画）
+let MG_CAT_SIG = "";    // Agent 名单指纹（只算安装身份，不算今日 calls）
+let MG_USAGE_SIG = "";  // 今日用量的指纹（变了才重画用量卡）
+let MG_GW_SIG = "";     // 网关「供应商 · 模型」指纹（只重画表头那一行）
+
+/* 总览的网关用量卡。today 用 MAGPIE.todayUsage（2.5s 快照），
+   7d/30d/all 走 gw.usage 按需读；缓存按周期分开。 */
+const DASH_USAGE_PERIODS = ["today", "7d", "30d", "all"];
+let DASH_USAGE_PERIOD = "today";
+try {
+  const p = localStorage.getItem("perch.usagePeriod");
+  if (DASH_USAGE_PERIODS.includes(p)) DASH_USAGE_PERIOD = p;
+} catch { /* 存不了就今天 */ }
+let DASH_USAGE_METRIC = "agents"; // agents | models
+let GW_USAGE = Object.create(null);
+let GW_USAGE_ERR = null;
+let GW_USAGE_LOADING = "";
+let GW_USAGE_REQ = 0;
+let GW_USAGE_TIMER = 0;
+let GW_AGENT_BUSY = "";           // 行上接入/写模型中
+let AGENT_RENDER_PENDING = false; // 选择器开着时推迟名单重画
 
 
 function mg() {
   return MAGPIE && MAGPIE.state ? MAGPIE : null;
-}
-function mgLive() {
-  const m = mg();
-  return !!(m && m.state === "running");
-}
-function mgCompact(n) {
-  n = Number(n) || 0;
-  if (n >= 1e9) return (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + "B";
-  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M";
-  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + "k";
-  return String(Math.round(n));
-}
-function mgPromptOf(u) {
-  return (u.input || 0) + (u.cache_read || 0) + (u.cache_write || 0);
-}
-function mgSpeed(u) {
-  if (!u || !u.decode_ms) return "—";
-  return (u.decode_out / (u.decode_ms / 1000)).toFixed(0);
-}
-function mgTTFT(u) {
-  if (!u || !u.timed) return "—";
-  return Math.round(u.ttft_ms / u.timed) + "ms";
-}
-function mgCacheRate(u) {
-  const p = mgPromptOf(u || {});
-  return p ? Math.round((100 * (u.cache_read || 0)) / p) : null;
 }
 /* 图标 resolver：照搬 magpie 的 icon()（app.js:285-321）——
    名字带 -color 或是已知位图 → <img>（图标自带颜色，直接给扩展名）；
@@ -73,6 +60,7 @@ function isPngIcon(nm) {
   switch (nm) {
     case "crush": case "zcode": case "alma": case "hanako": case "cindy":
     case "typesafe": case "atomcode": case "snow": case "mlx-serve":
+    case "app-alma": case "app-cc-switch": case "rtk":
       return true;
   }
   return false;
@@ -91,11 +79,7 @@ function iconHTML(name, cls) {
   return `<span class="ico-mask${c}" aria-hidden="true" ` +
     `style="-webkit-mask-image:url('${url}');mask-image:url('${url}')"></span>`;
 }
-function magpieLogo(cls) {
-  const c = " " + (cls || "");
-  return `<span class="ico-mask${c}" aria-hidden="true" style="-webkit-mask-image:url('icons/magpie.svg');mask-image:url('icons/magpie.svg')"></span>`;
-}
-/* 图标文件缺失（例如 magpie 报了一个我们没有的 icon id）时不要留 404 空白。
+/* 图标文件缺失（例如引擎报了一个我们没有的 icon id）时不要留 404 空白。
    img 的 error 事件不冒泡，所以在 document 的捕获阶段接住，换成带底色的「?」。 */
 document.addEventListener("error", (e) => {
   const img = e.target;
@@ -211,7 +195,7 @@ function setNavView(view) {
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     renderDashboard("进入总览");
   } else if (view === "settings") {
-    // 配置抽屉属于总览的 Agent 名单；离开总览就收起（见 89-agent-cfg.js）。
+    // 行内详情属于总览的 Agent 名单；离开总览就收起（见 89-agent-cfg.js）。
     if (typeof acClose === "function") acClose();
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     // 先按缓存画（第一帧不空），同时问 Go 要权威值（默认目录是不是还在盘上
@@ -254,9 +238,8 @@ function renderDashTabs() {
   slideThumb(seg);
 }
 
-/* 六个读数：左边两格是 Perch 自己的（在跑 / 轮次），右边四格是网关的
-   （请求 / 缓存 / 上下文 / 速度）。没有数据时写 "—" —— 0 是一个读数，
-   "网关没开"是另一件事，两者不能长成一个零。 */
+/* 四个读数全部来自 Perch 自己的会话库与格子状态：在跑 / 今日轮次 /
+   会话总数 / 活跃日。网关的请求与 token 读数在网关页，不在总览重复。 */
 function renderDashKpis() {
   const host = $("dash-kpi");
   if (!host) return;
@@ -274,55 +257,22 @@ function renderDashKpis() {
   const running = live.filter((t) => !t.connDown).length;
   const need = needModel();
 
-  const m = mg(), on = mgLive();
-  const mt = (m && m.today) || {}; // magpie 的今日读数；别叫 today，上面有日期
-  const ctx = (m && m.context) || {};
-  const cache = on ? mgCacheRate(mt) : null;
-  const ctxPct = ctx.window ? Math.round((100 * ctx.prompt) / ctx.window) : null;
-  const ctxSub = ctx.window
-    ? `${mgCompact(ctx.prompt)} / ${mgCompact(ctx.window)} · ${ctx.model || ""}`
-    : on ? (ctx.model
-        ? t("dash.kpi.windowUnknown", { model: ctx.model })
-        : t("dash.kpi.noRequests"))
-      : t("dash.kpi.gatewayDown");
-  const failSub = on
-    ? (mt.retried
-        ? t("dash.kpi.failedRetried", { n: dashNum(mt.errors || 0), retried: dashNum(mt.retried) })
-        : t("dash.kpi.failed", { n: dashNum(mt.errors || 0) }))
-    : t("dash.kpi.gatewayDown");
-  const cacheSub = on
-    ? t("dash.kpi.cacheSub", {
-        read: mgCompact(mt.cache_read || 0),
-        prompt: mgCompact(mgPromptOf(mt)),
-      })
-    : t("dash.kpi.gatewayDown");
-
-  const kpi = (n, label, sub, bad) =>
+  const kpi = (n, label, sub) =>
     `<div class="ck"><b>${n}</b><span>${label}</span>` +
-    `<small${bad ? ' class="bad"' : ""}>${esc(sub)}</small></div>`;
+    `<small>${esc(sub)}</small></div>`;
   host.innerHTML =
     kpi(tCount("dash.kpi.panes", running), t("dash.kpi.running"),
       tCount("dash.kpi.runningSub", live.length, { panes: live.length, need: need.wait.length })) +
     kpi(dashNum(todayN), t("dash.kpi.turnsToday"),
       t("dash.kpi.turnsSub", { week: dashNum(week), days: act.length })) +
-    kpi(on ? mgCompact(mt.calls || 0) : "—", t("dash.kpi.requestsToday"), failSub, on && mt.errors > 0) +
-    kpi(cache == null ? "—" : cache + "%", t("dash.kpi.cacheHit"), cacheSub) +
-    kpi(ctxPct == null ? "—" : ctxPct + "%", t("dash.kpi.context"), ctxSub) +
-    kpi(on ? mgSpeed(mt) : "—", t("dash.kpi.outputSpeed"),
-      on ? t("dash.kpi.avgFirstToken", { ttft: mgTTFT(mt) }) : t("dash.kpi.gatewayDown"));
+    kpi(dashNum(sess.length), t("dash.kpi.sessions"), t("dash.kpi.sessionsSub")) +
+    kpi(dashNum(act.length), t("dash.kpi.activeDays"), t("dash.kpi.activeDaysSub"));
 }
 
 /* 53 周 × 7 天。周一在最上、月份在顶行 —— 和 magpie 的 Usage 热力图同一副骨架。
    所有格子用**显式 grid-column/grid-row** 摆位：月份标签和日期格在同一张 grid 里，
-   靠自动排布会把它们挤到同一行。
-   两种口径（轮次 / 请求）共用这一张骨架：切 tab 只换数据，不换版式。 */
+   靠自动排布会把它们挤到同一行。数据只有一种口径：Perch 会话库里的轮次。 */
 function heatPoints() {
-  if (heatMetric === "calls") {
-    const m = mg();
-    return (m?.series || []).map((x) => ({
-      day: x.day, v: x.calls | 0, extra: (x.errors | 0),
-    }));
-  }
   return (STATE?.activity || []).map((a) => ({
     day: a.day, v: a.turns | 0, extra: a.sessions | 0,
   }));
@@ -358,7 +308,6 @@ function renderHeat() {
       el.className = "lv" + lv(v);
       el.dataset.v = String(v);
       el.dataset.x = String(a ? a.extra : 0);
-      el.dataset.metric = heatMetric;
     }
   } else {
     const WD = [t("dash.wd.mon"), "", t("dash.wd.wed"), "", t("dash.wd.fri"), "", t("dash.wd.sun")];
@@ -387,7 +336,7 @@ function renderHeat() {
         const a = byDay.get(k);
         const v = a ? a.v : 0;
         html += `<i class="lv${lv(v)}" style="${st}" data-day="${k}"` +
-          ` data-v="${v}" data-x="${a ? a.extra : 0}" data-metric="${heatMetric}"></i>`;
+          ` data-v="${v}" data-x="${a ? a.extra : 0}"></i>`;
       }
     }
     grid.innerHTML = html;
@@ -399,100 +348,14 @@ function renderHeat() {
 
   const sub = $("dash-heat-sub");
   if (sub) {
-    if (heatMetric === "calls") {
-      const m = mg();
-      const calls = pts.reduce((n, p) => n + p.v, 0);
-      sub.textContent = !m
-        ? t("dash.heat.pending")
-        : m.state !== "running"
-          ? t("dash.heat.down")
-          : pts.some((p) => p.v > 0)
-            ? tCount("dash.heat.callsSub", calls, {
-                total: dashNum(calls),
-                days: pts.filter((p) => p.v > 0).length,
-              })
-            : t("dash.heat.noCalls");
-    } else {
-      const total = (STATE?.sessions || []).reduce((n, s) => n + (s.turns | 0), 0);
-      sub.textContent = pts.length
-        ? tCount("dash.heat.turnsSub", total, {
-            total: dashNum(total),
-            days: pts.filter((p) => p.v > 0).length,
-          })
-        : t("dash.heat.noTurns");
-    }
+    const total = (STATE?.sessions || []).reduce((n, s) => n + (s.turns | 0), 0);
+    sub.textContent = pts.length
+      ? tCount("dash.heat.turnsSub", total, {
+          total: dashNum(total),
+          days: pts.filter((p) => p.v > 0).length,
+        })
+      : t("dash.heat.noTurns");
   }
-}
-
-/* 今日 token 构成：缓存读 / 输入 / 输出 / 缓存写，四段一条。
-   缓存读占绝大多数是常态（agent 每轮都复用前缀），分开一色才看得出用量花在哪。 */
-function renderDashMix() {
-  const bar = $("dash-mix-bar"), leg = $("dash-mix-legend");
-  if (!bar || !leg) return;
-  const m = mg(), on = mgLive();
-  const today = on ? (m?.today || {}) : {};
-  const segs = [
-    { k: "cache", label: t("dash.mix.cache"), v: today.cache_read || 0 },
-    { k: "input", label: t("dash.mix.input"), v: today.input || 0 },
-    { k: "output", label: t("dash.mix.output"), v: today.output || 0 },
-    { k: "write", label: t("dash.mix.write"), v: today.cache_write || 0 },
-  ];
-  const total = segs.reduce((n, s) => n + s.v, 0);
-  const sub = $("dash-mix-sub"), cost = $("dash-mix-cost");
-  if (sub) {
-    sub.textContent = !m ? t("dash.mix.pending")
-      : !on ? t("dash.kpi.gatewayDown")
-      : total ? t("dash.mix.total", { n: mgCompact(total) }) : t("dash.mix.noUsage");
-  }
-  if (cost) cost.textContent = on && (today.cost || 0) > 0
-    ? t("dash.mix.cost", { n: today.cost.toFixed(2) })
-    : "";
-  bar.innerHTML = total
-    ? segs.filter((s) => s.v > 0).map((s) =>
-        `<i class="${s.k}" style="flex:${s.v} 0 0" title="${s.label} ${mgCompact(s.v)}"></i>`).join("")
-    : `<i class="input" style="flex:1"></i>`;
-  // 输出通常只占零点几个百分点；四舍五入成「0%」会像是在说"没有输出"。
-  const share = (v) => !total || v === 0 ? "0%"
-    : (100 * v / total) >= 10 ? Math.round(100 * v / total) + "%"
-    : (100 * v / total).toFixed(1) + "%";
-  leg.innerHTML = total
-    ? segs.map((s) => `<span><i class="${s.k}"></i>${s.label} <b>${mgCompact(s.v)}</b>` +
-        `<em>${share(s.v)}</em></span>`).join("")
-    : `<span>${esc(t("dash.mix.empty"))}</span>`;
-}
-
-/* 最近请求的耗时形状：旧 → 新，一根一根柱；红柱是失败。
-   「实时」那列给的是每条的字（agent / model / ms），这里给的是**形状**——
-   同一批元数据，不读 prompt。 */
-function renderDashLat() {
-  const host = $("dash-lat-bars");
-  if (!host) return;
-  const m = mg(), on = mgLive();
-  const rows = on ? (m?.recent || []).slice(0, 16) : [];
-  const good = rows.filter((r) => (r.status | 0) < 400);
-  const avg = good.length
-    ? Math.round(good.reduce((n, r) => n + (r.ms | 0), 0) / good.length) : 0;
-  const sub = $("dash-lat-sub");
-  if (sub) {
-    sub.textContent = !m ? t("dash.mix.pending")
-      : !on ? t("dash.kpi.gatewayDown")
-      : rows.length
-        ? t("dash.lat.sub", { n: rows.length, ms: dashNum(avg) })
-        : t("dash.lat.noRequests");
-  }
-  if (!rows.length) {
-    host.innerHTML = `<span class="lat-empty">${esc(t("dash.live.empty"))}</span>`;
-    return;
-  }
-  const max = Math.max(1, ...rows.map((r) => r.ms | 0));
-  host.innerHTML = rows.slice().reverse().map((r) => {
-    const bad = (r.status | 0) >= 400;
-    const h = Math.max(2, Math.round(44 * (r.ms | 0) / max));
-    const at = (r.t || "").slice(11, 19);
-    return `<i class="${bad ? "bad" : ""}" style="height:${h}px" title="${esc(at)} · ` +
-      `${esc(r.agentName || r.agent || "")} · ${esc(r.model || r.served || "")} · ` +
-      `${bad ? "HTTP " + (r.status | 0) : dashNum(r.ms) + "ms"}"></i>`;
-  }).join("");
 }
 
 /* 顶部是**工作区入口**，不是网关状态条。
@@ -588,12 +451,6 @@ function renderDashNeed() {
 let INSTALLS = Object.create(null);
 let INSTALL_AT = "";
 
-/* "有没有下载"是用户 2026-10-17 定的分界线：已检测到的按「接没接进 Perch」
-   分成两组；没检测到的收进 magpie 那个样式的折叠栏里。
-   2026-10-19 用户把默认改成了**展开**：收起时页面底部会空一截，先让用户
-   看到完整清单；要收起是他们自己的动作（同一个会话里不会被重画弹回去）。 */
-let agentsFoldOpen = true;
-
 /* 当前 magpie 那份读数（给接入模型）。“读到了 agent 列表”与“网关在不在”
    是两件事：前者决定能不能说「magpie 不支持它」，后者决定去不去设置。
    GW_AGENTS 在 89-agent-cfg.js 里声明；本函数只在启动闸打开后被调用。 */
@@ -605,205 +462,542 @@ function dashMagpieState() {
   };
 }
 
-/* 一行的接入视图。所有判断都在 08-agent-model.js 的纯函数里 —— 这里只把
-   三份外部事实拼起来：名单（探测）、magpie 的接线行、落盘的接入记录。 */
-function dashAgentView(a) {
-  const gw = typeof gwInfoFor === "function" ? gwInfoFor(a.id) : null;
-  return agentIntegrationView(a, gw, AGENT_STATE[a.id] || null, dashMagpieState());
+/* 一行的最小视图：探测 + 控制面接线 + 当前模型。所有判断在 08-agent-model.js。 */
+function dashAgentView(card) {
+  const gw = typeof gwInfoFor === "function" ? gwInfoFor(card.id) : null;
+  return agentRouteView(card, gw, dashMagpieState());
 }
 
-/* 主行动 → 一颗按钮。动作名来自模型，不在这里重新判断“该不该出现”。 */
-function dashAgentAction(a, v, busy) {
-  const name = a.name || "";
-  const id = esc(a.id);
-  if (busy) {
-    const inst = INSTALLS[a.id];
-    return `<span class="st">${esc(inst.phase === "scanning"
+/* 名单 = 可安装的 catalog + 引擎已识别但 catalog 没有的 agent。
+   后者没有安装信息，但仍然能在行上接入、选模型、看字段。 */
+function dashAgentMerged() {
+  const m = mg();
+  const cat = (m && m.catalog) || [];
+  const rows = Array.isArray(GW_AGENTS) ? GW_AGENTS : [];
+  const by = new Map();
+  for (const c of cat) {
+    by.set(c.id, { card: c, gw: null, installed: !!c.installed, engineOnly: false });
+  }
+  for (const a of rows) {
+    const x = by.get(a.id);
+    if (x) {
+      x.gw = a;
+      x.installed = true;
+      continue;
+    }
+    by.set(a.id, {
+      card: {
+        id: a.id, name: a.name || a.id, icon: a.icon || "",
+        vendor: a.vendor || "", path: a.path || "",
+        installed: true, caps: {},
+      },
+      gw: a, installed: true, engineOnly: true,
+    });
+  }
+  return [...by.values()];
+}
+
+/* 子行返回的是 HTML（不是纯文本）：运行中的格子要在「运行中」前面带一颗绿点，
+   但仍然要把厂商/路径转义。名单位置由调用方直接拼。 */
+function dashAgentSub(x) {
+  const { card, gw } = x;
+  const detail = card.vendor || gw?.vendor || card.path || gw?.path || "";
+  if (!x.installed) return esc(detail);
+  const live = typeof liveAgentTab === "function" ? liveAgentTab(card.id) : null;
+  return esc(detail) + (live
+    ? `${detail ? " · " : ""}<i class="ag-live" aria-hidden="true"></i>${esc(t("dash.agents.running"))}`
+    : "");
+}
+
+/* 行上的模型 chip 空间有限：网关路由的标签常带引擎前缀
+   （magpie/deepseek/deepseek-flash）。前缀在总览上下文里没有信息量，
+   去掉它再显示；完整标签留在 title 里。 */
+function dashModelShort(label) {
+  const s = String(label || "");
+  return /^magpie\//i.test(s) ? s.slice(7) : s;
+}
+
+function dashModelChipHTML(x) {
+  const { card, v } = x;
+  if (!v) return "";
+  const ga = typeof gwInfoFor === "function" ? gwInfoFor(card.id) : null;
+  if (ga && ga.connectable === false) {
+    return `<span class="ag-model no" title="${esc(t("dash.agents.notConnectableHint"))}">` +
+      `${esc(t("dash.agents.notConnectable"))}</span>`;
+  }
+  if (v.ownMenu) {
+    return `<span class="ag-model own" title="${esc(t("dash.agents.modelInMenuHint"))}">` +
+      `${esc(t("dash.agents.modelInMenu"))}</span>`;
+  }
+  if (!v.hasGatewayModels) {
+    return `<button type="button" class="ag-model none" data-gwlink` +
+      ` title="${esc(t("dash.agents.noModelsHint"))}">${esc(t("dash.agents.noModels"))}</button>`;
+  }
+  if (!v.modelField) return "";
+  const full = v.modelLabel || (v.wired ? t("dash.agents.wiredNoModel") : t("dash.agents.chooseModel"));
+  const label = dashModelShort(full);
+  const hint = t("dash.agents.modelHint", { name: card.name || card.id }) +
+    (full && full !== label ? ` · ${full}` : "");
+  return `<button type="button" class="ag-model${v.wired ? " on" : ""}"` +
+    ` data-agentmodel="${esc(card.id)}" aria-haspopup="listbox" aria-expanded="false"` +
+    ` title="${esc(hint)}">` +
+    `<span>${esc(label)}</span><i aria-hidden="true">▾</i></button>`;
+}
+
+function dashConnectHTML(x) {
+  const { card, v } = x;
+  if (!v) return "";
+  const ga = typeof gwInfoFor === "function" ? gwInfoFor(card.id) : null;
+  if (ga && ga.connectable === false) {
+    return `<span class="ag-sw no" title="${esc(t("dash.agents.notConnectableHint"))}"><i></i></span>`;
+  }
+  if (!v.hasGatewayModels) {
+    return `<button type="button" class="ag-sw add" data-gwlink` +
+      ` title="${esc(t("dash.agents.addProviderHint"))}"><i></i></button>`;
+  }
+  const busy = GW_AGENT_BUSY === card.id;
+  return `<button type="button" class="ag-sw${v.wired ? " on" : ""}" role="switch"` +
+    ` aria-checked="${v.wired}" data-agentconnect="${esc(card.id)}"` +
+    `${busy ? " disabled" : ""}` +
+    ` title="${esc(v.wired ? t("dash.agents.disconnectHint") : t("dash.agents.connectHint"))}">` +
+    `<i></i></button>`;
+}
+
+function dashPrimaryHTML(x) {
+  const { card, v } = x;
+  if (v && v.canOpen) {
+    const live = typeof liveAgentTab === "function" ? liveAgentTab(card.id) : null;
+    return `<button type="button" class="ag-open" data-launch="${esc(card.id)}"` +
+      ` title="${esc(t(live ? "dash.agents.viewTitle" : "dash.agents.openTitle", { name: card.name || card.id }))}">` +
+      `${esc(t(live ? "dash.agents.view" : "dash.agents.open"))}</button>`;
+  }
+  if (card.url) {
+    return `<button type="button" class="ag-open quiet" data-docs="${esc(card.id)}"` +
+      ` title="${esc(t("dash.agents.docsTitle", { name: card.name || card.id }))}">` +
+      `${esc(t("dash.agents.docs"))}</button>`;
+  }
+  return `<span class="ag-open ghost" aria-hidden="true"></span>`;
+}
+
+function dashInstallHTML(x) {
+  const { card } = x;
+  const inst = INSTALLS[card.id];
+  if (inst && inst.state === "running") {
+    return `<span class="ag-inst-busy">${esc(inst.phase === "scanning"
       ? t("dash.agents.installScanning")
       : inst.phase === "queued" ? t("dash.agents.installQueued")
-      : t("dash.agents.installBusy"))}</span>`;
+        : t("dash.agents.installBusy"))}</span>`;
   }
-  switch (v.primary.action) {
-    case "install":
-      return a.install
-        ? `<button type="button" class="dl" data-install="${id}"` +
-          ` title="${esc(t("dash.agents.installTitle", { name }))}">${esc(t("dash.agents.install"))}</button>`
-        : a.url
-          ? `<button type="button" class="dl" data-docs="${id}"` +
-            ` title="${esc(t("dash.agents.docsTitle", { name }))}">${esc(t("dash.agents.docs"))}</button>`
-          : "";
-    case "docs":
-      return a.url
-        ? `<button type="button" class="dl" data-docs="${id}"` +
-          ` title="${esc(t("dash.agents.docsTitle", { name }))}">${esc(t("dash.agents.docs"))}</button>`
-        : "";
-    case "open": {
-      const live = typeof liveAgentTab === "function" && liveAgentTab(a.id);
-      const key = live ? "dash.agents.view" : "dash.agents.open";
-      const titleKey = live ? "dash.agents.viewTitle" : "dash.agents.openTitle";
-      return `<button type="button" class="dl" data-launch="${id}"` +
-        ` title="${esc(t(titleKey, { name }))}">${esc(t(key))}</button>`;
-    }
-    case "setup":
-      return `<button type="button" class="dl" data-setup="${id}"` +
-        ` title="${esc(t("dash.agents.setupTitle", { name }))}">${esc(t("dash.agents.setup"))}</button>`;
-    case "connect":
-      return `<button type="button" class="dl" data-gwconnect="${id}"` +
-        ` title="${esc(t("dash.agents.connectTitle", { name }))}">${esc(t("dash.agents.connect"))}</button>`;
-    case "settings":
-      return `<button type="button" class="dl" data-gwsettings="${id}"` +
-        ` title="${esc(t("dash.agents.gwSettingsTitle", { name }))}">${esc(t("dash.agents.gwSettings"))}</button>`;
-    case "usage":
-      return `<button type="button" class="dl" data-usage="${id}"` +
-        ` title="${esc(t("dash.agents.usageTitle", { name }))}">${esc(t("dash.agents.usage"))}</button>`;
-    case "drawer":
-      return `<button type="button" class="dl" data-usage="${id}"` +
-        ` title="${esc(t("dash.agents.configTitle", { name }))}">${esc(t("dash.agents.config"))}</button>`;
-    default:
-      return "";
+  if (card.install) {
+    return `<button type="button" class="ag-open" data-install="${esc(card.id)}"` +
+      ` title="${esc(t("dash.agents.installTitle", { name: card.name || card.id }))}">` +
+      `${esc(t("dash.agents.install"))}</button>`;
   }
+  if (card.url) {
+    return `<button type="button" class="ag-open quiet" data-docs="${esc(card.id)}"` +
+      ` title="${esc(t("dash.agents.docsTitle", { name: card.name || card.id }))}">` +
+      `${esc(t("dash.agents.docs"))}</button>`;
+  }
+  return `<span class="ag-open ghost" aria-hidden="true"></span>`;
 }
 
-/* 行上那句状态：分组名之外，还要说“下一步是什么”。用户不需要知道
-   “完整状态”这个抽象词；他需要看到「已安装 · 下一步：打开」。 */
-function dashAgentStatus(a, v, gid) {
-  if (gid === "missing") {
-    return a.windows === false ? t("dash.agents.macOnly") : t("dash.agents.notDetected");
-  }
-  if (v.group === "complete" || v.group === "native") {
-    return t("dash.agents.group." + v.group);
-  }
-  if (v.group === "launch") return t("dash.agents.group.launch");
-  if (v.group === "nolaunch") return t("dash.agents.group.nolaunch");
-  const step = v.primary.step || v.nextStep;
-  const key = {
-    detect: "dash.agents.next.install",
-    install: "dash.agents.next.install",
-    launch: "dash.agents.next.open",
-    auth: "dash.agents.next.auth",
-    status: v.primary.action === "setup" ? "dash.agents.next.setup" : "dash.agents.next.status",
-    resume: "dash.agents.next.resume",
-    gateway: v.primary.action === "settings" ? "dash.agents.next.magpie" : "dash.agents.next.gateway",
-  }[step];
-  return key ? t(key) : t("dash.agents.levelNone");
-}
-
-/* 五条腿的小标记（L 启动 / S 状态 / R 续接 / G 网关 / A 登录）。它们是
-   同一份步骤状态的另一种排布，不是第二套判断。 */
-function dashAgentLegs(v) {
-  const letter = { launch: "L", status: "S", resume: "R", gateway: "G", auth: "A" };
-  return `<span class="ag-legs" aria-hidden="true">` +
-    v.legs.map((l) =>
-      `<i class="ag-leg ${esc(l.state)}" title="${esc(t("agent.leg.title", {
-        step: t("agent.step." + l.key), state: t("agent.step.state." + l.state),
-      }))}">` + `${letter[l.key] || "?"}</i>`).join("") +
-    `</span>`;
-}
-
-function renderDashAgents() {
-  const host = $("dash-agent-list");
-  if (!host) return;
-  const m = mg();
-  const list = m && (m.catalog || []).length ? m.catalog : [];
-  const sub = $("dash-agent-sub");
-
-  // 每个 agent 只落一个组（08-agent-model 里保证互斥）。这里不再用三个
-  // 独立的布尔过滤 —— 旧写法会让同一个 agent 同时出现在「完整」和「仅启动」。
-  const groups = Object.create(null);
-  for (const g of AGENT_GROUPS) groups[g] = [];
-  const views = new Map();
-  for (const a of list) {
-    const v = dashAgentView(a);
-    views.set(a.id, v);
-    groups[v.group].push(a);
-  }
-  const total = AGENT_GROUPS.reduce((n, g) => n + groups[g].length, 0);
-  if (list.length && total !== list.length) {
-    // 真出现的话，屏上会少行；这条日志是唯一抓得住它的证人。
-    bootFact(`Agent 名单分组不变量被破坏：${list.length} 个 agent 只落进 ${total} 个组`);
-  }
-
-  const routed = list.filter((a) => (a.calls | 0) > 0);
-  if (sub) {
-    const bits = [];
-    for (const g of ["complete", "native", "action", "launch", "nolaunch", "missing"]) {
-      if (!groups[g].length) continue;
-      bits.push(t("dash.agents.sum." + g, { n: groups[g].length }));
-    }
-    sub.textContent = list.length
-      ? bits.join(" · ") + (routed.length ? t("dash.agents.sumRouted", { n: routed.length }) : "")
-      : t("dash.agents.scanning");
-  }
-  if (!list.length) {
-    host.innerHTML = `<div class="gw-empty">${esc(t("dash.agents.listPending"))}</div>`;
-    return;
-  }
-
-  const row = (a, gid) => {
-    const v = views.get(a.id);
-    const cfg = gid !== "missing";
-    const st = dashAgentStatus(a, v, gid);
-    const stateCls = v.complete ? " ok"
-      : v.group === "missing" || v.group === "nolaunch" || v.group === "launch" ? " off" : "";
-    // 这份名单只列 CLI agent：每行副标题都带 CLI，和网关层的桌面客户端分开。
-    const detail = gid === "missing"
-      ? t("dash.agents.detailCli", { vendor: a.vendor || "" })
-      : t("dash.agents.detailPath", { path: a.path || a.vendor || "" });
-    const calls = (a.calls | 0) > 0 ? t("dash.agents.calls", { n: dashNum(a.calls) }) : "";
-    const inst = INSTALLS[a.id];
-    const busy = !!(inst && inst.state === "running");
-    const ga = typeof gwInfoFor === "function" ? gwInfoFor(a.id) : null;
-    const gdot = ga
-      ? `<span class="gwdot${ga.wired ? " on" : ""}" title="${esc(ga.wired
-          ? t("dash.agents.wired") : t("dash.agents.notWired"))}"></span>`
-      : "";
-    // 状态那句的 title 说“为什么”：模型给的 noteKey 是稳定的，文案在这边翻。
-    const why = v.reason ? t(v.reason, { name: a.name || "" }) : "";
-    return `<div class="ag${cfg ? " cfg" : ""}"` +
-      (cfg ? ` data-agentcfg="${esc(a.id)}" role="button" tabindex="0"` +
-        ` aria-label="${esc(t("dash.agents.configAria", { name: a.name || "" }))}"` : "") + `>` +
-      iconHTML(a.icon) +
-      `<span class="who"><span class="nm">${esc(a.name)}${gdot}</span>` +
-      `<span class="sub" title="${esc(detail + calls)}">${esc(detail + calls)}</span></span>` +
-      dashAgentLegs(v) +
-      `<span class="st${stateCls}"${why ? ` title="${esc(why)}"` : ""}>${esc(st)}</span>` +
-      dashAgentAction(a, v, busy) +
-      (cfg ? `<span class="ag-cfg-chev" aria-hidden="true">›</span>` : "") +
-      `</div>`;
-  };
-  const group = (label, items, gid) =>
-    `<div class="ag-group">${esc(label)}<span>${items.length}</span></div>` +
-    `<div class="roster">${items.map((a) => row(a, gid)).join("")}</div>`;
-
-  let html = "";
-  for (const gid of ["complete", "native", "action", "launch", "nolaunch"]) {
-    if (!groups[gid].length) continue;
-    html += group(t("dash.agents.group." + gid), groups[gid], gid);
-  }
-  if (!list.some((a) => a.installed)) {
-    html += `<div class="gw-empty">${esc(t("dash.agents.emptyAll"))}</div>`;
-  }
-  if (groups.missing.length) {
-    html +=
-      `<button type="button" class="agent-more${agentsFoldOpen ? " open" : ""}"` +
-      ` id="dash-agent-more" data-agents-fold>` +
-      `<span id="dash-agent-more-label">${esc(agentsFoldOpen
-        ? t("dash.agents.foldHide")
-        : t("dash.agents.foldShow", { n: groups.missing.length }))}</span>` +
-      `<span class="chev" aria-hidden="true">▾</span></button>` +
-      `<div class="agent-fold${agentsFoldOpen ? " open" : ""}" id="dash-agent-fold"><div>` +
-      group(t("dash.agents.group.missing"), groups.missing, "missing") +
+function dashAgentRowHTML(x) {
+  const { card, gw, installed } = x;
+  const id = esc(card.id);
+  const name = card.name || card.id;
+  if (!installed) {
+    return `<div class="ag-item missing" data-agitem="${id}">` +
+      `<div class="ag missing">` +
+      iconHTML(card.icon) +
+      `<span class="who"><span class="nm">${esc(name)}</span>` +
+      `<span class="sub" title="${esc(card.path || card.vendor || "")}">${esc(card.vendor || "")}</span></span>` +
+      dashInstallHTML(x) +
       `</div></div>`;
   }
+  const v = dashAgentView(card);
+  x.v = v;
+  const open = AC_ID === card.id;
+  const detail = open && typeof acDetailHTML === "function"
+    ? `<div class="ag-detail" data-agdetail="${id}">${acDetailHTML(gw, card, v)}</div>` : "";
+  return `<div class="ag-item${open ? " open" : ""}" data-agitem="${id}">` +
+    `<div class="ag" data-agrow="${id}" role="button" tabindex="0"` +
+    ` aria-expanded="${open}" title="${esc(card.path || gw?.path || "")}">` +
+    iconHTML(card.icon) +
+    `<span class="who"><span class="nm">${esc(name)}</span>` +
+    `<span class="sub">${dashAgentSub(x)}</span></span>` +
+    dashModelChipHTML(x) + dashConnectHTML(x) + dashPrimaryHTML(x) +
+    `<span class="ag-chev" aria-hidden="true">${open ? "▴" : "▾"}</span>` +
+    `</div>${detail}</div>`;
+}
+
+/* 网关状态 + 供应商入口，挂在 Agent 工作台的表头。 */
+function renderDashAgentGw() {
+  const host = $("dash-agent-gw");
+  if (!host) return;
+  const m = mg();
+  const providers = Array.isArray(GW_PROVIDERS) ? GW_PROVIDERS.length
+    : (m && Array.isArray(m.providers) ? m.providers.length : 0);
+  const models = m && Array.isArray(m.models) ? m.models.length : 0;
+  const running = !!(m && m.state === "running") || (typeof gwOn === "function" && gwOn());
+  let html = "";
+  if (!m) {
+    html = `<span class="gw-dot"></span><span>${esc(t("dash.agents.gwReading"))}</span>`;
+  } else if (!running) {
+    html = `<span class="gw-dot warn"></span><span>${esc(t("dash.agents.gwDown"))}</span>` +
+      `<button type="button" class="ag-link" data-gwstart>${esc(t("dash.agents.gwStart"))}</button>`;
+  } else if (!providers) {
+    html = `<span class="gw-dot on"></span><span>${esc(t("dash.agents.gwNoProviders"))}</span>` +
+      `<button type="button" class="ag-link" data-gwlink>${esc(t("dash.agents.addProvider"))}</button>`;
+  } else {
+    const summary = providers === 1 && models === 1
+      ? t("dash.agents.gwSummaryOne", { providers, models })
+      : t("dash.agents.gwSummary", { providers, models });
+    html = `<span class="gw-dot on"></span><span>${esc(summary)}</span>` +
+      `<button type="button" class="ag-link" data-gwlink>${esc(t("dash.agents.manageProviders"))}</button>`;
+  }
+  html += `<button type="button" class="ag-rescan" data-agentrescan` +
+    ` title="${esc(t("dash.agents.rescan"))}" aria-label="${esc(t("dash.agents.rescan"))}">↻</button>`;
   host.innerHTML = html;
 }
 
-/* 网关页 = magpie 自己的界面（2026-10-18 改）。它由 87-gateway.js 管：
-   控制面接上之后，一个 iframe 指向同源反代的 /gwui/?view=providers；
-   没接上时显示 Perch 的安装/接入卡。供应商/路由/用量/插件不再手写。
-   总览的读数仍然来自两条腿：
-     · MAGPIE（只读、2.5s）—— 网关自己 /v1/magpie/* 的读数；
-     · GW（按需）—— 控制面快照，只用来判断 iframe 该不该出现。 */
+function dashAgentGroup(label, items) {
+  return `<div class="ag-group">${esc(label)}<span>${items.length}</span></div>` +
+    items.map(dashAgentRowHTML).join("");
+}
+
+/* 总览 Agent 工作台。重画契约见顶部注释：
+   - 选择器开着 / 详情里有输入控件获得焦点时，推迟到关闭后再画；
+   - 展开状态 AC_ID 保留；
+   - 2.5s 的用量推送不触发这里。 */
+function renderDashAgents() {
+  const host = $("dash-agent-list");
+  if (!host) return;
+  if (typeof AC_PICK !== "undefined" && AC_PICK) { AGENT_RENDER_PENDING = true; return; }
+  if (typeof AC_MODEL_POP !== "undefined" && AC_MODEL_POP) { AGENT_RENDER_PENDING = true; return; }
+  if (AC_ID && typeof acDetailEditing === "function" && acDetailEditing()) {
+    AGENT_RENDER_PENDING = true;
+    return;
+  }
+  AGENT_RENDER_PENDING = false;
+  const merged = dashAgentMerged();
+  const installed = merged.filter((x) => x.installed);
+  const missing = merged.filter((x) => !x.installed);
+  const sub = $("dash-agent-sub");
+  if (sub) {
+    sub.textContent = merged.length
+      ? t("dash.agents.summary", { installed: installed.length, installable: missing.length })
+      : t("dash.agents.scanning");
+  }
+  renderDashAgentGw();
+  if (!merged.length) {
+    host.innerHTML = `<div class="ag-empty">${esc(t("dash.agents.listPending"))}</div>`;
+    return;
+  }
+  let html = "";
+  if (installed.length) html += dashAgentGroup(t("dash.agents.group.installed"), installed);
+  if (missing.length) html += dashAgentGroup(t("dash.agents.group.installable"), missing);
+  if (!installed.length) html += `<div class="ag-empty">${esc(t("dash.agents.emptyAll"))}</div>`;
+  host.innerHTML = html;
+}
+
+/* 选择器关闭后，把推迟的名单重画补上。 */
+function dashFlushAgentRender() {
+  if (!AGENT_RENDER_PENDING) return;
+  AGENT_RENDER_PENDING = false;
+  renderDashAgents();
+}
+
+/* ---------------------------------------------------------------------------
+   总览 · 网关用量卡
+   --------------------------------------------------------------------------- */
+
+function dashCompact(n) {
+  n = Number(n) || 0;
+  if (n < 1000) return dashNum(n);
+  try {
+    return new Intl.NumberFormat(PERCH_LOCALE === "zh" ? "zh-CN" : "en",
+      { notation: "compact", maximumFractionDigits: 1 }).format(n);
+  } catch {
+    return n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : (n / 1e3).toFixed(1) + "k";
+  }
+}
+function dashMoney(n) {
+  const v = Number(n) || 0;
+  return "$" + v.toFixed(v > 0 && v < 1 ? 3 : 2);
+}
+function dashUsageCurrent() {
+  if (DASH_USAGE_PERIOD === "today") {
+    const m = mg();
+    return (m && m.todayUsage) || GW_USAGE.today || null;
+  }
+  return GW_USAGE[DASH_USAGE_PERIOD] || null;
+}
+function dashUsagePeriodLabel(p) {
+  return t("dash.usage.period." + p);
+}
+function renderDashUsagePeriod() {
+  const host = $("dash-usage-period");
+  if (!host) return;
+  if (host.dataset.locale !== PERCH_LOCALE || !host.querySelector("[data-usageperiod]")) {
+    host.dataset.locale = PERCH_LOCALE;
+    host.innerHTML = DASH_USAGE_PERIODS.map((p) =>
+      `<button type="button" class="usage-opt${p === DASH_USAGE_PERIOD ? " on" : ""}"` +
+      ` data-usageperiod="${p}" role="tab" aria-selected="${p === DASH_USAGE_PERIOD}">` +
+      `${esc(dashUsagePeriodLabel(p))}</button>`).join("");
+    return;
+  }
+  for (const b of host.querySelectorAll("[data-usageperiod]")) {
+    const on = b.dataset.usageperiod === DASH_USAGE_PERIOD;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", String(on));
+  }
+}
+function dashUsageKpisHTML(u) {
+  const t0 = u.totals || {};
+  const prompt = (t0.input || 0) + (t0.cacheRead || 0) + (t0.cacheWrite || 0);
+  const hit = prompt ? Math.round(100 * (t0.cacheRead || 0) / prompt) + "%" : "—";
+  const kpi = (label, value, sub) =>
+    `<div class="uk"><span>${esc(label)}</span><b>${esc(value)}</b>` +
+    (sub ? `<small>${esc(sub)}</small>` : "") + `</div>`;
+  return `<div class="usage-kpis">` +
+    kpi(t("dash.usage.calls"), dashNum(t0.calls),
+      t0.errors ? t("dash.usage.failed", { n: dashNum(t0.errors) }) : t("dash.usage.noErrors")) +
+    kpi(t("dash.usage.tokens"), dashCompact((t0.input || 0) + (t0.output || 0)),
+      t("dash.usage.tokensSub", { input: dashCompact(t0.input), output: dashCompact(t0.output) })) +
+    kpi(t("dash.usage.cache"), dashCompact(t0.cacheRead),
+      t("dash.usage.hitRate", { pct: hit })) +
+    kpi(t("dash.usage.cost"), dashMoney(t0.cost),
+      t0.unpriced ? t("dash.usage.unpriced", { n: dashNum(t0.unpriced) }) : "") +
+    `</div>`;
+}
+function dashUsageRowHTML(r, total) {
+  const tokens = (r.input || 0) + (r.output || 0);
+  const pct = total > 0 ? Math.max(1.5, Math.round(100 * tokens / total)) : 0;
+  const sub = r.sub ? `${r.sub} · ` : "";
+  return `<div class="ur">` +
+    iconHTML(r.icon || "") +
+    `<span class="un"><b>${esc(r.name || r.id || "?")}</b>` +
+    `<small>${esc(sub)}${esc(tCount("dash.usage.callsN", r.calls, { n: dashNum(r.calls) }))}` +
+    ` · ${esc(dashCompact(tokens))}</small>` +
+    `<i class="ubar" aria-hidden="true"><i style="width:${pct}%"></i></i></span>` +
+    `<span class="uc">${esc(r.cost ? dashMoney(r.cost) : dashCompact(tokens))}</span>` +
+    `</div>`;
+}
+function renderDashUsage() {
+  renderDashUsagePeriod();
+  const host = $("dash-usage");
+  if (!host) return;
+  const u = dashUsageCurrent();
+  let html = "";
+  if (!u) {
+    if (GW_USAGE_ERR) {
+      html = `<div class="usage-note bad">${esc(msgText(GW_USAGE_ERR))}` +
+        `<button type="button" class="ag-link" data-usageretry>${esc(t("dash.usage.retry"))}</button></div>`;
+    } else if (DASH_USAGE_PERIOD !== "today" && GW_USAGE_LOADING === DASH_USAGE_PERIOD) {
+      html = `<div class="usage-note"><span class="spin"></span>${esc(t("dash.usage.loading"))}</div>`;
+    } else if (typeof gwOn === "function" && !gwOn()) {
+      html = `<div class="usage-note">${esc(t("dash.usage.down"))}` +
+        `<button type="button" class="ag-link" data-gwlink>${esc(t("dash.usage.manage"))}</button></div>`;
+    } else {
+      html = `<div class="usage-note">${esc(t("dash.usage.loading"))}</div>`;
+    }
+  } else {
+    const rows = DASH_USAGE_METRIC === "models" ? (u.models || []) : (u.agents || []);
+    const total = rows.reduce((n, r) => n + (r.input || 0) + (r.output || 0), 0);
+    const top = rows.slice(0, 5);
+    html = dashUsageKpisHTML(u) +
+      `<div class="usage-switch" role="tablist" aria-label="${esc(t("dash.usage.metricAria"))}">` +
+      `<button type="button" class="useg${DASH_USAGE_METRIC === "agents" ? " on" : ""}"` +
+      ` data-usagemetric="agents" role="tab" aria-selected="${DASH_USAGE_METRIC === "agents"}">` +
+      `${esc(t("dash.usage.byAgent"))}</button>` +
+      `<button type="button" class="useg${DASH_USAGE_METRIC === "models" ? " on" : ""}"` +
+      ` data-usagemetric="models" role="tab" aria-selected="${DASH_USAGE_METRIC === "models"}">` +
+      `${esc(t("dash.usage.byModel"))}</button></div>` +
+      (top.length
+        ? `<div class="usage-list">${top.map((r) => dashUsageRowHTML(r, total)).join("")}</div>`
+        : `<div class="usage-note">${esc(t("dash.usage.empty"))}</div>`) +
+      `<div class="usage-foot"><button type="button" class="ag-link" data-gwlink>` +
+      `${esc(t("dash.usage.manage"))} →</button></div>`;
+    if (GW_USAGE_LOADING === DASH_USAGE_PERIOD) {
+      html = `<div class="usage-loading"><span class="spin"></span></div>` + html;
+    }
+  }
+  const was = document.activeElement;
+  const metric = was && was.dataset ? was.dataset.usagemetric : "";
+  if (host.__uhtml === html) return;
+  host.__uhtml = html;
+  host.innerHTML = html;
+  if (metric) {
+    const b = host.querySelector(`[data-usagemetric="${metric}"]`);
+    if (b) b.focus({ preventScroll: true });
+  }
+}
+function dashLoadUsage(period, force) {
+  if (!DASH_USAGE_PERIODS.includes(period)) return;
+  if (period === "today" && dashUsageCurrent() && !force) return;
+  if (typeof gwOn !== "function" || !gwOn()) {
+    GW_USAGE_ERR = { key: "dash.usage.down" };
+    GW_USAGE_LOADING = "";
+    renderDashUsage();
+    return;
+  }
+  const req = ++GW_USAGE_REQ;
+  GW_USAGE_LOADING = period;
+  GW_USAGE_ERR = null;
+  renderDashUsage();
+  clearTimeout(GW_USAGE_TIMER);
+  // 推送丢失时不要永远转圈：13s（比后端 12s HTTP 超时略长）后给出可重试的错误。
+  GW_USAGE_TIMER = setTimeout(() => {
+    if (GW_USAGE_LOADING !== period) return;
+    GW_USAGE_LOADING = "";
+    GW_USAGE_ERR = { key: "dash.usage.timeout" };
+    if (DASH_USAGE_PERIOD === period) renderDashUsage();
+  }, 13000);
+  sendCtrl({ type: "gw.usage", period });
+  return req;
+}
+function dashSetUsagePeriod(period) {
+  if (!DASH_USAGE_PERIODS.includes(period)) return;
+  DASH_USAGE_PERIOD = period;
+  try { localStorage.setItem("perch.usagePeriod", period); } catch { /* 只这一次 */ }
+  renderDashUsage();
+  // 今天走 2.5s 的 MAGPIE 快照；其余周期每次切回来都重取一次 ——
+  // 只在“没有缓存”时取会让 7d 卡片在发出新请求后一直停在旧数字。
+  if (period !== "today" || !dashUsageCurrent()) dashLoadUsage(period, true);
+}
+
+/* gw.usage 推送落点（20-ctl.js）。 */
+function applyGwUsage(m) {
+  if (!m || typeof m !== "object") return;
+  clearTimeout(GW_USAGE_TIMER);
+  GW_USAGE_TIMER = 0;
+  const p = m.period || "today";
+  if (m.err) {
+    if (p === GW_USAGE_LOADING) {
+      GW_USAGE_ERR = errMsgOf(m);
+      GW_USAGE_LOADING = "";
+    }
+    if (p === DASH_USAGE_PERIOD) renderDashUsage();
+    return;
+  }
+  if (m.usage && typeof m.usage === "object") GW_USAGE[p] = m.usage;
+  if (GW_USAGE_LOADING === p) GW_USAGE_LOADING = "";
+  GW_USAGE_ERR = null;
+  if (p === DASH_USAGE_PERIOD) renderDashUsage();
+}
+
+/* 打开行上的模型选择器。选中后只写配置/接入，不替用户开格子。 */
+function dashOpenAgentModel(anchor, id) {
+  const x = dashAgentMerged().find((y) => y.card.id === id);
+  const v = x ? dashAgentView(x.card) : null;
+  const field = v && v.modelField;
+  if (!field) {
+    showToast(t("dash.agents.noModels"), "", "info");
+    return;
+  }
+  const ok = acModelPickOpen(anchor, id, field, v.wired ? (v.currentModel || "") : "",
+    (value) => {
+      if (!value) return;
+      GW_AGENT_BUSY = id;
+      acSetFieldFor(id, field.key, value, true, false);
+      renderDashAgents();
+    },
+    { applyLabel: t(v.wired ? "dash.agents.applyModel" : "dash.agents.connectModel") });
+  if (!ok) showToast(t("dash.agents.noModels"), t("dash.agents.noModelsHint"), "info");
+}
+
+function dashToggleAgentConnect(id) {
+  const x = dashAgentMerged().find((y) => y.card.id === id);
+  const v = x ? dashAgentView(x.card) : null;
+  if (!v) return;
+  if (!v.hasGatewayModels) {
+    if (typeof gwOpenProviders === "function") gwOpenProviders();
+    return;
+  }
+  if (v.wired) {
+    acOpen(id, true);
+    AC_CONFIRM = true;
+    AC_ERR = null;
+    sendCtrl({ type: "gw.agent.preview", id });
+    renderDashAgents();
+    return;
+  }
+  GW_AGENT_BUSY = id;
+  sendCtrl({ type: "gw.agent.connect", id });
+  renderDashAgents();
+}
+
+function dashHandleGwAction(e) {
+  const link = e.target.closest("[data-gwlink]");
+  if (link) {
+    e.preventDefault();
+    if (typeof gwOpenProviders === "function") gwOpenProviders();
+    return true;
+  }
+  const start = e.target.closest("[data-gwstart]");
+  if (start) {
+    e.preventDefault();
+    sendCtrl({ type: "gw.engine.start" });
+    return true;
+  }
+  const rescan = e.target.closest("[data-agentrescan]");
+  if (rescan) {
+    e.preventDefault();
+    if (typeof GW_AGENTS_LOADING !== "undefined") GW_AGENTS_LOADING = true;
+    sendCtrl({ type: "gw.agents.rescan" });
+    return true;
+  }
+  return false;
+}
+
+$("dash-agent-gw").addEventListener("click", dashHandleGwAction);
+$("dash-agent-list").addEventListener("click", (e) => {
+  if (dashHandleGwAction(e)) return;
+  const model = e.target.closest("[data-agentmodel]");
+  if (model) {
+    e.preventDefault();
+    e.stopPropagation();
+    dashOpenAgentModel(model, model.dataset.agentmodel);
+    return;
+  }
+  const sw = e.target.closest("[data-agentconnect]");
+  if (sw) {
+    e.preventDefault();
+    e.stopPropagation();
+    dashToggleAgentConnect(sw.dataset.agentconnect);
+    return;
+  }
+  const row = e.target.closest("[data-agrow]");
+  if (!row || e.target.closest("button, a, input, select, textarea, label")) return;
+  acOpen(row.dataset.agrow);
+});
+$("dash-agent-list").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const row = e.target.closest("[data-agrow]");
+  if (!row || e.target !== row) return;
+  e.preventDefault();
+  acOpen(row.dataset.agrow);
+});
+$("dash-usage-period").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-usageperiod]");
+  if (b) dashSetUsagePeriod(b.dataset.usageperiod);
+});
+$("dash-usage").addEventListener("click", (e) => {
+  if (dashHandleGwAction(e)) return;
+  const m = e.target.closest("[data-usagemetric]");
+  if (m) {
+    DASH_USAGE_METRIC = m.dataset.usagemetric;
+    renderDashUsage();
+    return;
+  }
+  const retry = e.target.closest("[data-usageretry]");
+  if (retry) dashLoadUsage(DASH_USAGE_PERIOD, true);
+});
+
+/* 网关页 = Perch 原生页面（2026-10-22）。它由 87-gateway.js 管：
+   状态条 + 已添加供应商 + 供应商目录 + 编辑器。总览的读数仍来自两条腿：
+     · MAGPIE（只读、2.5s）—— 引擎 /v1/magpie/* 的用量读数；
+     · GW（按需）—— 控制面连接状态，决定引擎态与数据请求。 */
 function renderDashboard(why) {
   if (NAV_HERE !== "dash") return;
   const t0 = performance.now();
@@ -818,84 +1012,26 @@ function renderDashboard(why) {
   renderDashStatus();
   renderDashKpis();
   renderDashNeed();
-  renderDashLiveFeed();
   renderHeat();
-  renderDashMix();
-  renderDashLat();
   renderDashAgents();
+  renderDashUsage();
+  if (DASH_USAGE_PERIOD !== "today" && !GW_USAGE[DASH_USAGE_PERIOD] &&
+      GW_USAGE_LOADING !== DASH_USAGE_PERIOD) {
+    dashLoadUsage(DASH_USAGE_PERIOD);
+  }
   if (typeof gwAgentsPrefetch === "function") gwAgentsPrefetch();
   renderGateway();
-  syncHeatMetric();
   dashProbe(why, performance.now() - t0);
 }
 
 // 实时读数（700ms 跟着 renderLive 走）：只重画 Perch 自己那几个秒级读数
-// （在跑 / 在等你）和网关状态条。热力图、Agent 名单、网关页都不在这里重画 ——
-// 它们的数据来自会话库重扫和 magpie 的 2.5s 推送，不是 700ms 的本地状态。
+// （在跑 / 在等你）。热力图、Agent 名单、网关页都不在这里重画 ——
+// 它们的数据来自会话库重扫和引擎推送，不是 700ms 的本地状态。
 function renderDashLive() {
   if (NAV_HERE !== "dash") return;
   renderDashStatus();
   renderDashKpis();
   renderDashNeed();
-  renderDashLiveFeed();
-}
-
-function syncHeatMetric() {
-  const bar = $("heat-metric");
-  if (!bar) return;
-  for (const b of bar.querySelectorAll("[data-hm]")) {
-    const on = b.dataset.hm === heatMetric;
-    b.classList.toggle("on", on);
-    b.setAttribute("aria-selected", String(on));
-  }
-}
-
-/* 「实时」那一块：网关正在处理多少、最近几条请求落在哪。
-   网关空闲时它不是空白 —— 最近请求仍然说明"你刚才干了什么"。
-   ⚠️ 这一块只画 usage 接口的**请求元数据**（agent / provider / model / ms /
-   status），没有 prompt，也没有回复内容。 */
-function renderDashLiveFeed() {
-  const host = $("dash-live");
-  if (!host) return;
-  const m = mg(), on = mgLive();
-  const sub = $("dash-live-sub");
-  if (sub) {
-    sub.textContent = !m ? t("dash.live.pending")
-      : !on ? t("dash.kpi.gatewayDown")
-      : (m.conc?.requests
-          ? tCount("dash.live.processing", m.conc.requests, { n: m.conc.requests })
-          : t("dash.live.idleRecent", { n: (m.recent || []).length }));
-  }
-  if (!m) {
-    host.innerHTML = `<div class="live-now idle">${esc(t("dash.live.reading"))}</div>`;
-    return;
-  }
-  if (!on) {
-    host.innerHTML = `<div class="live-now idle">${esc(m.state === "stopped"
-      ? t("dash.live.downStopped") : t("dash.live.downMissing"))}</div>`;
-    return;
-  }
-  const c = m.conc || {};
-  const head = c.requests
-    ? `<div class="live-now"><span class="spin"></span>${tCount("dash.live.headProcessing", c.requests, { n: dashNum(c.requests) })}` +
-      (c.waiting ? esc(t("dash.live.queued", { n: dashNum(c.waiting) })) : "") +
-      (c.tools ? esc(tCount("dash.live.tools", c.tools, { n: dashNum(c.tools) })) : "") + `</div>`
-    : `<div class="live-now idle"><span class="dot on"></span>${esc(t("dash.live.headIdle", { n: (m.recent || []).length }))}</div>`;
-  const rows = (m.recent || []).slice(0, 6);
-  host.innerHTML = head + (rows.length
-    ? rows.map((r) => {
-        const bad = (r.status | 0) >= 400;
-        const at = (r.t || "").slice(11, 19);
-        return `<div class="live-row" title="${esc(at)} · ${esc(r.providerName || r.provider || "")}` +
-          ` · ${esc(r.served || r.model || "")}${r.effort ? " · effort " + esc(r.effort) : ""}` +
-          `${r.ttft_ms ? esc(t("dash.live.firstToken", { ms: dashNum(r.ttft_ms) })) : ""}">` +
-          `<span class="st${bad ? " bad" : ""}"></span>` +
-          `<span class="who">${iconHTML(r.icon, "sm")}<span class="nm">${esc(r.agentName || r.agent || "?")}</span></span>` +
-          `<span class="to">${esc(r.model || r.served || "")}</span>` +
-          `<span class="ms${bad ? " bad" : ""}">${bad ? "HTTP " + (r.status | 0) : dashNum(r.ms) + "ms"}</span>` +
-          `</div>`;
-      }).join("")
-    : `<div class="live-now idle">${esc(t("dash.live.empty"))}</div>`);
 }
 
 /* 总览的自证读数：盒子多大、哪一页、几格、几个活跃日、多少轮。
@@ -927,7 +1063,7 @@ $("dash-tabs").addEventListener("click", (e) => {
   const b = e.target.closest("[data-dtab]");
   if (!b || b.dataset.dtab === dashTab) return;
   dashTab = b.dataset.dtab;
-  // Agent 配置抽屉挂在总览的名单上；换页就收起（网关页是全幅 iframe）。
+  // 行内详情挂在总览的 Agent 名单上；换页就收起。
   if (typeof acClose === "function") acClose();
   try { localStorage.setItem("perch.dashTab", dashTab); } catch { /* 存不了就只在这一次生效 */ }
   renderDashTabs();
@@ -943,14 +1079,4 @@ $("dash-tabs").addEventListener("click", (e) => {
   bootFact(`总览 切页=${dashTab}`);
 });
 
-// 热力图口径：轮次（本机会话库）/ 请求（magpie 网关）。
-$("heat-metric").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-hm]");
-  if (!b || b.dataset.hm === heatMetric) return;
-  heatMetric = b.dataset.hm;
-  try { localStorage.setItem("perch.heatMetric", heatMetric); } catch { /* 存不了就只在这一次生效 */ }
-  syncHeatMetric();
-  renderHeat();
-  bootFact(`总览 热力图口径=${heatMetric}`);
-});
 

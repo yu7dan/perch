@@ -1,6 +1,6 @@
 package gateway
 
-// Agent 网关接线（总览 → Agent 名单 → 右侧配置抽屉）。
+// Agent 网关接线（总览 → Agent 工作台 → 行内详情）。
 //
 // 用户 2026-10-18 定：总览下面的 Agent 配置要能做到 magpie 的 Agents 页那套事。
 // magpie 把它做完了（internal/agent），但那是 Go internal 包、绑着 magpie 的
@@ -60,7 +60,7 @@ func (g *Gateway) agentPushState(op, id string, b []byte) {
 		}
 		if err3 := json.Unmarshal(b2, &st); err3 != nil || len(st.Agents) == 0 ||
 			string(st.Agents) == "null" {
-			g.agentPushErr(op, id, uimsg.New("gw.agentListMissing", "magpie 没有返回 agent 列表"))
+			g.agentPushErr(op, id, uimsg.New("gw.agentListMissing", "网关没有返回 agent 列表"))
 			return
 		}
 	}
@@ -157,6 +157,25 @@ func (g *Gateway) AgentState() {
 	g.agentPushState("state", "", b)
 }
 
+// AgentRescan asks the engine to rescan installed agents, then publishes the
+// fresh state. Used by 总览 → 网关 and by the Agents tab's own rescan button.
+func (g *Gateway) AgentRescan() {
+	if err := g.Ensure(); err != nil {
+		g.agentPushErr("rescan", "", err)
+		return
+	}
+	if _, err := g.API("POST", "/api/agents/rescan", nil); err != nil {
+		g.agentPushErr("rescan", "", err)
+		return
+	}
+	b, err := g.API("GET", "/api/state", nil)
+	if err != nil {
+		g.agentPushErr("rescan", "", err)
+		return
+	}
+	g.agentPushState("rescan", "", b)
+}
+
 // AgentSet 改一个字段。value 为空是 magpie 的「回到 agent 自己的默认」，
 // 所以空值必须原样发过去（不能当成"没填"）。
 func (g *Gateway) AgentSet(id, field, value string) {
@@ -204,9 +223,9 @@ func (g *Gateway) AgentAction(op, id string) {
 	// **不发 POST**。用户看到的是一句解释，而不是一个 HTTP 400 正文。
 	if op == "connect" {
 		if ok, known := g.agentConnectable(id); known && !ok {
-			text := "magpie 不能接入这个 agent（该 agent 没有可路由的 provider 选项）"
+			text := "网关不能接入这个 agent（该 agent 没有可路由的 provider 选项）"
 			if id == "cursor" {
-				text = "magpie 不能接入普通 Cursor CLI（Cursor CLI can't be connected to magpie）"
+				text = "网关不能接入普通 Cursor CLI（Cursor CLI can't be connected to the gateway）"
 			}
 			g.agentPushErr(op, id, uimsg.New("gw.agentNotConnectable", text))
 			return
@@ -239,7 +258,7 @@ func (g *Gateway) AgentPreview(id string) {
 		return
 	}
 	if !json.Valid(b) {
-		g.agentPushErr("preview", id, uimsg.New("gw.previewNotJSON", "magpie 返回的预览不是 JSON"))
+		g.agentPushErr("preview", id, uimsg.New("gw.previewNotJSON", "网关返回的预览不是 JSON"))
 		return
 	}
 	// 预览理论上是个对象；null 会让前端分不清"没有预览"和"还在读"，统一成 {}。
@@ -274,8 +293,8 @@ func (g *Gateway) AgentDrift() {
 	}
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(b, &m); err != nil || m == nil {
-		if g.driftErr != "magpie 返回的漂移列表不是对象" {
-			g.driftErr = "magpie 返回的漂移列表不是对象"
+		if g.driftErr != "网关返回的漂移列表不是对象" {
+			g.driftErr = "网关返回的漂移列表不是对象"
 			log.Printf("[agentcfg] %s", g.driftErr)
 		}
 		return

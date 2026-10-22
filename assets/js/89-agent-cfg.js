@@ -1,5 +1,6 @@
 "use strict";
-/* 89-agent-cfg.js —— 总览 → Agent 名单 → 右侧配置抽屉（2026-10-18）。
+/* 89-agent-cfg.js —— 总览 Agent 工作台的行内详情（2026-10-18，2026-10-22
+ * 从右侧抽屉改成行内展开）。
  *
  * 用户的要求：总览下面的 Agent 配置要做到 magpie 的 Agents 页那套事 ——
  * 接进网关、模型 / 推理强度 / 分档 / 子代理 / 登录方式，一次把 14 个字段全做。
@@ -10,8 +11,8 @@
  *   POST /api/agents/{act}/{id}    → 同上
  *   GET  /api/agents/preview/{id}  → {type:"gw.agent.preview", preview}
  *
- * 呈现：名单里点一格 → 右侧抽屉。抽屉只画 magpie 给的字段，不在 Perch 里
- * 另存一份配置 —— 谁是真相源这件事不能含糊。
+ * 呈现：名单里点一行 → 该行下面展开 `.ag-detail`。详情只画 magpie 给的字段，
+ * 不在 Perch 里另存一份配置 —— 谁是真相源这件事不能含糊。
  *
  * 安全：预览里的配置行可能带 magpie 写的 key，落进 DOM 前先把值打码；
  * 日志只记 agent / 字段名，不记值。
@@ -32,6 +33,10 @@ let AC_CONFIRM = false;
 /* 打开中的长列表选择器（模型字段）：{field, wrap}。弹层挂在 body 上（fixed），
    这样不会被抽屉的滚动容器裁掉。 */
 let AC_PICK = null;
+/* 主模型选择：用户在模型弹层里选中的值（还没写入）；空 = 还没选。
+   只有点“接入并使用此模型/应用”才发 gw.agent.set，选的时候不写配置。 */
+let AC_MODEL_SEL = "";
+let AC_MODEL_POP = null;
 /* 抽屉开着时的漂移轮询（15s，和 magpie 自己的窗口一样）。0 = 没在跑。 */
 let AC_DRIFT_TIMER = 0;
 
@@ -154,19 +159,30 @@ function acMaskLine(s) {
 // 抽屉的开关
 // ---------------------------------------------------------------------------
 
-function acOpen(id) {
+function acRender() {
+  if (typeof renderDashAgents === "function") renderDashAgents();
+}
+
+function acOpen(id, force) {
   if (!id) return;
+  if (AC_ID === id && !force) { acClose(); return; }
   if (AC_ID !== id) AC_PREVIEW = null;
   AC_ID = id;
   AC_BUSY = "";
   AC_ERR = null;
   AC_CONFIRM = false;
-  renderAgentDrawer();
+  AC_MODEL_SEL = "";
+  acModelPopClose(false);
+  acRender();
   // 打开时才问控制面（启动阶段它是被动的，不替用户拉起进程）。
   sendCtrl({ type: "gw.agents" });
   sendCtrl({ type: "gw.agent.preview", id });
   acDriftWatch(true);
-  bootFact(`Agent 配置 打开 ${id}`);
+  requestAnimationFrame(() => {
+    const row = document.querySelector(`#dash-agent-list [data-agrow="${CSS.escape(id)}"]`);
+    if (row) row.scrollIntoView({ block: "nearest" });
+  });
+  bootFact(`Agent 详情 打开 ${id}`);
 }
 
 /* 漂移是"配置文件在 Perch 之外被改了"：读一次 state 不够，抽屉开着时要
@@ -189,174 +205,273 @@ function acDriftWatch(on) {
 function acClose() {
   if (!AC_ID) return;
   acPickClose(false);
+  acModelPopClose(false);
   acDriftWatch(false);
   AC_ID = "";
   AC_BUSY = "";
   AC_ERR = null;
   AC_PREVIEW = null;
   AC_CONFIRM = false;
-  renderAgentDrawer();
+  AC_MODEL_SEL = "";
+  acRender();
 }
 
 // ---------------------------------------------------------------------------
 // 画
 // ---------------------------------------------------------------------------
 
+/* 兼容旧调用点：现在没有独立抽屉，详情是总览行内的 .ag-detail。 */
 function renderAgentDrawer() {
-  const box = $("agentcfg");
-  if (!box) return;
-  // 抽屉重画时弹层必须跟着消失：它挂在 body 上，不在这次 innerHTML 里。
-  acPickClose(false);
-  if (!AC_ID) {
-    box.classList.remove("on");
-    box.setAttribute("aria-hidden", "true");
-    return;
-  }
-  const a = gwAgentOf(AC_ID);
-  const cat = ((mg() && mg().catalog) || []).find((x) => x.id === AC_ID) || null;
-  const name = (a && a.name) || (cat && cat.name) || AC_ID;
-  const icon = (a && a.icon) || (cat && cat.icon) || "";
-  const path = (a && a.path) || (cat && cat.path) || "";
-  $("ac-ico").innerHTML = iconHTML(icon, "ac-ico-img");
-  $("ac-name").textContent = name;
-  $("ac-path").textContent = path;
-  $("ac-path").title = path;
-  $("ac-body").innerHTML = acBodyHTML(a, name);
-  box.classList.add("on");
-  box.setAttribute("aria-hidden", "false");
+  acRender();
 }
 
-/* 七步时间线：不管 magpie 有没有这个 agent，都要能回答“我走到哪、下一步是什么”。
-   旧抽屉在没有 magpie 行时直接显示空状态 —— 那正是用户说的“打开之后不知道为什么
-   没被录入完整”。 */
-function acIntegrationHTML(cat, v) {
-  if (!cat || !v) return "";
-  const rows = v.steps.map((s) => {
-    const mech = s.mechanism ? t("agent.mech." + s.mechanism) : "";
-    const note = s.noteKey ? t(s.noteKey, { name: cat.name || "" }) : "";
-    const detail = [mech, note].filter(Boolean).join(" · ");
-    return `<div class="ac-step ${esc(s.state)}" data-step="${esc(s.key)}">` +
-      `<span class="ac-step-dot ${esc(s.state)}" aria-hidden="true"></span>` +
-      `<span class="ac-step-k">${esc(t("agent.step." + s.key))}</span>` +
-      `<span class="ac-step-v">${esc(t("agent.step.state." + s.state))}</span>` +
-      (detail ? `<span class="ac-step-note" title="${esc(detail)}">${esc(detail)}</span>` : "") +
+/* 详情里如果有输入控件获得焦点，推送型重画要推迟，别把用户正在改的值冲掉。 */
+function acDetailEditing() {
+  const el = document.activeElement;
+  if (!el || !el.closest) return false;
+  return !!el.closest("#dash-agent-list .ag-detail") &&
+    /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
+}
+
+/* 行内详情。模型主字段在行上，这里只放路由、漂移、动作和高级字段。 */
+function acDetailHTML(a, card, v) {
+  const name = (a && a.name) || (card && card.name) || AC_ID;
+  if (!a && !GW_AGENTS && !GW_AGENTS_ERR) {
+    return `<div class="ac-loading"><span class="spin"></span>${esc(t("ac.loading"))}</div>` +
+      (acCatCanOpen(card)
+        ? `<div class="ac-actions"><button type="button" class="ac-btn" data-ac="open-local">` +
+          `${esc(t("ac.model.nativeOpen"))}</button></div>`
+        : "");
+  }
+  if (!a) {
+    let html = `<div class="ac-empty">${esc(t("ac.localOnly", { name }))}<br>` +
+      `<span>${esc(msgText(GW_AGENTS_ERR) || t("ac.empty.count", { n: (GW_AGENTS || []).length }))}</span></div>`;
+    if (acCatCanOpen(card)) {
+      html += `<div class="ac-actions"><button type="button" class="ac-btn primary" data-ac="open-local">` +
+        `${esc(t("ac.model.nativeOpen"))}</button></div>`;
+    } else if (card && card.installed) {
+      html += `<div class="ac-hint">${esc(t("ac.noTerminal"))}</div>`;
+    }
+    return html + acReloadHTML();
+  }
+
+  const busy = !!AC_BUSY;
+  let html = acRouteLine(a, v);
+  if (v && v.route === "unknown") {
+    html += `<div class="ac-hint">${esc(t("ac.route.unknownNote"))}</div>`;
+  }
+  if (v && !v.hasGatewayModels) {
+    html += `<div class="ac-hint">${esc(t("ac.model.noSource"))} ` +
+      `<button type="button" class="ac-btn quiet" data-ac="add-models">${esc(t("ac.model.addModels"))}</button></div>`;
+  }
+  if (busy) {
+    const word = AC_BUSY.startsWith("set:") ? t("ac.busy.set")
+      : t("ac.busy." + AC_BUSY);
+    html += `<div class="ac-hint ac-busy"><span class="spin"></span>${esc(word)}</div>`;
+  }
+  try {
+    const live = (typeof liveTabsForAgent === "function" && v && v.wired)
+      ? liveTabsForAgent(a.id) : [];
+    const setup = live.filter((x) => typeof paneSetupKind === "function" && paneSetupKind(x));
+    const stale = live.filter((x) => typeof paneModelStale === "function" && paneModelStale(x, v));
+    if (setup.length) {
+      html += `<div class="ac-note">${esc(t("ac.model.firstRunPanes"))}</div>` +
+        `<div class="ac-actions"><button type="button" class="ac-btn" data-ac="reopen-panes">` +
+        `${esc(t("ac.model.reopenPanes"))}</button></div>`;
+    } else if (stale.length) {
+      html += `<div class="ac-note">${esc(t("ac.model.staleRun", { n: stale.length }))}</div>` +
+        `<div class="ac-actions"><button type="button" class="ac-btn" data-ac="reopen-panes">` +
+        `${esc(t("ac.model.reopenPanes"))}</button></div>`;
+    }
+  } catch (e) {}
+  if (a.failover) html += `<div class="ac-note">${esc(t("ac.chip.failover"))}</div>`;
+  if (a.drift) html += acDriftHTML(a, a.drift);
+  if (a.stale > 0) html += `<div class="ac-note">${esc(t("ac.stale", { n: a.stale, name: a.name }))}</div>`;
+  if (GW_AGENTS_NOTICE) html += `<div class="ac-note">${esc(GW_AGENTS_NOTICE)}</div>`;
+  if (AC_ERR) html += `<div class="ac-err">${esc(msgText(AC_ERR))}</div>`;
+  if (AC_CONFIRM) {
+    html += acConfirmHTML(a);
+  } else if (a.wired) {
+    html += `<div class="ac-actions"><button type="button" class="ac-btn danger" data-ac="disconnect">` +
+      `${esc(t("ac.action.disconnect"))}</button></div>`;
+  } else if (acCatCanOpen(card)) {
+    html += `<div class="ac-actions"><button type="button" class="ac-btn" data-ac="open-local">` +
+      `${esc(t("ac.model.nativeOpen"))}</button></div>`;
+  } else {
+    html += `<div class="ac-hint">${esc(t("ac.noTerminal"))}</div>`;
+  }
+  html += acFieldsHTML(a, busy, v ? v.modelFieldKey : "");
+  return html;
+}
+
+/* 路由一行：网关 · 模型 / 本机 / 未配置。没有七步。 */
+function acRouteLine(a, v) {
+  if (!v) return "";
+  const label = t(v.labelKey);
+  let sub = v.modelLabel || "";
+  if (!sub && v.route === "gateway") sub = t("ac.route.joined");
+  return `<div class="ac-route-line">` +
+    `<span class="ag-route ${esc(v.route)}">${esc(label)}</span>` +
+    (sub ? `<span class="ac-route-model" title="${esc(sub)}">${esc(sub)}</span>` : "") +
+    `</div>`;
+}
+
+
+/* 抽屉的主任务：选一个网关模型，或者明确地用本机配置打开。
+   点模型按钮只展开列表；选中不写入；点“接入并使用此模型/应用”才写。 */
+function acModelSectionHTML(a, v, busy) {
+  if (!a || !v) return "";
+  const ga = typeof gwInfoFor === "function" ? gwInfoFor(a.id) : null;
+  const field = v.modelField;
+  const current = field ? String(field.value || "") : "";
+  const selected = AC_MODEL_SEL || "";
+  const needApply = !!selected && (!a.wired || selected !== current);
+  let html = `<div class="ac-model-sec"><span class="ac-sec-title">${esc(t("ac.model.title"))}</span>`;
+
+  // menu agent（ZCode / Cursor Private Inference）没有“一个主模型”可写：
+  // 它的模型列表就是它自己的菜单。即使 state 里某个字段带了网关选项，
+  // 也不替用户挑一个。
+  if (a.menu || !v.hasGatewayModels) {
+    const explicitNo = !!(ga && ga.connectable === false);
+    html += `<div class="ac-hint">${esc(t("ac.model.noModels"))}</div>`;
+    if (a.menu) {
+      html += `<div class="ac-hint">${esc(t("agent.model.ownMenu"))}</div>`;
+    } else {
+      html += `<div class="ac-hint">${esc(t(explicitNo ? "ac.model.notConnectable" : "ac.model.noSource"))}</div>`;
+    }
+    // Cursor 的普通 CLI 是已知上游边界：把“想继续用怎么办”直接写出来。
+    if (a.id === "cursor") html += `<div class="ac-hint">${esc(t("ac.gw.cursorNative"))}</div>`;
+    html += `<div class="ac-actions">` +
+      `<button type="button" class="ac-btn" data-ac="add-models">${esc(t("ac.model.addModels"))}</button>` +
+      (v.canOpen && !a.wired
+        ? `<button type="button" class="ac-btn" data-ac="open-local">${esc(t("ac.model.nativeOpen"))}</button>`
+        : "") +
+      `</div></div>`;
+    return html;
+  }
+
+  // 未接入时这颗按钮就是用户口中的「接入网关」：点开只展开模型列表，
+  // 不会自己挑一个；选了模型之后它才变成模型名，下面才出现「接入并使用」。
+  const label = selected ? agentModelLabel(field, selected)
+    : (a.wired && v.modelLabel ? v.modelLabel
+      : t(a.wired ? "ac.model.choose" : "ac.model.connectGateway"));
+  html += `<div class="ac-model-row">` +
+    `<button type="button" class="ac-btn ac-model-btn" data-acmodel="${esc(a.id)}"` +
+    `${busy ? " disabled" : ""} title="${esc(t(a.wired ? "ac.model.changeHint" : "ac.model.pickHint"))}">` +
+    `<span>${esc(label)}</span><i aria-hidden="true">▾</i></button>` +
+    `<span class="ac-model-state">${esc(a.wired ? t("ac.model.connected") : t("ac.model.notConnected"))}</span>` +
+    `</div>`;
+
+  if (needApply) {
+    const hasLive = typeof liveAgentTab === "function" && !!liveAgentTab(a.id);
+    html += `<div class="ac-actions">` +
+      `<button type="button" class="ac-btn primary" data-ac="model-apply"` +
+      `${busy ? " disabled" : ""}>${esc(t(a.wired ? "ac.model.applyReopen" : "ac.model.connectOpen"))}</button>` +
+      // 没有活格时给一条“只接入”的退路：不替用户开格子。
+      (hasLive ? "" :
+        `<button type="button" class="ac-btn" data-ac="model-apply-only"` +
+        `${busy ? " disabled" : ""}>${esc(t("ac.model.applyOnly"))}</button>`) +
       `</div>`;
-  }).join("");
-  const complete = v.complete
-    ? t(v.completeKind === "gateway" ? "agent.complete.gateway" : "agent.complete.native")
-    : t("agent.complete.pending");
-  const next = v.primary.step && v.primary.action !== "none" &&
-      v.group !== "launch" && v.group !== "nolaunch" && v.group !== "missing"
-    ? `<div class="ac-next">${esc(t("ac.integration.next", {
-        step: t("agent.step." + v.primary.step),
-        action: t("agent.action." + v.primary.action),
-      }))}</div>`
-    : "";
-  return `<div class="ac-sec"><span class="ac-sec-title">${esc(t("ac.integration.title"))}</span>` +
-    `<span class="ac-sec-sub">${esc(complete)}</span></div>` +
-    `<div class="ac-steps">${rows}</div>` + next;
+  } else if (!a.wired) {
+    html += `<div class="ac-actions">` +
+      `<button type="button" class="ac-btn" aria-disabled="true" data-ac="model-disabled"` +
+      ` title="${esc(t("ac.model.pickFirst"))}">${esc(t("ac.model.connectOpen"))}</button>` +
+      `</div>`;
+  }
+
+  // 已接入时主行动就是下面那颗「打开」（它会用网关配置启动）；这里不再摆
+  // 一颗同样写着「打开」的按钮。未接入时「用本机配置打开」是退路，一直在。
+  html += `<div class="ac-actions">` +
+    (!a.wired && v.canOpen
+      ? `<button type="button" class="ac-btn" data-ac="open-local">${esc(t("ac.model.nativeOpen"))}</button>`
+      : "") +
+    (a.wired ? `<button type="button" class="ac-btn danger" data-ac="disconnect">${esc(t("ac.action.disconnect"))}</button>` : "") +
+    `</div>`;
+  html += `<div class="ac-hint">${esc(t(a.wired ? "ac.model.hintWired" : "ac.model.hintConnect"))}</div>`;
+  return html + `</div>`;
 }
 
 function acBodyHTML(a, name) {
   const cat = ((mg() && mg().catalog) || []).find((x) => x.id === (a ? a.id : AC_ID)) || null;
-  const v = cat
-    ? agentIntegrationView(cat, gwInfoFor(cat.id), AGENT_STATE[cat.id] || null, dashMagpieState())
-    : null;
-  const integration = acIntegrationHTML(cat, v);
+  const v = cat ? agentRouteView(cat, gwInfoFor(cat.id), dashMagpieState()) : null;
 
   if (!a && !GW_AGENTS && !GW_AGENTS_ERR) {
-    return (integration ? integration : "") +
-      `<div class="ac-loading"><span class="spin"></span>${esc(t("ac.loading"))}</div>`;
+    // 读网关状态慢/没起来时也要能先把 agent 用本机配置打开 —— 打开不依赖
+    // 网关，不能拿一个转圈把用户挡在外面。
+    return `<div class="ac-loading"><span class="spin"></span>${esc(t("ac.loading"))}</div>` +
+      (acCatCanOpen(cat)
+        ? `<div class="ac-actions">` +
+          `<button type="button" class="ac-btn" data-ac="open-local">${esc(t("ac.model.nativeOpen"))}</button>` +
+          `</div>`
+        : "");
   }
   if (!a) {
-    return integration + `<div class="ac-empty">` +
-      `${esc(t("ac.empty", { name }))}<br>` +
+    let html = `<div class="ac-empty">` +
+      `${esc(t("ac.localOnly", { name }))}<br>` +
       `<span>${esc(msgText(GW_AGENTS_ERR) || t("ac.empty.count", { n: (GW_AGENTS || []).length }))}</span>` +
-      `</div>` + acReloadHTML();
+      `</div>`;
+    if (acCatCanOpen(cat)) {
+      html += `<div class="ac-actions">` +
+        `<button type="button" class="ac-btn primary" data-ac="open-local">${esc(t("ac.model.nativeOpen"))}</button>` +
+        `</div>`;
+    } else if (cat && cat.installed) {
+      html += `<div class="ac-hint">${esc(t("ac.noTerminal"))}</div>`;
+    }
+    return html + acReloadHTML();
   }
 
   const busy = !!AC_BUSY;
-  const b = (act, label, cls) =>
-    `<button type="button" class="ac-btn${cls ? " " + cls : ""}" data-ac="${act}"` +
-    `${busy ? " disabled" : ""}>${esc(label)}</button>`;
-  const busyText = AC_BUSY === "connect" ? t("ac.busy.connect")
-    : AC_BUSY === "disconnect" ? t("ac.busy.disconnect")
-    : AC_BUSY === "reapply" ? t("ac.busy.reapply")
-    : AC_BUSY === "keep" ? t("ac.busy.keep")
-    : AC_BUSY.startsWith("set:") ? t("ac.busy.set") : "";
+  let html = acRouteLine(a, v);
+  if (v && v.route === "unknown") {
+    html += `<div class="ac-hint">${esc(t("ac.route.unknownNote"))}</div>`;
+  }
+  if (busy) {
+    const word = AC_BUSY.startsWith("set:") ? t("ac.busy.set")
+      : t("ac.busy." + AC_BUSY);
+    html += `<div class="ac-hint ac-busy"><span class="spin"></span>${esc(word)}</div>`;
+  }
+  html += acModelSectionHTML(a, v, busy);
 
-  let html = integration + `<div class="ac-status">` +
-    `<span class="dot${a.wired ? " on" : ""}"></span>` +
-    `<b>${esc(a.wired ? t("ac.status.wired") : t("ac.status.unwired"))}</b>` +
-    (a.failover ? `<span class="ac-chip">${esc(t("ac.chip.failover"))}</span>` : "") +
-    (busyText ? `<span class="ac-busy"><span class="spin"></span>${esc(busyText)}</span>` : "") +
-    `<span class="ac-sp"></span>` + b("reload", t("ac.reload"), "quiet") +
-    `</div>`;
+  // 配置与运行进程不一致时，抽屉里也要说清楚，并给一个直接重开的动作。
+  // 这正是用户看到的“明明已接入，格子却还在要 key/登录”的那个缝。
+  try {
+    const live = (typeof liveTabsForAgent === "function" && v && v.wired)
+      ? liveTabsForAgent(a.id) : [];
+    const setup = live.filter((x) => typeof paneSetupKind === "function" && paneSetupKind(x));
+    const stale = live.filter((x) => typeof paneModelStale === "function" && paneModelStale(x, v));
+    if (setup.length) {
+      html += `<div class="ac-note">${esc(t("ac.model.firstRunPanes"))}</div>` +
+        `<div class="ac-actions">` +
+        `<button type="button" class="ac-btn" data-ac="reopen-panes">${esc(t("ac.model.reopenPanes"))}</button>` +
+        `</div>`;
+    } else if (stale.length) {
+      html += `<div class="ac-note">${esc(t("ac.model.staleRun", { n: stale.length }))}</div>` +
+        `<div class="ac-actions">` +
+        `<button type="button" class="ac-btn" data-ac="reopen-panes">${esc(t("ac.model.reopenPanes"))}</button>` +
+        `</div>`;
+    }
+  } catch (e) {}
 
+  if (a.failover) html += `<div class="ac-note">${esc(t("ac.chip.failover"))}</div>`;
   if (a.drift) html += acDriftHTML(a, a.drift);
   if (a.stale > 0) {
-    html += `<div class="ac-note">` +
-      `${esc(t("ac.stale", { n: a.stale, name: a.name }))}</div>`;
+    html += `<div class="ac-note">${esc(t("ac.stale", { n: a.stale, name: a.name }))}</div>`;
   }
-  if (GW_AGENTS_NOTICE) {
-    html += `<div class="ac-note">${esc(GW_AGENTS_NOTICE)}</div>`;
-  }
+  if (GW_AGENTS_NOTICE) html += `<div class="ac-note">${esc(GW_AGENTS_NOTICE)}</div>`;
   if (AC_ERR) html += `<div class="ac-err">${esc(msgText(AC_ERR))}</div>`;
-
-  // 能力边界要说出来，而不是只在「仅启动」两个字上停住：Perch 能开一格，
-  // 但没有状态适配器；agy 这种接了网关的，还要靠启动时注入环境变量。
-  const caps = (cat && cat.caps) || {};
-  if (caps.launch && !caps.status && !caps.title) {
-    // 真正没有状态源才说“仅启动”；有标题弱信号的不再套这句旧话。
-    html += `<div class="ac-hint">${esc(t("ac.launchOnly"))}</div>`;
-    if (a.launch) html += `<div class="ac-hint">${esc(t("ac.launch.viaGateway"))}</div>`;
-  } else if (caps.launch && caps.title) {
-    html += `<div class="ac-hint">${esc(t("ac.titleOnly"))}</div>`;
-    if (a.launch) html += `<div class="ac-hint">${esc(t("ac.launch.viaGateway"))}</div>`;
-  } else if (!caps.launch && cat && cat.installed) {
-    // 装了但 Perch 还没有为它接入终端启动：把边界说清楚，
-    // 不要让抽屉里只剩一个不能点的「接入网关」。
-    html += `<div class="ac-hint">${esc(t("ac.noTerminal"))}</div>`;
-  }
-  if (cat && cat.setup) {
-    // 只启动 → 接入状态：入口在总览那一行（data-setup），这里只告诉用户去哪点。
-    html += `<div class="ac-hint">${esc(t("ac.setupHint"))}</div>`;
-  }
-
-  const gwStep = v ? v.steps.find((s) => s.key === "gateway") : null;
-  const gwUnsupported = !!(gwStep && gwStep.state === "unsupported");
-  const gwWhy = gwStep && gwStep.noteKey ? t(gwStep.noteKey, { name: a.name || a.id }) : "";
 
   if (AC_CONFIRM) {
     html += acConfirmHTML(a);
-  } else if (gwUnsupported) {
-    /* 上游明确不支持（普通 Cursor CLI 就是）：**不 POST**、不给一个点了报 400
-       的按钮。按钮照旧占位但做灰（aria-disabled，不是 disabled —— 禁掉的按钮
-       title 不弹），原因和原生用法写在下面。 */
-    html += `<div class="ac-actions">` +
-      `<button type="button" class="ac-btn" aria-disabled="true" data-ac="gw-unavailable"` +
-      ` title="${esc(gwWhy)}">${esc(t("ac.action.connect"))}</button>` +
+  } else if (acCatCanOpen(cat)) {
+    html += `<div class="ac-actions ac-open-row">` +
+      `<button type="button" class="ac-btn primary" data-ac="open"` +
+      `${busy ? " disabled" : ""}>${esc(t("ac.model.open"))}</button>` +
       `</div>`;
-    html += `<div class="ac-hint">${esc(gwWhy)}</div>`;
-    html += `<div class="ac-hint">${esc(t("ac.gw.nativePath"))}</div>`;
-    if (a.id === "cursor") {
-      html += `<div class="ac-hint">${esc(t("ac.gw.cursorNative"))}</div>`;
-    }
   } else {
-    html += `<div class="ac-actions">` +
-      (a.wired
-        ? b("reapply", t("ac.action.reapply")) + b("disconnect", t("ac.action.disconnect"), "danger")
-        : b("connect", t("ac.action.connect"), "primary")) +
-      `</div>`;
-    if (!a.wired) {
-      html += `<div class="ac-hint">${esc(t("ac.hint.unwired"))}</div>`;
-      if (gwStep && gwStep.noteKey && gwStep.noteKey !== "agent.note.gatewayAvailable") {
-        html += `<div class="ac-hint">${esc(t(gwStep.noteKey, { name: a.name || a.id }))}</div>`;
-      }
-    }
+    html += `<div class="ac-hint">${esc(t("ac.noTerminal"))}</div>`;
   }
 
-  html += acFieldsHTML(a, busy);
+  html += acFieldsHTML(a, busy, v ? v.modelFieldKey : "");
   return html;
 }
 
@@ -385,13 +500,17 @@ function acDriftHTML(a, d) {
   // "这份配置是我有意改的"，magpie 把 applied 记录删掉、漂移随之消失。
   // 其余几种（没接上 / 绕过 / 地址不通）保留现状等于把问题藏起来，不给。
   const keep = d.kind === "replaced"
-    ? `<div class="ac-drift-acts">` +
-      `<button type="button" class="ac-btn" data-ac="keep"${AC_BUSY ? " disabled" : ""}` +
+    ? `<button type="button" class="ac-btn" data-ac="keep"${AC_BUSY ? " disabled" : ""}` +
       ` title="${esc(t("ac.keep.title"))}">` +
-      `${esc(t("ac.keep"))}</button><span>${esc(t("ac.keep.note"))}</span></div>`
+      `${esc(t("ac.keep"))}</button><span>${esc(t("ac.keep.note"))}</span>`
     : "";
+  // 「重新应用」是漂移的主行动：把 magpie 该写的值再写一遍。之前只处理了
+  // 消息、没有按钮，等于漂移只能看不能修。
+  const acts = `<div class="ac-drift-acts">` +
+    `<button type="button" class="ac-btn" data-ac="reapply"${AC_BUSY ? " disabled" : ""}` +
+    `>${esc(t("ac.action.reapply"))}</button>` + keep + `</div>`;
   return `<div class="ac-drift"><b>${esc(why)}</b>` +
-    (d.detail ? `<span>${esc(d.detail)}</span>` : "") + keep + `</div>`;
+    (d.detail ? `<span>${esc(d.detail)}</span>` : "") + acts + `</div>`;
 }
 
 function acConfirmHTML(a) {
@@ -441,11 +560,13 @@ function acChangesHTML(p) {
   return html + `</div>`;
 }
 
-function acFieldsHTML(a, busy) {
-  const fields = Array.isArray(a.fields) ? a.fields : [];
-  if (!fields.length) return `<div class="ac-hint">${esc(t("ac.fields.none"))}</div>`;
-  let html = `<div class="ac-sec"><span class="ac-sec-title">${esc(t("ac.fields.title"))}</span>` +
-    `<span class="ac-sec-sub">${esc(t("ac.fields.sub", { n: fields.length }))}</span></div>` +
+function acFieldsHTML(a, busy, excludeKey) {
+  const fields = (Array.isArray(a.fields) ? a.fields : [])
+    .filter((f) => f && f.key !== excludeKey);
+  if (!fields.length) return "";
+  // 高级字段默认收起：行内详情首先回答“走哪条路由、用哪个模型、下一步点哪”，
+  // 十几项分档字段展开会把整页撑成一张表单。展开后行为不变。
+  let html = `<details class="ac-adv"><summary>${esc(t("ac.adv.title"))}</summary>` +
     `<div class="ac-fields">` + fields.map((f) => acFieldHTML(a, f, busy)).join("") + `</div>`;
   // OpenCode 的推理档位叫 variant，选在它自己的 TUI 里（默认 Ctrl+T，
   // 实测 1.19.3 的 keybind 就是它）。magpie 接线时只把每个模型的 variants
@@ -455,7 +576,7 @@ function acFieldsHTML(a, busy) {
     // 这一句里有 <kbd>，按受控 HTML 插入（键位是界面元素，不是用户数据）。
     html += `<div class="ac-hint">${t("ac.opencode.hint")}</div>`;
   }
-  html += `<div class="ac-hint">${esc(t("ac.fields.footer"))}</div>`;
+  html += `<div class="ac-hint">${esc(t("ac.fields.footer"))}</div></details>`;
   return html;
 }
 
@@ -515,14 +636,124 @@ function acFieldHTML(a, f, busy) {
 // 长列表选择器（模型字段，带搜索）
 // ---------------------------------------------------------------------------
 
-function acSetField(field, value) {
+function acSetFieldFor(id, field, value, isModel, openIntent) {
+  if (!id || !field) return;
+  if (isModel) {
+    AGENT_MODEL_PENDING = { id, field, value };
+    AGENT_MODEL_OPEN_INTENT = openIntent !== false;
+  }
+  GW_AGENT_BUSY = id;
+  if (AC_ID === id) {
+    AC_BUSY = "set:" + field;
+    AC_ERR = null;
+    AC_CONFIRM = false;
+  }
+  acRender();
+  sendCtrl({ type: "gw.agent.set", id, field, value });
+  bootFact(`Agent 配置 写入 ${id}.${field}${isModel ? "（模型）" : ""}`);
+}
+
+function acSetField(field, value, isModel) {
   if (!field || !AC_ID || AC_BUSY) return;
-  AC_BUSY = "set:" + field;
-  AC_ERR = null;
-  AC_CONFIRM = false;
-  renderAgentDrawer();
-  sendCtrl({ type: "gw.agent.set", id: AC_ID, field, value });
-  bootFact(`Agent 配置 写入 ${AC_ID}.${field}`);
+  acSetFieldFor(AC_ID, field, value, isModel, true);
+}
+
+/* 等一格的首帧/流。开了新格之后要先让它真正起来，再写网关配置。 */
+function waitTabReady(tab, ms) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const tick = () => {
+      if (!tab || !TAB_LIST.includes(tab)) return resolve(false);
+      if (tab.ready && tab.stream) return resolve(true);
+      if (Date.now() - t0 >= (ms || 12000)) return resolve(false);
+      setTimeout(tick, 100);
+    };
+    tick();
+  });
+}
+
+/* dsh 的 profile 是它启动时自己建的：先 connect 后首次打开时，magpie 可能
+   写的是 legacy config.yaml。等 Go 的 Cards 带上 profileReady 再写，避免
+   “写进去了但 dsh 读不到”。其他 agent 只等一个很短的 settle。 */
+function waitAgentBootstrap(id, ms) {
+  return new Promise((resolve) => {
+    if (id !== "dsh") return setTimeout(() => resolve(true), 350);
+    const t0 = Date.now();
+    const tick = () => {
+      const card = ((typeof mg === "function" && mg() && mg().catalog) || [])
+        .find((x) => x && x.id === id);
+      if (card && card.profileReady) return resolve(true);
+      if (Date.now() - t0 >= (ms || 10000)) return resolve(false);
+      setTimeout(tick, 250);
+    };
+    tick();
+  });
+}
+
+/* 抽屉主行动：没有活格 → 先替用户打开一格（让 agent 建自己的 profile/配置），
+   等首帧/bootstrap 后再写网关。写成功后 afterAgentModelSet 按这一格的状态
+   决定“自动重开 / 等这一轮结束”。 */
+async function acApplyModel(field, value) {
+  if (!AC_ID || !field || !value) return;
+  const id = AC_ID;
+  const cat = ((typeof mg === "function" && mg() && mg().catalog) || [])
+    .find((x) => x && x.id === id);
+  // 没有终端承载形态的 agent 只能“只接入”，不能替用户开一格。
+  if (!acCatCanOpen(cat)) {
+    acSetFieldFor(id, field.key, value, true, false);
+    showToast(t("term.model.saved"), t("term.model.savedNext"), "ok");
+    return;
+  }
+  const live = typeof liveAgentTab === "function" ? liveAgentTab(id) : null;
+  if (live) { acSetFieldFor(id, field.key, value, true, true); return; }
+  acClose();
+  const nt = (typeof launchAgent === "function") ? await launchAgent(id) : null;
+  if (!nt) {
+    showToast(t("ac.model.openFailed"), "", "err");
+    return;
+  }
+  // 这一格是“为了接入而开”的：允许接线成功后在首启/启动画面上强制重开。
+  nt.wiringBootstrap = true;
+  await waitTabReady(nt, 12000);
+  if (!TAB_LIST.includes(nt)) {
+    showToast(t("ac.model.openClosed"), "", "info");
+    return;
+  }
+  // dsh 的首帧可能还是空屏，等启动画面/引导页画出来再写；afterAgentModelSet
+  // 靠屏上的标记判断“这一格可以安全重开”。
+  if (id === "dsh") await new Promise((r) => setTimeout(r, 1000));
+  await waitAgentBootstrap(id, 10000);
+  if (!TAB_LIST.includes(nt)) {
+    showToast(t("ac.model.openClosed"), "", "info");
+    return;
+  }
+  acSetFieldFor(id, field.key, value, true, true);
+}
+
+/* 抽屉里的「重开运行中的格子」：和接线成功后的收尾同一张判定表 ——
+   首启/空闲/已停止重开；真正在干活的跳过并保留提示。 */
+async function acReopenAgentPanes(id) {
+  if (!id || typeof liveTabsForAgent !== "function") return;
+  const tabs = liveTabsForAgent(id);
+  if (!tabs.length) return;
+  acClose();
+  let reopened = 0, fresh = 0, deferred = 0;
+  for (const tab of tabs) {
+    if (!TAB_LIST.includes(tab)) continue;
+    const setup = typeof paneSetupKind === "function" ? paneSetupKind(tab) : "";
+    const st = typeof cellState === "function" ? cellState(tab) : "idle";
+    const d = (typeof agentReopenDecision === "function")
+      ? agentReopenDecision({ hasTab: true, setup, state: st, openIntent: true })
+      : "defer";
+    if (d !== "reopen") { deferred++; continue; }
+    const r = await reopenAgentForModel(tab, { setup: !!setup, quiet: true });
+    if (r) { reopened++; if (!r.resumed) fresh++; }
+  }
+  if (reopened) {
+    showToast(t("term.model.reopened"),
+      t(fresh ? "term.model.reopenedNewNote" : "term.model.reopenedNote"), "ok");
+  }
+  if (deferred) showToast(t("term.model.savedBusy"), t("term.model.restartLater"), "info");
 }
 
 function acPickItemHTML(value, name, group, on, title) {
@@ -586,7 +817,7 @@ function acPickOpen(field) {
   if (!a) return;
   const f = (a.fields || []).find((x) => x.key === field);
   if (!f) return;
-  const wrap = [...$("ac-body").querySelectorAll("[data-acpick]")]
+  const wrap = [...$("dash-agent-list").querySelectorAll("[data-acpick]")]
     .find((w) => w.dataset.acpick === field);
   if (!wrap) return;
   AC_PICK = { field, wrap };
@@ -668,58 +899,257 @@ function acPickOpen(field) {
   inp.focus();
 }
 
+function acFlushSoon() {
+  queueMicrotask(() => {
+    if (typeof dashFlushAgentRender === "function" && !AC_PICK && !AC_MODEL_POP) {
+      dashFlushAgentRender();
+    }
+  });
+}
+
 function acPickClose(refocus) {
-  if (!AC_PICK) return;
+  if (!AC_PICK) { acFlushSoon(); return; }
   const wrap = AC_PICK.wrap;
   AC_PICK = null;
   const pop = document.querySelector(".ac-pop");
   if (pop) pop.remove();
-  if (!wrap) return;
-  wrap.classList.remove("open");
-  const b = wrap.querySelector(".ac-pick-btn");
-  if (b) {
-    b.setAttribute("aria-expanded", "false");
-    if (refocus) b.focus();
+  if (wrap) {
+    wrap.classList.remove("open");
+    const b = wrap.querySelector(".ac-pick-btn");
+    if (b) {
+      b.setAttribute("aria-expanded", "false");
+      if (refocus) b.focus();
+    }
   }
+  acFlushSoon();
+}
+
+// ---------------------------------------------------------------------------
+// 主模型选择器（抽屉和终端格子头的 chip 共用）
+// ---------------------------------------------------------------------------
+
+function acModelPopClose(refocus) {
+  if (!AC_MODEL_POP) { acFlushSoon(); return; }
+  const { pop, anchor } = AC_MODEL_POP;
+  AC_MODEL_POP = null;
+  if (pop && pop.parentNode) pop.parentNode.removeChild(pop);
+  if (anchor) {
+    anchor.setAttribute("aria-expanded", "false");
+    if (refocus && anchor.focus) anchor.focus();
+  }
+  acFlushSoon();
+}
+
+/* 打开模型列表。selected 只用来打勾；不写入。
+   onPick(value) 由调用方决定是“先选中再确认”还是“立即应用”。
+   opts.applyLabel：给出应用按钮。此时点选项只改选中态，再点应用才调 onPick
+   —— 终端格子头走这条（选模型和写配置分开，避免误点一下就把 agent 换了模型）。
+   不给 applyLabel 时保持抽屉的老行为：点选项即回调（抽屉还要再点一次“应用”）。 */
+function acModelPickOpen(anchor, agentId, field, selected, onPick, opts) {
+  if (!anchor || !field || typeof onPick !== "function") return false;
+  const gateways = agentGatewayOptions(field);
+  if (!gateways.length) return false;
+  acPickClose(false);
+  acModelPopClose(false);
+  const applyLabel = opts && opts.applyLabel ? String(opts.applyLabel) : "";
+  // 应用按钮只接受列表里的网关模型：agent 当前可能用着它自己的模型
+  // （Cursor 的 auto、Claude 的 sonnet…），那不是这一列里的可选项。
+  const selectedInList = gateways.some((o) => o.value === selected);
+  let picked = applyLabel ? (selectedInList ? selected : "") : (selected || "");
+
+  const pop = document.createElement("div");
+  pop.className = "ac-pop ac-model-pop";
+  const find = t("ac.model.search");
+  let list = "";
+  let grp = null;
+  for (const o of gateways) {
+    const g = o.group || "";
+    if (g !== grp && g) {
+      list += `<div class="ac-pop-grp">${esc(AC_GROUP_KEYS[g] ? t(AC_GROUP_KEYS[g]) : g)}</div>`;
+    }
+    grp = g;
+    list += acPickItemHTML(o.value, o.label || o.value, "", o.value === selected,
+      o.note || "");
+  }
+  const foot = applyLabel
+    ? `<div class="ac-pop-foot"><span class="ac-pop-pick">${esc(picked
+        ? agentModelLabel(field, picked) : t("ac.model.pickFirst"))}</span>` +
+      `<button type="button" class="ac-pop-apply${picked ? "" : " off"}" data-popapply` +
+      `${picked ? "" : ' aria-disabled="true"'}>` +
+      `${esc(applyLabel)}</button></div>`
+    : "";
+  pop.innerHTML = `<input class="ac-pop-find" type="search" autocomplete="off"` +
+    ` placeholder="${esc(find)}" aria-label="${esc(find)}">` +
+    `<div class="ac-pop-list" role="listbox">${list}</div>${foot}`;
+  pop.style.visibility = "hidden";
+  document.body.appendChild(pop);
+
+  const list0 = pop.querySelector(".ac-pop-list");
+  const on0 = list0 && list0.querySelector(".ac-pop-opt.on");
+  if (list0 && on0) {
+    const lb = list0.getBoundingClientRect(), ob = on0.getBoundingClientRect();
+    if (ob.top < lb.top || ob.bottom > lb.bottom) {
+      list0.scrollTop = Math.max(0,
+        list0.scrollTop + (ob.top - lb.top) - (list0.clientHeight - on0.offsetHeight) / 2);
+    }
+  }
+
+  const r = anchor.getBoundingClientRect();
+  const w = pop.offsetWidth || 340;
+  const h = pop.offsetHeight || 320;
+  let left = r.left;
+  if (left + w > window.innerWidth - 8) left = Math.max(8, r.right - w);
+  let top = r.bottom + 6;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - 6 - h);
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+  pop.style.visibility = "";
+
+  AC_MODEL_POP = { pop, anchor };
+  anchor.setAttribute("aria-expanded", "true");
+  pop.addEventListener("pointerdown", (e) => e.stopPropagation());
+  pop.addEventListener("input", (e) => {
+    if (e.target.classList.contains("ac-pop-find")) acPickFilter(pop, e.target.value);
+  });
+  pop.addEventListener("click", (e) => {
+    if (applyLabel) {
+      const ap = e.target.closest("[data-popapply]");
+      if (ap) {
+        if (ap.disabled || !picked) return;
+        const value = picked;
+        acModelPopClose(true);
+        onPick(value);
+        return;
+      }
+    }
+    const b = e.target.closest(".ac-pop-opt");
+    if (!b) return;
+    const value = b.dataset.val;
+    if (applyLabel) {
+      // 只改选中态；写配置留给“应用”那一下。
+      picked = value;
+      for (const o of pop.querySelectorAll(".ac-pop-opt")) {
+        const on = o === b;
+        o.classList.toggle("on", on);
+        o.setAttribute("aria-selected", on ? "true" : "false");
+        const tick = o.querySelector(".tick");
+        if (tick) tick.textContent = on ? "✓" : "";
+      }
+      const lab = pop.querySelector(".ac-pop-pick");
+      if (lab) lab.textContent = agentModelLabel(field, value);
+      const ap = pop.querySelector("[data-popapply]");
+      if (ap) { ap.classList.remove("off"); ap.removeAttribute("aria-disabled"); }
+      return;
+    }
+    acModelPopClose(false);
+    onPick(value);
+  });
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      acModelPopClose(true);
+      return;
+    }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const items = [...pop.querySelectorAll(".ac-pop-opt")].filter((o) => !o.hidden);
+    if (!items.length) return;
+    const cur = items.indexOf(document.activeElement);
+    const i = e.key === "ArrowDown"
+      ? (cur < 0 ? 0 : Math.min(items.length - 1, cur + 1))
+      : (cur < 0 ? items.length - 1 : Math.max(0, cur - 1));
+    items[i].focus();
+  });
+  const inp = pop.querySelector(".ac-pop-find");
+  inp.focus();
+  return true;
 }
 
 // ---------------------------------------------------------------------------
 // 手势
 // ---------------------------------------------------------------------------
 
-$("ac-x").addEventListener("click", acClose);
-
-$("ac-body").addEventListener("change", (e) => {
+$("dash-agent-list").addEventListener("change", (e) => {
   const sel = e.target.closest("[data-acfield]");
   if (!sel) return;
   acSetField(sel.dataset.acfield, sel.value);
 });
 
-$("ac-body").addEventListener("click", (e) => {
+function acOpenAgent() {
+  if (!AC_ID) return;
+  const id = AC_ID;
+  acClose();
+  if (typeof launchAgent === "function") launchAgent(id);
+}
+
+/* 这颗“打开”只在 Perch 真能为它起一格时出现。没有终端适配的 agent 仍然能
+   在抽屉里配置/look，但不能给一个点了必然失败的按钮。 */
+function acCatCanOpen(cat) {
+  return !!(cat && cat.installed && cat.caps && cat.caps.launch);
+}
+
+$("dash-agent-list").addEventListener("click", (e) => {
   const pick = e.target.closest("[data-acpick] .ac-pick-btn");
   if (pick && !pick.disabled) {
     acPickOpen(pick.closest("[data-acpick]").dataset.acpick);
     return;
   }
+
+  const modelBtn = e.target.closest("[data-acmodel]");
+  if (modelBtn && AC_ID && !AC_BUSY) {
+    const cat = ((mg() && mg().catalog) || []).find((x) => x.id === AC_ID) || null;
+    const v = cat ? agentRouteView(cat, gwInfoFor(cat.id), dashMagpieState()) : null;
+    const field = v && v.modelField;
+    if (field) {
+      const selected = AC_MODEL_SEL || (v.wired ? v.currentModel : "");
+      const ok = acModelPickOpen(modelBtn, AC_ID, field, selected, (value) => {
+        AC_MODEL_SEL = value;
+        acRender();
+      });
+      if (!ok) {
+        showToast(t("ac.model.noModels"), t("ac.model.noSource"), "info");
+      }
+    }
+    return;
+  }
+
   const b = e.target.closest("[data-ac]");
   if (!b || !AC_ID) return;
   const act = b.dataset.ac;
-  if (act === "gw-unavailable") {
-    // 灰色按钮也要有回应：把“为什么不能接、还能怎么用”再说一遍。
+  if (act === "model-disabled") {
+    showToast(t("ac.model.pickFirst"), t("ac.model.hintConnect"), "info");
+    return;
+  }
+  if (act === "model-apply" || act === "model-apply-only") {
     const cat = ((mg() && mg().catalog) || []).find((x) => x.id === AC_ID) || null;
-    const v = cat
-      ? agentIntegrationView(cat, gwInfoFor(cat.id), AGENT_STATE[cat.id] || null, dashMagpieState())
-      : null;
-    const step = v ? v.steps.find((s) => s.key === "gateway") : null;
-    const why = step && step.noteKey
-      ? t(step.noteKey, { name: (cat && cat.name) || AC_ID })
-      : t("msg.gw.agentNotConnectable");
-    showToast(t("ac.gw.unsupportedTitle"), why + " " + t("ac.gw.nativePath"), "info");
+    const v = cat ? agentRouteView(cat, gwInfoFor(cat.id), dashMagpieState()) : null;
+    const field = v && v.modelField;
+    if (!field || !AC_MODEL_SEL) return;
+    if (act === "model-apply") {
+      acApplyModel(field, AC_MODEL_SEL);
+    } else {
+      acSetFieldFor(AC_ID, field.key, AC_MODEL_SEL, true, false);
+    }
+    return;
+  }
+  if (act === "reopen-panes") {
+    acReopenAgentPanes(AC_ID);
+    return;
+  }
+  if (act === "open" || act === "open-local") {
+    acOpenAgent();
+    return;
+  }
+  if (act === "add-models") {
+    // 去网关页加供应商/模型；抽屉固定在右侧，先收起来。
+    acClose();
+    if (typeof gwOpenProviders === "function") gwOpenProviders();
     return;
   }
   if (act === "reload") {
     AC_ERR = null;
-    renderAgentDrawer();
+    acRender();
     sendCtrl({ type: "gw.agents" });
     if (AC_ID) sendCtrl({ type: "gw.agent.preview", id: AC_ID });
     return;
@@ -728,18 +1158,18 @@ $("ac-body").addEventListener("click", (e) => {
     AC_CONFIRM = true;
     AC_ERR = null;
     if (!AC_PREVIEW) sendCtrl({ type: "gw.agent.preview", id: AC_ID });
-    renderAgentDrawer();
+    acRender();
     return;
   }
   if (act === "disconnect-cancel") {
     AC_CONFIRM = false;
-    renderAgentDrawer();
+    acRender();
     return;
   }
   if (act === "disconnect-go") {
     AC_BUSY = "disconnect";
     AC_ERR = null;
-    renderAgentDrawer();
+    acRender();
     sendCtrl({ type: "gw.agent.disconnect", id: AC_ID });
     bootFact(`Agent 配置 断开 ${AC_ID}`);
     return;
@@ -748,39 +1178,52 @@ $("ac-body").addEventListener("click", (e) => {
     // 不写文件：只是让 magpie 接受现状（见 internal/gateway/agents.go 的 gwAgentAction）。
     AC_BUSY = "keep";
     AC_ERR = null;
-    renderAgentDrawer();
+    acRender();
     sendCtrl({ type: "gw.agent.keep", id: AC_ID });
     bootFact(`Agent 配置 保留现状 ${AC_ID}`);
     return;
   }
-  if (act === "connect" || act === "reapply") {
+  if (act === "reapply") {
     AC_BUSY = act;
     AC_ERR = null;
-    renderAgentDrawer();
-    sendCtrl({ type: "gw.agent." + act, id: AC_ID });
-    bootFact(`Agent 配置 ${act === "connect" ? "接入" : "重新应用"} ${AC_ID}`);
+    acRender();
+    sendCtrl({ type: "gw.agent.reapply", id: AC_ID });
+    bootFact(`Agent 配置 重新应用 ${AC_ID}`);
   }
 });
 
-// 选择器开着时碰抽屉里任何别的东西（另一个字段、按钮）就先收起来：
+// 选择器开着时碰详情里任何别的东西（另一个字段、按钮）就先收起来：
 // 否则原生 select 的菜单和弹层会同时挂在那儿。点自己那颗按钮不算（那是切换）。
-$("ac-body").addEventListener("pointerdown", (e) => {
+$("dash-agent-list").addEventListener("pointerdown", (e) => {
+  if (AC_MODEL_POP) {
+    const w = e.target.closest("[data-agentmodel]");
+    if (!(w && w === AC_MODEL_POP.anchor)) acModelPopClose(false);
+  }
   if (!AC_PICK) return;
   const w = e.target.closest("[data-acpick]");
   if (w && w === AC_PICK.wrap) return;
   acPickClose(false);
 }, true);
 
-// 点抽屉外面收起。指着另一行（[data-agentcfg]）时不关：那一下要换成那一行。
+// 点页面别处不再收起详情：详情是总览的一部分，不是浮层。
+// 模型弹层仍然点外面关闭；行点击会切换到另一行。
 document.addEventListener("pointerdown", (e) => {
-  if (!AC_ID) return;
-  if (e.target.closest("#agentcfg") || e.target.closest("[data-agentcfg]")) return;
-  acClose();
+  if (AC_MODEL_POP) {
+    const anchor = AC_MODEL_POP.anchor;
+    if (!(e.target.closest(".ac-model-pop") || (anchor && anchor.contains(e.target)))) {
+      acModelPopClose(false);
+    }
+  }
 });
 
 // Esc：先收选择器，再收抽屉。用捕获，焦点在下拉/终端里时也能生效。
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
+  if (AC_MODEL_POP) {
+    acModelPopClose(true);
+    e.stopPropagation();
+    return;
+  }
   if (AC_PICK) {
     acPickClose(true);
     e.stopPropagation();
@@ -791,6 +1234,12 @@ document.addEventListener("keydown", (e) => {
   e.stopPropagation();
 }, true);
 
-// 弹层是 fixed 的，抽屉一滚就跟着关（它不再指向原来那一行）。
-$("ac-body").addEventListener("scroll", () => acPickClose(false), { passive: true });
-window.addEventListener("resize", () => acPickClose(false));
+// 弹层是 fixed 的，总览一滚就跟着关（它不再指向原来那一行）。
+document.querySelector(".dash-scroll").addEventListener("scroll", () => {
+  acPickClose(false);
+  acModelPopClose(false);
+}, { passive: true });
+window.addEventListener("resize", () => {
+  acPickClose(false);
+  acModelPopClose(false);
+});

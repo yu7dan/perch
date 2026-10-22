@@ -15,7 +15,7 @@ Run several agents side by side in one window — one real terminal per pane. Co
 </div>
 
 <p align="center">
-  <a href="docs/images/overview.png"><img src="docs/images/overview.png" alt="Perch overview: workspace status, gateway usage, and the agent catalog" width="960"></a>
+  <a href="docs/images/overview.png"><img src="docs/images/overview.png" alt="Perch overview: workspace status, agent workboard, and gateway usage" width="960"></a>
 </p>
 
 Perch is a Windows desktop gateway for agent terminals, in the same **agent development environment** category as Orca.
@@ -29,7 +29,7 @@ Every agent has its own sessions, its own state, and its own idea of "waiting fo
 - **One real terminal per pane** — parallel grid, independent tabs, status dots; scrollback stays local and is still there when you switch back.
 - **Attention first** — whoever is waiting for you comes first. Answer selection prompts from the "Needs you" panel; permission prompts can be allowed or denied from the work board after the terminals are collapsed.
 - **Collapse terminals into a work board** — one fixed-height row per agent; the row does not render the transcript; click a row to enter that pane.
-- **The gateway is not rebuilt** — providers, routing, usage, and plugins use magpie's native pages. Perch embeds them and wires agents into them; it does not keep a second copy.
+- **A gateway that stays out of the way** — providers, agent wiring, and usage live in Perch's own gateway page. A headless local engine does the routing; there is no second app to open and no embedded vendor UI.
 
 ## Features
 
@@ -43,7 +43,7 @@ Each pane is a live ConPTY with its own scrollback, tab, and status dot. Switchi
 
 </td>
 <td width="50%">
-  <a href="docs/images/overview.png"><img src="docs/images/overview.png" alt="Workspace status, activity, and the agent catalog in the Perch overview" width="100%"></a>
+  <a href="docs/images/overview.png"><img src="docs/images/overview.png" alt="The Perch overview: agent workboard and gateway usage" width="100%"></a>
 </td>
 </tr>
 <tr>
@@ -51,23 +51,23 @@ Each pane is a live ConPTY with its own scrollback, tab, and status dot. Switchi
 
 ### Agent wiring and model selection
 
-Connect, disconnect, re-apply, or keep the current configuration. Long model lists become a searchable popover; the current value is brought into view automatically. Configuration comes from magpie's `/api/state`, and writes go through the same API — Perch does not keep a second copy.
+The model is your choice, never a default Perch picks. Choose one on the agent's row in Overview, from the inline detail, or from the model chip in a running pane (`Ctrl+Shift+M`). Selecting a model writes that exact value through the built-in gateway engine; on an unwired agent the same call connects first and then applies it. Long lists become a searchable popover with no preselection, and the current value is brought into view only when the agent is already wired. An idle pane offers to reopen and resume after a model change; a busy pane saves the choice and waits. Configuration is read back from the engine's `/api/state`, and writes go through the same API — the page never assumes an HTTP 2xx means the agent changed.
 
 </td>
 <td width="50%">
-  <a href="docs/images/agent-wiring.png"><img src="docs/images/agent-wiring.png" alt="Agent configuration drawer with gateway wiring and model selection" width="100%"></a>
+  <a href="docs/images/agent-wiring.png"><img src="docs/images/agent-wiring.png" alt="Agent row model picker and inline gateway detail in the Perch overview" width="100%"></a>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="middle">
 
-### Embedded magpie gateway
+### Built-in gateway engine
 
-Providers, routing, usage, and plugins use magpie's own pages; the version and update bar is hosted by Perch. Updates use magpie's own `check → install`; after re-exec, Perch claims the new process by port.
+Perch ships with a headless local gateway engine and a native provider console. The catalog lists every supported provider as a template; pick one, paste a key, and the sheet stays open for model chips and a live key test. Added providers sit above the catalog in one row each. Usage lives in the Overview's right rail (today / 7 / 30 / all), next to the agents it serves. The engine runs as a private child process with its own data directory and a stable loopback address; its web UI is never loaded or proxied. Provider keys go one way — into the engine — and the page only ever sees a masked status.
 
 </td>
 <td width="50%">
-  <a href="docs/images/gateway.png"><img src="docs/images/gateway.png" alt="Embedded magpie gateway showing usage, sessions, projects, and models" width="100%"></a>
+  <a href="docs/images/gateway.png"><img src="docs/images/gateway.png" alt="Perch's provider catalog and editor sheet with a saved key status" width="100%"></a>
 </td>
 </tr>
 </table>
@@ -80,11 +80,11 @@ Providers, routing, usage, and plugins use magpie's own pages; the version and u
 - **Read-only file rail** — a file tree and preview beside the active agent. Perch reads files and never edits them behind your back.
 - **Close is not delete** — closing a pane stops the run but keeps the record. The agent appears as "closed" in the left rail and can be resumed later under the same pane ID.
 - **Install recipes built in** — the agent catalog detects what is installed, runs the official installer or npm package on request, and rescans immediately after installation.
-- **Gateway lifecycle** — Perch observes a running magpie, can start its own control plane when needed, follows updates through re-exec, and never stops the desktop magpie.
+- **Gateway lifecycle** — the engine starts and stops with Perch, keeps the same gateway address across restarts so agent configs stay valid, and never touches a desktop gateway you may already run.
 
 ## Supported agents
 
-Perch's catalog contains CLI agents only. Desktop and web clients are not installed or launched by Perch; they belong to magpie's gateway layer. The catalog ships with 15 CLI agents, grouped by integration depth.
+Perch's catalog contains CLI agents only. Desktop and web clients are not installed or launched by Perch; they belong to the gateway layer. The catalog ships with 15 CLI agents, grouped by integration depth.
 
 ### Full integration
 
@@ -127,12 +127,12 @@ The other nine have a one-click install recipe — the official installer or an 
   <sub><b>ZCode</b> — detected and listed in the catalog, but not installed or launched by Perch.</sub>
 </p>
 
-**Install** means Perch runs the agent's official installer or npm package after you click "Install". **Launch** means Perch can start it in a pane. Desktop clients are outside this list; any client that can point at a custom base URL can use the magpie gateway.
+**Install** means Perch runs the agent's official installer or npm package after you click "Install". **Launch** means Perch can start it in a pane. Desktop clients are outside this list; any client that can point at a custom base URL can use the built-in gateway.
 
 Two of these go further than install/launch:
 
 - **Antigravity CLI** has session resume wired (`--conversation <id>` / `--continue`). Its native terminal title carries no state (it is the executable path), so Perch offers a one-click **Connect status** action that installs lifecycle hooks (`SessionStart` / `PreInvocation` / `Stop`). Until those hooks are installed the row says, honestly, that there is no status source. Waiting-for-approval is not subscribed: `PreToolUse` is a permission gate and an observer must not answer it.
-- **Cursor** has `--resume <chatId>` / `--continue` resume wired, but the regular `cursor-agent` CLI has no status source and cannot be routed through magpie (`Cursor CLI can't be connected to magpie`). The drawer says so, keeps the gateway action visibly unavailable, and points to native use, `cursor-agent login`, or Cursor Private Inference instead of sending a request that returns HTTP 400.
+- **Cursor** has `--resume <chatId>` / `--continue` resume wired, but the regular `cursor-agent` CLI has no status source and cannot be routed through the gateway. The inline detail says so, keeps the gateway action visibly unavailable, and points to native use, `cursor-agent login`, or Cursor Private Inference instead of sending a request that returns HTTP 400.
 
 ## Where the data comes from
 
@@ -160,7 +160,7 @@ Two binaries are required: the main app and a separate hook receiver (the agent'
 
 - **Experimental**; interfaces will change.
 - Windows only (ConPTY and Job Objects).
-- Status comes from each agent's own structured source where one exists (hooks, an app-server, an extension, or a local HTTP API); terminal-title glyphs are the fallback. Agents without a structured source stay launch-only until one is wired.
+- Status comes from each agent's own structured source where one exists (hooks, an app-server, an extension, or a local HTTP API); terminal-title glyphs are the fallback. Perch does not auto-write an agent's hooks: agents without a structured source still open, sign in, and run normally, just with less busy/idle detail.
 - Process names, the state directory, and the hook receiver are all `perch` / `Perch`; there are no machine-specific absolute paths. On another machine Perch uses that machine's own state root (`CLAUDE_CONFIG_DIR`, or `~/.claude` when unset).
 
 ## For contributors
@@ -172,7 +172,7 @@ Why the frontend uses classic scripts with `defer`, what belongs in each file, i
 This project learned from two open-source implementations, mostly at the level of concrete process (terminal pane layout, status-dot glyphs, the one-agent-per-line activity stream, the auto-scroll state machine). The architecture and data plane are our own. [THIRD-PARTY.md](THIRD-PARTY.md) lists each item and its license.
 
 - [Orca](https://github.com/stablyai/orca) (MIT) — UI styling and a set of implementation details
-- [Magpie](https://github.com/yetone/magpie) (MIT) — desktop feel and the information architecture of the usage panel
+- [Magpie](https://github.com/yetone/magpie) (MIT) — bundled headless gateway engine; Perch owns the UI and talks to it over its local API
 
 And [xterm.js](https://github.com/xtermjs/xterm.js), [Wails](https://github.com/wailsapp/wails), [Cascadia](https://github.com/microsoft/cascadia-code), [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), and [Geist](https://github.com/vercel/geist-font).
 

@@ -14,9 +14,6 @@ type Host interface {
 	BindSession(tabID int, sid, name, agent string) bool
 	RebindSession(tabID int, sid, name, agent string) bool
 	SetStatus(tabID int, status string) (prev string, changed bool)
-	// RecordStatus 记“这个 agent 的状态这条腿已经产生过真实事件”。只在第一条
-	// 真实事件时落盘（Store.SetStep 会去重）；它是“录入”的证据，不是能力声明。
-	RecordStatus(tabID int, mechanism string)
 	Push(v any)
 	// ResolveExe 找 agent 的可执行文件，并处理 Windows 的 .cmd/.bat shim。
 	ResolveExe(bin string) (string, []string)
@@ -44,7 +41,6 @@ func (defaultHost) RebindSession(int, string, string, string) bool {
 	return false
 }
 func (defaultHost) SetStatus(int, string) (string, bool) { return "", false }
-func (defaultHost) RecordStatus(int, string)             {}
 func (defaultHost) Push(any)                             {}
 func (defaultHost) WireLaunch(string) (map[string]string, []string, bool) {
 	return nil, nil, false

@@ -2,7 +2,7 @@
 //
 // 这里只放**Perch 自己**的偏好：默认工作目录、终端外观、关窗/结束 agent 的
 // 确认、启动落点。agent 自己的配置（模型、网关、权限…）一律不进来 ——
-// 那是 magpie / agent 配置抽屉的事，两家的状态不能搅在一起。
+// 那是 magpie / agent 行内详情的事，两家的状态不能搅在一起。
 //
 // 落盘位置和项目池同一层：%APPDATA%\Perch\settings.json。
 // 和 projects.json 一样走「先写 .tmp 再 rename」的原子写，并且**解析失败就

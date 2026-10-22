@@ -13,7 +13,6 @@ func (h agyTestHost) RebindSession(int, string, string, string) bool {
 	return false
 }
 func (h agyTestHost) SetStatus(int, string) (string, bool) { return "", false }
-func (h agyTestHost) RecordStatus(int, string)             {}
 func (h agyTestHost) Push(any)                             {}
 func (h agyTestHost) ResolveExe(bin string) (string, []string) {
 	return bin, nil

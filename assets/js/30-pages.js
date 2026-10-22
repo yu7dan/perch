@@ -261,6 +261,7 @@ function setActive(t) {
   t.tabEl.classList.add("on");
   term = t.term;                            // ← 页面级那几十处读到的就是它
   renderAgentDot(t);
+  if (typeof renderPaneModel === "function") renderPaneModel();
   renderTabTitle(t);
   paintConnStatus(t.ready);
   paintRenderStatus();
@@ -356,6 +357,8 @@ function closeTab(t, opts) {
   if (activeTab === t) {
     activeTab = null; term = null;
     setActive(TAB_LIST[Math.min(i, TAB_LIST.length - 1)] || null);
+    // 没有下一格时 setActive(null) 直接返回，chip 还挂着上一格的模型。
+    if (typeof renderPaneModel === "function") renderPaneModel();
   }
   renderGrid();     // 格数变了 → 重排列数、重算主区宽度
   // 左栏的行就是 agent：这一格没了，那一行也得跟着没（2026-10-17 起左栏

@@ -1,53 +1,208 @@
-/* 70-gateway.css —— 网关页的外壳。
-   页面本身是 magpie 自己的界面：Go 在 /gwui/ 与 /api/ 上做同源反代（internal/gateway/ui.go），
-   这里只负责 iframe 的尺寸，以及控制面没接上时那张安装/接入卡。
-   Provider / 路由 / 用量 / 插件的一切样式都在 magpie 的 app.css 里，本文件不再
-   复制任何一份 —— 手写实现已于 2026-10-18 整体删除。 */
+/* 70-gateway.css —— Perch 自己的供应商页（2026-10-22 第二轮）。
+   页面只回答“模型从哪里来”：已添加的供应商 + 始终陈列的目录 + 右侧编辑器。
+   视觉沿用总览：一整块面、头发丝分隔、真实 logo、对齐的列；不复制 magpie 的 DOM。 */
 
-/* iframe 自己滚（滚动发生在 magpie 页面内部），外层不许滚：
-   否则 iframe 会被内容撑高，Perch 的页面跟着滚。 */
 #dash:has(#dash-gateway:not([hidden])) .dash-scroll{overflow:hidden}
 #dash:has(#dash-gateway:not([hidden])) .dash-wrap{height:100%;display:flex;flex-direction:column}
-#dash-gateway{flex:1;min-height:0;min-width:0}
-#gw-frame{flex:1;min-height:0;width:100%;display:block;border:0;background:var(--bg)}
-#gw-frame[hidden]{display:none}
+#dash-gateway{flex:1;min-height:0;min-width:0;display:flex;flex-direction:column}
+#dash-gateway[hidden]{display:none}
 
-/* ---- 已接入：版本 / 更新条 ---------------------------------------------
-   一行 Perch 自己的状态（不是 magpie 的页面）：当前版本、可更新的版本、
-   用户点出来的「更新」。更新由 magpie 自己的 /api/update 完成。 */
-.gw-ver{flex:none;display:flex;align-items:center;gap:8px;height:26px;padding:0 12px;
-        border-bottom:1px solid var(--line-soft);background:var(--bg);
-        font-size:10.5px;color:var(--faint);white-space:nowrap}
-.gw-ver[hidden]{display:none}
-.gw-ver .sep{color:var(--line)}
-.gw-ver .upd{color:#f5d06a}
-.gw-ver .err{color:var(--red)}
-.gw-ver .gw-btn{margin-left:2px}
+/* ---- 状态条 ------------------------------------------------------------ */
+.gw-status{flex:none;display:flex;align-items:center;gap:8px;height:40px;padding:0 16px;
+           border-bottom:1px solid var(--line-soft);background:var(--bg);
+           font-size:11px;color:var(--muted);white-space:nowrap;overflow-x:auto;overflow-y:hidden}
+.gw-status .fsp{flex:1 0 12px}
+.gw-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--faint)}
+.gw-dot.on{background:var(--green);box-shadow:0 0 0 3px rgba(74,222,128,.10)}
+.gw-dot.warn{background:var(--amber)}
+.gw-dot.bad{background:var(--red)}
+.gw-status b{font-weight:600;color:var(--fg2)}
+.gw-status .sep{color:var(--line)}
+.gw-status .addr{font-family:var(--mono);font-size:10.5px;color:var(--faint);
+                 overflow:hidden;text-overflow:ellipsis;max-width:280px}
+.gw-status .err{color:var(--red);overflow:hidden;text-overflow:ellipsis;max-width:460px}
+.gw-status .gw-actions{display:flex;align-items:center;gap:6px;flex:none}
 
-/* ---- 未接入：安装 / 接入卡 --------------------------------------------- */
-.gw-cover{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column}
-.gw-cover[hidden]{display:none}
+/* ---- 内容 -------------------------------------------------------------- */
+.gw-view{flex:1;min-height:0;overflow-y:auto;padding:18px 20px 40px}
+.gw-page{max-width:1040px;margin:0 auto;min-width:0}
+.gw-head{display:flex;align-items:flex-start;gap:18px;margin-bottom:12px}
+.gw-head .gw-id{flex:1;min-width:0}
+.gw-head h2{margin:0;font-size:15px;font-weight:600;color:var(--fg)}
+.gw-head p{margin:4px 0 0;font-size:11.5px;line-height:1.65;color:var(--faint);max-width:680px}
+.gw-search{flex:none;display:flex;align-items:center;gap:6px;width:230px;height:28px;
+  padding:0 9px;border:1px solid var(--line);border-radius:7px;background:var(--card);
+  color:var(--faint);box-sizing:border-box}
+.gw-search:focus-within{border-color:var(--accent);color:var(--fg2)}
+.gw-search input{flex:1;min-width:0;height:100%;border:0;background:transparent;outline:none;
+  color:var(--fg);font-size:11.5px}
+.gw-search input::placeholder{color:var(--faint)}
+.gw-search input:disabled{opacity:.5}
 
-/* 卡里的状态行沿用总览的 .console-bar（细线、小字、可拖的那一套语言）。 */
-.gw-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.gw-actions.right{margin-left:auto}
-.gw-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:22px;
-        padding:0 8px;border:1px solid var(--line);border-radius:var(--r-sm);
-        background:rgba(255,255,255,.03);color:var(--fg2);font-size:11px;cursor:pointer;
-        white-space:nowrap;transition:background .12s,border-color .12s,color .12s}
+.gw-sec-head{display:flex;align-items:baseline;gap:8px;padding:0 2px 7px;min-width:0}
+.gw-sec-head b{font-size:12px;font-weight:600;color:var(--fg)}
+.gw-sec-head span{font-size:10.5px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;font-variant-numeric:tabular-nums}
+
+/* 已添加：一行一个，点行打开编辑器。 */
+.gw-added{margin-bottom:16px}
+.gw-list{border:1px solid var(--line-soft);border-radius:9px;background:var(--card);overflow:hidden}
+.gw-prow{display:grid;grid-template-columns:24px minmax(0,1fr) auto 120px 12px;gap:10px;
+  align-items:center;min-height:46px;padding:0 12px;border-top:1px solid var(--line-soft);
+  cursor:pointer;min-width:0}
+.gw-prow:first-child{border-top:0}
+.gw-prow:hover{background:var(--card-hov)}
+.gw-prow:focus-visible{outline:1px solid var(--accent);outline-offset:-2px}
+.gw-pico{width:24px;height:24px;display:grid;place-items:center;flex:none}
+.gw-pico .ico-img,.gw-pico .ico-mask{width:22px;height:22px}
+.gw-letter{width:22px;height:22px;border-radius:6px;background:#202026;color:var(--fg2);
+  display:grid;place-items:center;font-size:11px;font-weight:600}
+.gw-pmain{min-width:0;display:flex;flex-direction:column;gap:1px}
+.gw-pmain b{font-size:12.5px;font-weight:500;color:var(--fg);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.gw-pmain small{font-size:10.5px;color:var(--faint);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.gw-uses{display:flex;align-items:center;gap:3px;min-width:0}
+.gw-use{width:24px;height:24px;border:0;border-radius:6px;background:transparent;
+  display:grid;place-items:center;cursor:pointer;padding:0}
+.gw-use:hover{background:rgba(255,255,255,.07)}
+.gw-use .ico-img,.gw-use .ico-mask{width:16px;height:16px}
+.gw-use-more{font-size:9.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+.gw-key{display:inline-flex;align-items:center;justify-content:center;width:118px;height:20px;
+  padding:0 7px;border:1px solid transparent;border-radius:999px;font-size:10px;
+  white-space:nowrap;overflow:hidden;box-sizing:border-box}
+.gw-key span,.gw-key{text-overflow:ellipsis}
+.gw-key.ok{color:var(--green);background:rgba(74,222,128,.09);border-color:rgba(74,222,128,.18)}
+.gw-key.warn{color:var(--amber);background:rgba(245,208,106,.09);border-color:rgba(245,208,106,.18)}
+.gw-key.plain{color:var(--faint);background:rgba(255,255,255,.03);border-color:var(--line-soft)}
+.gw-chev{font-size:12px;color:var(--faint);text-align:center}
+
+/* 目录：分组标题 + 无边框 tiles。 */
+.gw-catalog{margin-top:2px}
+.gw-cat-group{margin-top:10px}
+.gw-cat-title{display:flex;align-items:baseline;gap:8px;padding:0 8px 3px}
+.gw-cat-title b{font-size:12.5px;font-weight:600;color:var(--fg)}
+.gw-cat-title span{font-size:10.5px;color:var(--faint)}
+.gw-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
+  gap:1px 12px;min-width:0}
+.gw-tile{display:flex;align-items:center;gap:8px;height:34px;padding:0 8px;border:0;
+  border-radius:6px;background:transparent;color:var(--fg2);text-align:left;cursor:pointer;
+  min-width:0}
+.gw-tile:hover{background:var(--card-hov);color:var(--fg)}
+.gw-tile:focus-visible{outline:1px solid var(--accent);outline-offset:-2px}
+.gw-tile .ico-img,.gw-tile .ico-mask{width:18px;height:18px;flex:none}
+.gw-tile .nm{flex:1;min-width:0;font-size:12.5px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.gw-tile .have{width:6px;height:6px;border-radius:3px;background:var(--green);flex:none}
+.gw-custom{display:flex;align-items:center;gap:9px;margin-top:12px;padding-top:10px;
+  border-top:1px solid var(--line-soft);font-size:10.5px;color:var(--faint)}
+.gw-custom-btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 9px;
+  border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--fg2);
+  font-size:11.5px;cursor:pointer}
+.gw-custom-btn:hover{border-color:var(--fg2);color:var(--fg)}
+.gw-custom-btn .plus{font-size:14px;line-height:1;color:var(--faint)}
+.gw-none{padding:14px 8px;font-size:11.5px;color:var(--faint)}
+
+.gw-lead{padding:8px 0 12px;font-size:11.5px;line-height:1.65;color:var(--muted)}
+.gw-lead span{display:block;font-size:10.5px;color:var(--faint);margin-top:2px}
+.gw-down{display:flex;align-items:center;justify-content:space-between;gap:14px;
+  padding:14px 16px;border:1px solid var(--line-soft);border-radius:9px;background:var(--card)}
+.gw-down-id{min-width:0;display:flex;flex-direction:column;gap:3px}
+.gw-down-id b{font-size:12.5px;font-weight:600;color:var(--fg)}
+.gw-down-id span{font-size:11px;line-height:1.55;color:var(--faint)}
+.gw-error{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid rgba(248,113,113,.25);
+  border-radius:8px;color:var(--red);font-size:11.5px}
+.gw-loading{display:flex;align-items:center;gap:8px;padding:22px 4px;color:var(--faint);font-size:12px}
+
+/* 按钮：和总览/安装台同一套高度与边框。 */
+.gw-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:26px;
+  padding:0 10px;border:1px solid var(--line);border-radius:var(--r-sm);
+  background:rgba(255,255,255,.03);color:var(--fg2);font-size:11.5px;cursor:pointer;
+  white-space:nowrap;transition:background .12s,border-color .12s,color .12s}
 .gw-btn:hover{border-color:var(--faint);color:var(--fg);background:rgba(255,255,255,.07)}
 .gw-btn.primary{background:var(--accent);border-color:transparent;color:#fff}
 .gw-btn.primary:hover{background:#1d5cf0;color:#fff}
-.gw-btn:disabled{opacity:.4;cursor:default}
-.gw-btn.sm{height:19px;padding:0 6px;font-size:10.5px}
-.gw-connect{display:flex;flex-direction:column;align-items:flex-start;gap:10px;padding:24px 20px}
-.gw-connect b{font-size:13px}
-.gw-connect p{margin:0;font-size:12px;line-height:1.75;color:var(--muted);max-width:620px}
-.gw-connect .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-/* magpie 安装日志：和 Agent 的行内安装控制台同一种东西（等宽、黑底、可滚）。 */
-.gw-inst-log{margin:4px 0 0;padding:10px 12px;width:100%;max-height:220px;overflow:auto;
-             background:#0a0a0a;border:1px solid var(--line-soft);border-radius:6px;
-             font:11px/1.6 var(--mono);color:var(--muted);white-space:pre-wrap}
-.gw-msg{padding:7px 20px 0;font-size:11px;color:var(--muted);line-height:1.6}
-.gw-msg.ok{color:var(--green)}
-.gw-msg.bad{color:var(--red)}
+.gw-btn.sm{height:22px;padding:0 8px;font-size:11px}
+.gw-btn:disabled{cursor:default;color:var(--faint);border-color:var(--line-soft);background:transparent}
+.gw-btn:focus-visible{outline:1px solid var(--accent);outline-offset:1px}
+
+/* ---- 供应商编辑器（右侧 sheet） ---------------------------------------- */
+#gw-edit{position:fixed;z-index:80;right:0;top:var(--titlebar-h);bottom:24px;width:520px;
+  display:none;flex-direction:column;background:var(--panel);
+  border-left:1px solid var(--line);box-shadow:-20px 0 48px rgba(0,0,0,.45);
+  animation:gwe-in .18s cubic-bezier(.2,.8,.2,1)}
+#gw-edit.on{display:flex}
+#gw-edit[aria-hidden="true"]{display:none}
+@keyframes gwe-in{from{transform:translateX(14px);opacity:0}to{transform:none;opacity:1}}
+.gwe-head{display:flex;align-items:center;gap:9px;padding:12px 14px;flex:none;
+  border-bottom:1px solid var(--line-soft)}
+.gwe-ico{width:22px;height:22px;display:grid;place-items:center;flex:none}
+.gwe-ico .ico-img,.gwe-ico .ico-mask{width:22px;height:22px}
+.gwe-id{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.gwe-id b{font-size:13px;font-weight:600;color:var(--fg);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.gwe-id span{font-size:10.5px;color:var(--faint);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.gwe-site{flex:none;font-size:10.5px;color:var(--muted);background:none;border:0;cursor:pointer;
+  white-space:nowrap;padding:0}
+.gwe-site:hover{color:var(--fg);text-decoration:underline}
+.gwe-x{flex:none;width:24px;height:24px;display:grid;place-items:center;border:0;border-radius:6px;
+  background:transparent;color:var(--muted);cursor:pointer}
+.gwe-x:hover{background:#33333c;color:var(--fg)}
+.gwe-body{flex:1;overflow-y:auto;padding:13px 16px 18px;display:flex;flex-direction:column;gap:9px}
+.gwe-kind{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--faint);padding-bottom:2px}
+.gwe-row{display:grid;grid-template-columns:88px minmax(0,1fr);gap:10px;align-items:start;
+  min-width:0}
+.gwe-k{font-size:11px;color:var(--fg2);text-align:right;padding-top:6px;line-height:1.4}
+.gwe-c{min-width:0;display:flex;flex-direction:column;gap:5px}
+.gwe-input,.gwe-area{width:100%;box-sizing:border-box;border:1px solid var(--line);
+  border-radius:6px;background:#121216;color:var(--fg);font-size:12px;padding:6px 8px;outline:none}
+.gwe-input:focus,.gwe-area:focus{border-color:var(--accent)}
+.gwe-area{min-height:84px;resize:vertical;font-family:var(--mono);font-size:11.5px;line-height:1.6}
+.gwe-hint{font-size:10px;line-height:1.5;color:var(--faint)}
+.gwe-note{font-size:11px;line-height:1.6;color:var(--muted);padding:7px 9px;
+  border-radius:6px;background:rgba(255,255,255,.035)}
+.gwe-links{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.gwe-link{font-size:10.5px;color:var(--muted);background:none;border:0;padding:0;cursor:pointer}
+.gwe-link:hover{color:var(--fg);text-decoration:underline}
+.gwe-seg{display:inline-flex;align-items:center;gap:1px;padding:2px;border-radius:7px;
+  background:rgba(255,255,255,.04);flex-wrap:wrap}
+.gwe-opt{height:24px;padding:0 9px;border:0;border-radius:5px;background:transparent;
+  color:var(--muted);font-size:11px;cursor:pointer;white-space:nowrap}
+.gwe-opt:hover{color:var(--fg2)}
+.gwe-opt.on{background:rgba(255,255,255,.11);color:var(--fg)}
+.mchips{display:flex;flex-wrap:wrap;gap:5px;min-width:0}
+.gwe-chips{max-height:170px;overflow-y:auto;padding:1px 0}
+.mchip{height:24px;padding:0 8px;border:1px solid var(--line);border-radius:999px;
+  background:transparent;color:var(--muted);font-size:10.5px;cursor:pointer;white-space:nowrap}
+.mchip:hover{border-color:var(--faint);color:var(--fg2)}
+.mchip.on{border-color:rgba(74,222,128,.35);background:rgba(74,222,128,.10);color:var(--green)}
+.gwe-model-find{margin-bottom:2px}
+.gwe-more{border-top:1px solid var(--line-soft);padding-top:7px;margin-top:2px}
+.gwe-more summary{font-size:10.5px;color:var(--muted);cursor:pointer;list-style:none}
+.gwe-more summary::-webkit-details-marker{display:none}
+.gwe-more summary::before{content:"▸";display:inline-block;margin-right:5px;color:var(--faint)}
+.gwe-more[open] summary::before{transform:rotate(90deg)}
+.gwe-eps{display:flex;flex-direction:column;gap:3px;padding:6px 0 0 12px}
+.gwe-eps span{font:10.5px/1.5 var(--mono);color:var(--faint);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.gwe-err{font-size:11px;line-height:1.55;color:var(--red);padding:7px 9px;border-radius:6px;
+  background:rgba(255,101,104,.08)}
+.gwe-foot{flex:none;display:flex;align-items:center;gap:8px;padding:11px 14px;
+  border-top:1px solid var(--line-soft)}
+.gwe-foot .fsp{flex:1}
+.gwe-danger{font-size:11px;color:var(--red);background:none;border:0;padding:0;cursor:pointer}
+.gwe-danger:hover{text-decoration:underline}
+
+@media (max-width:900px){
+  .gw-head{flex-direction:column;gap:10px}
+  .gw-search{width:100%}
+  .gw-prow{grid-template-columns:24px minmax(0,1fr) 108px 12px}
+  .gw-uses{display:none}
+}
+@media (max-width:700px){
+  #gw-edit{width:100%}
+  .gwe-row{grid-template-columns:1fr;gap:4px}
+  .gwe-k{text-align:left;padding-top:0}
+}

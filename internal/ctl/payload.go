@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/yu7dan/perch/internal/agentcatalog"
-	"github.com/yu7dan/perch/internal/agentstate"
 	"github.com/yu7dan/perch/internal/gateway"
 	"github.com/yu7dan/perch/internal/history"
 	"github.com/yu7dan/perch/internal/project"
@@ -49,9 +48,6 @@ type ShellPayload struct {
 	// Settings 是 Perch 自己的偏好。跟着首份载荷一起下来，
 	// 前端就不用为了"终端用什么字号"再发一次请求；之后的改动走 ctl 的 settings 消息。
 	Settings settings.Settings `json:"settings"`
-	// AgentState 是每个 agent 的接入进度（见 internal/agentstate）。它是
-	// "打开过之后走到哪一步"的唯一一份事实；总览不许再从静态 caps 自己推。
-	AgentState map[string]agentstate.Record `json:"agentState,omitempty"`
 }
 
 // ShellPayload 现场扫一遍，拼出首份载荷。
@@ -77,7 +73,6 @@ func (s *Server) ShellPayload() ShellPayload {
 	if s.deps.Gateway != nil {
 		p.Magpie = s.deps.Gateway.Snapshot()
 	}
-	p.AgentState = s.agentStateSnapshot()
 	// Prefs 在组合根里先于第一次载荷初始化；万一某条测试路径没初始化，
 	// 给默认值而不是零值（零值会让确认默认变成关）。
 	if s.deps.Prefs != nil {
@@ -191,15 +186,6 @@ func (s *Server) bootAgentCards() []agentcatalog.Card {
 	return agentcatalog.Cards(home)
 }
 
-// agentStateSnapshot 是接入进度的只读快照。nil store（测试/无状态工具）给空表，
-// 前端把它当"还没有任何记录"，不是"全部完整"。
-func (s *Server) agentStateSnapshot() map[string]agentstate.Record {
-	if s.deps.AgentState == nil {
-		return map[string]agentstate.Record{}
-	}
-	return s.deps.AgentState.Snapshot()
-}
-
 // defaultAgentSetting 是设置里的显式默认（空 = 自动）。前端自己还会校验
 // “已安装 / 能启动”，这里只把落盘的事实带过去。
 func (s *Server) defaultAgentSetting() string {
@@ -257,11 +243,6 @@ func (s *Server) applySettingsPatch(p settings.Patch, why string) {
 		next.StartView, next.Language, pick(next.DefaultAgent, "(自动)"), pick(next.NewAgentShortcut, "(关闭)"),
 		next.ConfirmClose, next.ConfirmEndAgent)
 	s.pushSettings(nil)
-	// Perch 的语言选择也是 magpie 的：内嵌网关页跟随同一份设置（尽力而为，
-	// 失败只落日志；见 internal/gateway/language.go）。
-	if s.deps.Gateway != nil {
-		s.deps.Gateway.SetLanguage(next.Language)
-	}
 	if next.DefaultCWD != old.DefaultCWD {
 		project.EnsureDefaultWorkspace(s.customCWD)
 		s.poolReply(nil)

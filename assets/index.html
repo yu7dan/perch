@@ -252,6 +252,11 @@
              它不记得"当前是谁" —— 那是 activeTab 的事。 --></div>
         <div class="phead">
           <div class="rt">
+            <button type="button" class="pmodel" id="pane-model" hidden
+              aria-haspopup="listbox" aria-expanded="false"
+              title="这一格的模型" data-i18n-title="term.model.title">
+              <span class="pmodel-txt"></span><i aria-hidden="true">▾</i>
+            </button>
             <button class="pbtn" id="restore" title="把上次的输出恢复到这个面板"
               data-i18n-title="term.restore.title"></button>
           </div>
@@ -429,8 +434,8 @@
        "除了左侧栏之外，其他部分就是整个 dashboard"（用户 2026-10-17 定的形态）。
        顶栏那排模块切换照 magpie 的 .seg：没有灰底轨道，只有一枚滑动的白片。
 
-       ⚠️ 网关那一页**不手写**：它内嵌 magpie 自己的界面（同源反代）。
-       同一个设置做两份必然漂 —— 这是用户 2026-10-18 明确否掉手写实现后的结论。 -->
+       网关那一页是 Perch 自己的原生页面（2026-10-22）：引擎在后台，
+       Perch 用控制面 API 拿归一化数据；不再内嵌引擎的 Web UI。 -->
   <main id="dash">
     <!-- 总览 ↔ 左栏的缝（可拖，改 --rail-w）。抓取带落在总览这一侧，
          可见线画在缝上 —— 和 #list-divider 同一套几何。 -->
@@ -438,55 +443,28 @@
     <div class="dash-scroll">
       <div class="dash-wrap">
         <section class="dash-pane" id="dash-overview">
-          <!-- 操作台：一整块面 + 头发丝分隔。顶部是工作区入口 + 六个读数
-               （网关状态条已按用户评审撤掉 —— 用不用网关是另一件事），
-               中间左边是三个月的活动、右边是**正在发生的事**（请求 + 在等你），
-               底部是 Agent 接线表。 -->
+          <!-- 总览 = 工作台：Agent 在左（安装 / 打开 / 选模型 / 接入都在行上），
+               网关用量和在等你都在右栏，53 周活动压在全宽底部。
+               网关页只剩供应商目录；总览不依赖它才能回答“我现在怎么样”。 -->
           <section class="console" id="dash-console">
             <div class="console-bar" id="dash-status"></div>
             <div class="console-kpis" id="dash-kpi"></div>
             <div class="console-cols">
-              <div class="console-main">
+              <div class="console-main" id="dash-agent-card">
                 <div class="mod-head">
-                  <div><b data-i18n="dash.heat.title">每日活动</b><span class="sub" id="dash-heat-sub"></span></div>
-                  <div class="mini-segs" id="heat-metric" role="tablist" aria-label="热力图口径" data-i18n-aria-label="dash.heat.metricAria">
-                    <button type="button" class="mini on" data-hm="turns" role="tab" data-i18n="dash.heat.turns">轮次</button>
-                    <button type="button" class="mini" data-hm="calls" role="tab" data-i18n="dash.heat.calls">请求</button>
-                  </div>
+                  <div><b data-i18n="dash.agents.title">Agent 工作台</b><span class="sub" id="dash-agent-sub"></span></div>
+                  <div class="agent-gw" id="dash-agent-gw"></div>
                 </div>
-                <div class="heat-scroll"><div class="heat-grid" id="dash-heat"></div></div>
-                <div class="heat-tip" id="dash-heat-tip" hidden></div>
-                <div class="heat-foot">
-                  <span data-i18n="dash.heat.less">少</span>
-                  <span class="sw"></span><span class="sw lv1"></span><span class="sw lv2"></span><span class="sw lv3"></span><span class="sw lv4"></span>
-                  <span data-i18n="dash.heat.more">多</span>
-                </div>
-
-                <!-- 热力图下面的两条读数：token 构成和最近请求的耗时形状。
-                     它们不是另开卡片，而是在同一块操作台上用头发丝分开 ——
-                     左边这一列因此和右边的实时流一样高，不会留一大片空。 -->
-                <section class="console-sub" id="dash-mix-card">
-                  <div class="mod-head">
-                    <div><b data-i18n="dash.mix.title">今日 token</b><span class="sub" id="dash-mix-sub"></span></div>
-                    <span class="note" id="dash-mix-cost"></span>
-                  </div>
-                  <div class="mix-bar" id="dash-mix-bar"></div>
-                  <div class="mix-legend" id="dash-mix-legend"></div>
-                </section>
-                <section class="console-sub" id="dash-lat-card">
-                  <div class="mod-head">
-                    <div><b data-i18n="dash.lat.title">最近请求耗时</b><span class="sub" id="dash-lat-sub"></span></div>
-                    <span class="note" data-i18n="dash.lat.note">柱高 = 耗时</span>
-                  </div>
-                  <div class="lat-bars" id="dash-lat-bars"></div>
-                </section>
+                <div id="dash-agent-list"></div>
               </div>
               <aside class="console-side">
-                <section class="side-block">
+                <section class="side-block" id="dash-usage-card">
                   <div class="mod-head">
-                    <div><b data-i18n="dash.live.title">实时</b><span class="sub" id="dash-live-sub"></span></div>
+                    <div><b data-i18n="dash.usage.title">网关用量</b></div>
+                    <div class="usage-period" id="dash-usage-period" role="tablist"
+                         aria-label="用量周期" data-i18n-aria-label="dash.usage.periodAria"></div>
                   </div>
-                  <div id="dash-live"></div>
+                  <div id="dash-usage"></div>
                 </section>
                 <section class="side-block" id="dash-need-card">
                   <div class="mod-head">
@@ -497,35 +475,29 @@
               </aside>
             </div>
 
-            <!-- Agent CLI 接线表：只列本机能在终端里跑的 CLI agent（已接入 /
-                 未接入两组）；未检测到的收进 magpie 式折叠栏，点「安装」在 Perch
-                 里跑官方 CLI 命令。桌面端不在这里 —— 用户自己下载，在网关层配置。
-                 点一行 = 右侧配置抽屉（89-agent-cfg.js）：接入网关、模型、
-                 推理强度、分档、子代理、登录方式。 -->
-            <section class="console-foot" id="dash-agent-card">
+            <section class="console-foot" id="dash-heat-card">
               <div class="mod-head">
-                <div><b data-i18n="dash.agents.title">Agent CLI</b><span class="sub" id="dash-agent-sub"></span></div>
-                <span class="note" data-i18n="dash.agents.note">只列本机 CLI agent · 点一行配置网关 · 图标来自 magpie / lobe-icons</span>
+                <div><b data-i18n="dash.heat.title">每日活动</b><span class="sub" id="dash-heat-sub"></span></div>
               </div>
-              <div class="roster" id="dash-agent-list"></div>
+              <div class="heat-scroll"><div class="heat-grid" id="dash-heat"></div></div>
+              <div class="heat-tip" id="dash-heat-tip" hidden></div>
+              <div class="heat-foot">
+                <span data-i18n="dash.heat.less">少</span>
+                <span class="sw"></span><span class="sw lv1"></span><span class="sw lv2"></span><span class="sw lv3"></span><span class="sw lv4"></span>
+                <span data-i18n="dash.heat.more">多</span>
+              </div>
             </section>
           </section>
         </section>
 
-        <!-- 网关：magpie 自己的界面（用户 2026-10-18 定的方向：不手写第二份）。
-             网关的那几页（供应商的陈列/添加/订阅/配置页、路由、网关、用量、
-             插件）由 magpie 的前端渲染；Go 侧在同源路径下反代（internal/gateway/ui.go），
-             并把 magpie 自己的 Agents/Sessions/Library 与左侧栏从内嵌页里
-             拿掉 —— 那些和 Perch 的总览/Agent 重复，导航按顶部标签摆。
-             iframe 地址里没有 key —— 鉴权 cookie 由服务端注入。
-             控制面没接上时 iframe 不设 src，盖一张安装/接入卡。 -->
+        <!-- 网关（2026-10-22）：Perch 自己的供应商页。
+             引擎（magpie）在后台跑，Perch 通过控制面 API 拿归一化数据；
+             这一页不加载、不反代引擎的 Web UI，也不认识任何插件概念。
+             供应商目录始终陈列；已添加的行在上面；编辑器是右侧 sheet。 -->
         <section class="dash-pane gw-pane" id="dash-gateway" hidden>
-          <!-- 版本/更新条：magpie 自己管更新（/api/update），Perch 只显示和
-               转发用户那一下点击。接上控制面后才出现 —— 未接上时安装卡里
-               已经有版本。 -->
-          <div class="gw-ver" id="gw-ver" hidden></div>
-          <div class="gw-cover" id="gw-cover"></div>
-          <iframe id="gw-frame" title="magpie" hidden></iframe>
+          <div class="gw-status" id="gw-status"></div>
+          <div class="gw-view" id="gw-view"></div>
+          <aside id="gw-edit" role="dialog" aria-label="供应商配置" aria-hidden="true"></aside>
         </section>
       </div>
     </div>
@@ -803,6 +775,7 @@
       </div>
     </div>
   </main>
+
 </div>
 
 <!-- 4. 状态栏。
@@ -971,27 +944,6 @@
     <div id="op-list"></div>
   </div>
 </div>
-<!-- Agent 配置抽屉（总览 → Agent 名单 → 点一行）。数据与写操作都走 magpie
-     控制面（internal/gateway/agents.go / 89-agent-cfg.js）；这里只放壳，内容打开时现填。
-     fixed 在右沿、标题栏之下、状态栏之上；点外面、Esc、× 都收起。 -->
-<aside id="agentcfg" role="dialog" aria-label="Agent 配置" aria-hidden="true"
-  data-i18n-aria-label="ac.title">
-  <div class="ac-head">
-    <span class="ac-ico" id="ac-ico"></span>
-    <div class="ac-id">
-      <b id="ac-name">Agent</b>
-      <span class="ac-path" id="ac-path"></span>
-    </div>
-    <span class="ac-chip" title="Perch 的使用层只安装/运行 CLI agent"
-      data-i18n-title="ac.cliHint" data-i18n="ac.cli">CLI</span>
-    <button type="button" class="ac-x" id="ac-x" title="关闭" aria-label="关闭"
-      data-i18n-title="common.close" data-i18n-aria-label="common.close">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-        stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
-    </button>
-  </div>
-  <div class="ac-body" id="ac-body"></div>
-</aside>
 <!-- 确认框（单例）。关窗确认、结束 agent 确认都走它 —— 一处语义、一处键盘行为。
      盖住整个窗口（包括自绘标题栏）：确认没答复之前，点 × 也只会把焦点送回卡片，
      不会在背后偷偷把窗口关掉。内容由 85-settings.js 的 askConfirm 填。 -->
@@ -1072,7 +1024,7 @@ window.__facts = [];
 <script defer src="/js/01-i18n.js"></script>
 <script defer src="/js/05-prefs.js"></script>
 <!-- 纯视图模型（无 DOM）：一个 agent 从零到“完整/可用”的判断只写一份，
-     总览与配置抽屉都读它。测试在 08-agent-model.test.js（Node）。 -->
+     总览的行和行内详情都读它。测试在 08-agent-model.test.js（Node）。 -->
 <script defer src="/js/08-agent-model.js"></script>
 <script defer src="/js/10-term.js"></script>
 <script defer src="/js/20-ctl.js"></script>
@@ -1091,6 +1043,8 @@ window.__facts = [];
 <script defer src="/js/84-settings-search.js"></script>
 <script defer src="/js/85-settings.js"></script>
 <script defer src="/js/86-dash.js"></script>
+<!-- 网关页：状态条 + 已添加供应商 + 供应商目录 + 右侧编辑器（Perch 原生，
+     见 internal/gateway；不加载引擎自己的 Web UI）。 -->
 <script defer src="/js/87-gateway.js"></script>
 <script defer src="/js/88-install.js"></script>
 <script defer src="/js/89-agent-cfg.js"></script>

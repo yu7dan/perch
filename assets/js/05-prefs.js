@@ -10,7 +10,7 @@
    所以：本地改动先乐观写缓存，Go 的 settings 消息一到就以 Go 为准
    （fromGo=true 时整份替换，避免"盘上少一个字段、前端还留着旧值"）。
 
-   ⚠️ 这里**不碰** agent 自己的配置。模型/网关/权限是 magpie 和 agent 配置抽屉
+   ⚠️ 这里**不碰** agent 自己的配置。模型/网关/权限是 magpie 和 agent 行内详情
    的事；两份状态搅在一起是上一轮明确避开的那类错。 */
 
 const SETTINGS_DEFAULTS = Object.freeze({

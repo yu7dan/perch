@@ -21,12 +21,6 @@ type Msg struct {
 	// pane.close / pane.forget 用：那一格的 paneId（登记表的身份，不是 tab id ——
 	// tab id 每次启动重发，见 panes.Pane 的说明）。close 只打标记，forget 才删。
 	Pane int `json:"pane"`
-	// agent.readiness 用：首屏/探测得到的就绪分类。Agent 是前端启动时选的
-	// agent id，Go 会拿 pane 反查运行期表复核 —— 前端不能凭空给任意 agent 写状态。
-	Agent     string `json:"agent"`
-	Readiness string `json:"readiness"`
-	// agent.status 用：这条状态证据来自哪条腿（目前只有 title）。
-	Mechanism string `json:"mechanism"`
 	// Req：建格请求的**令牌**，原样带回 tab.ok（成功和拒绝两条路都带）。
 	//
 	// ⚠️ 为什么非要有它：前端原来靠"在 TAB_LIST 里找一个 id=0 且还在等应答的标签"
@@ -59,30 +53,20 @@ type Msg struct {
 	// false / 0 / 空串都是合法值，所以不能用零值判断缺省。
 	Settings *settings.Patch `json:"settings,omitempty"`
 	// gw.* 用：控制面的读写参数。
-	//   Period  today / 7d / 30d / all
-	//   Preset  供应商预设 id
 	//   Key     供应商 API key —— **只在内存里过一次**，不落日志、不回显
-	//   From    分组改名前的 id
-	//   Members 分组成员（provider/model）
-	//   Plugin  插件 npm 包名；Op 是 add/remove/update/upgrade/off
-	//   User    额度卡片的账号
-	Period  string   `json:"period,omitempty"`
-	Preset  string   `json:"preset,omitempty"`
-	Key     string   `json:"key,omitempty"`
-	From    string   `json:"from,omitempty"`
-	Members []string `json:"members,omitempty"`
-	Plugin  string   `json:"plugin,omitempty"`
-	Op      string   `json:"op,omitempty"`
-	User    string   `json:"user,omitempty"`
-	Offset  int      `json:"offset,omitempty"`
-	// 供应商编辑（gw.provider.save 且带 id、不带 preset）：三个接入点。
-	// 用指针是为了把「没发」和「发来空串（清空这个接入点）」分开 ——
-	// 值类型 + omitempty 会让"清空"变成静默无效。
-	Chat      *string `json:"chat,omitempty"`
-	Responses *string `json:"responses,omitempty"`
-	Anthropic *string `json:"anthropic,omitempty"`
-	// gw.provider.arrange：开关着的供应商的新顺序（id 列表，靠上的先用）。
-	Order []string `json:"order,omitempty"`
+	//   ProviderID / CredentialID 是引擎里的身份；Protocol/BaseURL/Models 是
+	//   供应商表单。Key 复用上面的字段 —— 密钥只进不出。
+	Key          string            `json:"key,omitempty"`
+	ProviderID   string            `json:"providerId,omitempty"`
+	CredentialID string            `json:"credentialId,omitempty"`
+	Protocol     string            `json:"protocol,omitempty"`
+	BaseURL      string            `json:"baseUrl,omitempty"`
+	Preset       string            `json:"preset,omitempty"`
+	Endpoints    map[string]string `json:"endpoints,omitempty"`
+	Models       []string          `json:"models,omitempty"`
+	// Period is gw.usage's window: today | 7d | 30d | all. It is validated
+	// again in Go; this is not a pass-through to an arbitrary engine query.
+	Period string `json:"period,omitempty"`
 	// gw.agent.set 用：Field 是 /api/state 里字段的 key，Value 是选项值。
 	// 空串是**有效值** —— magpie 用它把字段还原成 agent 自己的默认，所以
 	// Value 不套 omitempty：别让"清空"在编码这一层变成静默无效。
