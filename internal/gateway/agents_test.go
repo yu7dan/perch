@@ -1,6 +1,22 @@
 package gateway
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
+
+func TestAgentEngineManagedPersistsAcrossRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "engine-agents.json")
+	g := New(nil)
+	g.SetEngineAgentsFile(path)
+	g.setAgentEngine(map[string]bool{"gemini": true})
+
+	g2 := New(nil)
+	g2.SetEngineAgentsFile(path)
+	if !g2.AgentEngineManaged("gemini") {
+		t.Fatal("wired set did not survive a restart; restored panes would launch on the real config")
+	}
+}
 
 func TestAgentEngineManagedFollowsWired(t *testing.T) {
 	g := New(nil)

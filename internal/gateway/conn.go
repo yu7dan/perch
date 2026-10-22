@@ -94,7 +94,10 @@ type Gateway struct {
 	agentLaunch map[string]string
 	// agentEngine：哪些 agent 现在确实由引擎接入了网关。只有这些 agent 的
 	// 启动才应该把用户目录换到引擎沙盒；没接线的仍读用户自己的配置。
-	agentEngine map[string]bool
+	// 这份表会落盘：冷恢复的格子比第一次 /api/state 更早启动，不能等状态
+	// 到了才知道该不该换沙盒。
+	agentEngine      map[string]bool
+	engineAgentsFile string
 }
 
 // New 构造一个未连接的网关。push 是发给前端的函数，可以为 nil（测试）。

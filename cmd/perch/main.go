@@ -152,6 +152,11 @@ func main() {
 
 	// 网关与安装器：网关先建（安装完成回调要接它）；两者都只通过 push 出站。
 	a.gw = gateway.New(a.push.Push)
+	// 已接入引擎的 agent 表要跨重启：冷恢复的格子比 /api/state 先起来，
+	// 没这份缓存，Gemini 这类通用 CLI 会拿真实配置启动并弹登录页。
+	if p, err := appdir.PerchFile("engine-agents.json"); err == nil {
+		a.gw.SetEngineAgentsFile(p)
+	}
 	// 2026-10-22：隔离引擎是产品默认路径：只用 Perch 自己安装的 portable
 	// magpie，不碰桌面 magpie/3425，也不写 agent 的全局配置。
 	// 排障时可以显式设 PERCH_ISOLATED_GATEWAY=0 回到旧的桌面 magpie 发现路径。

@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/yu7dan/perch/internal/uimsg"
@@ -44,13 +45,39 @@ func agentLogID(id string) string {
 	return " " + id
 }
 
+// SetEngineAgentsFile 从 Perch 的持久文件恢复“哪些 agent 已接入引擎”。
+// 冷恢复时格子比第一次 /api/state 更早启动；没有这份缓存，已接入的
+// Gemini 之类会按真实配置启动，弹出登录页。
+func (g *Gateway) SetEngineAgentsFile(path string) {
+	if path == "" {
+		return
+	}
+	var m map[string]bool
+	if b, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(b, &m)
+	}
+	g.launchMu.Lock()
+	g.engineAgentsFile = path
+	if m != nil {
+		g.agentEngine = m
+	}
+	g.launchMu.Unlock()
+}
+
 func (g *Gateway) setAgentEngine(next map[string]bool) {
 	if next == nil {
 		next = map[string]bool{}
 	}
 	g.launchMu.Lock()
 	g.agentEngine = next
+	path := g.engineAgentsFile
 	g.launchMu.Unlock()
+	if path == "" {
+		return
+	}
+	if b, err := json.Marshal(next); err == nil {
+		_ = os.WriteFile(path, append(b, '\n'), 0600)
+	}
 }
 
 // AgentEngineManaged 报告这个 agent 当前是否已由引擎接入网关。只有 true
