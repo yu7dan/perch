@@ -648,6 +648,13 @@ function dashModelShort(label) {
   return /^magpie\//i.test(s) ? s.slice(7) : s;
 }
 
+function dashContextLabel(n) {
+  n = Number(n) || 0;
+  if (!n) return "—";
+  if (n >= 1000000) return (Math.round(n / 100000) / 10) + "M";
+  return Math.round(n / 1000) + "k";
+}
+
 function perchAlias(id) {
   const s = String(id || "agent").toLowerCase()
     .replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -857,6 +864,8 @@ function perchRowHTML(a, gid) {
       `</div>` +
       `<div class="ag-det-row"><span>${esc(t("dash.agents.perchDetailModel"))}</span>` +
       `<b>${esc(p ? perchModelLabel(p) : t("dash.agents.perchUnset"))}</b></div>` +
+      `<div class="ag-det-row"><span>${esc(t("dash.agents.perchDetailContext"))}</span>` +
+      `<b>${esc(p && model && model.context ? dashContextLabel(model.context) : "—")}</b></div>` +
       (p ? (() => {
         const efforts = model && Array.isArray(model.efforts)
           ? model.efforts.map((e) => String(e).toLowerCase()).filter(Boolean) : [];
