@@ -27,6 +27,13 @@ func TestEngineEnvSandboxesAgentHomes(t *testing.T) {
 	local := t.TempDir()
 	t.Setenv("LOCALAPPDATA", local)
 	t.Setenv("PERCH_ISOLATED_PORT", "64749")
+	// 先把 USERPROFILE/HOME 钉到临时目录，再调 engineEnv：seed 会按它找
+	// 桌面配置，绝不能读到这台机器真实的 ~/.dsh / ~/.pi。
+	realHome := t.TempDir()
+	t.Setenv("USERPROFILE", realHome)
+	t.Setenv("HOME", realHome)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(realHome, ".cache"))
+	t.Setenv("MAGPIE_BUN", "")
 	oldPort := isolatedGatewayPort
 	oldURL := gatewayURL
 	isolatedGatewayPort = 64749
@@ -67,11 +74,6 @@ func TestEngineEnvSandboxesAgentHomes(t *testing.T) {
 	}
 	// USERPROFILE/HOME are sandboxed too, so magpie's Agent.Path can't reach
 	// the desktop; WorkBuddy's sign-in is seeded into the sandbox instead.
-	realHome := t.TempDir()
-	t.Setenv("USERPROFILE", realHome)
-	t.Setenv("HOME", realHome)
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(realHome, ".cache"))
-	t.Setenv("MAGPIE_BUN", "")
 	bunDir := filepath.Join(realHome, ".cache", "magpie", "bun", "1.4.3")
 	if err := os.MkdirAll(bunDir, 0700); err != nil {
 		t.Fatal(err)

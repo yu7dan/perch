@@ -106,7 +106,7 @@ func DshDef() Def {
 	d := GenericDef("dsh-tui")
 	d.Args = func(intent ResumeIntent, _ string) []string { return dshArgs(intent) }
 	d.Prepare = func(tag string, _ int, _ string, _ []string) (map[string]string, []string, func(context.Context), error) {
-		return map[string]string{
+		env := map[string]string{
 			// dsh 的 shell executor 会剥掉名字里含 KEY/TOKEN/SECRET/PASSWORD 的
 			// 环境变量（Orca 在 dsh-hook.cmd 里实测过）。这个变量名必须继续
 			// 不含这些词，否则 hook 会拿不到格子身份。
@@ -114,7 +114,15 @@ func DshDef() Def {
 			// dsh-tui 的启动器用 `dsh --version` 探测官方 CLI；npm 的 shim 又要
 			// 找 node。GUI 进程的 PATH 常常比终端短，这里按事实补齐。
 			"PATH": dshChildPath(),
-		}, nil, nil, nil
+		}
+		// 隔离引擎把 magpie 的 dsh 字段写进 Perch 的 DSH_HOME；Perch 直接
+		// 启动 dsh-tui 时也必须读同一个 home，否则「已接入」只写不进运行。
+		for k, v := range host.EngineHomeEnv() {
+			if _, exists := env[k]; !exists {
+				env[k] = v
+			}
+		}
+		return env, nil, nil, nil
 	}
 	return d
 }

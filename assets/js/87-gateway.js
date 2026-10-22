@@ -247,6 +247,7 @@ function applyGwAgents(m) {
   if (Array.isArray(m.agents)) GW_AGENTS = m.agents;
   // 任何一次动作（读/写/接入/断开/重应用）回来都结束了忙碌态。
   AC_BUSY = "";
+  GW_AGENT_BUSY = "";
   if (m.err) {
     // 存结构而不是渲染好的句子：切语言时 89-agent-cfg 会重画。
     GW_AGENTS_ERR = errMsgOf(m);
@@ -289,7 +290,12 @@ function applyMagpie(s) {
   MAGPIE = s;
   const sig = JSON.stringify([s.state, (s.series || []).length,
     (s.series || []).reduce((n, x) => n + (x.calls | 0), 0), (s.today || {}).calls]);
-  const catSig = JSON.stringify((s.catalog || []).map((a) => [a.id, !!a.installed, a.calls | 0]));
+  // 名单只在“身份”变了时重画：今日 call 数每 2.5 秒都在变，把它算进
+  // 指纹会让行内的模型选择器/展开状态每 2.5 秒被冲掉一次。
+  const catSig = JSON.stringify((s.catalog || []).map((a) => [
+    a.id, !!a.installed, a.icon, a.name, a.path, !!a.install, a.url,
+    !!(a.caps && a.caps.launch),
+  ]));
   const seriesChanged = sig !== MG_SIG;
   const catChanged = catSig !== MG_CAT_SIG;
   MG_SIG = sig;

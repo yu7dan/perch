@@ -390,6 +390,16 @@
 .agp-k{flex:none;width:72px;color:var(--faint)}
 .agp-v{min-width:0;color:var(--fg2)}
 .agp-v code{font:10.5px/1.6 var(--mono);color:var(--muted)}
+.gw-fields{display:flex;flex-direction:column;gap:6px;width:100%}
+.gw-field{display:flex;align-items:center;gap:10px;min-height:28px}
+.gw-k{flex:none;width:110px;color:var(--faint);font-size:11px}
+.gw-select{flex:1;min-width:0;height:28px;padding:0 6px;
+           border:1px solid var(--line);border-radius:6px;background:var(--card);
+           color:var(--fg);font:11px/1.5 var(--ui);cursor:pointer}
+.gw-select:hover:not(:disabled){border-color:#4a4a52}
+.gw-select:focus{outline:none;border-color:var(--accent)}
+.gw-select:disabled{opacity:.55;cursor:default}
+.agp-exp-acts{display:flex;gap:4px;margin-top:4px}
 .agp-dim{color:var(--faint)}
 .agp-efforts{display:flex;flex-wrap:wrap;gap:4px}
 .agp-effort{height:22px;padding:0 8px;border:1px solid var(--line);border-radius:5px;

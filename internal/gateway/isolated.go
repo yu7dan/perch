@@ -64,6 +64,7 @@ func EngineHomeEnv() map[string]string {
 		"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
 		"XDG_CACHE_HOME":  filepath.Join(home, ".cache"),
 		"XDG_DATA_HOME":   filepath.Join(home, ".local", "share"),
+		"DSH_HOME":        filepath.Join(home, ".dsh"),
 	}
 }
 
@@ -222,6 +223,7 @@ func engineEnv(key string) ([]string, error) {
 		filepath.Join(home, ".claude"),
 		filepath.Join(home, ".codex"),
 		filepath.Join(home, ".dsh"),
+		filepath.Join(home, ".dsh-tui"),
 		filepath.Join(home, ".gemini"),
 		filepath.Join(home, ".pi"),
 		filepath.Join(home, ".cursor"),
@@ -308,6 +310,36 @@ func seedEngineAgentConfigs(home string) {
 		filepath.Join(realHome, ".pi", "agent"),
 		filepath.Join(home, ".pi", "agent"),
 	)
+	// DSH 的 profile（含 TUI 和 hook 桥）和登录态：引擎会往同一个 home
+	// 写自己的 provider/模型；Perch 的 dsh-tui 也按这个 DSH_HOME 启动。
+	// profile 里的 node_modules 比较大，只在沙盒还没有时复制一次。
+	for _, name := range []string{
+		"config.yaml", "cordis.patch.yml", "settings.yaml",
+		".env", ".credentials.yaml", ".anonymous-user-id",
+	} {
+		_ = copyFileIfMissing(
+			filepath.Join(realHome, ".dsh", name),
+			filepath.Join(home, ".dsh", name),
+		)
+	}
+	_ = copyDirIfMissing(
+		filepath.Join(realHome, ".dsh", "profiles"),
+		filepath.Join(home, ".dsh", "profiles"),
+	)
+	// dsh-tui 的首次引导只看 ~/.dsh-tui/onboarding.json；沙盒里没有这份
+	// 记录时会在第一次开格弹 4 步向导。网关已经由 magpie 配好，这里只让
+	// 沙盒里的 TUI 跳过引导，不动真实目录。
+	onboarding := filepath.Join(home, ".dsh-tui", "onboarding.json")
+	realOnboarding := filepath.Join(realHome, ".dsh-tui", "onboarding.json")
+	if _, err := os.Stat(onboarding); os.IsNotExist(err) {
+		if b, rerr := os.ReadFile(realOnboarding); rerr == nil {
+			_ = os.MkdirAll(filepath.Dir(onboarding), 0700)
+			_ = os.WriteFile(onboarding, b, 0600)
+		} else {
+			_ = os.MkdirAll(filepath.Dir(onboarding), 0700)
+			_ = os.WriteFile(onboarding, []byte("{\"completed\":true,\"version\":1}\n"), 0600)
+		}
+	}
 }
 
 func samePath(a, b string) bool {
