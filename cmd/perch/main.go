@@ -20,6 +20,7 @@ import (
 	perchassets "github.com/yu7dan/perch"
 	"github.com/yu7dan/perch/internal/agent"
 	"github.com/yu7dan/perch/internal/agentcatalog"
+	"github.com/yu7dan/perch/internal/agentprofile"
 	"github.com/yu7dan/perch/internal/appdir"
 	"github.com/yu7dan/perch/internal/ctl"
 	"github.com/yu7dan/perch/internal/dsh"
@@ -45,11 +46,12 @@ type perchApp struct {
 	stateDir    string
 	fallbackCWD string
 
-	titles *session.TitleStore
-	prefs  *settings.Store
-	pool   *project.Pool
-	panes  *panes.Store
-	tabs   *session.Manager
+	titles   *session.TitleStore
+	prefs    *settings.Store
+	pool     *project.Pool
+	panes    *panes.Store
+	tabs     *session.Manager
+	profiles *agentprofile.Store
 
 	defs map[string]agent.Def
 
@@ -66,6 +68,14 @@ func main() {
 		push:        &pushRelay{},
 	}
 	log.Printf("[perch] 版本 %s（pid %d）", buildVersion, os.Getpid())
+
+	// Perch 自己的 per-agent 配置（模型别名/档位）。和 agent 的全局配置分开，
+	// 由隔离网关在开格时注入；默认路径在 %APPDATA%\Perch\agent-profiles.json。
+	if p, err := appdir.PerchFile("agent-profiles.json"); err == nil {
+		a.profiles = agentprofile.Load(p)
+	} else {
+		a.profiles = agentprofile.Load("")
+	}
 
 	// 状态根按 Claude Code 自己的规则取：环境里有 CLAUDE_CONFIG_DIR 就用它，
 	// 否则 <用户主目录>\.claude。仓库里不留任何本机绝对路径。
@@ -144,6 +154,9 @@ func main() {
 	// 带一条 launch 命令，网关把它解析成 env+args，开格时由 AgyDef 现取。
 	// 没接线时 Launch 返回 false，启动退回通用路径。
 	a.tabs.SetWireLaunch(a.gw.Launch)
+	// Phase 2：Perch 自己的 per-agent 模型注入。只在隔离引擎模式下有内容；
+	// 旧路径（桌面 magpie）保持不注入、行为不变。
+	a.tabs.SetWireProfile(a.agentWireProfile)
 	// 内嵌网关页的语言跟 Perch 的设置走：先记下偏好，控制面连上时再写进
 	// magpie（它自己的 settings.lang），见 internal/gateway/language.go。
 	a.gw.SetLanguage(a.prefs.Snapshot().Language)
@@ -415,6 +428,35 @@ func (a *perchApp) defaultCWD() string {
 		return p
 	}
 	return a.fallbackCWD
+}
+
+// agentWireProfile 是 session.Manager 开格前的注入点。
+//
+// 只做 Perch 自己的配置：模型指向 group/perch-<agent> 这个稳定别名，
+// 引擎里的 group 目标换了，运行中的会话下一轮就生效。绝不写 agent 的
+// 全局配置；拿不到配置就返回 false，让这一格按 agent 自己的方式启动。
+func (a *perchApp) agentWireProfile(id string) (map[string]string, []string, bool) {
+	if a.profiles == nil || !a.gw.Isolated() {
+		return nil, nil, false
+	}
+	p, ok := a.profiles.Get(id)
+	if !ok || p.Alias == "" || p.Model == "" {
+		return nil, nil, false
+	}
+	// 每次开格都确认一次组存在；CLI 只改 Perch 引擎的 portable data，
+	// 不碰桌面 magpie，也不碰 agent 配置。
+	if err := a.gw.EnsureAgentGroup(p.Alias, p.Model); err != nil {
+		log.Printf("[gw] agent %s 的 Perch 模型配置没有生效：%v", id, err)
+		return nil, nil, false
+	}
+	switch id {
+	case "claude":
+		return gateway.ClaudeProfileEnv(p.Alias), nil, true
+	case "codex":
+		return nil, gateway.CodexProfileArgs(p.Alias), true
+	default:
+		return nil, nil, false
+	}
 }
 
 // mergeCatalogCalls 把“今日经过网关”的读数保留下来：刚扫出来的名单没有

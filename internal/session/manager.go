@@ -48,6 +48,11 @@ type Manager struct {
 	// 唯一调用点是 agent.AgyDef 的 Prepare；没接网关时保持 nil。
 	wireMu     sync.RWMutex
 	wireLaunch func(id string) (map[string]string, []string, bool)
+
+	// profileMu：Perch 自己的 per-agent 配置（模型/档位）注入。
+	// 只有隔离网关模式下列表函数才返回内容；旧路径保持 nil。
+	profileMu   sync.RWMutex
+	wireProfile func(id string) (map[string]string, []string, bool)
 }
 
 // New 构造空的会话表。Defs 在 agent.SetHost 之后由 SetDefs 填 —— 顺序见
@@ -81,6 +86,24 @@ func (m *Manager) SetWireLaunch(fn func(id string) (map[string]string, []string,
 	m.wireMu.Lock()
 	m.wireLaunch = fn
 	m.wireMu.Unlock()
+}
+
+// SetWireProfile 由组合根注入：返回这一格要用的 Perch 网关配置。
+// Claude 的 env 会合并进 --settings；Codex 的 args 是顶层 -c 覆盖。
+func (m *Manager) SetWireProfile(fn func(id string) (map[string]string, []string, bool)) {
+	m.profileMu.Lock()
+	m.wireProfile = fn
+	m.profileMu.Unlock()
+}
+
+func (m *Manager) profileFor(id string) (map[string]string, []string, bool) {
+	m.profileMu.RLock()
+	fn := m.wireProfile
+	m.profileMu.RUnlock()
+	if fn == nil {
+		return nil, nil, false
+	}
+	return fn(id)
 }
 
 func (m *Manager) defFor(id string) (agent.Def, bool) {

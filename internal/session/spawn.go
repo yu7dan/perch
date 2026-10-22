@@ -78,27 +78,50 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 			return nil, &StartError{Stage: StagePrepare, Agent: tab.Spec.Agent, Err: perr}
 		}
 	}
+	// Perch 自己的 per-agent 配置：模型别名/档位。只在隔离网关模式下有；
+	// 拿不到就按旧路径启动。Claude 的 env 会合并进 --settings，Codex 用 -c.
+	var profEnv map[string]string
+	var profArgs []string
+	if e, a, ok := m.profileFor(tab.Spec.Agent); ok {
+		profEnv, profArgs = e, a
+	}
 	// hooks 是**每格子一份**：事件文件路径写死进这一份 --settings 里，
 	// 于是"这条事件属于哪个格子"由文件名决定，不需要任何反查。
 	// 只有 Claude 用这份 --settings；别的 agent 传空串。
 	settings := ""
 	if tab.Spec.Agent == "claude" {
 		settings = BuildHookSettings(m.stateDir, tag)
+		if len(profEnv) > 0 {
+			settings = mergeSettingsEnv(settings, profEnv)
+			// 文件路径比命令行里的 JSON 稳；写失败就退回内联串。
+			if p := writeClaudeSettings(tag, settings); p != "" {
+				settings = p
+			}
+		}
 	}
 	// 每次开格重新解析一次（见 agent.Def.Bin 的注释）：装完/更新完不用重启 Perch。
 	exe, prefix := def.Exe, def.Prefix
 	if def.Bin != "" {
 		exe, prefix = m.ResolveExe(def.Bin)
 	}
-	args := append(append([]string{}, prefix...), def.Args(tab.Spec.Resume, settings)...)
+	args := append([]string{}, prefix...)
+	args = append(args, profArgs...)
+	args = append(args, def.Args(tab.Spec.Resume, settings)...)
 	args = append(args, prepArgs...)
 
-	env := make(map[string]string, len(def.Env)+len(prepEnv))
+	env := make(map[string]string, len(def.Env)+len(prepEnv)+len(profEnv))
 	for k, v := range def.Env {
 		env[k] = v
 	}
 	for k, v := range prepEnv {
 		env[k] = v
+	}
+	// Claude 的网关变量已经进 --settings 的 env 块（优先级高于用户 settings）；
+	// 别的 agent 没有 settings 通道，按进程环境注入。
+	if tab.Spec.Agent != "claude" {
+		for k, v := range profEnv {
+			env[k] = v
+		}
 	}
 	sess, err := term.Start(exe, args, cwd, agent.BuildEnv(env), cols, rows)
 	if err != nil {
