@@ -746,8 +746,14 @@ function gwGatewayOptions(f) {
     .filter((o) => o && String(o.value || "").startsWith("magpie/"));
 }
 
+// 引擎字段写进 Perch 沙盒后，哪些 agent 的启动真的会读沙盒？目前只有
+// agy（按 /api/state 的 launch 注入）和 dsh（DshDef 带 DSH_HOME）。
+// 其他通用 CLI 仍按自己的真实配置启动，先不要在这里假装“已接入”。
+const GW_ENGINE_SANDBOX_AGENTS = new Set(["agy", "dsh"]);
+
 function gwEngineManaged(a) {
   if (!a || !a.installed || !perchCaps(a).launch) return false;
+  if (!GW_ENGINE_SANDBOX_AGENTS.has(a.id)) return false;
   const g = gwAgentOf(a.id);
   if (!g) return false;
   if (g.wired) return true;
