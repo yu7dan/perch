@@ -326,6 +326,7 @@ func main() {
 		Pool:           a.pool,
 		Prefs:          a.prefs,
 		Gateway:        a.gw,
+		Profiles:       a.profiles,
 		Installer:      a.installer,
 		Transcript:     a.follower,
 		DefaultCWD:     a.defaultCWD,

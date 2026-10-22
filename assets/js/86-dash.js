@@ -594,12 +594,389 @@ let INSTALL_AT = "";
    看到完整清单；要收起是他们自己的动作（同一个会话里不会被重画弹回去）。 */
 let agentsFoldOpen = true;
 
+/* ===========================================================================
+   Perch 自己的 Agent 工作板（隔离网关，2026-10-22）
+   ---------------------------------------------------------------------------
+   magpie 的 Agent 页上半部分在这里重生：每行一个 agent，明确写「未设置 /
+   已设置」，模型直接从网关目录里选；安装仍然走 Perch 自己的一键安装。
+   数据来自 ctl 的 agent.profiles（Perch 自己的 agent-profiles.json +
+   引擎 /api/providers），**不是** magpie 的全局 agent 配置。
+
+   非隔离模式（默认）保持旧的三列名单和右侧抽屉不变；只有后端说
+   isolated=true 时才启用这块。
+   =========================================================================== */
+let AGENT_UI_ISOLATED = false;
+let AGENT_PROFILES = Object.create(null);
+let AGENT_MODELS = [];
+let AGENT_PROFILE_ASKED = false;
+let AGENT_PROFILE_ERR = "";
+let AGENT_DETAIL_ID = "";
+let AGENT_MODEL_POP = null;
+
+function ensureAgentProfiles() {
+  if (AGENT_PROFILE_ASKED) return;
+  AGENT_PROFILE_ASKED = true;
+  try { sendCtrl({ type: "agent.profiles" }); } catch (e) { /* 控制通道还没起就等下次 */ }
+}
+
+function applyAgentProfiles(m) {
+  AGENT_UI_ISOLATED = !!(m && m.isolated);
+  const next = Object.create(null);
+  for (const p of (m && m.agents) || []) {
+    if (p && p.agent) next[p.agent] = p;
+  }
+  AGENT_PROFILES = next;
+  AGENT_MODELS = Array.isArray(m && m.models) ? m.models : [];
+  AGENT_PROFILE_ERR = (m && typeof errMsgOf === "function") ? (errMsgOf(m) || "") : "";
+  if (AGENT_MODEL_POP) dashModelClose(false);
+  if (AGENT_UI_ISOLATED && typeof AC_ID !== "undefined" && AC_ID &&
+      typeof acClose === "function") acClose();
+  if (NAV_HERE === "dash") renderDashAgents();
+}
+
+/* 模型标签压缩：网关路由的标签常带引擎前缀（magpie/deepseek/...），
+   在行里没有信息量；完整标签留在 title 里。 */
+function dashModelShort(label) {
+  const s = String(label || "");
+  return /^magpie\//i.test(s) ? s.slice(7) : s;
+}
+
+function perchAlias(id) {
+  const s = String(id || "agent").toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  return "group/perch-" + (s || "agent");
+}
+
+function perchProfileOf(id) { return AGENT_PROFILES[id] || null; }
+
+function perchModelOf(p) {
+  if (!p || !p.model) return null;
+  return AGENT_MODELS.find((m) => m && m.id === p.model) || null;
+}
+
+function perchModelLabel(p) {
+  if (!p || !p.model) return "";
+  const m = perchModelOf(p);
+  return m ? (m.name || m.id) : dashModelShort(p.model);
+}
+
+function perchGoGateway() {
+  const b = document.querySelector('#dash-tabs .opt[data-dtab="gateway"]');
+  if (b) b.click();
+}
+
+function perchCaps(a) {
+  return a.caps || { launch: !!a.adapter, status: !!a.adapter, waiting: !!a.adapter };
+}
+
+function renderPerchAgentList(host, list, sub) {
+  if (AGENT_MODEL_POP) dashModelClose(false);
+  const installed = list.filter((a) => a.installed);
+  const configured = installed.filter((a) => perchProfileOf(a.id));
+  const unset = installed.filter((a) => !perchProfileOf(a.id) && perchCaps(a).launch);
+  const off = installed.filter((a) => !perchCaps(a).launch);
+  const missing = list.filter((a) => !a.installed);
+
+  if (sub) {
+    const bits = [];
+    if (configured.length) bits.push(t("dash.agents.perchSumSet", { n: configured.length }));
+    if (unset.length) bits.push(t("dash.agents.perchSumUnset", { n: unset.length }));
+    if (off.length) bits.push(t("dash.agents.perchSumOff", { n: off.length }));
+    bits.push(t("dash.agents.sumMissing", { n: missing.length }));
+    if (AGENT_MODELS.length) bits.push(t("dash.agents.perchSumModels", { n: AGENT_MODELS.length }));
+    else if (AGENT_PROFILE_ERR) bits.push(t("dash.agents.perchGatewayErr"));
+    sub.textContent = bits.join(" · ");
+  }
+
+  let html = "";
+  if (!AGENT_MODELS.length) {
+    html += `<div class="ag-guide">` +
+      `<b>${esc(t("dash.agents.perchGuideTitle"))}</b>` +
+      `<p>${esc(t("dash.agents.perchGuideBody"))}</p>` +
+      `<button type="button" class="dl" data-gwlink>${esc(t("dash.agents.perchGuideAction"))}</button>` +
+      `</div>`;
+  }
+
+  const group = (label, items, gid) => items.length
+    ? `<div class="ag-group">${esc(label)}<span>${items.length}</span></div>` +
+      `<div class="roster one">${items.map((a) => perchRowHTML(a, gid)).join("")}</div>`
+    : "";
+
+  html += group(t("dash.agents.perchGroupSet"), configured, "set");
+  html += group(t("dash.agents.perchGroupUnset"), unset, "unset");
+  html += group(t("dash.agents.perchGroupOff"), off, "off");
+  if (!installed.length) html += `<div class="gw-empty">${esc(t("dash.agents.emptyAll"))}</div>`;
+  if (missing.length) {
+    html +=
+      `<button type="button" class="agent-more${agentsFoldOpen ? " open" : ""}"` +
+      ` id="dash-agent-more" data-agents-fold>` +
+      `<span id="dash-agent-more-label">${esc(agentsFoldOpen
+        ? t("dash.agents.foldHide")
+        : t("dash.agents.foldShow", { n: missing.length }))}</span>` +
+      `<span class="chev" aria-hidden="true">▾</span></button>` +
+      `<div class="agent-fold${agentsFoldOpen ? " open" : ""}" id="dash-agent-fold"><div>` +
+      group(t("dash.agents.notDetected"), missing, "missing") +
+      `</div></div>`;
+  }
+  host.innerHTML = html;
+}
+
+function perchRowHTML(a, gid) {
+  const id = esc(a.id);
+  const name = a.name || a.id;
+  const p = gid === "missing" ? null : perchProfileOf(a.id);
+  const model = perchModelOf(p);
+  const caps = perchCaps(a);
+  const launch = !!caps.launch;
+  const live = typeof liveAgentTab === "function" ? liveAgentTab(a.id) : null;
+  const detail = gid === "missing" ? (a.vendor || "") : (a.path || a.vendor || "");
+  const calls = (a.calls | 0) > 0 ? t("dash.agents.calls", { n: dashNum(a.calls) }) : "";
+  const open = AGENT_DETAIL_ID === a.id;
+  const inst = INSTALLS[a.id];
+  const busy = inst && inst.state === "running";
+  const busySpan = busy
+    ? `<span class="st">${esc(inst.phase === "scanning"
+        ? t("dash.agents.installScanning")
+        : inst.phase === "queued" ? t("dash.agents.installQueued")
+          : t("dash.agents.installBusy"))}</span>`
+    : "";
+
+  let action = "";
+  if (gid === "missing") {
+    action = a.install
+      ? (busy ? busySpan
+        : `<button type="button" class="dl" data-install="${id}"` +
+          ` title="${esc(t("dash.agents.installTitle", { name }))}">${esc(t("dash.agents.install"))}</button>`)
+      : a.url
+        ? `<button type="button" class="dl" data-docs="${id}"` +
+          ` title="${esc(t("dash.agents.docsTitle", { name }))}">${esc(t("dash.agents.docs"))}</button>`
+        : "";
+  } else if (launch) {
+    action = `<button type="button" class="dl" data-launch="${id}"` +
+      ` title="${esc(t("dash.agents.openTitle", { name }))}">${esc(t("dash.agents.open"))}</button>`;
+  } else {
+    action = a.install
+      ? (busy ? busySpan
+        : `<button type="button" class="dl" data-install="${id}"` +
+          ` title="${esc(t("dash.agents.installTitle", { name }))}">${esc(t("dash.agents.install"))}</button>`)
+      : a.url
+        ? `<button type="button" class="dl" data-docs="${id}"` +
+          ` title="${esc(t("dash.agents.docsTitle", { name }))}">${esc(t("dash.agents.docs"))}</button>`
+        : "";
+  }
+
+  const profChip = gid === "missing" ? "" :
+    `<span class="ag-prof${p ? " on" : ""}" title="${esc(t("dash.agents.perchStatusHint"))}">` +
+    `${esc(p ? t("dash.agents.perchSet") : t("dash.agents.perchUnset"))}</span>`;
+
+  const modelBtn = (gid !== "missing" && launch)
+    ? `<button type="button" class="ag-model-chip${p ? " on" : " none"}"` +
+      ` data-perchmodel="${id}" aria-haspopup="listbox" aria-expanded="false"` +
+      ` title="${esc(p ? t("dash.agents.perchModelHint") : t("dash.agents.perchPickHint"))}">` +
+      `<span>${esc(p ? perchModelLabel(p) : t("dash.agents.perchPick"))}</span>` +
+      `<i aria-hidden="true">▾</i></button>`
+    : "";
+
+  const row = `<div class="ag perch${open ? " open" : ""}" data-perchrow="${id}"` +
+    ` role="button" tabindex="0" aria-expanded="${open}">` +
+    iconHTML(a.icon) +
+    `<span class="who"><span class="nm">${esc(name)}${live
+      ? `<i class="ag-live" title="${esc(t("dash.agents.running"))}"></i>` : ""}</span>` +
+    `<span class="sub" title="${esc(detail + calls)}">${esc(detail + calls)}</span></span>` +
+    profChip + modelBtn + action +
+    `<span class="ag-cfg-chev" data-perchdetail="${id}" aria-hidden="true">${open ? "▾" : "›"}</span>` +
+    `</div>`;
+
+  let detailHTML = "";
+  if (open) {
+    const alias = (p && p.alias) || perchAlias(a.id);
+    detailHTML = `<div class="ag-detail">` +
+      `<div class="ag-det-head"><b>${esc(t("dash.agents.perchDetailTitle"))}</b>` +
+      (p ? `<button type="button" class="ag-det-clear" data-perchclear="${id}">${esc(t("dash.agents.perchClear"))}</button>` : "") +
+      `</div>` +
+      `<div class="ag-det-row"><span>${esc(t("dash.agents.perchDetailModel"))}</span>` +
+      `<b>${esc(p ? perchModelLabel(p) : t("dash.agents.perchUnset"))}</b></div>` +
+      (p && p.effort
+        ? `<div class="ag-det-row"><span>${esc(t("dash.agents.perchDetailEffort"))}</span>` +
+          `<b>${esc(p.effort)}</b></div>` : "") +
+      `<div class="ag-det-row"><span>${esc(t("dash.agents.perchDetailAlias"))}</span>` +
+      `<code>${esc(alias)}</code></div>` +
+      `<p class="ag-det-note">${esc(t("dash.agents.perchDetailNote"))}</p>` +
+      `</div>`;
+  }
+  return `<div class="ag-item perch" data-agitem="${id}">${row}${detailHTML}</div>`;
+}
+
+function dashModelPickTitle(m) {
+  const bits = [m.name || m.id, m.providerName || m.provider || ""];
+  if (m.context) bits.push(Math.round(m.context / 1000) + "k");
+  return bits.filter(Boolean).join(" · ");
+}
+
+function dashModelPickOpen(anchor, id) {
+  if (!anchor || !anchor.isConnected) return;
+  if (AGENT_MODEL_POP && AGENT_MODEL_POP.id === id) { dashModelClose(true); return; }
+  dashModelClose(false);
+  const p = perchProfileOf(id);
+  const pop = document.createElement("div");
+  pop.className = "ac-pop dash-model-pop";
+  if (!AGENT_MODELS.length) {
+    pop.innerHTML = `<div class="dash-model-empty">` +
+      `<p>${esc(AGENT_PROFILE_ERR || t("dash.agents.perchNoModels"))}</p>` +
+      `<button type="button" class="dl" data-gwlink>${esc(t("dash.agents.perchGuideAction"))}</button>` +
+      `</div>`;
+  } else {
+    let listHTML = "";
+    let grp = null;
+    for (const m of AGENT_MODELS) {
+      const g = m.providerName || m.provider || "";
+      if (g !== grp) {
+        listHTML += `<div class="ac-pop-grp">${esc(g)}</div>`;
+        grp = g;
+      }
+      const on = !!(p && p.model === m.id);
+      listHTML += (typeof acPickItemHTML === "function")
+        ? acPickItemHTML(m.id, m.name || m.id, "", on, dashModelPickTitle(m))
+        : `<button type="button" class="ac-pop-opt${on ? " on" : ""}" data-val="${esc(m.id)}">` +
+          `<span class="nm">${esc(m.name || m.id)}</span></button>`;
+    }
+    pop.innerHTML = `<input class="ac-pop-find" type="search" autocomplete="off"` +
+      ` placeholder="${esc(t("dash.agents.perchSearch"))}"` +
+      ` aria-label="${esc(t("dash.agents.perchSearch"))}">` +
+      `<div class="ac-pop-list" role="listbox">${listHTML}</div>`;
+  }
+  pop.style.visibility = "hidden";
+  document.body.appendChild(pop);
+
+  const r = anchor.getBoundingClientRect();
+  const w = pop.offsetWidth || 320;
+  const h = pop.offsetHeight || 260;
+  let left = r.left;
+  if (left + w > window.innerWidth - 8) left = Math.max(8, r.right - w);
+  let top = r.bottom + 6;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - 6 - h);
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+  pop.style.visibility = "";
+  anchor.setAttribute("aria-expanded", "true");
+  AGENT_MODEL_POP = { anchor, pop, id };
+
+  pop.addEventListener("pointerdown", (e) => e.stopPropagation());
+  pop.addEventListener("input", (e) => {
+    if (e.target.classList.contains("ac-pop-find") && typeof acPickFilter === "function") {
+      acPickFilter(pop, e.target.value);
+    }
+  });
+  pop.addEventListener("click", (e) => {
+    const gw = e.target.closest("[data-gwlink]");
+    if (gw) { dashModelClose(false); perchGoGateway(); return; }
+    const b = e.target.closest(".ac-pop-opt");
+    if (!b) return;
+    const val = b.dataset.val;
+    dashModelClose(false);
+    if (!val) return;
+    const m = AGENT_MODELS.find((x) => x && x.id === val);
+    if (m) {
+      AGENT_PROFILES[id] = { agent: id, alias: perchAlias(id), model: val, effort: (p && p.effort) || "" };
+      if (NAV_HERE === "dash") renderDashAgents();
+    }
+    sendCtrl({ type: "agent.profile.set", id, value: val });
+  });
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault(); e.stopPropagation(); dashModelClose(true); return;
+    }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const items = [...pop.querySelectorAll(".ac-pop-opt")].filter((o) => !o.hidden);
+    if (!items.length) return;
+    const cur = items.indexOf(document.activeElement);
+    const i = e.key === "ArrowDown"
+      ? (cur < 0 ? 0 : Math.min(items.length - 1, cur + 1))
+      : (cur < 0 ? items.length - 1 : Math.max(0, cur - 1));
+    items[i].focus();
+  });
+  const inp = pop.querySelector(".ac-pop-find");
+  if (inp) inp.focus();
+}
+
+function dashModelClose(refocus) {
+  if (!AGENT_MODEL_POP) return;
+  const { anchor, pop } = AGENT_MODEL_POP;
+  AGENT_MODEL_POP = null;
+  if (pop) pop.remove();
+  if (anchor) {
+    anchor.setAttribute("aria-expanded", "false");
+    if (refocus && anchor.isConnected) anchor.focus();
+  }
+}
+
+document.addEventListener("pointerdown", (e) => {
+  if (!AGENT_MODEL_POP) return;
+  if (e.target.closest(".dash-model-pop") || e.target.closest("[data-perchmodel]")) return;
+  dashModelClose(false);
+}, true);
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !AGENT_MODEL_POP) return;
+  e.preventDefault();
+  e.stopPropagation();
+  dashModelClose(true);
+}, true);
+
+$("dash-agent-list").addEventListener("click", (e) => {
+  if (!AGENT_UI_ISOLATED) return;
+  const gw = e.target.closest("[data-gwlink]");
+  if (gw) { e.preventDefault(); e.stopPropagation(); perchGoGateway(); return; }
+  const mb = e.target.closest("[data-perchmodel]");
+  if (mb) {
+    e.preventDefault();
+    e.stopPropagation();
+    dashModelPickOpen(mb, mb.dataset.perchmodel);
+    return;
+  }
+  const cb = e.target.closest("[data-perchclear]");
+  if (cb) {
+    e.preventDefault();
+    e.stopPropagation();
+    sendCtrl({ type: "agent.profile.set", id: cb.dataset.perchclear, value: "" });
+    return;
+  }
+  const db = e.target.closest("[data-perchdetail]");
+  if (db) {
+    e.preventDefault();
+    e.stopPropagation();
+    AGENT_DETAIL_ID = AGENT_DETAIL_ID === db.dataset.perchdetail ? "" : db.dataset.perchdetail;
+    renderDashAgents();
+    return;
+  }
+  const row = e.target.closest("[data-perchrow]");
+  if (row && !e.target.closest("button")) {
+    AGENT_DETAIL_ID = AGENT_DETAIL_ID === row.dataset.perchrow ? "" : row.dataset.perchrow;
+    renderDashAgents();
+  }
+});
+
+$("dash-agent-list").addEventListener("keydown", (e) => {
+  if (!AGENT_UI_ISOLATED || (e.key !== "Enter" && e.key !== " ")) return;
+  const row = e.target.closest("[data-perchrow]");
+  if (!row || e.target.closest("button")) return;
+  e.preventDefault();
+  AGENT_DETAIL_ID = AGENT_DETAIL_ID === row.dataset.perchrow ? "" : row.dataset.perchrow;
+  renderDashAgents();
+});
+
 function renderDashAgents() {
   const host = $("dash-agent-list");
   if (!host) return;
   const m = mg();
   const list = m && (m.catalog || []).length ? m.catalog : [];
   const sub = $("dash-agent-sub");
+  ensureAgentProfiles();
+  if (AGENT_UI_ISOLATED) {
+    renderPerchAgentList(host, list, sub);
+    return;
+  }
   // caps 是权威；老 magpie 还没有这个字段时退回 adapter（只认结构化状态）。
   const capsOf = (a) => a.caps || {
     launch: !!a.adapter, status: !!a.adapter, waiting: !!a.adapter,

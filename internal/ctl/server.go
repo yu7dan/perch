@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/yu7dan/perch/internal/agentcatalog"
+	"github.com/yu7dan/perch/internal/agentprofile"
 	"github.com/yu7dan/perch/internal/gateway"
 	"github.com/yu7dan/perch/internal/install"
 	"github.com/yu7dan/perch/internal/panes"
@@ -65,6 +66,7 @@ type Deps struct {
 	Pool       *project.Pool
 	Prefs      *settings.Store
 	Gateway    *gateway.Gateway
+	Profiles   *agentprofile.Store
 	Installer  *install.Installer
 	Transcript *transcript.Follower
 
@@ -164,6 +166,10 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		"gw.agent.connect", "gw.agent.disconnect", "gw.agent.reapply",
 		"gw.agent.keep", "gw.agent.preview", "gw.agents.drift":
 		s.handleGateway(m)
+
+	// Perch 自己的 per-agent 配置（隔离网关；不写 agent 全局配置）
+	case "agent.profiles", "agent.profile.set":
+		s.handleAgentProfile(m)
 
 	// 安装器 / “只启动”agent 的状态接入
 	case "install.agent", "install.magpie", "install.cancel", "agent.setup":

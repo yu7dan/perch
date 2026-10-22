@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -47,5 +48,61 @@ func TestCodexProfileArgs(t *testing.T) {
 		if !strings.Contains(args, want) {
 			t.Errorf("args %q missing %q", args, want)
 		}
+	}
+}
+
+func TestPluginAgentModels(t *testing.T) {
+	dir := t.TempDir()
+	body := `[
+		{"id":"workbuddy-ai","name":"WorkBuddy AI","signedIn":false,"models":[{"id":"default-model","name":"Default"}]},
+		{"id":"workbuddy","name":"WorkBuddy","signedIn":true,"authType":"oauth","models":[
+			{"id":"auto","name":"Auto","context":256000},
+			{"id":"hy3","name":"Hy3","context":192000}
+		]}
+	]`
+	if err := os.WriteFile(dir+"/plugin-providers.json", []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	out := pluginAgentModels(dir)
+	if len(out) != 2 {
+		t.Fatalf("len=%d out=%+v", len(out), out)
+	}
+	if out[0].ID != "workbuddy/auto" || out[0].ProviderName != "WorkBuddy" || out[0].Context != 256000 {
+		t.Fatalf("out[0]=%+v", out[0])
+	}
+	if out[1].ID != "workbuddy/hy3" {
+		t.Fatalf("out[1]=%+v", out[1])
+	}
+}
+
+func TestParseAgentModels(t *testing.T) {
+	b := []byte(`{"providers":[
+		{"id":"deepseek","name":"DeepSeek","icon":"deepseek","models":[
+			{"id":"deepseek-flash","name":"Flash","on":true,"efforts":["low","high"],"context":1000000},
+			{"id":"deepseek/deepseek-v4-pro","name":"","on":false,"context":200000}
+		]},
+		{"id":"workbuddy","name":"WorkBuddy","models":[
+			{"id":"auto","name":"Auto","on":true}
+		]}
+	]}`)
+	out, err := parseAgentModels(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 3 {
+		t.Fatalf("len=%d", len(out))
+	}
+	byID := map[string]AgentModel{}
+	for _, m := range out {
+		byID[m.ID] = m
+	}
+	if m, ok := byID["deepseek/deepseek-flash"]; !ok || m.Name != "Flash" || !m.On || m.Context != 1000000 {
+		t.Fatalf("deepseek-flash=%+v ok=%v", m, ok)
+	}
+	if _, ok := byID["deepseek/deepseek/deepseek-v4-pro"]; ok {
+		t.Fatal("already-prefixed model id got prefixed twice")
+	}
+	if m, ok := byID["workbuddy/auto"]; !ok || m.ProviderName != "WorkBuddy" {
+		t.Fatalf("workbuddy=%+v ok=%v", m, ok)
 	}
 }

@@ -222,6 +222,52 @@
 .ag .ag-cfg-chev{margin-left:6px;color:#4a4a52;font-size:14px;line-height:1;flex:none}
 .ag.cfg:hover .ag-cfg-chev{color:var(--muted)}
 
+/* ---- Perch Agent 工作板（隔离网关，2026-10-22）----------------------------
+   一列行，和 magpie 的 Agent 页上半部分同一套密度：logo / 名字 /
+   未设置·已设置 / 模型 chip / 打开 / 展开。安装仍走 Perch 自己的按钮。 */
+.roster.one{grid-template-columns:minmax(0,1fr)}
+.roster.one .ag{border-left:0!important;padding-left:0}
+.ag-item.perch{min-width:0}
+.ag.perch{height:auto;min-height:56px;align-items:center;cursor:pointer;border-radius:4px}
+.ag.perch:hover{background:rgba(255,255,255,.03)}
+.ag.perch:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
+.ag .ag-live{display:inline-block;width:5px;height:5px;margin-left:6px;border-radius:999px;
+             background:var(--green);box-shadow:0 0 0 2px rgba(134,239,172,.14);vertical-align:1px}
+.ag .ag-prof{flex:none;font-size:10px;line-height:18px;padding:0 7px;border-radius:999px;
+             border:1px solid var(--line);color:var(--faint);white-space:nowrap}
+.ag .ag-prof.on{color:var(--green);border-color:rgba(134,239,172,.24);
+                background:rgba(134,239,172,.06)}
+.ag .ag-model-chip{display:inline-flex;align-items:center;gap:5px;flex:none;max-width:190px;
+                   height:24px;padding:0 9px;border:1px solid var(--line);border-radius:6px;
+                   background:var(--card);color:var(--fg2);font-size:11px;white-space:nowrap}
+.ag .ag-model-chip span{overflow:hidden;text-overflow:ellipsis}
+.ag .ag-model-chip i{font-style:normal;color:var(--faint);font-size:9px}
+.ag .ag-model-chip:hover{border-color:var(--fg2);color:var(--fg)}
+.ag .ag-model-chip.none{color:var(--muted);border-style:dashed}
+.ag .ag-model-chip.none:hover{color:var(--fg)}
+.ag-detail{padding:10px 12px 12px 41px;border-bottom:1px solid var(--line-soft);
+           background:rgba(255,255,255,.018)}
+.ag-det-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.ag-det-head b{font-size:11px;font-weight:600;color:var(--fg2)}
+.ag-det-clear{margin-left:auto;font-size:10.5px;color:var(--faint)}
+.ag-det-clear:hover{color:var(--red)}
+.ag-det-row{display:flex;gap:12px;font-size:11px;line-height:1.7;color:var(--muted)}
+.ag-det-row span{width:64px;flex:none;color:var(--faint)}
+.ag-det-row b{font-weight:500;color:var(--fg2);min-width:0;overflow:hidden;
+              text-overflow:ellipsis;white-space:nowrap}
+.ag-det-row code{font:10.5px/1.6 var(--mono);color:var(--muted);min-width:0;
+                 overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ag-det-note{margin:6px 0 0;font-size:10.5px;line-height:1.6;color:var(--faint)}
+.ag-guide{display:flex;flex-direction:column;align-items:flex-start;gap:6px;
+          margin:10px 0 2px;padding:12px 14px;border:1px solid var(--line-soft);
+          border-radius:8px;background:rgba(255,255,255,.018)}
+.ag-guide b{font-size:12px;font-weight:600;color:var(--fg)}
+.ag-guide p{margin:0;font-size:11px;line-height:1.65;color:var(--muted);max-width:680px}
+.ag-guide .dl{margin-top:2px}
+.dash-model-pop{width:320px}
+.dash-model-empty{padding:12px 14px;display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.dash-model-empty p{margin:0;font-size:11px;line-height:1.65;color:var(--muted)}
+
 /* "显示 N 个未检测到的" —— magpie agents 页那条 fold 的同一形态：
    一行居中文字 + 会转的 chevron，展开用 grid-template-rows 0fr→1fr
    （高度能动、不需要先量内容，也不会把上面的行挤跳）。 */
