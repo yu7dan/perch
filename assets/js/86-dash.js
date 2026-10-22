@@ -616,6 +616,8 @@ let AGENT_SETS = [];
 let AGENT_SET_PENDING = "";
 let AGENT_SET_NAMING = false;
 let AGENT_SET_DRAFT = "";
+// magpie 的 Agents 页默认把未设置/未检测到的收在 "Show N more" 下面。
+let PERCH_FOLD_OPEN = false;
 
 function ensureAgentProfiles() {
   if (AGENT_PROFILE_ASKED) return;
@@ -694,79 +696,94 @@ function perchProfilesHTML() {
   const chips = AGENT_SETS.map((s) => {
     const n = Array.isArray(s && s.agents) ? s.agents.length : 0;
     const pending = AGENT_SET_PENDING === s.name;
-    return `<span class="ag-pset${pending ? " pending" : ""}" data-perchset="${esc(s.name)}"` +
+    return `<span class="agp-chip${pending ? " pending" : ""}" data-perchset="${esc(s.name)}"` +
       ` role="button" tabindex="0" title="${esc(t("dash.agents.perchProfileHint", { name: s.name, n }))}">` +
-      `<span class="nm">${esc(s.name)}</span><em>${n}</em>` +
+      `<span class="nm">${esc(s.name)}</span><span class="dot" aria-hidden="true"></span>` +
       `<span class="x" data-perchsetdel="${esc(s.name)}"` +
       ` title="${esc(t("dash.agents.perchProfileDelete"))}" aria-label="${esc(t("dash.agents.perchProfileDelete"))}">×</span>` +
       `</span>`;
   }).join("");
   let editor = "";
   if (AGENT_SET_NAMING) {
-    editor = `<input id="perch-set-name" class="ag-set-name" type="text" maxlength="60"` +
+    editor = `<input id="perch-set-name" class="agp-setname" type="text" maxlength="60"` +
       ` value="${esc(AGENT_SET_DRAFT)}" placeholder="${esc(t("dash.agents.perchProfileName"))}"` +
       ` aria-label="${esc(t("dash.agents.perchProfileName"))}">` +
-      `<button type="button" class="ag-set-do" data-perchsetapply>${esc(t("dash.agents.perchProfileSave"))}</button>` +
-      `<button type="button" class="ag-set-cancel" data-perchsetcancel>${esc(t("common.cancel"))}</button>`;
+      `<button type="button" class="agp-setdo" data-perchsetapply>${esc(t("dash.agents.perchProfileSave"))}</button>` +
+      `<button type="button" class="agp-setcancel" data-perchsetcancel>${esc(t("common.cancel"))}</button>`;
   } else {
-    editor = `<button type="button" class="ag-set-save" data-perchsetsave>` +
+    editor = `<button type="button" class="agp-setsave" data-perchsetsave>` +
       `${esc(t("dash.agents.perchSaveProfile"))}</button>`;
   }
-  return `<div class="ag-profiles"><span class="lbl">${esc(t("dash.agents.perchProfiles"))}</span>` +
-    (chips || `<span class="hint">${esc(t("dash.agents.perchNoProfiles"))}</span>`) +
-    `<span class="ed">${editor}</span></div>`;
+  return `<div class="agp-profiles"><span class="agp-plabel">${esc(t("dash.agents.perchProfiles"))}</span>` +
+    `<span class="agp-chips">${chips || `<span class="agp-phint">${esc(t("dash.agents.perchNoProfiles"))}</span>`}</span>` +
+    `<span class="agp-pedit">${editor}</span></div>`;
+}
+
+function perchLeadHTML() {
+  const [pre, post] = t("dash.agents.perchLead").split("{perch}");
+  return `<div class="agp-lead">${esc(pre)}<b>Perch</b>${esc(post || "")}</div>`;
 }
 
 function renderPerchAgentList(host, list, sub) {
   if (AGENT_MODEL_POP) dashModelClose(false);
   const installed = list.filter((a) => a.installed);
-  const configured = installed.filter((a) => perchProfileOf(a.id));
-  const unset = installed.filter((a) => !perchProfileOf(a.id) && perchCaps(a).launch);
-  const off = installed.filter((a) => !perchCaps(a).launch);
+  // 只有 Claude/Codex 已经接通了 Perch 的每格注入。别的 CLI 仍然由 Perch
+  // 打开，但用它们自己的配置；不能在这里摆一个选了也不生效的模型开关。
+  const wireable = (a) => a.id === "claude" || a.id === "codex";
+  const wired = installed.filter((a) => {
+    const p = perchProfileOf(a.id);
+    return wireable(a) && !!(p && p.model);
+  });
+  const unset = installed.filter((a) => {
+    const p = perchProfileOf(a.id);
+    return wireable(a) && !(p && p.model) && perchCaps(a).launch;
+  });
+  const own = installed.filter((a) => !wireable(a) && perchCaps(a).launch);
+  const needs = installed.filter((a) => !perchCaps(a).launch);
   const missing = list.filter((a) => !a.installed);
 
   if (sub) {
     const bits = [];
-    if (configured.length) bits.push(t("dash.agents.perchSumSet", { n: configured.length }));
-    if (unset.length) bits.push(t("dash.agents.perchSumUnset", { n: unset.length }));
-    if (off.length) bits.push(t("dash.agents.perchSumOff", { n: off.length }));
-    bits.push(t("dash.agents.sumMissing", { n: missing.length }));
+    if (wired.length) bits.push(t("dash.agents.perchSumSet", { n: wired.length }));
     if (AGENT_MODELS.length) bits.push(t("dash.agents.perchSumModels", { n: AGENT_MODELS.length }));
     else if (AGENT_PROFILE_ERR) bits.push(t("dash.agents.perchGatewayErr"));
     sub.textContent = bits.join(" · ");
   }
 
-  let html = "";
-  if (AGENT_SETS.length || AGENT_MODELS.length) html += perchProfilesHTML();
-  if (!AGENT_MODELS.length) {
-    html += `<div class="ag-guide">` +
+  let html = perchLeadHTML();
+  if (!AGENT_MODELS.length && !wired.length) {
+    html += `<div class="agp-guide">` +
       `<b>${esc(t("dash.agents.perchGuideTitle"))}</b>` +
       `<p>${esc(t("dash.agents.perchGuideBody"))}</p>` +
       `<button type="button" class="dl" data-gwlink>${esc(t("dash.agents.perchGuideAction"))}</button>` +
       `</div>`;
+  } else if (!AGENT_MODELS.length) {
+    html += `<div class="agp-guide"><p>${esc(t("dash.agents.perchGatewayConnecting"))}</p></div>`;
   }
 
-  const group = (label, items, gid) => items.length
-    ? `<div class="ag-group">${esc(label)}<span>${items.length}</span></div>` +
-      `<div class="roster one">${items.map((a) => perchRowHTML(a, gid)).join("")}</div>`
-    : "";
-
-  html += group(t("dash.agents.perchGroupSet"), configured, "set");
-  html += group(t("dash.agents.perchGroupUnset"), unset, "unset");
-  html += group(t("dash.agents.perchGroupOff"), off, "off");
-  if (!installed.length) html += `<div class="gw-empty">${esc(t("dash.agents.emptyAll"))}</div>`;
+  const rows = wired.map((a) => perchRowHTML(a, "set")).join("") +
+    unset.map((a) => perchRowHTML(a, "unset")).join("") +
+    own.map((a) => perchRowHTML(a, "own")).join("") +
+    needs.map((a) => perchRowHTML(a, "needs")).join("");
+  html += `<div class="agp-list">` + rows;
+  if (!installed.length) {
+    html += `<div class="agp-empty">${esc(t("dash.agents.emptyAll"))}</div>`;
+  }
   if (missing.length) {
-    html +=
-      `<button type="button" class="agent-more${agentsFoldOpen ? " open" : ""}"` +
-      ` id="dash-agent-more" data-agents-fold>` +
-      `<span id="dash-agent-more-label">${esc(agentsFoldOpen
-        ? t("dash.agents.foldHide")
-        : t("dash.agents.foldShow", { n: missing.length }))}</span>` +
+    const label = PERCH_FOLD_OPEN
+      ? t("dash.agents.perchFoldHide")
+      : t("dash.agents.perchFoldShow", { n: missing.length });
+    html += `<button type="button" class="agp-more${PERCH_FOLD_OPEN ? " open" : ""}"` +
+      ` id="dash-agent-more" data-perchfold data-fold-count="${missing.length}"` +
+      ` aria-expanded="${PERCH_FOLD_OPEN}"><span id="dash-agent-more-label">${esc(label)}</span>` +
       `<span class="chev" aria-hidden="true">▾</span></button>` +
-      `<div class="agent-fold${agentsFoldOpen ? " open" : ""}" id="dash-agent-fold"><div>` +
-      group(t("dash.agents.notDetected"), missing, "missing") +
+      `<div class="agp-fold${PERCH_FOLD_OPEN ? " open" : ""}" id="dash-agent-fold"><div class="agp-fold-inner">` +
+      `<div class="agp-cap">${esc(t("dash.agents.perchNotInstalled"))}<span>${missing.length}</span></div>` +
+      missing.map((a) => perchRowHTML(a, "missing")).join("") +
       `</div></div>`;
   }
+  html += `</div>` + perchProfilesHTML();
+
   host.innerHTML = html;
   if (AGENT_SET_NAMING) {
     const inp = $("perch-set-name");
@@ -795,98 +812,165 @@ function perchRowHTML(a, gid) {
   const p = gid === "missing" ? null : perchProfileOf(a.id);
   const model = perchModelOf(p);
   const caps = perchCaps(a);
-  const launch = !!caps.launch;
   const live = typeof liveAgentTab === "function" ? liveAgentTab(a.id) : null;
   const detail = gid === "missing" ? (a.vendor || "") : (a.path || a.vendor || "");
   const calls = (a.calls | 0) > 0 ? t("dash.agents.calls", { n: dashNum(a.calls) }) : "";
-  const open = AGENT_DETAIL_ID === a.id;
+  const open = AGENT_DETAIL_ID === a.id && gid === "set";
   const inst = INSTALLS[a.id];
   const busy = inst && inst.state === "running";
   const busySpan = busy
-    ? `<span class="st">${esc(inst.phase === "scanning"
+    ? `<span class="agp-state">${esc(inst.phase === "scanning"
         ? t("dash.agents.installScanning")
         : inst.phase === "queued" ? t("dash.agents.installQueued")
           : t("dash.agents.installBusy"))}</span>`
     : "";
 
-  let action = "";
-  if (gid === "missing") {
-    action = a.install
-      ? (busy ? busySpan
-        : `<button type="button" class="dl" data-install="${id}"` +
-          ` title="${esc(t("dash.agents.installTitle", { name }))}">${esc(t("dash.agents.install"))}</button>`)
-      : a.url
-        ? `<button type="button" class="dl" data-docs="${id}"` +
-          ` title="${esc(t("dash.agents.docsTitle", { name }))}">${esc(t("dash.agents.docs"))}</button>`
-        : "";
-  } else if (launch) {
-    action = `<button type="button" class="dl" data-launch="${id}"` +
-      ` title="${esc(t("dash.agents.openTitle", { name }))}">${esc(t("dash.agents.open"))}</button>`;
-  } else {
-    action = a.install
-      ? (busy ? busySpan
-        : `<button type="button" class="dl" data-install="${id}"` +
-          ` title="${esc(t("dash.agents.installTitle", { name }))}">${esc(t("dash.agents.install"))}</button>`)
-      : a.url
-        ? `<button type="button" class="dl" data-docs="${id}"` +
-          ` title="${esc(t("dash.agents.docsTitle", { name }))}">${esc(t("dash.agents.docs"))}</button>`
-        : "";
+  // 使用自己配置的 CLI / 需要补可执行文件 / 没装：仍然是平面列表里的一行。
+  if (gid === "own" || gid === "needs" || gid === "missing") {
+    let action = "";
+    if (gid === "own") {
+      action = `<button type="button" class="agp-install" data-launch="${id}"` +
+        ` title="${esc(t("dash.agents.openTitle", { name }))}">${esc(t("dash.agents.open"))}</button>`;
+    } else if (a.install) {
+      action = busy ? busySpan
+        : `<button type="button" class="agp-install" data-install="${id}"` +
+          ` title="${esc(t("dash.agents.installTitle", { name }))}">` +
+          `${esc(gid === "needs" ? t("dash.agents.perchRepairInstall") : t("dash.agents.install"))}</button>`;
+    } else if (a.url) {
+      action = `<button type="button" class="agp-install" data-docs="${id}"` +
+        ` title="${esc(t("dash.agents.docsTitle", { name }))}">${esc(t("dash.agents.docs"))}</button>`;
+    }
+    const status = gid === "own"
+      ? t("dash.agents.perchOwnConfig")
+      : gid === "needs"
+        ? t("dash.agents.perchNeedsInstall")
+        : (a.vendor || t("dash.agents.notDetected"));
+    return `<div class="agp-row flat ${gid}" data-perchrow="${id}" title="${esc(detail + calls)}">` +
+      `<span class="agp-ic">${iconHTML(a.icon)}</span>` +
+      `<div class="agp-who"><div class="agp-name">${esc(name)}</div>` +
+      `<div class="agp-status"><i class="agp-dot"></i><span>${esc(status)}</span></div></div>` +
+      action + `</div>`;
   }
 
-  const profChip = gid === "missing" ? "" :
-    `<span class="ag-prof${p ? " on" : ""}" title="${esc(t("dash.agents.perchStatusHint"))}">` +
-    `${esc(p ? t("dash.agents.perchSet") : t("dash.agents.perchUnset"))}</span>`;
-
-  const modelBtn = (gid !== "missing" && launch)
-    ? `<button type="button" class="ag-model-chip${p ? " on" : " none"}"` +
-      ` data-perchmodel="${id}" aria-haspopup="listbox" aria-expanded="false"` +
-      ` title="${esc(p ? t("dash.agents.perchModelHint") : t("dash.agents.perchPickHint"))}">` +
-      `<span>${esc(p ? perchModelLabel(p) : t("dash.agents.perchPick"))}</span>` +
-      `<i aria-hidden="true">▾</i></button>`
+  const wired = gid === "set" && !!(p && p.model);
+  const modelIcon = wired && model && model.icon ? iconHTML(model.icon, "agp-mic") : "";
+  const modelLabel = wired ? perchModelLabel(p) : t("dash.agents.perchPickModel");
+  const modelTitle = wired ? t("dash.agents.perchModelHint") : t("dash.agents.perchPickHint");
+  const linkLabel = a.id === "claude"
+    ? t("dash.agents.perchTiersLink")
+    : t("dash.agents.perchModelsLink", { n: AGENT_MODELS.length });
+  const link = wired
+    ? `<button type="button" class="agp-link" data-perchdetail="${id}" aria-expanded="${open}">` +
+      `${esc(linkLabel)}<span class="chev" aria-hidden="true">${open ? "⌄" : "›"}</span></button>`
+    : `<span class="agp-link-slot"></span>`;
+  const sw = `<button type="button" class="agp-switch${wired ? " on" : ""}"` +
+    ` data-perchtoggle="${id}" role="switch" aria-checked="${wired}"` +
+    ` title="${esc(wired ? t("dash.agents.perchSwitchOffHint") : t("dash.agents.perchSwitchOnHint"))}">` +
+    `<i></i></button>`;
+  const openBtn = wired
+    ? `<button type="button" class="agp-open" data-launch="${id}"` +
+      ` title="${esc(t("dash.agents.openTitle", { name }))}"` +
+      ` aria-label="${esc(t("dash.agents.openTitle", { name }))}">▶</button>`
     : "";
 
-  const row = `<div class="ag perch${open ? " open" : ""}" data-perchrow="${id}"` +
-    ` role="button" tabindex="0" aria-expanded="${open}">` +
-    iconHTML(a.icon) +
-    `<span class="who"><span class="nm">${esc(name)}${live
-      ? `<i class="ag-live" title="${esc(t("dash.agents.running"))}"></i>` : ""}</span>` +
-    `<span class="sub" title="${esc(detail + calls)}">${esc(detail + calls)}</span></span>` +
-    profChip + modelBtn + action +
-    `<span class="ag-cfg-chev" data-perchdetail="${id}" aria-hidden="true">${open ? "▾" : "›"}</span>` +
-    `</div>`;
-
-  let detailHTML = "";
+  let exp = "";
   if (open) {
     const alias = (p && p.alias) || perchAlias(a.id);
-    detailHTML = `<div class="ag-detail">` +
-      `<div class="ag-det-head"><b>${esc(t("dash.agents.perchDetailTitle"))}</b>` +
-      (p ? `<button type="button" class="ag-det-clear" data-perchclear="${id}">${esc(t("dash.agents.perchClear"))}</button>` : "") +
+    const efforts = model && Array.isArray(model.efforts)
+      ? model.efforts.map((e) => String(e).toLowerCase()).filter(Boolean) : [];
+    const cur = String((p && p.effort) || "").toLowerCase();
+    if (cur && !efforts.includes(cur)) efforts.push(cur);
+    const chip = (v, label) =>
+      `<button type="button" class="agp-effort${cur === v ? " on" : ""}"` +
+      ` data-percheffort="${id}" data-effort="${esc(v)}"` +
+      ` title="${esc(t("dash.agents.perchEffortHint"))}">${esc(label)}</button>`;
+    const effortsHTML = [chip("", t("dash.agents.perchEffortDefault"))]
+      .concat(efforts.map((e) => chip(e, e))).join("");
+    const provs = [];
+    const byProv = Object.create(null);
+    for (const m of AGENT_MODELS) {
+      const key = m.provider || m.providerName || "?";
+      if (!byProv[key]) {
+        byProv[key] = { name: m.providerName || key, icon: m.icon || "", n: 0 };
+        provs.push(key);
+      }
+      byProv[key].n++;
+    }
+    const provChips = provs.map((k) => {
+      const g = byProv[k];
+      return `<span class="agp-pchip">${g.icon ? iconHTML(g.icon, "agp-pic") : ""}` +
+        `<span>${esc(g.name)}</span><span class="n">${g.n}</span></span>`;
+    }).join("");
+    let tiersHTML = "";
+    if (a.id === "claude") {
+      const tierDefs = [["opus", "Opus"], ["sonnet", "Sonnet"], ["haiku", "Haiku"], ["fable", "Fable"]];
+      tiersHTML = `<div class="agp-kv"><div class="agp-k">${esc(t("dash.agents.perchTiersLink"))}</div>` +
+        `<div class="agp-v agp-tiers">` + tierDefs.map(([key, label]) => {
+          const tp = p && p.tiers ? p.tiers[key] : null;
+          const tm = tp && tp.model ? AGENT_MODELS.find((x) => x && x.id === tp.model) : null;
+          const tlabel = tp && tp.model ? ((tm && tm.name) || tp.model) : t("dash.agents.perchTierFollow");
+          const ticon = tm && tm.icon ? iconHTML(tm.icon) : "";
+          const tlevels = tm && Array.isArray(tm.efforts)
+            ? tm.efforts.map((e) => String(e).toLowerCase()).filter(Boolean) : [];
+          const tcur = tp && tp.effort ? String(tp.effort).toLowerCase() : "";
+          const teff = (tp && tp.model)
+            ? [t("dash.agents.perchEffortDefault")].concat(tlevels).map((e, i) => {
+              const v = i === 0 ? "" : e;
+              return `<button type="button" class="agp-effort${tcur === v ? " on" : ""}"` +
+                ` data-percheffort="${id}" data-perchtier="${key}" data-effort="${esc(v)}">` +
+                `${esc(i === 0 ? t("dash.agents.perchEffortDefault") : e)}</button>`;
+            }).join("")
+            : "";
+          return `<div class="agp-tier">` +
+            `<span class="agp-tier-name">${esc(label)}</span>` +
+            `<button type="button" class="agp-field agp-tier-field${tp && tp.model ? "" : " empty"}"` +
+            ` data-perchmodel="${id}" data-tier="${key}" aria-haspopup="listbox" aria-expanded="false">` +
+            `${ticon}<span class="v">${esc(tlabel)}</span><span class="chev" aria-hidden="true">▾</span></button>` +
+            (teff ? `<span class="agp-efforts">${teff}</span>` : "") +
+            `<span class="agp-tier-hint">/model ${esc(key)}</span>` +
+            `</div>`;
+        }).join("") + `</div></div>`;
+    }
+    exp = `<div class="agp-exp">` +
+      `<div class="agp-exp-body">` +
+      `<div class="agp-kv"><div class="agp-k">${esc(t("dash.agents.perchExpIn", { agent: a.id === "claude" ? "Claude" : name }))}</div>` +
+      `<div class="agp-v">${esc(t("dash.agents.perchExpInBody"))}</div></div>` +
+      tiersHTML +
+      `<div class="agp-kv"><div class="agp-k">${esc(t("dash.agents.perchExpNewSessions"))}</div>` +
+      `<div class="agp-v">${esc(modelLabel)}` +
+      `<span class="agp-dim"> · ${esc(model && model.context ? dashContextLabel(model.context) : "—")}</span>` +
+      `<span class="agp-dim"> · ${esc(t("dash.agents.perchDetailNote"))}</span></div></div>` +
+      `<div class="agp-kv"><div class="agp-k">${esc(t("dash.agents.perchEffortLabel"))}</div>` +
+      `<div class="agp-v"><span class="agp-efforts"${efforts.length ? "" : ` title="${esc(t("dash.agents.perchEffortNone"))}"`}>${effortsHTML}</span></div></div>` +
+      `<div class="agp-kv"><div class="agp-k">${esc(t("dash.agents.perchModelList"))}</div>` +
+      `<div class="agp-v agp-mlist"><span class="agp-pchips">${provChips}</span>` +
+      `<button type="button" class="agp-quiet" data-perchpick="${id}">${esc(t("dash.agents.perchPick"))}</button>` +
+      `</div></div>` +
+      `<div class="agp-kv"><div class="agp-k">${esc(t("dash.agents.perchDetailAlias"))}</div>` +
+      `<div class="agp-v"><code>${esc(alias)}</code></div></div>` +
       `</div>` +
-      `<div class="ag-det-row"><span>${esc(t("dash.agents.perchDetailModel"))}</span>` +
-      `<b>${esc(p ? perchModelLabel(p) : t("dash.agents.perchUnset"))}</b></div>` +
-      `<div class="ag-det-row"><span>${esc(t("dash.agents.perchDetailContext"))}</span>` +
-      `<b>${esc(p && model && model.context ? dashContextLabel(model.context) : "—")}</b></div>` +
-      (p ? (() => {
-        const efforts = model && Array.isArray(model.efforts)
-          ? model.efforts.map((e) => String(e).toLowerCase()).filter(Boolean) : [];
-        const cur = String(p.effort || "").toLowerCase();
-        if (cur && !efforts.includes(cur)) efforts.push(cur);
-        const chip = (v, label) =>
-          `<button type="button" class="ag-effort${cur === v ? " on" : ""}"` +
-          ` data-percheffort="${id}" data-effort="${esc(v)}"` +
-          ` title="${esc(t("dash.agents.perchEffortHint"))}">${esc(label)}</button>`;
-        const buttons = [chip("", t("dash.agents.perchEffortDefault"))]
-          .concat(efforts.map((e) => chip(e, e))).join("");
-        return `<div class="ag-det-row"><span>${esc(t("dash.agents.perchDetailEffort"))}</span>` +
-          `<span class="ag-efforts"${efforts.length ? "" : ` title="${esc(t("dash.agents.perchEffortNone"))}"`}>` +
-          `${buttons}</span></div>`;
-      })() : "") +
-      `<div class="ag-det-row"><span>${esc(t("dash.agents.perchDetailAlias"))}</span>` +
-      `<code>${esc(alias)}</code></div>` +
-      `<p class="ag-det-note">${esc(t("dash.agents.perchDetailNote"))}</p>` +
-      `</div>`;
+      `<div class="agp-exp-foot">` +
+      `<button type="button" class="agp-quiet accent" data-launch="${id}">${esc(t("dash.agents.open"))}</button>` +
+      `<span class="agp-grow"></span>` +
+      `<button type="button" class="agp-quiet red" data-perchclear="${id}">${esc(t("dash.agents.perchClear"))}</button>` +
+      `</div></div>`;
   }
-  return `<div class="ag-item perch" data-agitem="${id}">${row}${detailHTML}</div>`;
+
+  return `<div class="agp-row${wired ? " conn" : " unplugged"}${open ? " open" : ""}"` +
+    ` data-perchrow="${id}" title="${esc(detail + calls)}"` +
+    ` aria-expanded="${open}">` +
+    `<span class="agp-ic">${iconHTML(a.icon)}</span>` +
+    `<div class="agp-who"><div class="agp-name">${esc(name)}` +
+    `${live ? `<i class="agp-live" title="${esc(t("dash.agents.running"))}"></i>` : ""}</div>` +
+    `<div class="agp-status"><i class="agp-dot${wired ? " on" : ""}"></i><span>${esc(wired
+      ? t("dash.agents.perchConnected", { model: modelLabel })
+      : t("dash.agents.perchUnset"))}</span></div></div>` +
+    link +
+    `<button type="button" class="agp-field${wired ? "" : " empty"}"` +
+    ` data-perchmodel="${id}" aria-haspopup="listbox" aria-expanded="false"` +
+    ` title="${esc(modelTitle)}">${modelIcon}<span class="v">${esc(modelLabel)}</span>` +
+    `<span class="chev" aria-hidden="true">▾</span></button>` +
+    openBtn + sw + exp + `</div>`;
 }
 
 function dashModelPickTitle(m) {
@@ -895,11 +979,14 @@ function dashModelPickTitle(m) {
   return bits.filter(Boolean).join(" · ");
 }
 
-function dashModelPickOpen(anchor, id) {
+function dashModelPickOpen(anchor, id, tier) {
   if (!anchor || !anchor.isConnected) return;
-  if (AGENT_MODEL_POP && AGENT_MODEL_POP.id === id) { dashModelClose(true); return; }
+  const key = id + (tier ? ":" + tier : "");
+  if (AGENT_MODEL_POP && AGENT_MODEL_POP.key === key) { dashModelClose(true); return; }
   dashModelClose(false);
   const p = perchProfileOf(id);
+  const tp = tier && p && p.tiers ? p.tiers[tier] : null;
+  const curModel = tier ? ((tp && tp.model) || "") : ((p && p.model) || "");
   const pop = document.createElement("div");
   pop.className = "ac-pop dash-model-pop";
   if (!AGENT_MODELS.length) {
@@ -908,7 +995,11 @@ function dashModelPickOpen(anchor, id) {
       `<button type="button" class="dl" data-gwlink>${esc(t("dash.agents.perchGuideAction"))}</button>` +
       `</div>`;
   } else {
-    let listHTML = "";
+    let listHTML = `<button type="button" class="ac-pop-opt dm-opt dm-default${curModel ? "" : " on"}"` +
+      ` data-val=""><span class="dm-ic"></span>` +
+      `<span class="dm-txt"><span class="nm">${esc(tier ? t("dash.agents.perchTierFollow") : t("dash.agents.perchModelDefault"))}</span>` +
+      `<span class="dm-prov">${esc(tier ? t("dash.agents.perchTierFollowSub") : t("dash.agents.perchModelDefaultSub"))}</span></span>` +
+      `${curModel ? "" : `<span class="dm-check" aria-hidden="true">✓</span>`}</button>`;
     let grp = null;
     for (const m of AGENT_MODELS) {
       const g = m.providerName || m.provider || "";
@@ -916,11 +1007,18 @@ function dashModelPickOpen(anchor, id) {
         listHTML += `<div class="ac-pop-grp">${esc(g)}</div>`;
         grp = g;
       }
-      const on = !!(p && p.model === m.id);
-      listHTML += (typeof acPickItemHTML === "function")
-        ? acPickItemHTML(m.id, m.name || m.id, "", on, dashModelPickTitle(m))
-        : `<button type="button" class="ac-pop-opt${on ? " on" : ""}" data-val="${esc(m.id)}">` +
-          `<span class="nm">${esc(m.name || m.id)}</span></button>`;
+      const on = curModel === m.id;
+      const prov = m.providerName || m.provider || "";
+      const ctx = m.context ? dashContextLabel(m.context) : "";
+      const mi = m.icon ? iconHTML(m.icon) : "";
+      listHTML += `<button type="button" class="ac-pop-opt dm-opt${on ? " on" : ""}"` +
+        ` data-val="${esc(m.id)}" title="${esc(dashModelPickTitle(m))}">` +
+        `<span class="dm-ic">${mi}</span>` +
+        `<span class="dm-txt"><span class="nm">${esc(m.name || m.id)}</span>` +
+        `<span class="dm-prov">${esc(prov)}</span></span>` +
+        `<span class="dm-ctx">${esc(ctx)}</span>` +
+        (on ? `<span class="dm-check" aria-hidden="true">✓</span>` : ``) +
+        `</button>`;
     }
     pop.innerHTML = `<input class="ac-pop-find" type="search" autocomplete="off"` +
       ` placeholder="${esc(t("dash.agents.perchSearch"))}"` +
@@ -941,7 +1039,7 @@ function dashModelPickOpen(anchor, id) {
   pop.style.top = top + "px";
   pop.style.visibility = "";
   anchor.setAttribute("aria-expanded", "true");
-  AGENT_MODEL_POP = { anchor, pop, id };
+  AGENT_MODEL_POP = { anchor, pop, id, tier, key };
 
   pop.addEventListener("pointerdown", (e) => e.stopPropagation());
   pop.addEventListener("input", (e) => {
@@ -956,6 +1054,37 @@ function dashModelPickOpen(anchor, id) {
     if (!b) return;
     const val = b.dataset.val;
     dashModelClose(false);
+    if (tier) {
+      if (val === "") {
+        const np = { ...p, tiers: { ...((p && p.tiers) || {}) } };
+        delete np.tiers[tier];
+        if (!Object.keys(np.tiers).length) delete np.tiers;
+        AGENT_PROFILES[id] = np;
+        if (NAV_HERE === "dash") renderDashAgents();
+        sendCtrl({ type: "agent.profile.tier", id, tier, value: "", effort: "" });
+        return;
+      }
+      if (!val) return;
+      const m = AGENT_MODELS.find((x) => x && x.id === val);
+      const levels = (m && Array.isArray(m.efforts) ? m.efforts : [])
+        .map((e) => String(e).toLowerCase());
+      const oldEffort = tp && tp.effort ? String(tp.effort).toLowerCase() : "";
+      const keep = oldEffort && levels.includes(oldEffort) ? oldEffort : "";
+      AGENT_PROFILES[id] = {
+        ...p,
+        tiers: { ...((p && p.tiers) || {}), [tier]: { model: val, effort: keep } },
+      };
+      if (NAV_HERE === "dash") renderDashAgents();
+      sendCtrl({ type: "agent.profile.tier", id, tier, value: val, effort: keep });
+      return;
+    }
+    if (val === "") {
+      // magpie picker 的 Default：回到 agent 自己的配置，等同于关掉开关。
+      delete AGENT_PROFILES[id];
+      renderDashAgents();
+      sendCtrl({ type: "agent.profile.set", id, value: "", effort: "" });
+      return;
+    }
     if (!val) return;
     const m = AGENT_MODELS.find((x) => x && x.id === val);
     // 换模型时只保留新模型也支持的档位；不支持就回到默认，别把上一款
@@ -1061,6 +1190,58 @@ $("dash-agent-list").addEventListener("click", (e) => {
   if (!AGENT_UI_ISOLATED) return;
   const gw = e.target.closest("[data-gwlink]");
   if (gw) { e.preventDefault(); e.stopPropagation(); perchGoGateway(); return; }
+  const fb = e.target.closest("[data-perchfold]");
+  if (fb) {
+    e.preventDefault();
+    e.stopPropagation();
+    PERCH_FOLD_OPEN = !PERCH_FOLD_OPEN;
+    fb.classList.toggle("open", PERCH_FOLD_OPEN);
+    fb.setAttribute("aria-expanded", String(PERCH_FOLD_OPEN));
+    const fold = $("dash-agent-fold");
+    if (fold) fold.classList.toggle("open", PERCH_FOLD_OPEN);
+    const label = $("dash-agent-more-label");
+    if (label) {
+      const n = Number(fb.dataset.foldCount || 0);
+      label.textContent = PERCH_FOLD_OPEN
+        ? t("dash.agents.perchFoldHide")
+        : t("dash.agents.perchFoldShow", { n });
+    }
+    return;
+  }
+  const pk = e.target.closest("[data-perchpick]");
+  if (pk) {
+    e.preventDefault();
+    e.stopPropagation();
+    const row = pk.closest("[data-perchrow]");
+    const anchor = row && row.querySelector("[data-perchmodel]");
+    if (anchor) dashModelPickOpen(anchor, pk.dataset.perchpick);
+    return;
+  }
+  const tgl = e.target.closest("[data-perchtoggle]");
+  if (tgl) {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = tgl.dataset.perchtoggle;
+    const p = perchProfileOf(id);
+    if (p && p.model) {
+      perchConfirm({
+        title: t("dash.agents.perchDisconnectTitle"),
+        body: t("dash.agents.perchDisconnectBody"),
+        ok: t("dash.agents.perchDisconnectOk"),
+        danger: true,
+      }).then((yes) => {
+        if (!yes) return;
+        delete AGENT_PROFILES[id];
+        renderDashAgents();
+        sendCtrl({ type: "agent.profile.set", id, value: "", effort: "" });
+      });
+    } else {
+      const row = tgl.closest("[data-perchrow]");
+      const anchor = row && row.querySelector("[data-perchmodel]");
+      if (anchor) dashModelPickOpen(anchor, id);
+    }
+    return;
+  }
   const del = e.target.closest("[data-perchsetdel]");
   if (del) {
     e.preventDefault();
@@ -1104,7 +1285,7 @@ $("dash-agent-list").addEventListener("click", (e) => {
   if (mb) {
     e.preventDefault();
     e.stopPropagation();
-    dashModelPickOpen(mb, mb.dataset.perchmodel);
+    dashModelPickOpen(mb, mb.dataset.perchmodel, mb.dataset.tier || "");
     return;
   }
   const eb = e.target.closest("[data-percheffort]");
@@ -1115,6 +1296,18 @@ $("dash-agent-list").addEventListener("click", (e) => {
     const p = perchProfileOf(id);
     if (!p || !p.model) return;
     const effort = String(eb.dataset.effort || "").toLowerCase();
+    const tier = String(eb.dataset.perchtier || "").toLowerCase();
+    if (tier) {
+      const tp = p.tiers && p.tiers[tier];
+      if (!tp || !tp.model) return;
+      AGENT_PROFILES[id] = {
+        ...p,
+        tiers: { ...p.tiers, [tier]: { ...tp, effort } },
+      };
+      renderDashAgents();
+      sendCtrl({ type: "agent.profile.tier", id, tier, value: tp.model, effort });
+      return;
+    }
     AGENT_PROFILES[id] = { ...p, effort };
     renderDashAgents();
     sendCtrl({ type: "agent.profile.set", id, value: p.model, effort });
@@ -1135,11 +1328,6 @@ $("dash-agent-list").addEventListener("click", (e) => {
     renderDashAgents();
     return;
   }
-  const row = e.target.closest("[data-perchrow]");
-  if (row && !e.target.closest("button")) {
-    AGENT_DETAIL_ID = AGENT_DETAIL_ID === row.dataset.perchrow ? "" : row.dataset.perchrow;
-    renderDashAgents();
-  }
 });
 
 $("dash-agent-list").addEventListener("input", (e) => {
@@ -1155,11 +1343,6 @@ $("dash-agent-list").addEventListener("keydown", (e) => {
     perchApplyProfileSet(set.dataset.perchset);
     return;
   }
-  const row = e.target.closest("[data-perchrow]");
-  if (!row || e.target.closest("button")) return;
-  e.preventDefault();
-  AGENT_DETAIL_ID = AGENT_DETAIL_ID === row.dataset.perchrow ? "" : row.dataset.perchrow;
-  renderDashAgents();
 });
 
 function renderDashAgents() {

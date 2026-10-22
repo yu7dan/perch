@@ -40,6 +40,37 @@ func TestSetStoreRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStoreTiers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	s := Load(path)
+	if _, err := s.SetTier("claude", "opus", "workbuddy/glm-5.3", "high"); err == nil {
+		t.Fatal("tier set without a main model accepted")
+	}
+	if err := s.Set(Profile{Agent: "claude", Alias: "group/perch-claude", Model: "deepseek/deepseek-flash", Effort: "low"}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.SetTier("claude", "opus", "workbuddy/glm-5.3", "high")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Tiers["opus"].Model != "workbuddy/glm-5.3" || p.Tiers["opus"].Effort != "high" {
+		t.Fatalf("tiers=%+v", p.Tiers)
+	}
+	// Reload keeps it, and clearing one tier leaves the main profile.
+	s2 := Load(path)
+	got, _ := s2.Get("claude")
+	if got.Tiers["opus"].Model != "workbuddy/glm-5.3" {
+		t.Fatalf("reloaded tiers=%+v", got.Tiers)
+	}
+	got, err = s2.SetTier("claude", "opus", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Tiers) != 0 || got.Model != "deepseek/deepseek-flash" {
+		t.Fatalf("after clear=%+v", got)
+	}
+}
+
 func TestSetStoreRejectsBadNamesAndEmpty(t *testing.T) {
 	s := LoadSets(filepath.Join(t.TempDir(), "sets.json"))
 	if err := s.Save("  ", []Profile{{Agent: "claude", Model: "x"}}); err == nil {

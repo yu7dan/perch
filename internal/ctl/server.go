@@ -169,7 +169,7 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		s.handleGateway(m)
 
 	// Perch 自己的 per-agent 配置（隔离网关；不写 agent 全局配置）
-	case "agent.profiles", "agent.profile.set",
+	case "agent.profiles", "agent.profile.set", "agent.profile.tier",
 		"agent.profile.save", "agent.profile.use", "agent.profile.delete":
 		s.handleAgentProfile(m)
 

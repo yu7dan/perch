@@ -462,7 +462,29 @@ func (a *perchApp) agentWireProfile(id string) (map[string]string, []string, boo
 	}
 	switch id {
 	case "claude":
-		return gateway.ClaudeProfileEnv(p.Alias), nil, true
+		env := gateway.ClaudeProfileEnv(p.Alias)
+		// 档位自己的模型：每一档一个稳定组，换这一档只动它。
+		// 组没建起来就退回主模型，不挡整格启动。
+		for tier, tp := range p.Tiers {
+			if tp.Model == "" {
+				continue
+			}
+			key := gateway.ClaudeTierEnvKey(tier)
+			if key == "" {
+				continue
+			}
+			alias := gateway.ClaudeTierAlias(p.Alias, tier)
+			if err := a.gw.EnsureAgentGroup(alias, tp.Model, tp.Effort); err != nil {
+				log.Printf("[gw] agent %s 的 %s 档位没有生效，退回主模型：%v", id, tier, err)
+				continue
+			}
+			env[key] = alias
+			if strings.EqualFold(tier, "haiku") {
+				// Claude Code 的小任务（标题/背景）走 haiku 档。
+				env["ANTHROPIC_SMALL_FAST_MODEL"] = alias
+			}
+		}
+		return env, nil, true
 	case "codex":
 		return nil, gateway.CodexProfileArgs(p.Alias), true
 	default:

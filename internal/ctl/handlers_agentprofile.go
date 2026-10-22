@@ -9,6 +9,7 @@ package ctl
 import (
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	"github.com/yu7dan/perch/internal/agentprofile"
@@ -26,6 +27,8 @@ func (s *Server) handleAgentProfile(m *Msg) {
 		go s.pushAgentProfiles()
 	case "agent.profile.set":
 		go s.setAgentProfile(trimSpace(m.ID), trimSpace(m.Value), trimSpace(m.Effort))
+	case "agent.profile.tier":
+		go s.setAgentTier(trimSpace(m.ID), trimSpace(m.Tier), trimSpace(m.Value), trimSpace(m.Effort))
 	case "agent.profile.save":
 		go s.saveAgentProfileSet(trimSpace(m.SetName))
 	case "agent.profile.use":
@@ -95,6 +98,10 @@ func (s *Server) setAgentProfile(id, model, effort string) {
 		Model:  model,
 		Effort: effort,
 	}
+	// 换主模型不要顺手把各档位自己的模型清掉。
+	if hadOld {
+		p.Tiers = old.Tiers
+	}
 	if err := s.deps.Profiles.Set(p); err != nil {
 		log.Printf("[agentprofile] 保存 %s 失败：%v", id, err)
 		s.pushAgentProfilesErr(err)
@@ -114,6 +121,52 @@ func (s *Server) setAgentProfile(id, model, effort string) {
 		}
 	}
 	log.Printf("[agentprofile] %s -> %s（档位 %q）", id, model, effort)
+	s.pushAgentProfiles()
+}
+
+// setAgentTier 改 Claude 某个档位（opus/sonnet/haiku/fable）的模型/推理强度。
+// 空 model 是清掉这档，让它跟随主模型；网关里对应的稳定组不再使用。
+func (s *Server) setAgentTier(id, tier, model, effort string) {
+	if id == "" || tier == "" || s.deps.Profiles == nil {
+		return
+	}
+	if gateway.ClaudeTierEnvKey(tier) == "" {
+		s.pushAgentProfilesErr(uimsg.NewParams("gw.agentTierBad",
+			"不认识的档位："+tier, map[string]string{"tier": tier}))
+		return
+	}
+	agentProfileOps.Lock()
+	old, ok := s.deps.Profiles.Get(id)
+	if !ok || old.Model == "" {
+		agentProfileOps.Unlock()
+		s.pushAgentProfilesErr(uimsg.New("gw.agentProfileBad", "先给这个 agent 选一个主模型"))
+		return
+	}
+	oldTier, hadTier := old.Tiers[strings.ToLower(tier)]
+	if _, err := s.deps.Profiles.SetTier(id, tier, model, effort); err != nil {
+		agentProfileOps.Unlock()
+		s.pushAgentProfilesErr(err)
+		return
+	}
+	if model != "" && s.deps.Gateway != nil && s.deps.Gateway.Isolated() {
+		alias := old.Alias
+		if alias == "" {
+			alias = agentprofile.AliasFor(id)
+		}
+		if err := s.deps.Gateway.EnsureAgentGroup(gateway.ClaudeTierAlias(alias, tier), model, effort); err != nil {
+			// 回退这一档，别让 UI/磁盘和网关各说各话。
+			if hadTier {
+				_, _ = s.deps.Profiles.SetTier(id, tier, oldTier.Model, oldTier.Effort)
+			} else {
+				_, _ = s.deps.Profiles.SetTier(id, tier, "", "")
+			}
+			agentProfileOps.Unlock()
+			s.pushAgentProfilesErr(err)
+			return
+		}
+	}
+	agentProfileOps.Unlock()
+	log.Printf("[agentprofile] %s 档位 %s -> %s（推理强度 %q）", id, tier, model, effort)
 	s.pushAgentProfiles()
 }
 
@@ -155,6 +208,15 @@ func (s *Server) applyAgentProfile(p agentprofile.Profile) error {
 	if p.Model != "" && s.deps.Gateway != nil && s.deps.Gateway.Isolated() {
 		if err := s.deps.Gateway.EnsureAgentGroup(p.Alias, p.Model, p.Effort); err != nil {
 			return err
+		}
+		for tier, tp := range p.Tiers {
+			if tp.Model == "" || gateway.ClaudeTierEnvKey(tier) == "" {
+				continue
+			}
+			if err := s.deps.Gateway.EnsureAgentGroup(
+				gateway.ClaudeTierAlias(p.Alias, tier), tp.Model, tp.Effort); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

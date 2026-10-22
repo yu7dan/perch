@@ -51,6 +51,22 @@ func TestCodexProfileArgs(t *testing.T) {
 	}
 }
 
+func TestClaudeTiers(t *testing.T) {
+	if got := ClaudeTierAlias("group/perch-claude", "opus"); got != "group/perch-claude-opus" {
+		t.Fatalf("alias=%q", got)
+	}
+	if got := ClaudeTierEnvKey("sonnet"); got != "ANTHROPIC_DEFAULT_SONNET_MODEL" {
+		t.Fatalf("env=%q", got)
+	}
+	if got := ClaudeTierEnvKey("bogus"); got != "" {
+		t.Fatalf("bogus env=%q", got)
+	}
+	env := ClaudeProfileEnv("group/perch-claude")
+	if env["ANTHROPIC_DEFAULT_OPUS_MODEL"] != "group/perch-claude" {
+		t.Fatalf("default opus=%q", env["ANTHROPIC_DEFAULT_OPUS_MODEL"])
+	}
+}
+
 func TestAgentGroupTarget(t *testing.T) {
 	if got, err := agentGroupTarget("workbuddy/hy3", "high"); err != nil || got != "workbuddy/hy3:high" {
 		t.Fatalf("high: %q %v", got, err)

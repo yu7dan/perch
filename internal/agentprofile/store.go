@@ -8,6 +8,7 @@ package agentprofile
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,12 +16,22 @@ import (
 	"sync"
 )
 
+// TierProfile 是一个 Claude 模型档位（opus/sonnet/haiku/fable）自己的
+// 模型和推理强度；空表示跟随主模型。
+type TierProfile struct {
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
+}
+
 // Profile 是一个 agent 的 Perch 侧配置。
 type Profile struct {
 	Agent  string `json:"agent"`
 	Alias  string `json:"alias,omitempty"`  // group/perch-<agent>
 	Model  string `json:"model,omitempty"`  // 网关目录里的 provider/model
-	Effort string `json:"effort,omitempty"` // 档位；先存，live 生效随后接
+	Effort string `json:"effort,omitempty"` // 推理强度（magpie 的 effort）
+	// Tiers 只有 Claude 用：opus/sonnet/haiku/fable 各自可以指向不同的
+	// 网关模型/推理强度；没有的键跟随 Model/Effort。
+	Tiers map[string]TierProfile `json:"tiers,omitempty"`
 }
 
 // AliasFor 是 Perch 给 agent 的稳定模型别名。只保留字母数字和连字符，
@@ -71,11 +82,22 @@ func Load(path string) *Store {
 	return s
 }
 
+func cloneProfile(p Profile) Profile {
+	if p.Tiers != nil {
+		m := make(map[string]TierProfile, len(p.Tiers))
+		for k, v := range p.Tiers {
+			m[k] = v
+		}
+		p.Tiers = m
+	}
+	return p
+}
+
 func (s *Store) Get(agent string) (Profile, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.m[agent]
-	return p, ok
+	return cloneProfile(p), ok
 }
 
 // Set 写一份配置并落盘。空 Model 是“清掉这个 agent 的 Perch 配置”。
@@ -88,9 +110,38 @@ func (s *Store) Set(p Profile) error {
 	if strings.TrimSpace(p.Model) == "" {
 		delete(s.m, p.Agent)
 	} else {
-		s.m[p.Agent] = p
+		s.m[p.Agent] = cloneProfile(p)
 	}
 	return s.saveLocked()
+}
+
+// SetTier 改一个 Claude 档位的模型/推理强度；空 model 是回到跟随主模型。
+// 没有主模型时拒绝 —— 只设一个档位没有可注入的东西。
+func (s *Store) SetTier(agent, tier, model, effort string) (Profile, error) {
+	agent, tier = strings.TrimSpace(agent), strings.ToLower(strings.TrimSpace(tier))
+	model, effort = strings.TrimSpace(model), strings.ToLower(strings.TrimSpace(effort))
+	if agent == "" || tier == "" {
+		return Profile{}, fmt.Errorf("缺少 agent 或档位")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.m[agent]
+	if !ok || strings.TrimSpace(p.Model) == "" {
+		return Profile{}, fmt.Errorf("先给 %s 选一个主模型", agent)
+	}
+	if model == "" {
+		delete(p.Tiers, tier)
+		if len(p.Tiers) == 0 {
+			p.Tiers = nil
+		}
+	} else {
+		if p.Tiers == nil {
+			p.Tiers = map[string]TierProfile{}
+		}
+		p.Tiers[tier] = TierProfile{Model: model, Effort: effort}
+	}
+	s.m[agent] = cloneProfile(p)
+	return cloneProfile(p), s.saveLocked()
 }
 
 // All 按 agent id 排序返回，给 UI 用。
@@ -99,7 +150,7 @@ func (s *Store) All() []Profile {
 	defer s.mu.Unlock()
 	out := make([]Profile, 0, len(s.m))
 	for _, p := range s.m {
-		out = append(out, p)
+		out = append(out, cloneProfile(p))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Agent < out[j].Agent })
 	return out

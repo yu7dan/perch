@@ -225,7 +225,41 @@ func parseAgentModels(b []byte) ([]AgentModel, error) {
 	return out, nil
 }
 
-// ClaudeProfileEnv 是写进 --settings 的 env 块的一组覆盖值。
+// ClaudeTierAlias 是一个档位自己的稳定组别名，例如
+// group/perch-claude-opus。换这一档的模型只改这个组。
+func ClaudeTierAlias(mainAlias, tier string) string {
+	tier = strings.ToLower(strings.TrimSpace(tier))
+	var b strings.Builder
+	for _, r := range tier {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	t := strings.Trim(b.String(), "-")
+	if t == "" {
+		t = "tier"
+	}
+	return mainAlias + "-" + t
+}
+
+// ClaudeTierEnvKey 是 Claude Code 读取某个档位模型的环境变量。
+// 不认识的档位返回 ""。
+func ClaudeTierEnvKey(tier string) string {
+	switch strings.ToLower(strings.TrimSpace(tier)) {
+	case "opus":
+		return "ANTHROPIC_DEFAULT_OPUS_MODEL"
+	case "sonnet":
+		return "ANTHROPIC_DEFAULT_SONNET_MODEL"
+	case "haiku":
+		return "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+	case "fable":
+		return "ANTHROPIC_DEFAULT_FABLE_MODEL"
+	}
+	return ""
+}
+
+// ClaudeProfileEnv 是写进 --settings 的 env 块的一组覆盖值。默认所有
+// 档位跟随主模型；配置了单独档位的在 main 里覆盖对应键。
 func ClaudeProfileEnv(alias string) map[string]string {
 	return map[string]string{
 		"ANTHROPIC_BASE_URL":             IsolatedGatewayURL(),

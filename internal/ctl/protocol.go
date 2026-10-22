@@ -88,4 +88,6 @@ type Msg struct {
 	// agent.profile.save/use/delete 用：配置方案的名字。
 	// （不能用 Name：那是 project.rename 的字段。）
 	SetName string `json:"setName,omitempty"`
+	// agent.profile.tier 用：Claude 的 opus/sonnet/haiku/fable。
+	Tier string `json:"tier,omitempty"`
 }
