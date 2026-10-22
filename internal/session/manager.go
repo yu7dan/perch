@@ -56,8 +56,9 @@ type Manager struct {
 
 	// homeMu：隔离引擎的沙盒用户目录。agy 这类由 Perch 直接启动、
 	// 但配置由引擎管理的 agent 要和引擎读同一份配置。
-	homeMu  sync.RWMutex
-	homeEnv func() map[string]string
+	homeMu     sync.RWMutex
+	homeEnv    func() map[string]string
+	homeEnvFor func(string) map[string]string
 }
 
 // New 构造空的会话表。Defs 在 agent.SetHost 之后由 SetDefs 填 —— 顺序见
@@ -116,6 +117,23 @@ func (m *Manager) EngineHomeEnv() map[string]string {
 		return nil
 	}
 	return fn()
+}
+
+// SetEngineHomeEnvFor 给通用 CLI 用：按 agent id 决定是否换引擎沙盒。
+func (m *Manager) SetEngineHomeEnvFor(fn func(string) map[string]string) {
+	m.homeMu.Lock()
+	m.homeEnvFor = fn
+	m.homeMu.Unlock()
+}
+
+func (m *Manager) EngineHomeEnvFor(id string) map[string]string {
+	m.homeMu.RLock()
+	fn := m.homeEnvFor
+	m.homeMu.RUnlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(id)
 }
 
 func (m *Manager) profileFor(id string) (map[string]string, []string, bool) {

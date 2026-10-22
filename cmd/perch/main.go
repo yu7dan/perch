@@ -174,6 +174,14 @@ func main() {
 		}
 		return gateway.EngineHomeEnv()
 	})
+	// 通用 CLI 只有当前确实由引擎接入网关时才换沙盒；否则继续读用户自己
+	// 的配置（未接入 = 不替用户改运行环境）。
+	a.tabs.SetEngineHomeEnvFor(func(id string) map[string]string {
+		if !a.gw.Isolated() || !a.gw.AgentEngineManaged(id) {
+			return nil
+		}
+		return gateway.EngineHomeEnv()
+	})
 	// 内嵌网关页的语言跟 Perch 的设置走：先记下偏好，控制面连上时再写进
 	// magpie（它自己的 settings.lang），见 internal/gateway/language.go。
 	a.gw.SetLanguage(a.prefs.Snapshot().Language)
@@ -183,6 +191,23 @@ func main() {
 	setupAgent := func(id string, log func(string)) error {
 		if id != "dsh" {
 			return nil
+		}
+		// 隔离模式下 Perch 启动的 dsh 读的是引擎沙盒里的 DSH_HOME；hook 桥/
+		// home patch 也必须写进同一份，否则真实 ~/.dsh 装好了、Perch 的格子
+		// 仍然看不到状态。这个函数只在用户点「接入状态钩子」时跑，短暂设置
+		// 环境变量即可。
+		if a.gw.Isolated() {
+			if home := gateway.PerchEngineHomeDir(); home != "" {
+				old, had := os.LookupEnv("DSH_HOME")
+				_ = os.Setenv("DSH_HOME", filepath.Join(home, ".dsh"))
+				defer func() {
+					if had {
+						_ = os.Setenv("DSH_HOME", old)
+					} else {
+						_ = os.Unsetenv("DSH_HOME")
+					}
+				}()
+			}
 		}
 		return dsh.EnsureHooks(a.stateDir, session.HookDir(a.stateDir), session.HookExePath(), log)
 	}

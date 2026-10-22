@@ -326,6 +326,10 @@ func seedEngineAgentConfigs(home string) {
 		filepath.Join(realHome, ".dsh", "profiles"),
 		filepath.Join(home, ".dsh", "profiles"),
 	)
+	// pnpm 的 .modules.yaml 里记着虚拟商店的绝对路径。整目录复制到沙盒后
+	// 它仍指向真实 ~/.dsh，`dsh plugin add` 会拒绝运行；只改沙盒这一份的
+	// virtualStoreDir，真实目录不动。
+	fixSandboxPnpmModules(home)
 	// dsh-tui 的首次引导只看 ~/.dsh-tui/onboarding.json；沙盒里没有这份
 	// 记录时会在第一次开格弹 4 步向导。网关已经由 magpie 配好，这里只让
 	// 沙盒里的 TUI 跳过引导，不动真实目录。
@@ -340,6 +344,81 @@ func seedEngineAgentConfigs(home string) {
 			_ = os.WriteFile(onboarding, []byte("{\"completed\":true,\"version\":1}\n"), 0600)
 		}
 	}
+	seedGenericAgentConfigs(realHome, home)
+}
+
+// seedGenericAgentConfigs 把 magpie 能接线的通用 CLI 的登录态/配置带进
+// 沙盒。只在这些 agent 已被引擎接网关后，EngineDef 才会把启动目录换到
+// 沙盒；seed 是为了那时它们仍认得自己的账号和本地设置。
+// 目标已存在的文件/目录一律不覆盖，用户后来在 Perch 里的修改不会被重启冲掉。
+func seedGenericAgentConfigs(realHome, home string) {
+	// 这些目录里是各自的 auth/插件/本地设置，通常很小；已有就完全不碰。
+	// 先整目录再补单文件：先补文件会提前建出父目录，让整目录复制误以为
+	// 目标已经存在而跳过其余文件。
+	dirs := []string{
+		".gemini/config",
+		".copilot",
+		".qwen",
+		".codebuddy",
+		".kimi",
+		".kimi-code",
+		".config/crush",
+		".config/muse",
+		".muse",
+	}
+	for _, rel := range dirs {
+		_ = copyDirIfMissing(
+			filepath.Join(realHome, filepath.FromSlash(rel)),
+			filepath.Join(home, filepath.FromSlash(rel)),
+		)
+	}
+	files := []string{
+		".gemini/settings.json",
+		".gemini/oauth_creds.json",
+		".gemini/google_accounts.json",
+		".gemini/installation_id",
+		".copilot/settings.json",
+		".copilot/config.json",
+		".qwen/settings.json",
+		".qwen/oauth_creds.json",
+		".config/crush/crush.json",
+		".codebuddy/settings.json",
+		".codebuddy/models.json",
+		".kimi/config.toml",
+		".kimi-code/config.toml",
+		".muse/settings.json",
+	}
+	for _, rel := range files {
+		_ = copyFileIfMissing(
+			filepath.Join(realHome, filepath.FromSlash(rel)),
+			filepath.Join(home, filepath.FromSlash(rel)),
+		)
+	}
+}
+
+// fixSandboxPnpmModules 把沙盒 DSH profile 里 pnpm 记录的 virtualStoreDir
+// 指回沙盒自己。node_modules 是 hoisted 的真实文件，只有这个绝对路径会让
+// pnpm 误以为依赖来自真实的 ~/.dsh。
+func fixSandboxPnpmModules(home string) {
+	p := filepath.Join(home, ".dsh", "profiles", "dsh-tui", "node_modules", ".modules.yaml")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return
+	}
+	var m map[string]any
+	if json.Unmarshal(b, &m) != nil {
+		return
+	}
+	want := filepath.Join(filepath.Dir(p), ".pnpm")
+	if cur, _ := m["virtualStoreDir"].(string); samePath(cur, want) {
+		return
+	}
+	m["virtualStoreDir"] = want
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(p, append(out, '\n'), 0600)
 }
 
 func samePath(a, b string) bool {

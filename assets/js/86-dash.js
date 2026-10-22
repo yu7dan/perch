@@ -746,14 +746,30 @@ function gwGatewayOptions(f) {
     .filter((o) => o && String(o.value || "").startsWith("magpie/"));
 }
 
-// 引擎字段写进 Perch 沙盒后，哪些 agent 的启动真的会读沙盒？目前只有
-// agy（按 /api/state 的 launch 注入）和 dsh（DshDef 带 DSH_HOME）。
-// 其他通用 CLI 仍按自己的真实配置启动，先不要在这里假装“已接入”。
-const GW_ENGINE_SANDBOX_AGENTS = new Set(["agy", "dsh"]);
+// magpie 的 Routing groups 是路由组别名，不是供应商模型。`group/perch-*`
+// 是 Perch 给四个每格注入的 agent 建的内部别名（换模型/档位下一轮生效），
+// `auto/*` 是 magpie 自己的路由组。agy/dsh 的模型选择器不该出现它们。
+function gwIsRoutingGroup(o) {
+  return !!o && (o.group === "Routing groups" ||
+    /^magpie\/group\//.test(String(o.value || "")));
+}
 
+function gwVisibleFieldOptions(f) {
+  let out = (f && Array.isArray(f.options) ? f.options : []).filter((o) => !gwIsRoutingGroup(o));
+  // 引擎托管行是“经 Perch 网关”的模型选择器：DSH 这类还会列出本机
+  // DeepSeek 直连模型，选了就等于绕过网关（甚至断开）。这里只留
+  // magpie/… 的网关模型，直连留在「使用自己的配置」那一侧。
+  if (f && f.key === "model") {
+    out = out.filter((o) => String((o && o.value) || "").startsWith("magpie/"));
+  }
+  return out;
+}
+
+// 引擎字段里有 magpie/… 模型选项，就说明这个 CLI 能被网关接入。未接入
+// 时它仍按用户自己的配置启动（EngineDef 只在 wired 后换沙盒）；开关和
+// 模型选择先在这里完成，接入后的下一次开格才走引擎沙盒。
 function gwEngineManaged(a) {
   if (!a || !a.installed || !perchCaps(a).launch) return false;
-  if (!GW_ENGINE_SANDBOX_AGENTS.has(a.id)) return false;
   const g = gwAgentOf(a.id);
   if (!g) return false;
   if (g.wired) return true;
@@ -764,11 +780,14 @@ function gwModelField(g) { return gwFieldOfAgent(g, "model"); }
 
 function gwModelLabel(g) {
   const f = gwModelField(g);
-  return f && f.value ? gwValueLabel(f, f.value) : "";
+  if (!f || !f.value) return "";
+  const o = (f.options || []).find((x) => x && x.value === f.value);
+  if (o && gwIsRoutingGroup(o)) return t("dash.agents.gwInternalRoute");
+  return gwValueLabel(f, f.value);
 }
 
 function gwFieldSelectHTML(g, f, id, busy) {
-  const opts = Array.isArray(f.options) ? f.options : [];
+  const opts = gwVisibleFieldOptions(f);
   const known = opts.some((o) => o.value === f.value);
   let inner = "";
   if (!opts.some((o) => o.value === "")) {
@@ -790,7 +809,9 @@ function gwFieldSelectHTML(g, f, id, busy) {
       : items;
   }
   if (f.value && !known) {
-    inner += `<option value="${esc(f.value)}" selected>${esc(f.value)}</option>`;
+    const cur = (f.options || []).find((o) => o && o.value === f.value);
+    const label = cur && gwIsRoutingGroup(cur) ? t("dash.agents.gwInternalRoute") : f.value;
+    inner += `<option value="${esc(f.value)}" selected>${esc(label)}</option>`;
   }
   return `<label class="gw-field">` +
     `<span class="gw-k">${esc(gwFieldName(f))}</span>` +
@@ -1015,6 +1036,10 @@ function perchEngineRowHTML(a) {
       `<div class="agp-v">${esc(t("dash.agents.gwScopeBody"))}</div></div>` +
       `</div><div class="agp-exp-foot">` +
       `<button type="button" class="agp-quiet accent" data-launch="${id}">${esc(t("dash.agents.open"))}</button>` +
+      (a.id === "dsh"
+        ? `<button type="button" class="agp-quiet" data-gwsetup="dsh"` +
+          ` title="${esc(t("dash.agents.gwSetupHooksHint"))}">${esc(t("dash.agents.gwSetupHooks"))}</button>`
+        : "") +
       `<span class="agp-grow"></span>` +
       (wired
         ? `<button type="button" class="agp-quiet red" data-gwdisconnect="${id}">${esc(t("ac.action.disconnect"))}</button>`
@@ -1375,8 +1400,12 @@ function gwFieldPopOpen(anchor, id, key) {
   const g = gwAgentOf(id);
   const f = gwFieldOfAgent(g, key);
   if (!f) return;
-  const opts = Array.isArray(f.options) ? f.options : [];
+  const opts = gwVisibleFieldOptions(f);
   let listHTML = "";
+  if (f.value && !opts.some((o) => o.value === f.value)) {
+    listHTML += `<div class="dash-model-empty"><p>` +
+      `${esc(t("dash.agents.gwInternalRoute"))}</p></div>`;
+  }
   if (!opts.some((o) => o.value === "")) {
     listHTML += `<button type="button" class="ac-pop-opt dm-opt${f.value ? "" : " on"}"` +
       ` role="option" aria-selected="${!f.value}" data-val="">` +
@@ -1731,6 +1760,14 @@ $("dash-agent-list").addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
     gwToggleAgent(gdc.dataset.gwdisconnect);
+    return;
+  }
+  const gsu = e.target.closest("[data-gwsetup]");
+  if (gsu) {
+    e.preventDefault();
+    e.stopPropagation();
+    sendCtrl({ type: "agent.setup", id: gsu.dataset.gwsetup });
+    bootFact(`Agent 状态接入 → ${gsu.dataset.gwsetup}`);
     return;
   }
   const grp = e.target.closest("[data-gwreapply]");

@@ -25,6 +25,9 @@ type Host interface {
 	// 非隔离模式返回 nil；由 Perch 直接起、但配置由引擎管理的 agent 用它
 	// 与引擎读同一份配置。
 	EngineHomeEnv() map[string]string
+	// EngineHomeEnvFor 只给“当前确实已接入引擎网关”的通用 agent 返回沙盒
+	// 环境；未接入/非隔离时返回 nil，让它继续读用户自己的配置。
+	EngineHomeEnvFor(id string) map[string]string
 }
 
 var host Host = defaultHost{}
@@ -49,7 +52,8 @@ func (defaultHost) Push(any)                             {}
 func (defaultHost) WireLaunch(string) (map[string]string, []string, bool) {
 	return nil, nil, false
 }
-func (defaultHost) EngineHomeEnv() map[string]string { return nil }
+func (defaultHost) EngineHomeEnv() map[string]string          { return nil }
+func (defaultHost) EngineHomeEnvFor(string) map[string]string { return nil }
 
 func (defaultHost) ResolveExe(bin string) (string, []string) {
 	bin = strings.TrimSpace(bin)

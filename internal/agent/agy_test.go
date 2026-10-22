@@ -24,7 +24,8 @@ func (h agyTestHost) WireLaunch(id string) (map[string]string, []string, bool) {
 	}
 	return h.env, h.args, h.ok
 }
-func (h agyTestHost) EngineHomeEnv() map[string]string { return h.homeEnv }
+func (h agyTestHost) EngineHomeEnv() map[string]string          { return h.homeEnv }
+func (h agyTestHost) EngineHomeEnvFor(string) map[string]string { return h.homeEnv }
 
 func TestAgyDefInjectsWireLaunch(t *testing.T) {
 	SetHost(agyTestHost{
@@ -65,6 +66,25 @@ func TestAgyDefUsesEngineHomeEnv(t *testing.T) {
 	}
 	if env["GEMINI_API_KEY"] != "k" {
 		t.Fatalf("wire env lost: %#v", env)
+	}
+}
+
+func TestEngineDefUsesEngineHomeEnv(t *testing.T) {
+	SetHost(agyTestHost{
+		homeEnv: map[string]string{"USERPROFILE": `C:\sandbox`, "HOME": `C:\sandbox`},
+	})
+	defer SetHost(defaultHost{})
+
+	d := EngineDef("gemini", "gemini")
+	env, args, obs, err := d.Prepare("tag", 1, `C:\work`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["USERPROFILE"] != `C:\sandbox` || env["HOME"] != `C:\sandbox` {
+		t.Fatalf("engine home env not applied: %#v", env)
+	}
+	if args != nil || obs != nil {
+		t.Fatalf("unexpected args/observe: args=%#v observe=%v", args, obs != nil)
 	}
 }
 

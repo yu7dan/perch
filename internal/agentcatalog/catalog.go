@@ -180,7 +180,9 @@ func Defs(stateDir string) map[string]agent.Def {
 		if e.ID == "claude" || !e.Launch || e.Bin == "" {
 			continue
 		}
-		defs[e.ID] = agent.GenericDef(e.Bin)
+		// 通用 CLI 在「已接入引擎网关」时也要读引擎沙盒；没接入时
+		// EngineDef 返回 nil，行为与 GenericDef 完全一样。
+		defs[e.ID] = agent.EngineDef(e.ID, e.Bin)
 	}
 	// 深度适配器覆盖通用那条。
 	defs["opencode"] = agent.OpenCodeDef()

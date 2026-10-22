@@ -50,6 +50,17 @@ func GenericDef(bin string) Def {
 	}
 }
 
+// EngineDef 给 magpie 的通用 agent 用：已接入引擎网关时，启动进程也换到
+// 引擎沙盒，这样它读到的是 /api/set 写进去的模型/供应商；没接入时照旧读
+// 用户自己的配置。agy/dsh 有自己的深度适配，不经过这里。
+func EngineDef(id, bin string) Def {
+	d := GenericDef(bin)
+	d.Prepare = func(string, int, string, []string) (map[string]string, []string, func(context.Context), error) {
+		return host.EngineHomeEnvFor(id), nil, nil, nil
+	}
+	return d
+}
+
 // CodexDef 是每格一个 app-server + TUI --remote 的适配器。
 func CodexDef() Def { return codexDef() }
 

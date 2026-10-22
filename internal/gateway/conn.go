@@ -92,11 +92,18 @@ type Gateway struct {
 	// 只能按 magpie 给的那条命令启动。每次 /api/state 到达时整份替换。
 	launchMu    sync.Mutex
 	agentLaunch map[string]string
+	// agentEngine：哪些 agent 现在确实由引擎接入了网关。只有这些 agent 的
+	// 启动才应该把用户目录换到引擎沙盒；没接线的仍读用户自己的配置。
+	agentEngine map[string]bool
 }
 
 // New 构造一个未连接的网关。push 是发给前端的函数，可以为 nil（测试）。
 func New(push func(any)) *Gateway {
-	return &Gateway{push: push, agentLaunch: map[string]string{}}
+	return &Gateway{
+		push:        push,
+		agentLaunch: map[string]string{},
+		agentEngine: map[string]bool{},
+	}
 }
 
 func (g *Gateway) emit(v any) {
