@@ -92,9 +92,9 @@ func AgyDef() Def {
 	d := GenericDef("agy")
 	d.Prepare = func(_ string, _ int, _ string, _ []string) (map[string]string, []string, func(context.Context), error) {
 		env, args, ok := host.WireLaunch("agy")
-		if !ok {
-			return nil, nil, nil, nil
-		}
+		// 沙盒 home 不依赖 WireLaunch 成不成功：冷恢复的 agy 可能在引擎
+		// /api/state 到达之前就起来，那一刻拿不到 launch；如果这时退回
+		// 真实 home，agy 会读写桌面 settings（实测会改掉真实文件）。
 		if homeEnv := host.EngineHomeEnv(); len(homeEnv) > 0 {
 			if env == nil {
 				env = map[string]string{}
@@ -104,6 +104,9 @@ func AgyDef() Def {
 					env[k] = v
 				}
 			}
+		}
+		if !ok {
+			return env, nil, nil, nil
 		}
 		return env, args, nil, nil
 	}

@@ -88,6 +88,28 @@ func TestEngineDefUsesEngineHomeEnv(t *testing.T) {
 	}
 }
 
+func TestAgyDefSandboxesBeforeWireLaunch(t *testing.T) {
+	// 冷恢复时 launch 可能还没到：env 仍必须是沙盒，否则 agy 会读写真实
+	// ~/.gemini/antigravity-cli。
+	SetHost(agyTestHost{
+		ok:      false,
+		homeEnv: map[string]string{"USERPROFILE": `C:\sandbox`, "HOME": `C:\sandbox`},
+	})
+	defer SetHost(defaultHost{})
+
+	d := AgyDef()
+	env, args, obs, err := d.Prepare("tag", 1, `C:\work`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["USERPROFILE"] != `C:\sandbox` || env["HOME"] != `C:\sandbox` {
+		t.Fatalf("unwired agy must still get engine home: %#v", env)
+	}
+	if args != nil || obs != nil {
+		t.Fatalf("unwired agy must not get launch args: args=%#v observe=%v", args, obs != nil)
+	}
+}
+
 func TestAgyDefFallsBackWhenUnwired(t *testing.T) {
 	SetHost(agyTestHost{})
 	defer SetHost(defaultHost{})
