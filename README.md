@@ -84,7 +84,7 @@ Providers, routing, usage, and plugins use magpie's own pages; the version and u
 
 ## Supported agents
 
-Perch's catalog contains CLI agents only. Desktop and web clients are not installed or launched by Perch; they belong to magpie's gateway layer. The catalog ships with 15 CLI agents, grouped by integration depth.
+Perch's catalog contains CLI agents only. Desktop and web clients are not installed or launched by Perch; they belong to magpie's gateway layer. The catalog ships with 9 CLI agents, grouped by integration depth.
 
 ### Full integration
 
@@ -104,30 +104,20 @@ DeepSeek Harness is the non-official case: its official package ships no interac
 
 ### Install and launch
 
-The other nine have a one-click install recipe — the official installer or an npm package — and can be started in a Perch pane. They share the same icon, detection, install, and launch path.
+The other four have a one-click install recipe — the official installer or an npm package — and can be started in a Perch pane. They share the same icon, detection, install, and launch path.
 
 <table align="center">
 <tr>
-<td align="center" width="20%"><img src="assets/icons/agents/antigravity-color.svg" width="32" height="32" alt="Antigravity CLI"><br><sub>Antigravity CLI</sub></td>
-<td align="center" width="20%"><img src="assets/icons/agents/cursor.svg" width="32" height="32" alt="Cursor"><br><sub>Cursor</sub></td>
-<td align="center" width="20%"><img src="assets/icons/agents/codebuddy-color.svg" width="32" height="32" alt="CodeBuddy Code"><br><sub>CodeBuddy Code</sub></td>
-<td align="center" width="20%"><img src="assets/icons/agents/kimi.svg" width="32" height="32" alt="Kimi Code"><br><sub>Kimi Code</sub></td>
-<td align="center" width="20%"><img src="assets/icons/agents/meta-color.svg" width="32" height="32" alt="Muse Code"><br><sub>Muse Code</sub></td>
-</tr>
-<tr>
-<td align="center" width="20%"><img src="assets/icons/agents/geminicli-color.svg" width="32" height="32" alt="Gemini CLI"><br><sub>Gemini CLI</sub></td>
-<td align="center" width="20%"><img src="assets/icons/agents/githubcopilot.svg" width="32" height="32" alt="Copilot CLI"><br><sub>Copilot CLI</sub></td>
-<td align="center" width="20%"><img src="assets/icons/agents/qwen-color.svg" width="32" height="32" alt="Qwen Code"><br><sub>Qwen Code</sub></td>
-<td align="center" width="20%"><img src="assets/icons/agents/crush.png" width="32" height="32" alt="Crush"><br><sub>Crush</sub></td>
+<td align="center" width="25%"><img src="assets/icons/agents/antigravity-color.svg" width="32" height="32" alt="Antigravity CLI"><br><sub>Antigravity CLI</sub></td>
+<td align="center" width="25%"><img src="assets/icons/agents/cursor.svg" width="32" height="32" alt="Cursor"><br><sub>Cursor</sub></td>
+<td align="center" width="25%"><img src="assets/icons/agents/githubcopilot.svg" width="32" height="32" alt="Copilot CLI"><br><sub>Copilot CLI</sub></td>
+<td align="center" width="25%"><img src="assets/icons/agents/qoder.svg" width="32" height="32" alt="Qoder"><br><sub>Qoder</sub></td>
 </tr>
 </table>
 
-<p align="center">
-  <img src="assets/icons/agents/zcode.png" width="24" height="24" alt="ZCode" valign="middle">
-  <sub><b>ZCode</b> — detected and listed in the catalog, but not installed or launched by Perch.</sub>
-</p>
-
 **Install** means Perch runs the agent's official installer or npm package after you click "Install". **Launch** means Perch can start it in a pane. Desktop clients are outside this list; any client that can point at a custom base URL can use the magpie gateway.
+
+Qoder requires a Qoder sign-in on first run; custom providers (including Perch's gateway) are available to BYOK plans.
 
 ## Where the data comes from
 

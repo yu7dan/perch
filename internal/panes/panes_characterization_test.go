@@ -121,6 +121,30 @@ func TestCloseKeepsOnlyTalkedPanes(t *testing.T) {
 	}
 }
 
+func TestPruneAgentsKeepsListAndShell(t *testing.T) {
+	p := &Store{
+		file: filepath.Join(t.TempDir(), "panes.json"),
+		Panes: []Pane{
+			{PaneID: 1, Agent: "claude"},
+			{PaneID: 2, Agent: "qwen"},
+			{PaneID: 3, Agent: ""},
+			{PaneID: 4, Agent: "qoder"},
+		},
+	}
+	keep := func(id string) bool { return id == "claude" || id == "qoder" }
+	if n := p.PruneAgents(keep, "test"); n != 1 {
+		t.Fatalf("pruned=%d want 1", n)
+	}
+	if p.Count() != 3 {
+		t.Fatalf("count=%d want 3", p.Count())
+	}
+	for _, r := range p.Snapshot() {
+		if r.Agent == "qwen" {
+			t.Fatal("removed agent record survived")
+		}
+	}
+}
+
 func TestPaneStoreReadOnlyNeverWrites(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "panes.json")
 	p := &Store{file: file, readOnly: true, next: 1}

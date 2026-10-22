@@ -71,6 +71,7 @@ func TestEngineEnvSandboxesAgentHomes(t *testing.T) {
 		"XDG_CONFIG_HOME":    filepath.Join(home, ".config"),
 		"XDG_CACHE_HOME":     filepath.Join(home, ".cache"),
 		"XDG_DATA_HOME":      filepath.Join(home, ".local", "share"),
+		"QODER_CONFIG_DIR":   filepath.Join(home, ".qoder"),
 	}
 	// USERPROFILE/HOME are sandboxed too, so magpie's Agent.Path can't reach
 	// the desktop; WorkBuddy's sign-in is seeded into the sandbox instead.
@@ -118,13 +119,14 @@ func TestEngineHomeEnv(t *testing.T) {
 	home := filepath.Join(local, "Perch", "gateway", "home")
 	got := EngineHomeEnv()
 	want := map[string]string{
-		"USERPROFILE":     home,
-		"HOME":            home,
-		"APPDATA":         filepath.Join(home, "appdata"),
-		"LOCALAPPDATA":    filepath.Join(home, "localappdata"),
-		"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
-		"XDG_CACHE_HOME":  filepath.Join(home, ".cache"),
-		"XDG_DATA_HOME":   filepath.Join(home, ".local", "share"),
+		"USERPROFILE":      home,
+		"HOME":             home,
+		"APPDATA":          filepath.Join(home, "appdata"),
+		"LOCALAPPDATA":     filepath.Join(home, "localappdata"),
+		"XDG_CONFIG_HOME":  filepath.Join(home, ".config"),
+		"XDG_CACHE_HOME":   filepath.Join(home, ".cache"),
+		"XDG_DATA_HOME":    filepath.Join(home, ".local", "share"),
+		"QODER_CONFIG_DIR": filepath.Join(home, ".qoder"),
 	}
 	for k, v := range want {
 		if got[k] != v {

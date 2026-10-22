@@ -537,6 +537,36 @@ func (p *Store) MarkDegraded(id int, from, why string) {
 	p.scheduleLocked(fmt.Sprintf("降级留证 pane=%d 原本要接=%s（%s）", id, short(from), why))
 }
 
+// PruneAgents 摘掉不在当前 Agent 名单里的记录（名单精简/产品边界变化）。
+// 只删记录；transcript 文件一个字不动。空 agent（shell 记录）保留。
+func (p *Store) PruneAgents(keep func(string) bool, why string) int {
+	if keep == nil {
+		return 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := p.Panes[:0]
+	n := 0
+	for _, r := range p.Panes {
+		if strings.TrimSpace(r.Agent) == "" || keep(r.Agent) {
+			out = append(out, r)
+			continue
+		}
+		n++
+		log.Printf("[panes] 摘掉名单外 agent 记录 pane=%d agent=%s（%s）—— 会话文件未动",
+			r.PaneID, r.Agent, why)
+	}
+	if n == 0 {
+		return 0
+	}
+	p.Panes = out
+	p.dirty = true
+	p.forgetting = true
+	p.writeLocked("名单精简摘掉 " + strconv.Itoa(n) + " 条记录")
+	p.forgetting = false
+	return n
+}
+
 // Snapshot 给一份副本（冷恢复那条路用它排座位序：**落盘的数组顺序就是座位序**）。
 func (p *Store) Snapshot() []Pane {
 	p.mu.Lock()

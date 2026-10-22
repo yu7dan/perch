@@ -40,11 +40,6 @@ $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Env
 func recipeScript(r agentcatalog.Recipe) string {
 	var b strings.Builder
 	b.WriteString(pathPrelude)
-	if r.NeedsGit {
-		b.WriteString(`if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) { ` +
-			`Write-Host '== 需要 Git for Windows（官方安装要求）=='; ` +
-			`throw '没有找到 git.exe：请先安装 Git for Windows，再点一次安装' }` + "\n")
-	}
 	if r.NPM {
 		b.WriteString(`if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {` + "\n")
 		b.WriteString(`  Write-Host '== 没有找到 Node.js，先安装 Node.js LTS（winget）=='` + "\n")

@@ -57,14 +57,15 @@ func EngineHomeEnv() map[string]string {
 		return nil
 	}
 	return map[string]string{
-		"USERPROFILE":     home,
-		"HOME":            home,
-		"APPDATA":         filepath.Join(home, "appdata"),
-		"LOCALAPPDATA":    filepath.Join(home, "localappdata"),
-		"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
-		"XDG_CACHE_HOME":  filepath.Join(home, ".cache"),
-		"XDG_DATA_HOME":   filepath.Join(home, ".local", "share"),
-		"DSH_HOME":        filepath.Join(home, ".dsh"),
+		"USERPROFILE":      home,
+		"HOME":             home,
+		"APPDATA":          filepath.Join(home, "appdata"),
+		"LOCALAPPDATA":     filepath.Join(home, "localappdata"),
+		"XDG_CONFIG_HOME":  filepath.Join(home, ".config"),
+		"XDG_CACHE_HOME":   filepath.Join(home, ".cache"),
+		"XDG_DATA_HOME":    filepath.Join(home, ".local", "share"),
+		"DSH_HOME":         filepath.Join(home, ".dsh"),
+		"QODER_CONFIG_DIR": filepath.Join(home, ".qoder"),
 	}
 }
 
@@ -255,6 +256,7 @@ func engineEnv(key string) ([]string, error) {
 		filepath.Join(home, ".gemini"),
 		filepath.Join(home, ".pi"),
 		filepath.Join(home, ".cursor"),
+		filepath.Join(home, ".qoder"),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0700); err != nil {
@@ -282,6 +284,7 @@ func engineEnv(key string) ([]string, error) {
 	m["CLAUDE_CONFIG_DIR"] = filepath.Join(home, ".claude")
 	m["CODEX_HOME"] = filepath.Join(home, ".codex")
 	m["DSH_HOME"] = filepath.Join(home, ".dsh")
+	m["QODER_CONFIG_DIR"] = filepath.Join(home, ".qoder")
 	// 不能设 1：magpie 的账号发现一旦关闭，plugin-auth.json 也会被跳过，
 	// WorkBuddy 插件供应商就不会出现在 /v1/models。agent 的目录已隔开，
 	// 这里显式写 0，避免父进程环境里带进来的 1 生效。
@@ -297,8 +300,8 @@ func engineEnv(key string) ([]string, error) {
 			}
 		}
 	}
-	// npm 全局安装的 CLI（Gemini/Qwen/Copilot…）在 %APPDATA%\npm，GUI
-	// 进程的 PATH 常常没有它；magpie 的 detect 和 dsh-tui 都按 PATH 找。
+	// npm 全局安装的 CLI（Copilot 等）在 %APPDATA%\npm，GUI 进程的 PATH
+	// 常常没有它；magpie 的 detect 和 dsh-tui 都按 PATH 找。
 	// Windows 的环境变量名大小写不敏感，os.Environ 可能给的是 "Path"；
 	// 先合并成唯一的 "PATH"，否则我们新加的那条会被旧值盖掉。
 	var curPath string
@@ -349,12 +352,7 @@ func seedEngineAgentConfigs(home string) {
 	); err == nil {
 		log.Printf("[gw] 已 seed Antigravity CLI 配置")
 	}
-	// Gemini CLI 的 settings 和 Pi 的 agent 目录也先带上；各自的网关设置
-	// 仍然由 magpie 写进 Perch home。
-	_ = copyFileIfMissing(
-		filepath.Join(realHome, ".gemini", "settings.json"),
-		filepath.Join(home, ".gemini", "settings.json"),
-	)
+	// Pi 的 agent 目录也先带上；网关设置仍由 magpie 写进 Perch home。
 	_ = copyDirIfMissing(
 		filepath.Join(realHome, ".pi", "agent"),
 		filepath.Join(home, ".pi", "agent"),
@@ -405,15 +403,8 @@ func seedGenericAgentConfigs(realHome, home string) {
 	// 先整目录再补单文件：先补文件会提前建出父目录，让整目录复制误以为
 	// 目标已经存在而跳过其余文件。
 	dirs := []string{
-		".gemini/config",
 		".copilot",
-		".qwen",
-		".codebuddy",
-		".kimi",
-		".kimi-code",
-		".config/crush",
-		".config/muse",
-		".muse",
+		".qoder",
 	}
 	for _, rel := range dirs {
 		_ = copyDirIfMissing(
@@ -422,36 +413,15 @@ func seedGenericAgentConfigs(realHome, home string) {
 		)
 	}
 	files := []string{
-		".gemini/settings.json",
-		".gemini/oauth_creds.json",
-		".gemini/google_accounts.json",
-		".gemini/installation_id",
 		".copilot/settings.json",
 		".copilot/config.json",
-		".qwen/settings.json",
-		".qwen/oauth_creds.json",
-		".config/crush/crush.json",
-		".codebuddy/settings.json",
-		".codebuddy/models.json",
-		".kimi/config.toml",
-		".kimi-code/config.toml",
-		".muse/settings.json",
+		".qoder/settings.json",
 	}
 	for _, rel := range files {
 		_ = copyFileIfMissing(
 			filepath.Join(realHome, filepath.FromSlash(rel)),
 			filepath.Join(home, filepath.FromSlash(rel)),
 		)
-	}
-	// Gemini CLI 已经装好、但用户还没登录/写过配置时，真实 ~/.gemini 里
-	// 没有 settings.json；给引擎沙盒放一个空对象，magpie 才能识别并接入它。
-	// 这只是沙盒里的占位，真实文件不会被创建。
-	geminiSettings := filepath.Join(home, ".gemini", "settings.json")
-	if _, err := os.Stat(filepath.Join(realHome, ".gemini", "settings.json")); os.IsNotExist(err) {
-		if _, err := os.Stat(geminiSettings); os.IsNotExist(err) {
-			_ = os.MkdirAll(filepath.Dir(geminiSettings), 0700)
-			_ = os.WriteFile(geminiSettings, []byte("{}\n"), 0600)
-		}
 	}
 }
 

@@ -78,6 +78,13 @@ func main() {
 	} else {
 		a.profiles = agentprofile.Load("")
 	}
+	// 名单精简：删掉已移除 agent 的 Perch 会话配置；不影响会话/转录文件。
+	for _, p := range a.profiles.All() {
+		if p.Agent != "" && !agentcatalog.Exists(p.Agent) {
+			_ = a.profiles.Set(agentprofile.Profile{Agent: p.Agent})
+			log.Printf("[perch] 名单精简：移除已下架 agent 的 Perch 配置 %s", p.Agent)
+		}
+	}
 	// 配置方案（Profiles）：当前 per-agent 配置的快照，存成独立文件。
 	if p, err := appdir.PerchFile("agent-profile-sets.json"); err == nil {
 		a.profileSets = agentprofile.LoadSets(p)
@@ -125,6 +132,11 @@ func main() {
 		a.panes.SetReadOnly("已经有一个我在跑（步 7 的单实例闸）")
 	}
 	a.panes.Warn()
+	// 名单精简后，旧名字（Gemini/Qwen/CodeBuddy…）的记录不再恢复、不再出现在
+	// 左栏；只摘记录，磁盘上的会话文件保留。
+	if n := a.panes.PruneAgents(agentcatalog.Exists, "Agent 名单精简"); n > 0 {
+		log.Printf("[panes] 名单精简：摘掉 %d 条名单外 agent 记录（会话文件保留）", n)
+	}
 
 	// C3：第一个动作就是给自己上"随进程退出清理整棵树"的保险 ——
 	// 必须早于任何子进程（窗口的 WebView2、每个格子的 ConPTY 都在这之后才起）。

@@ -60,14 +60,14 @@ func TestCapsForAgent(t *testing.T) {
 	if oc.Resume {
 		t.Fatalf("opencode 还没做续接，不能标成 resume: %+v", oc)
 	}
-	// 通用启动不等于有状态。qwen 有 Bin，能开一格；但没接状态。
-	qwen := CapsFor("qwen", true)
-	if !qwen.Launch || qwen.Status || qwen.Waiting {
-		t.Fatalf("通用 agent 只能 launch: %+v", qwen)
+	// 通用启动不等于有状态。copilot 有 Bin，能开一格；但没接状态。
+	copilot := CapsFor("copilot", true)
+	if !copilot.Launch || copilot.Status || copilot.Waiting {
+		t.Fatalf("通用 agent 只能 launch: %+v", copilot)
 	}
-	// zcode 在 init 里被跳过（Bin 有但不能直接启动），不能假装能开。
-	if zcode := CapsFor("zcode", false); zcode.Launch {
-		t.Fatalf("zcode 没有启动适配器，不能标 launch: %+v", zcode)
+	// 没装时不能假装能开；qoder 也是通用启动路径。
+	if qoder := CapsFor("qoder", false); qoder.Launch {
+		t.Fatalf("没装的 qoder 不能标 launch: %+v", qoder)
 	}
 	pi := CapsFor("pi", true)
 	if !pi.Launch || !pi.Resume || !pi.Status || !pi.Waiting {
