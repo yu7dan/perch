@@ -119,11 +119,19 @@ func (s *Server) paneClose(m *Msg) {
 	if s.deps.Panes == nil {
 		return
 	}
-	if s.deps.Panes.MarkClosed(m.Pane, "用户点格子头的 ×") {
-		log.Printf("[ctl] pane.close pane=%d（关格保留记录，重启不自动拉起）", m.Pane)
-	} else {
+	kept, found := s.deps.Panes.Close(m.Pane, "用户点格子头的 ×")
+	switch {
+	case !found:
 		log.Printf("[ctl] pane.close pane=%d：盘上没有这条记录（可能已经摘过），不动", m.Pane)
+	case kept:
+		log.Printf("[ctl] pane.close pane=%d（关格保留记录，重启不自动拉起）", m.Pane)
+	default:
+		log.Printf("[ctl] pane.close pane=%d（没发过提示，记录已摘掉）", m.Pane)
 	}
+	// 前端关格时先乐观地留了一行「已关闭」；空记录已经摘掉时要把那一行撤掉。
+	s.Push(map[string]any{
+		"type": "pane.closed", "pane": m.Pane, "kept": kept, "found": found,
+	})
 }
 
 // paneForget 是**唯一**一条会删记录的路径：用户明确不要这个 agent 了

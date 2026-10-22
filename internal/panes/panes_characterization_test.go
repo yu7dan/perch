@@ -40,7 +40,7 @@ func TestRestorePlanCharacterization(t *testing.T) {
 			{PaneID: 2, Agent: "claude", SessionID: "missing-id"},
 			{PaneID: 3, Agent: "claude", SessionID: "dup-id"},
 			{PaneID: 4, Agent: "claude", SessionID: "dup-id"},
-			{PaneID: 5, Agent: "claude", SessionID: "closed-id", Closed: true},
+			{PaneID: 5, Agent: "claude", SessionID: "closed-id", Closed: true, Spoke: true},
 		},
 	}
 
@@ -72,6 +72,52 @@ func TestRestorePlanCharacterization(t *testing.T) {
 		if v.PaneID != 3 && v.Resume.Kind != "new" {
 			t.Errorf("pane %d resume=%q want new", v.PaneID, v.Resume.Kind)
 		}
+	}
+}
+
+func TestRestorePlanPrunesEmptyClosed(t *testing.T) {
+	p := &Store{
+		file: filepath.Join(t.TempDir(), "panes.json"),
+		Panes: []Pane{
+			{PaneID: 1, Agent: "claude", Closed: true},
+			{PaneID: 2, Agent: "claude", Closed: true, Spoke: true},
+			{PaneID: 3, Agent: "claude", Closed: true, Talked: true},
+		},
+	}
+	plan := p.RestorePlan(nil)
+	if len(plan.Views) != 2 {
+		t.Fatalf("views=%d want 2 (empty closed must be pruned)", len(plan.Views))
+	}
+	for _, v := range plan.Views {
+		if v.PaneID == 1 {
+			t.Fatal("pane 1 has no conversation and must be pruned")
+		}
+	}
+	if got := p.Count(); got != 2 {
+		t.Fatalf("count=%d want 2", got)
+	}
+}
+
+func TestCloseKeepsOnlyTalkedPanes(t *testing.T) {
+	p := &Store{
+		file: filepath.Join(t.TempDir(), "panes.json"),
+		Panes: []Pane{
+			{PaneID: 1, Agent: "claude"},
+			{PaneID: 2, Agent: "claude", Talked: true},
+			{PaneID: 3, Agent: "claude", Spoke: true},
+		},
+	}
+	if kept, found := p.Close(1, "test"); !found || kept {
+		t.Fatalf("empty pane close: kept=%v found=%v want false,true", kept, found)
+	}
+	if got := p.Count(); got != 2 {
+		t.Fatalf("after empty close count=%d want 2", got)
+	}
+	if kept, found := p.Close(2, "test"); !found || !kept {
+		t.Fatalf("talked pane close: kept=%v found=%v want true,true", kept, found)
+	}
+	if kept, found := p.Close(3, "test"); !found || !kept {
+		t.Fatalf("spoke pane close: kept=%v found=%v want true,true", kept, found)
 	}
 }
 

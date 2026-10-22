@@ -283,8 +283,9 @@ function setActive(t) {
 // 关掉一个格子：关掉它的 stream，Go 那边 Receive 失败就 return，
 // defer 里会把 PTY 收掉、把 handler 从表里删掉（main.go handleTab）。
 /* 两种"用户点名"的关闭，语义**不同**（用户 2026-10-17 定的）：
-     `opts.close`   点格子头的 × = 关掉运行、**留着这个 agent**（发 `pane.close`，
-                     记录打 closed；重启不自动拉起，左栏列成「已关闭」）；
+     `opts.close`   点格子头的 × = 关掉运行；发过提示的格子记录打 closed，
+                     重启不自动拉起、左栏列成「已关闭」；从没发过提示的空开合
+                     由 Go 直接摘记录（`pane.closed kept=false` 撤回那一行）；
      `opts.forget`  左栏「结束这个 agent」= 不要它了（发 `pane.forget`，唯一删记录的路）。
    —— 见 main.go 的 tabs.drop 那段：流断了、进程挂了、窗口关了都**不许动记录**，
    那些只说明"它现在不在跑"，不说明"我不要它了"。

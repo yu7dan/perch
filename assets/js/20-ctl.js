@@ -55,9 +55,11 @@ const restoreCount = (v) => RESTORE.panes.filter((p) => p.verdict === v).length;
    里删掉"。用户的意思正好相反 —— 关掉只是"我现在不需要它开着"，那个 agent
    以后还要用。
 
-   现在 × 发 `pane.close`：Go 把记录打上 `closed`，**不删**；重启时它不占座位
-   （不自动拉起），只在左栏工作区里留一行「已关闭」，点一下用**同一个 paneId**
-   接上原来那条会话。真正删记录的只有「结束这个 agent」。
+   现在 × 发 `pane.close`：发过提示的格子，Go 把记录打上 `closed`，**不删**；
+   重启时它不占座位（不自动拉起），只在左栏工作区里留一行「已关闭」，点一下用
+   **同一个 paneId** 接上原来那条会话。从没发过提示的空开合没有会话可续，
+   Go 会直接摘掉记录，前端收到 `pane.closed kept=false` 后把乐观补的那行撤回。
+   真正删除有内容记录的仍然只有「结束这个 agent」。
 
    ⚠️ 这份 Map 是**薄快照**，只为画那一行/接回它；权威那份在
    %APPDATA%\Perch\panes.json，冷恢复时由 `panes.list` 推回来重建一遍。 */
@@ -86,6 +88,9 @@ function rememberClosedPane(t) {
     // `spoke` 只是一个**措辞用**的近似（会话在库里 ≈ 说过话）；判定接不接得上
     // 永远只看 onDisk。
     spoke: !!(t.sessionID && findSess(t.sessionID)),
+    // 发送过提示才会绑上 session；绑定本身不是精确证据，只用来撑到
+    // 下一次 panes.list / pane.closed 回来。
+    talked: !!t.sessionID,
   });
 }
 function closedRowName(r) {
@@ -119,7 +124,9 @@ function closedUnresumable(r) {
    文件被删了；两种分开说，因为用户能做的判断不一样（"我还没让它干过活" vs
    "我的文件怎么没了"）。 */
 function closedWhy(r) {
-  return r.spoke ? t("pane.closedWhy.spoke") : t("pane.closedWhy.zero");
+  if (r.spoke) return t("pane.closedWhy.spoke");
+  if (r.talked) return t("pane.closedWhy.talked");
+  return t("pane.closedWhy.zero");
 }
 
 /* 等那份清单，最多 800ms。**为什么不是直接 await 一个 promise**：清单是 ctl 通道上
@@ -440,7 +447,7 @@ function dispatchCtl(m) {
           sessionId: p.sessionId || "", lastSeenAt: p.lastSeenAt || "", name: "",
           // 盘上还有没有它上次那条会话（Go 现算的）。没有的话，那一行先说
           // 「接不上」并把原因写进 title —— 别等用户点下去才吃一句莫名其妙的报错。
-          onDisk: !!p.onDisk, spoke: !!p.spoke,
+          onDisk: !!p.onDisk, spoke: !!p.spoke, talked: !!p.talked,
         });
       }
       bootFact(`冷恢复：${RESTORE.panes.length} 条候选（ok=${restoreCount("ok")} ` +
@@ -458,6 +465,15 @@ function dispatchCtl(m) {
         // 前端得说得出"这一条为什么没有座位"。
         bootFact("冷恢复清单：" + RESTORE.panes.map((p) =>
           `pane=${p.paneId}:${p.verdict}(${p.agent}→${p.resume ? p.resume.kind : "?"} cwd=${p.cwd || "(默认)"})`).join(" "));
+      }
+      return;
+    }
+    case "pane.closed": {
+      // 关格时前端乐观补的那一行，只有 Go 真的留下了记录才该存在；
+      // 从没发过提示的格子 Go 会直接摘掉，这里把那一行撤回。
+      if (!m.kept || !m.found) {
+        CLOSED_PANES.delete(m.pane | 0);
+        armRailRebuild();
       }
       return;
     }
