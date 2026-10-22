@@ -65,6 +65,10 @@ type Gateway struct {
 	ours    bool
 	exe     string
 	lastErr string
+	// isolated：Perch 自己的 portable 引擎（isolated.go）。默认 false，
+	// 保持桌面 magpie 的旧路径；由组合根在 StartWatcher 之前打开。
+	isolated bool
+	isoPort  int
 
 	watcherMu  sync.RWMutex
 	docWatcher *watcher
@@ -178,6 +182,9 @@ func gwPing(port int, key string) bool {
 
 // Ensure 接上或拉起控制面。只由用户点「连接」或启动时的被动探测调用。
 func (g *Gateway) Ensure() error {
+	if g.Isolated() {
+		return g.ensureIsolated()
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -447,7 +454,11 @@ func (g *Gateway) Refresh() {
 }
 
 // Probe 是启动时的被动探测：只接已经存在的控制面，绝不拉起进程。
+// 隔离模式下启动时不碰任何外部控制面；引擎由用户点开网关时才拉起。
 func (g *Gateway) Probe() {
+	if g.Isolated() {
+		return
+	}
 	key := g.loadKey()
 	for p := gwFirstPort; p < gwFirstPort+gwPortTries; p++ {
 		if gwPing(p, key) {

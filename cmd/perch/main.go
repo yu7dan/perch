@@ -134,6 +134,12 @@ func main() {
 
 	// 网关与安装器：网关先建（安装完成回调要接它）；两者都只通过 push 出站。
 	a.gw = gateway.New(a.push.Push)
+	// 2026-10-22：隔离引擎模式先由环境变量打开，产品默认路径暂不变。
+	// 打开后只用 Perch 自己安装的 portable magpie，不碰桌面 magpie/3425。
+	if os.Getenv("PERCH_ISOLATED_GATEWAY") == "1" {
+		a.gw.SetIsolated(true)
+		log.Printf("[gw] PERCH_ISOLATED_GATEWAY=1：使用 Perch 自己的网关引擎")
+	}
 	// agy 这类 agent 的网关地址/密钥只能从环境变量拿；magpie 的 /api/state
 	// 带一条 launch 命令，网关把它解析成 env+args，开格时由 AgyDef 现取。
 	// 没接线时 Launch 返回 false，启动退回通用路径。
