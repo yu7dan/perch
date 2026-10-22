@@ -787,6 +787,18 @@ function leaveWaitingFromHook(t, v, why) {
   scheduleLive();
 }
 
+// dsh 的 hook busy 只有一条路（它没有登记表）。标题已经是 ✦ 时，这条 busy
+// 可能是迟到的 UserPromptSubmit；补一个收尾计时器，别让格子永久转圈。
+function markDshBusy(t, v, why) {
+  v.st = "busy";
+  v.state = "working";
+  v.evidence = "hook";
+  v.wait = null;
+  if (t.agentState === "idle" && typeof armDshLateSettle === "function") {
+    armDshLateSettle(t);
+  }
+}
+
 /* 这条 PostToolUse/PostToolUseFailure 能不能销掉当前的等待？
    判据照 Orca 的 claude-events.ts:112-166：
      · **工具调用 id 优先**（waitingToolUseId）—— 平行兄弟调用（比如同时跑了
@@ -904,8 +916,10 @@ function applyHook(m) {
     case "Stop":
       // 这轮结束了：hook 记下的“在等你”随之作废（理由见 leaveWaitingFromHook）。
       leaveWaitingFromHook(t, v, "hook Stop：这轮结束");
-      // dsh 没有登记表：Stop 是唯一可靠的“这一轮完了”信号。
+      // dsh 没有登记表：Stop 是“这一轮完了”的直接信号；收到它时把标题
+      // 兜底的迟到计时器一起撤掉，避免下一轮刚开始又被旧计时器熄掉。
       if (isDsh) {
+        if (typeof cancelDshLateSettle === "function") cancelDshLateSettle(t);
         v.st = "idle";
         v.state = "done";
         v.evidence = "hook";
@@ -961,10 +975,7 @@ function applyHook(m) {
       if (ask || (!isDsh && (!m.tool || m.tool === "AskUserQuestion"))) {
         enterWaitingFromHook(t, v, "ask", m.tool || "", "PreToolUse", m.tid, m.agent);
       } else if (isDsh) {
-        v.st = "busy";
-        v.state = "working";
-        v.evidence = "hook";
-        v.wait = null;
+        markDshBusy(t, v, "PreToolUse");
       }
       break;
     }
@@ -978,10 +989,7 @@ function applyHook(m) {
       // 就是它唯一的忙信号。
       leaveWaitingFromHook(t, v, "hook UserPromptSubmit：用户发了新提示");
       if (isDsh) {
-        v.st = "busy";
-        v.state = "working";
-        v.evidence = "hook";
-        v.wait = null;
+        markDshBusy(t, v, "UserPromptSubmit");
       }
       break;
     case "PostToolUse":
@@ -997,10 +1005,14 @@ function applyHook(m) {
          —— 那会把一个真的还挂着的问题销掉（Orca 的
          isParallelSiblingCompletionDuringQuestion 就是挡这件事）。 */
       if (!m.agent && (!wasWaiting || closed)) {
-        v.st = "busy";
-        v.state = "working";
-        v.evidence = "hook";
-        v.wait = null;
+        if (isDsh) {
+          markDshBusy(t, v, m.event);
+        } else {
+          v.st = "busy";
+          v.state = "working";
+          v.evidence = "hook";
+          v.wait = null;
+        }
       }
       break;
     }
@@ -1023,6 +1035,7 @@ function applyHook(m) {
       if (isDsh) {
         // dsh 没有登记表：新建/续接出来的会话先落到 idle，别让上一格的
         // busy 一直挂着。SessionStart 不是 turn-end，但这里没有别的收尾腿。
+        if (typeof cancelDshLateSettle === "function") cancelDshLateSettle(t);
         v.st = "idle";
         v.state = "done";
         v.evidence = "hook";
