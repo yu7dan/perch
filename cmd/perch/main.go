@@ -166,6 +166,14 @@ func main() {
 	// Phase 2：Perch 自己的 per-agent 模型注入。只在隔离引擎模式下有内容；
 	// 旧路径（桌面 magpie）保持不注入、行为不变。
 	a.tabs.SetWireProfile(a.agentWireProfile)
+	// 隔离引擎的 USERPROFILE 是沙盒；agy 直接由 Perch 启动，也要用同一份
+	// 用户目录，才能和引擎读到同一份 settings/信任列表。
+	a.tabs.SetEngineHomeEnv(func() map[string]string {
+		if !a.gw.Isolated() {
+			return nil
+		}
+		return gateway.EngineHomeEnv()
+	})
 	// 内嵌网关页的语言跟 Perch 的设置走：先记下偏好，控制面连上时再写进
 	// magpie（它自己的 settings.lang），见 internal/gateway/language.go。
 	a.gw.SetLanguage(a.prefs.Snapshot().Language)

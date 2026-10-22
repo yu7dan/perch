@@ -53,6 +53,11 @@ type Manager struct {
 	// 只有隔离网关模式下列表函数才返回内容；旧路径保持 nil。
 	profileMu   sync.RWMutex
 	wireProfile func(id string) (map[string]string, []string, bool)
+
+	// homeMu：隔离引擎的沙盒用户目录。agy 这类由 Perch 直接启动、
+	// 但配置由引擎管理的 agent 要和引擎读同一份配置。
+	homeMu  sync.RWMutex
+	homeEnv func() map[string]string
 }
 
 // New 构造空的会话表。Defs 在 agent.SetHost 之后由 SetDefs 填 —— 顺序见
@@ -94,6 +99,23 @@ func (m *Manager) SetWireProfile(fn func(id string) (map[string]string, []string
 	m.profileMu.Lock()
 	m.wireProfile = fn
 	m.profileMu.Unlock()
+}
+
+// SetEngineHomeEnv 由组合根在隔离模式确定后注入。
+func (m *Manager) SetEngineHomeEnv(fn func() map[string]string) {
+	m.homeMu.Lock()
+	m.homeEnv = fn
+	m.homeMu.Unlock()
+}
+
+func (m *Manager) EngineHomeEnv() map[string]string {
+	m.homeMu.RLock()
+	fn := m.homeEnv
+	m.homeMu.RUnlock()
+	if fn == nil {
+		return nil
+	}
+	return fn()
 }
 
 func (m *Manager) profileFor(id string) (map[string]string, []string, bool) {

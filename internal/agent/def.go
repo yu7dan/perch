@@ -67,12 +67,26 @@ func PiDef() Def { return piDef() }
 // launch 命令；组合根把它解析成 env+args 交给这里，每次开格现取。
 //
 // 没接线时 WireLaunch 返回 ok=false，退回 GenericDef 的普通启动。
+//
+// 隔离引擎模式下还要把 agy 的用户目录换到引擎沙盒：引擎已经 seed 了一份
+// agy settings，且之后 magpie 的通用接入只写沙盒；如果 agy 仍读桌面配置，
+// 两边就会看到不同的模型/信任列表，还会把会话写回桌面。
 func AgyDef() Def {
 	d := GenericDef("agy")
 	d.Prepare = func(_ string, _ int, _ string, _ []string) (map[string]string, []string, func(context.Context), error) {
 		env, args, ok := host.WireLaunch("agy")
 		if !ok {
 			return nil, nil, nil, nil
+		}
+		if homeEnv := host.EngineHomeEnv(); len(homeEnv) > 0 {
+			if env == nil {
+				env = map[string]string{}
+			}
+			for k, v := range homeEnv {
+				if _, exists := env[k]; !exists {
+					env[k] = v
+				}
+			}
 		}
 		return env, args, nil, nil
 	}

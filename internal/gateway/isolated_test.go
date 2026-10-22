@@ -65,9 +65,8 @@ func TestEngineEnvSandboxesAgentHomes(t *testing.T) {
 		"XDG_CACHE_HOME":     filepath.Join(home, ".cache"),
 		"XDG_DATA_HOME":      filepath.Join(home, ".local", "share"),
 	}
-	// USERPROFILE/HOME stay real: the WorkBuddy plugin reads the desktop app's
-	// sign-in from %USERPROFILE%\AppData\Local\CodeBuddyExtension. Agent config
-	// homes are redirected by the explicit variables checked above.
+	// USERPROFILE/HOME are sandboxed too, so magpie's Agent.Path can't reach
+	// the desktop; WorkBuddy's sign-in is seeded into the sandbox instead.
 	realHome := t.TempDir()
 	t.Setenv("USERPROFILE", realHome)
 	t.Setenv("HOME", realHome)
@@ -97,9 +96,9 @@ func TestEngineEnvSandboxesAgentHomes(t *testing.T) {
 		}
 		got[k] = v
 	}
-	if got["USERPROFILE"] != realHome || got["HOME"] != realHome {
-		t.Errorf("USERPROFILE/HOME must stay real for WorkBuddy desktop sign-in: %q/%q",
-			got["USERPROFILE"], got["HOME"])
+	if got["USERPROFILE"] != home || got["HOME"] != home {
+		t.Errorf("USERPROFILE/HOME must be sandboxed: %q/%q want %q",
+			got["USERPROFILE"], got["HOME"], home)
 	}
 	if got["MAGPIE_BUN"] != bunExe {
 		t.Errorf("MAGPIE_BUN=%q want desktop Bun %q", got["MAGPIE_BUN"], bunExe)
@@ -107,6 +106,27 @@ func TestEngineEnvSandboxesAgentHomes(t *testing.T) {
 	for k, want := range checks {
 		if got[k] != want {
 			t.Errorf("%s=%q want %q", k, got[k], want)
+		}
+	}
+}
+
+func TestEngineHomeEnv(t *testing.T) {
+	local := t.TempDir()
+	t.Setenv("LOCALAPPDATA", local)
+	home := filepath.Join(local, "Perch", "gateway", "home")
+	got := EngineHomeEnv()
+	want := map[string]string{
+		"USERPROFILE":     home,
+		"HOME":            home,
+		"APPDATA":         filepath.Join(home, "appdata"),
+		"LOCALAPPDATA":    filepath.Join(home, "localappdata"),
+		"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
+		"XDG_CACHE_HOME":  filepath.Join(home, ".cache"),
+		"XDG_DATA_HOME":   filepath.Join(home, ".local", "share"),
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s=%q want %q", k, got[k], v)
 		}
 	}
 }

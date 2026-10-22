@@ -21,6 +21,10 @@ type Host interface {
 	// 只有把网关地址/密钥放在环境变量里的 agent（目前是 agy）才会用到；
 	// 没接线、没读到、或形状不认识时返回 ok=false，启动仍走通用路径。
 	WireLaunch(id string) (env map[string]string, args []string, ok bool)
+	// EngineHomeEnv 返回隔离引擎的沙盒用户目录（USERPROFILE/HOME/XDG_*）。
+	// 非隔离模式返回 nil；由 Perch 直接起、但配置由引擎管理的 agent 用它
+	// 与引擎读同一份配置。
+	EngineHomeEnv() map[string]string
 }
 
 var host Host = defaultHost{}
@@ -45,6 +49,7 @@ func (defaultHost) Push(any)                             {}
 func (defaultHost) WireLaunch(string) (map[string]string, []string, bool) {
 	return nil, nil, false
 }
+func (defaultHost) EngineHomeEnv() map[string]string { return nil }
 
 func (defaultHost) ResolveExe(bin string) (string, []string) {
 	bin = strings.TrimSpace(bin)

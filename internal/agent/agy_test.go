@@ -3,9 +3,10 @@ package agent
 import "testing"
 
 type agyTestHost struct {
-	env  map[string]string
-	args []string
-	ok   bool
+	env     map[string]string
+	args    []string
+	ok      bool
+	homeEnv map[string]string
 }
 
 func (h agyTestHost) BindSession(int, string, string, string) bool { return false }
@@ -23,6 +24,7 @@ func (h agyTestHost) WireLaunch(id string) (map[string]string, []string, bool) {
 	}
 	return h.env, h.args, h.ok
 }
+func (h agyTestHost) EngineHomeEnv() map[string]string { return h.homeEnv }
 
 func TestAgyDefInjectsWireLaunch(t *testing.T) {
 	SetHost(agyTestHost{
@@ -42,6 +44,27 @@ func TestAgyDefInjectsWireLaunch(t *testing.T) {
 	}
 	if len(args) != 2 || args[0] != "--model" || args[1] != "magpie/m" {
 		t.Fatalf("args = %#v", args)
+	}
+}
+
+func TestAgyDefUsesEngineHomeEnv(t *testing.T) {
+	SetHost(agyTestHost{
+		env:     map[string]string{"GEMINI_API_KEY": "k"},
+		ok:      true,
+		homeEnv: map[string]string{"USERPROFILE": `C:\sandbox`, "HOME": `C:\sandbox`},
+	})
+	defer SetHost(defaultHost{})
+
+	d := AgyDef()
+	env, _, _, err := d.Prepare("tag", 1, `C:\work`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["USERPROFILE"] != `C:\sandbox` || env["HOME"] != `C:\sandbox` {
+		t.Fatalf("engine home env not applied: %#v", env)
+	}
+	if env["GEMINI_API_KEY"] != "k" {
+		t.Fatalf("wire env lost: %#v", env)
 	}
 }
 

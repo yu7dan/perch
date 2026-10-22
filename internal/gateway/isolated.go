@@ -9,13 +9,10 @@ package gateway
 // 这里的目标是**隔离**：
 //   - 用 Perch 自己安装的 magpie CLI（%LOCALAPPDATA%\Perch\magpie\magpie.exe）
 //     的 portable 模式：配置、供应商、用量都落在 exe 旁边的 data\ 里；
-//   - 引擎进程把 agent 的配置目录（APPDATA/LOCALAPPDATA/XDG_*/
-//     CLAUDE_CONFIG_DIR/CODEX_HOME/DSH_HOME）全部指向 Perch 自己的沙盒，
-//     这样 magpie 的 agent 自动同步即使写文件，也只写进沙盒；
-//   - USERPROFILE/HOME **不换**：WorkBuddy 插件要从
-//     %USERPROFILE%\AppData\Local\CodeBuddyExtension 读桌面端自己的登录态；
-//     换掉它，插件会报“WorkBuddy desktop isn't signed in”，反代就不可用。
-//     这只读桌面登录态，不写；Claude/Codex 等会被换配置目录的 agent 仍隔离。
+//   - 引擎进程的 USERPROFILE/HOME 也指向 Perch 自己的沙盒；magpie 的
+//     Agent.Path（~/.gemini、~/.cursor、~/.pi 等）因此全部落在沙盒里。
+//   - 沙盒启动前从桌面只读 seed 需要的 agent 配置：agy 的 settings、
+//     WorkBuddy 桌面登录态等；之后 magpie 的通用 agent 接入只写沙盒。
 //   - 网关端口固定为 Perch 自己的端口（默认 64730 起找空闲），永远不是 3425。
 //
 // 桌面 magpie、桌面 Claude/Codex、当前正在用的网关都不受影响。agent 的
@@ -50,6 +47,25 @@ const (
 // （wire.go），watcher 的 HTTP 腿直接读它；SetIsolated 必须在 StartWatcher
 // 之前调用。
 var isolatedGatewayPort int
+
+// EngineHomeEnv 是引擎沙盒对应的“用户目录”环境。magpie 的 Agent.Path 和
+// 大多数 CLI 都按 USERPROFILE/HOME 展开，所以由 Perch 直接启动的 agent
+// （agy 等）必须带这组变量，才能和引擎读到同一份沙盒配置。
+func EngineHomeEnv() map[string]string {
+	home := PerchEngineHomeDir()
+	if home == "" {
+		return nil
+	}
+	return map[string]string{
+		"USERPROFILE":     home,
+		"HOME":            home,
+		"APPDATA":         filepath.Join(home, "appdata"),
+		"LOCALAPPDATA":    filepath.Join(home, "localappdata"),
+		"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
+		"XDG_CACHE_HOME":  filepath.Join(home, ".cache"),
+		"XDG_DATA_HOME":   filepath.Join(home, ".local", "share"),
+	}
+}
 
 func localAppData() string {
 	if v := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); v != "" {
@@ -188,10 +204,9 @@ func desktopBunPath(home string) string {
 	return exe
 }
 
-// engineEnv 构造引擎子进程的环境：先继承，再把 agent 的配置目录换到沙盒。
-// 不设置 PATH，agent 二进制仍然能被探测到；但它们写配置时只会写沙盒。
-// USERPROFILE/HOME 保持真实值，只为了让 WorkBuddy 插件读到桌面端登录态；
-// 它的读取是只读的，Claude/Codex 的目录已由下面的显式变量隔开。
+// engineEnv 构造引擎子进程的环境：先继承，再把整个用户目录和 agent 的
+// 配置目录换到沙盒。不设置 PATH，agent 二进制仍然能被探测到；但它们读写
+// 配置时只会碰沙盒。桌面端需要的登录态/配置由 seedEngineAgentConfigs 只读带入。
 func engineEnv(key string) ([]string, error) {
 	home := PerchEngineHomeDir()
 	if home == "" {
@@ -207,6 +222,9 @@ func engineEnv(key string) ([]string, error) {
 		filepath.Join(home, ".claude"),
 		filepath.Join(home, ".codex"),
 		filepath.Join(home, ".dsh"),
+		filepath.Join(home, ".gemini"),
+		filepath.Join(home, ".pi"),
+		filepath.Join(home, ".cursor"),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0700); err != nil {
@@ -214,14 +232,18 @@ func engineEnv(key string) ([]string, error) {
 				map[string]string{"err": err.Error()})
 		}
 	}
+	seedEngineAgentConfigs(home)
 	m := make(map[string]string, len(os.Environ())+12)
 	for _, kv := range os.Environ() {
 		if k, v, ok := strings.Cut(kv, "="); ok {
 			m[k] = v
 		}
 	}
-	// 不覆盖 USERPROFILE/HOME（见上面的 WorkBuddy 说明）。只把 agent 自己
-	// 的配置目录和 Windows 的 AppData/XDG 目录搬到沙盒。
+	// USERPROFILE/HOME 也进沙盒：magpie 的 Agent.Path 全部按它展开，
+	// 这样通用 agent 接入不会碰桌面配置。WorkBuddy 登录态和 agy 等
+	// 需要的配置在 seedEngineAgentConfigs 里只读搬进来。
+	m["USERPROFILE"] = home
+	m["HOME"] = home
 	m["APPDATA"] = appdata
 	m["LOCALAPPDATA"] = localappdata
 	m["XDG_CONFIG_HOME"] = filepath.Join(home, ".config")
@@ -251,6 +273,66 @@ func engineEnv(key string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// seedEngineAgentConfigs 把桌面端只读的 agent 配置搬进 Perch home。
+// magpie 的 Agent.Path 全部按 USERPROFILE 展开，所以 seed 之后它的通用
+// agent 接入只会写 Perch home。只复制/更新需要的这些，不动真实文件。
+func seedEngineAgentConfigs(home string) {
+	realHome, err := os.UserHomeDir()
+	if err != nil || realHome == "" || samePath(realHome, home) {
+		return
+	}
+	// WorkBuddy 插件从桌面 app 的登录文件读登录态。
+	authSrc := filepath.Join(realHome, "AppData", "Local", "CodeBuddyExtension", "Data", "Public", "auth")
+	authDst := filepath.Join(home, "AppData", "Local", "CodeBuddyExtension", "Data", "Public", "auth")
+	for _, name := range []string{"workbuddy-desktop.info", "workbuddy-desktop-ai.info"} {
+		if copyFileIfNewer(filepath.Join(authSrc, name), filepath.Join(authDst, name)) {
+			log.Printf("[gw] 已从桌面 seed WorkBuddy 登录态 %s", name)
+		}
+	}
+	// Antigravity CLI 的 settings（custom models / trusted workspaces）。
+	if err := copyDirIfMissing(
+		filepath.Join(realHome, ".gemini", "antigravity-cli"),
+		filepath.Join(home, ".gemini", "antigravity-cli"),
+	); err == nil {
+		log.Printf("[gw] 已 seed Antigravity CLI 配置")
+	}
+	// Gemini CLI 的 settings 和 Pi 的 agent 目录也先带上；各自的网关设置
+	// 仍然由 magpie 写进 Perch home。
+	_ = copyFileIfMissing(
+		filepath.Join(realHome, ".gemini", "settings.json"),
+		filepath.Join(home, ".gemini", "settings.json"),
+	)
+	_ = copyDirIfMissing(
+		filepath.Join(realHome, ".pi", "agent"),
+		filepath.Join(home, ".pi", "agent"),
+	)
+}
+
+func samePath(a, b string) bool {
+	aa, errA := filepath.Abs(a)
+	bb, errB := filepath.Abs(b)
+	return errA == nil && errB == nil && strings.EqualFold(aa, bb)
+}
+
+// copyFileIfNewer 在目标缺失或比源旧时复制；返回是否真的写了目标。
+func copyFileIfNewer(src, dst string) bool {
+	si, err := os.Stat(src)
+	if err != nil || si.IsDir() {
+		return false
+	}
+	if di, err := os.Stat(dst); err == nil && !di.IsDir() && !si.ModTime().After(di.ModTime()) {
+		return false
+	}
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return false
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
+		return false
+	}
+	return os.WriteFile(dst, b, 0600) == nil
 }
 
 // engineStartArgs 是隔离引擎的启动参数；单独列出来给测试。
