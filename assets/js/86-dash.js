@@ -963,8 +963,7 @@ function perchProfilesHTML() {
 }
 
 function perchLeadHTML() {
-  const [pre, post] = t("dash.agents.perchLead").split("{perch}");
-  return `<div class="agp-lead">${esc(pre)}<b>Perch</b>${esc(post || "")}</div>`;
+  return `<div class="agp-lead">${esc(t("dash.agents.perchLead"))}</div>`;
 }
 
 function renderPerchAgentList(host, list, sub) {

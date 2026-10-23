@@ -245,7 +245,9 @@ try{document.documentElement.dataset.theme="dark";document.title="Perch"}catch(e
   function walk(n){
     if(n.nodeType===3){
       var p=n.parentElement;
-      if(p && skip[p.tagName]) return;
+      // The routing stage's hub is magpie's own mascot and label; leave it
+      // saying "magpie" as visible credit for the engine Perch is using.
+      if(p && (skip[p.tagName] || p.closest(".rt-hub"))) return;
       var v=fix(n.nodeValue||"");
       if(v!==n.nodeValue) n.nodeValue=v;
       return;
