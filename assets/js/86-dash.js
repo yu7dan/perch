@@ -1001,7 +1001,7 @@ function perchEngineRowHTML(a) {
     ` title="${esc(t("dash.agents.gwModelHint"))}">` +
     `${chipIcon}<span class="v">${esc(chipLabel)}</span><span class="chev" aria-hidden="true">▾</span></button>`;
   const link = `<button type="button" class="agp-link" data-gwdetail="${id}"` +
-    ` aria-expanded="${open}">${esc(t("dash.agents.gwFieldsLink", { n: fields.length }))}` +
+    ` aria-expanded="${open}">${esc(t("dash.agents.settings"))}` +
     `<span class="chev" aria-hidden="true">${open ? "⌄" : "›"}</span></button>`;
   const sw = `<button type="button" class="agp-switch${wired ? " on" : ""}"` +
     ` data-gwswitch="${id}" role="switch" aria-checked="${wired}"` +
@@ -1072,7 +1072,7 @@ function perchRowHTML(a, gid) {
   const live = typeof liveAgentTab === "function" ? liveAgentTab(a.id) : null;
   const detail = gid === "missing" ? (a.vendor || "") : (a.path || a.vendor || "");
   const calls = (a.calls | 0) > 0 ? t("dash.agents.calls", { n: dashNum(a.calls) }) : "";
-  const open = AGENT_DETAIL_ID === a.id && gid === "set";
+  const open = AGENT_DETAIL_ID === a.id && (gid === "set" || gid === "unset");
   const inst = INSTALLS[a.id];
   const busy = inst && inst.state === "running";
   const busySpan = busy
@@ -1113,22 +1113,16 @@ function perchRowHTML(a, gid) {
   const modelIcon = wired && model && model.icon ? iconHTML(model.icon, "agp-mic") : "";
   const modelLabel = wired ? perchModelLabel(p) : t("dash.agents.perchPickModel");
   const modelTitle = wired ? t("dash.agents.perchModelHint") : t("dash.agents.perchPickHint");
-  const linkLabel = a.id === "claude"
-    ? t("dash.agents.perchTiersLink")
-    : t("dash.agents.perchModelsLink", { n: perchVisibleModels(a.id).length });
-  const link = wired
-    ? `<button type="button" class="agp-link" data-perchdetail="${id}" aria-expanded="${open}">` +
-      `${esc(linkLabel)}<span class="chev" aria-hidden="true">${open ? "⌄" : "›"}</span></button>`
-    : `<span class="agp-link-slot"></span>`;
+  const linkLabel = t("dash.agents.settings");
+  const link = `<button type="button" class="agp-link" data-perchdetail="${id}" aria-expanded="${open}">` +
+    `${esc(linkLabel)}<span class="chev" aria-hidden="true">${open ? "⌄" : "›"}</span></button>`;
   const sw = `<button type="button" class="agp-switch${wired ? " on" : ""}"` +
     ` data-perchtoggle="${id}" role="switch" aria-checked="${wired}"` +
     ` title="${esc(wired ? t("dash.agents.perchSwitchOffHint") : t("dash.agents.perchSwitchOnHint"))}">` +
     `<i></i></button>`;
-  const openBtn = wired
-    ? `<button type="button" class="agp-open" data-launch="${id}"` +
-      ` title="${esc(t("dash.agents.openTitle", { name }))}"` +
-      ` aria-label="${esc(t("dash.agents.openTitle", { name }))}">▶</button>`
-    : "";
+  const openBtn = `<button type="button" class="agp-open" data-launch="${id}"` +
+    ` title="${esc(t("dash.agents.openTitle", { name }))}"` +
+    ` aria-label="${esc(t("dash.agents.openTitle", { name }))}">▶</button>`;
 
   let exp = "";
   if (open) {
