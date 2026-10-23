@@ -180,6 +180,12 @@ function instDone(m) {
   if (!instRunning()) stopInstTicker();
   instPaint();
   renderDashAgents();
+  // 新装的 agent 可能还没进 /api/state 的旧快照：装完立刻重读一次，
+  // 下一次总览的 TTL 刷新是兜底。
+  if (m.ok && m.id !== "magpie" && typeof gwAgentsPrefetch === "function") {
+    if (typeof gwAgentsReset === "function") gwAgentsReset();
+    gwAgentsPrefetch(true);
+  }
   if (!m.ok && m.id === INSTALL_AT) {
     const log = $("inst-log");
     if (log) log.scrollTop = log.scrollHeight;

@@ -210,6 +210,7 @@ function applyGwLang(m) {
 
 function applyGw(g) {
   if (!g || typeof g !== "object") return;
+  const wasOn = gwOn();
   GW = g;
   GW_BUSY = "";
   if (!g.connected) {
@@ -218,6 +219,11 @@ function applyGw(g) {
   }
   // 接上了就把自动接入的尝试次数清零：以后进程真掉了，还有三次自动恢复的机会。
   gwAutoTries = 0;
+  // 刚接上控制面时立刻重读 agent 状态，别等下一次 TTL；也清掉后台预取失败计数。
+  if (!wasOn && NAV_HERE === "dash") {
+    if (typeof gwAgentsReset === "function") gwAgentsReset();
+    if (typeof gwAgentsPrefetch === "function") gwAgentsPrefetch(true);
+  }
   if (NAV_HERE === "dash" && dashTab === "gateway") renderGateway();
 }
 
@@ -244,10 +250,19 @@ function applyGwAgents(m) {
     return;
   }
   GW_AGENTS_NOTICE = m.notice || "";
-  if (Array.isArray(m.agents)) GW_AGENTS = m.agents;
-  // 任何一次动作（读/写/接入/断开/重应用）回来都结束了忙碌态。
-  AC_BUSY = "";
-  GW_AGENT_BUSY = "";
+  if (Array.isArray(m.agents)) {
+    GW_AGENTS = m.agents;
+    GW_AGENTS_AT = Date.now();
+  }
+  if (m.op === "state") {
+    // 后台预取不是用户动作：不能清掉正在进行的接入/写入忙碌态。
+    GW_AGENTS_REQ_AT = 0;
+    GW_AGENTS_FAILS = m.err ? GW_AGENTS_FAILS + 1 : 0;
+  } else {
+    // 用户动作（读/写/接入/断开/重应用）回来，忙碌态结束。
+    AC_BUSY = "";
+    GW_AGENT_BUSY = "";
+  }
   if (m.err) {
     // 存结构而不是渲染好的句子：切语言时 89-agent-cfg 会重画。
     GW_AGENTS_ERR = errMsgOf(m);
@@ -256,8 +271,12 @@ function applyGwAgents(m) {
     GW_AGENTS_ERR = null;
     AC_ERR = null;
   }
-  renderDashAgents();
-  renderAgentDrawer();
+  // 后台 state 到达时如果用户正开着选择器/正在写，先存数据不重画；
+  // 下一次动作或总览重绘会把新 state 带出来。
+  if (m.op !== "state" || !gwAgentsBusyHere()) {
+    renderDashAgents();
+    renderAgentDrawer();
+  }
 }
 
 /* 漂移轮询的落点（internal/gateway/agents.go → {type:"gw.agents.drift"}）。
@@ -277,8 +296,10 @@ function applyGwAgentsDrift(m) {
     }
   }
   if (!changed) return;
+  // 选择器/写入/方案命名期间只更新数据，不重画：重画会把用户正在挑的东西关掉。
+  if (gwAgentsBusyHere()) return;
   renderDashAgents();
-  if (!AC_PICK && !AC_BUSY) renderAgentDrawer();
+  renderAgentDrawer();
 }
 
 /* magpie 快照到达（shell 首帧 + 每 2.5s 的推送都走这里）。
@@ -294,7 +315,7 @@ function applyMagpie(s) {
   // 指纹会让行内的模型选择器/展开状态每 2.5 秒被冲掉一次。
   const catSig = JSON.stringify((s.catalog || []).map((a) => [
     a.id, !!a.installed, a.icon, a.name, a.path, !!a.install, a.url,
-    !!(a.caps && a.caps.launch),
+    !!(a.caps && a.caps.launch), !!(a.caps && a.caps.inject),
   ]));
   const seriesChanged = sig !== MG_SIG;
   const catChanged = catSig !== MG_CAT_SIG;

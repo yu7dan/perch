@@ -374,6 +374,7 @@
            border:0;border-radius:7px;background:rgba(255,255,255,.06);color:var(--fg2);
            font-size:12.5px;text-align:left;cursor:pointer}
 .agp-field:hover{background:rgba(255,255,255,.09)}
+.agp-field:disabled{opacity:.55;cursor:default}
 .agp-field .v{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 .agp-field.empty .v{color:var(--faint);font-weight:400}
 .agp-field .chev{margin-left:auto;color:var(--faint);font-size:10px}
@@ -383,6 +384,9 @@
           opacity:0;pointer-events:none;transition:opacity .12s,background .12s;cursor:pointer}
 .agp-row:hover .agp-open,.agp-row:focus-within .agp-open{opacity:1;pointer-events:auto}
 .agp-open:hover{background:rgba(255,255,255,.09);color:var(--fg)}
+.agp-open.off,.agp-row:hover .agp-open.off,.agp-row:focus-within .agp-open.off{
+  opacity:1;pointer-events:auto;background:transparent;color:var(--faint);cursor:default}
+.agp-field-slot{grid-column:4;min-width:0}
 .agp-switch{position:relative;justify-self:end;width:32px;height:19px;padding:0;
             border:0;border-radius:10px;background:var(--line);cursor:pointer;
             transition:background .2s}
@@ -392,30 +396,28 @@
 .agp-switch.on i{transform:translateX(13px);background:var(--bg)}
 .agp-exp{grid-column:1/-1;margin:2px 0;border-top:1px solid var(--line-soft)}
 .agp-exp-body{padding:10px 0 6px}
-.agp-kv{display:flex;gap:12px;padding:4px 0;font-size:11.5px;line-height:1.55}
-.agp-k{flex:none;width:72px;color:var(--faint)}
+/* One label column for every expanded row: profile and engine fields start on
+   the same vertical line. The value column may hold a chip, a chip row, or prose. */
+.agp-kv{display:grid;grid-template-columns:72px minmax(0,1fr);column-gap:12px;
+        align-items:start;padding:4px 0;font-size:11.5px;line-height:1.55}
+.agp-k{width:auto;padding-top:7px;color:var(--faint)}
 .agp-v{min-width:0;color:var(--fg2)}
 .agp-v code{font:10.5px/1.6 var(--mono);color:var(--muted)}
-.gw-fields{display:flex;flex-direction:column;gap:6px;width:100%}
-.gw-field{display:flex;align-items:center;gap:10px;min-height:28px}
-.gw-k{flex:none;width:110px;color:var(--faint);font-size:11px}
-.gw-select{flex:1;min-width:0;height:28px;padding:0 6px;
-           border:1px solid var(--line);border-radius:6px;background:var(--card);
-           color:var(--fg);font:11px/1.5 var(--ui);cursor:pointer}
-.gw-select:hover:not(:disabled){border-color:#4a4a52}
-.gw-select:focus{outline:none;border-color:var(--accent)}
-.gw-select:disabled{opacity:.55;cursor:default}
+/* The row's model chip is a grid child; inside the open panel the same chip is
+   a normal inline control, so reset the row grid placement there. */
+.agp-exp .agp-field{display:inline-flex;vertical-align:middle;grid-column:auto;flex:none;width:min(100%,320px)}
+.agp-exp .agp-tier-field{width:200px}
+.agp-exp .agp-field .v{font-weight:400}
 .agp-exp-acts{display:flex;gap:4px;margin-top:4px}
 .agp-dim{color:var(--faint)}
 .agp-efforts{display:flex;flex-wrap:wrap;gap:4px}
 .agp-effort{height:22px;padding:0 8px;border:1px solid var(--line);border-radius:5px;
             background:transparent;color:var(--muted);font-size:10.5px;cursor:pointer}
 .agp-effort:hover{color:var(--fg);border-color:var(--fg2)}
+.agp-effort:disabled{opacity:.55;cursor:default}
 .agp-effort.on{color:var(--green);border-color:rgba(134,239,172,.28);
                background:rgba(134,239,172,.07)}
-.agp-tiers{display:flex;flex-direction:column;gap:6px;width:100%}
-.agp-tier{display:flex;align-items:center;gap:8px;min-height:28px}
-.agp-tier-name{flex:none;width:58px;color:var(--muted);font-size:11px}
+.agp-tier{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-height:30px}
 .agp-tier-field{flex:none;width:200px}
 .agp-tier .agp-efforts{gap:3px}
 .agp-tier .agp-effort{height:20px;padding:0 7px}
@@ -435,6 +437,7 @@
 .agp-quiet:hover{background:rgba(255,255,255,.05);color:var(--fg)}
 .agp-quiet.accent{color:var(--accent)}
 .agp-quiet.red{color:var(--red)}
+.agp-quiet.off,.agp-quiet.off:hover{background:transparent;color:var(--faint);cursor:default}
 .agp-more{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;height:42px;
           border:0;border-top:1px solid var(--line-soft);background:transparent;
           color:var(--muted);font-size:12px;cursor:pointer}
@@ -490,6 +493,7 @@
   .agp-row .agp-open{grid-column:3;grid-row:1;justify-self:center}
   .agp-row .agp-switch{grid-column:4;grid-row:1}
   .agp-row .agp-field{grid-column:1/5;grid-row:2}
+  .agp-row .agp-field-slot{grid-column:1/5;grid-row:2}
   .agp-row .agp-link{grid-column:1;grid-row:3;justify-self:start}
   .agp-exp{grid-column:1/-1}
 }

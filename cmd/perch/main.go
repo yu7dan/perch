@@ -497,7 +497,7 @@ func (a *perchApp) defaultCWD() string {
 // 引擎里的 group 目标换了，运行中的会话下一轮就生效。绝不写 agent 的
 // 全局配置；拿不到配置就返回 false，让这一格按 agent 自己的方式启动。
 func (a *perchApp) agentWireProfile(id string) (map[string]string, []string, bool) {
-	if a.profiles == nil || !a.gw.Isolated() {
+	if a.profiles == nil || !a.gw.Isolated() || !agent.Injects(id) {
 		return nil, nil, false
 	}
 	p, ok := a.profiles.Get(id)

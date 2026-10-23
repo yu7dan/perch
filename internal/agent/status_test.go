@@ -78,6 +78,25 @@ func TestCapsForAgent(t *testing.T) {
 	}
 }
 
+// TestCapsInject 守住"哪些 agent 走 Perch 的每格注入"这唯一一份能力表：
+// frontend 不再写 claude/codex/pi/opencode 的 id 列表。
+func TestCapsInject(t *testing.T) {
+	for _, id := range []string{"claude", "codex", "pi", "opencode"} {
+		if !Injects(id) || !CapsFor(id, true).Inject {
+			t.Fatalf("%s 应当支持 Perch 每格注入", id)
+		}
+	}
+	for _, id := range []string{"dsh", "qoder", "cursor", "copilot", "agy", "gemini"} {
+		if Injects(id) || CapsFor(id, true).Inject {
+			t.Fatalf("%s 不应被标成可注入", id)
+		}
+	}
+	// 注入是能力，launch 是本机事实：没装仍然可以注入，只是开不了格。
+	if c := CapsFor("claude", false); !c.Inject || c.Launch {
+		t.Fatalf("inject 与 launch 不应互相污染: %+v", c)
+	}
+}
+
 // TestPiObserverTail 走的是真实路径：observer.ts 往文件里追加，Go 侧 tail。
 // 这里不模拟事件结构体，只按扩展现行输出写行 —— 协议变了这条测试会先红。
 func TestPiObserverTail(t *testing.T) {

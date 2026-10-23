@@ -71,6 +71,7 @@ const (
 
 type Caps struct {
 	Launch    bool   `json:"launch"`    // Perch 能在终端里启动它
+	Inject    bool   `json:"inject"`    // Perch 能按格注入模型/别名 profile
 	Resume    bool   `json:"resume"`    // 能按会话续接
 	Status    bool   `json:"status"`    // 能给出忙/闲
 	Waiting   bool   `json:"waiting"`   // 能给出“卡在等你”（提问/批准）
@@ -81,18 +82,18 @@ type Caps struct {
 
 var agentAdapterCaps = map[string]Caps{
 	"claude": {
-		Launch: true, Resume: true, Status: true, Waiting: true, Actions: true,
+		Launch: true, Inject: true, Resume: true, Status: true, Waiting: true, Actions: true,
 		Mechanism: "hook",
 	},
 	"opencode": {
-		Launch: true, Status: true, Waiting: true,
+		Launch: true, Inject: true, Status: true, Waiting: true,
 		Mechanism: "http",
 	},
 	"pi": {
 		// 状态/等待来自 pi -e 挂进去的观察扩展（internal/agent/pi/observer.ts）。
 		// 等待是**条件性**的：Pi 没有内建审批，只有扩展的 ctx.ui 提示才会
 		// 出现 waiting；没有扩展提问时不会等 —— 这是能力边界，不假装。
-		Launch: true, Resume: true, Status: true, Waiting: true,
+		Launch: true, Inject: true, Resume: true, Status: true, Waiting: true,
 		Mechanism: "extension",
 	},
 	"codex": {
@@ -100,7 +101,7 @@ var agentAdapterCaps = map[string]Caps{
 		// thread/status/changed 的 activeFlags（waitingOnApproval /
 		// waitingOnUserInput）。批准本身仍然在 TUI 里回答（Approvals=false）：
 		// 实测 0.163.0 的批准请求只发给 TUI，不发给旁路观察者。
-		Launch: true, Resume: true, Status: true, Waiting: true,
+		Launch: true, Inject: true, Resume: true, Status: true, Waiting: true,
 		Mechanism: "app-server",
 	},
 	"dsh": {
@@ -129,6 +130,13 @@ func CapsFor(id string, canLaunch bool) Caps {
 		return c
 	}
 	return Caps{Launch: canLaunch, Mechanism: "terminal"}
+}
+
+// Injects 报告 agentWireProfile 是否能为这个 agent 注入 per-pane profile。
+// 这是唯一一份"可注入"能力表；CapsFor 和组合根都读它，别在别处再写 id 列表。
+func Injects(id string) bool {
+	c, ok := agentAdapterCaps[id]
+	return ok && c.Inject
 }
 
 // agentEvent 是适配器 -> Perch 的归一化事件。未来的外部适配器（JSONL/HTTP）
