@@ -9,8 +9,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/yu7dan/perch/internal/transcript"
 )
 
 // ---------------------------------------------------------------------------
@@ -146,6 +149,14 @@ type piEvent struct {
 	Name    string `json:"name"`
 	Reason  string `json:"reason"`
 	Aborted bool   `json:"aborted"`
+	At      int64  `json:"at"`
+
+	// v2：流水/改动（见 observer.ts 顶部）。ID 是工具调用 id 或消息块 id。
+	ID   string `json:"id"`
+	Tool string `json:"tool"`
+	Path string `json:"path"`
+	Op   string `json:"op"`
+	OK   *bool  `json:"ok"`
 }
 
 // observePi tail 一个格子的 JSONL。语义与 hooks 的轮询一致：
@@ -159,7 +170,7 @@ func observePi(ctx context.Context, tabID int, path string, every time.Duration,
 	// name 只是顺带记下：Pi 的 /name 改的是会话显示名，不是状态。
 	// 把它塞进**下一条** status 事件（emitAgentStatus 只认状态变化，
 	// 单发一条没有 status 的 agent 消息会把前端 v.st 清成 ""）。
-	st := &piPaneState{}
+	st := &piPaneState{flow: newPiFlow()}
 	for {
 		select {
 		case <-ctx.Done():
@@ -205,9 +216,128 @@ func observePi(ctx context.Context, tabID int, path string, every time.Duration,
 	}
 }
 
-// piPaneState 是一次观察里的格内上下文（目前只有显示名）。
+// piPaneState 是一次观察里的格内上下文：显示名 + 流水/改动。
 type piPaneState struct {
 	name string
+	flow *piFlow
+}
+
+// piFlow 是扩展直接推来的流水/改动。它和 transcript.Follower 是**两条互斥的
+// 腿**：Pi 的 session jsonl 在当前版本/Home 下实测没有落盘，所以 Pi 这条腿
+// 不跟文件，改用扩展已经看见的 message/tool 生命周期。
+type piFlow struct {
+	started  bool
+	acts     []transcript.ActItem
+	byID     map[string]int
+	files    map[string]*transcript.FileTouch
+	filesSig string
+	seq      int
+}
+
+func newPiFlow() *piFlow {
+	return &piFlow{byID: map[string]int{}, files: map[string]*transcript.FileTouch{}}
+}
+
+func (f *piFlow) reset(tabID int) {
+	f.started = false
+	f.acts = nil
+	f.byID = map[string]int{}
+	f.files = map[string]*transcript.FileTouch{}
+	f.filesSig = ""
+	host.Push(map[string]any{"type": "acts", "tab": tabID, "items": []transcript.ActItem{}, "replace": true})
+	host.Push(map[string]any{"type": "files", "tab": tabID, "files": []transcript.FileTouch{}})
+}
+
+func (f *piFlow) put(tabID int, it transcript.ActItem) {
+	if f == nil {
+		return
+	}
+	if it.ID == "" {
+		f.seq++
+		it.ID = fmt.Sprintf("pi:%d", f.seq)
+	}
+	if idx, ok := f.byID[it.ID]; ok {
+		// 原地更新：工具先由 tool_execution_start 出现，结果再由 act_update 补。
+		old := &f.acts[idx]
+		if it.Kind != "" {
+			old.Kind = it.Kind
+		}
+		if it.Tool != "" {
+			old.Tool = it.Tool
+		}
+		if it.Text != "" {
+			old.Text = it.Text
+		}
+		if it.Path != "" {
+			old.Path = it.Path
+		}
+		if it.OK != nil {
+			old.OK = it.OK
+		}
+		it = *old
+	} else {
+		if it.At == "" {
+			it.At = time.Now().Format(time.RFC3339)
+		}
+		f.acts = append(f.acts, it)
+		if len(f.acts) > 300 {
+			drop := len(f.acts) - 300
+			f.acts = append([]transcript.ActItem(nil), f.acts[drop:]...)
+			f.byID = map[string]int{}
+			for i, a := range f.acts {
+				f.byID[a.ID] = i
+			}
+		} else {
+			f.byID[it.ID] = len(f.acts) - 1
+		}
+	}
+	replace := !f.started
+	f.started = true
+	host.Push(map[string]any{"type": "acts", "tab": tabID, "items": []transcript.ActItem{it}, "replace": replace})
+}
+
+func (f *piFlow) file(tabID int, path, op string) {
+	if f == nil || strings.TrimSpace(path) == "" {
+		return
+	}
+	key := strings.ToLower(filepath.Clean(path))
+	t := f.files[key]
+	if t == nil {
+		t = &transcript.FileTouch{Path: path}
+		f.files[key] = t
+	}
+	if t.At == "" {
+		t.At = time.Now().Format(time.RFC3339)
+	}
+	found := false
+	for _, o := range t.Ops {
+		if o == op {
+			found = true
+			break
+		}
+	}
+	if !found && op != "" {
+		t.Ops = append(t.Ops, op)
+	}
+	f.pushFiles(tabID)
+}
+
+func (f *piFlow) pushFiles(tabID int) {
+	list := make([]transcript.FileTouch, 0, len(f.files))
+	keys := make([]string, 0, len(f.files))
+	for k := range f.files {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		list = append(list, *f.files[k])
+	}
+	sig := mustJSON(list)
+	if sig == f.filesSig {
+		return
+	}
+	f.filesSig = sig
+	host.Push(map[string]any{"type": "files", "tab": tabID, "files": list})
 }
 
 func handlePiLine(tabID int, line string, st *piPaneState, sink func(agentEvent)) {
@@ -228,8 +358,29 @@ func handlePiLine(tabID int, line string, st *piPaneState, sink func(agentEvent)
 
 	switch ev.Type {
 	case "session_start":
+		if st.flow != nil {
+			st.flow.reset(tabID)
+		}
 		log.Printf("[pi t%d] session_start reason=%s session=%s",
 			tabID, OrNone(ev.Reason), Short(ev.Session))
+		return
+	case "act":
+		at := ""
+		if ev.At > 0 {
+			at = time.UnixMilli(ev.At).Format(time.RFC3339)
+		}
+		st.flow.put(tabID, transcript.ActItem{
+			ID: ev.ID, Kind: ev.Kind, Tool: ev.Tool, Text: ev.Text,
+			Path: ev.Path, OK: ev.OK, At: at,
+		})
+		return
+	case "act_update":
+		st.flow.put(tabID, transcript.ActItem{
+			ID: ev.ID, Text: ev.Text, Path: ev.Path, OK: ev.OK,
+		})
+		return
+	case "file":
+		st.flow.file(tabID, ev.Path, ev.Op)
 		return
 	case "name":
 		// 名字不是状态：**不能**单独推一条没有 status 的 agent 消息 ——

@@ -54,20 +54,30 @@ func TestCapsForAgent(t *testing.T) {
 		t.Fatalf("没装的 claude 不能标 launch: %+v", c)
 	}
 	oc := CapsFor("opencode", true)
-	if !oc.Launch || !oc.Status || !oc.Waiting {
+	if !oc.Launch || !oc.Status || !oc.Waiting || !oc.Actions {
 		t.Fatalf("opencode 能力矩阵不对: %+v", oc)
 	}
 	if oc.Resume {
 		t.Fatalf("opencode 还没做续接，不能标成 resume: %+v", oc)
 	}
-	// 通用启动不等于有状态。copilot 有 Bin，能开一格；但没接状态。
+	// Copilot 1.0.103 的 --help 实测有 --resume/--continue；状态来自
+	// events.jsonl 的 turn 边界。能力表必须按现在的事实写。
 	copilot := CapsFor("copilot", true)
-	if !copilot.Launch || copilot.Status || copilot.Waiting {
-		t.Fatalf("通用 agent 只能 launch: %+v", copilot)
+	if !copilot.Launch || !copilot.Status || !copilot.Resume || !copilot.Actions {
+		t.Fatalf("copilot 能力矩阵不对: %+v", copilot)
 	}
-	// 没装时不能假装能开；qoder 也是通用启动路径。
+	// 没装时不能假装能开。
 	if qoder := CapsFor("qoder", false); qoder.Launch {
 		t.Fatalf("没装的 qoder 不能标 launch: %+v", qoder)
+	}
+	if qoder := CapsFor("qoder", true); !qoder.Resume || !qoder.Status || !qoder.Waiting {
+		t.Fatalf("qoder 应当按 hooks 接状态: %+v", qoder)
+	}
+	if cursor := CapsFor("cursor", true); !cursor.Resume || !cursor.Status || cursor.Waiting {
+		t.Fatalf("cursor 只承诺转录能给的: %+v", cursor)
+	}
+	if agy := CapsFor("agy", true); !agy.Resume || !agy.Status || !agy.Actions {
+		t.Fatalf("agy 能力矩阵不对: %+v", agy)
 	}
 	pi := CapsFor("pi", true)
 	if !pi.Launch || !pi.Resume || !pi.Status || !pi.Waiting {
@@ -280,7 +290,7 @@ func TestOpenCodeObserver(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	events := make(chan agentEvent, 16)
-	go observeOpenCode(ctx, 1, srv.URL, "test-pass", 10*time.Millisecond, func(ev agentEvent) {
+	go observeOpenCode(ctx, 1, "", srv.URL, "test-pass", 10*time.Millisecond, func(ev agentEvent) {
 		events <- ev
 	})
 

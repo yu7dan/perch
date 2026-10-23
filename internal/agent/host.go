@@ -28,6 +28,9 @@ type Host interface {
 	// EngineHomeEnvFor 只给“当前确实已接入引擎网关”的通用 agent 返回沙盒
 	// 环境；未接入/非隔离时返回 nil，让它继续读用户自己的配置。
 	EngineHomeEnvFor(id string) map[string]string
+	// HookSettings 造一份 Claude 形状的 hooks 配置（含本格的事件文件路径）。
+	// Qoder 用 --settings 接这份配置；它和 Claude 一样是**合并**，不碰用户文件。
+	HookSettings(tag string) string
 }
 
 var host Host = defaultHost{}
@@ -54,6 +57,7 @@ func (defaultHost) WireLaunch(string) (map[string]string, []string, bool) {
 }
 func (defaultHost) EngineHomeEnv() map[string]string          { return nil }
 func (defaultHost) EngineHomeEnvFor(string) map[string]string { return nil }
+func (defaultHost) HookSettings(string) string                { return "" }
 
 func (defaultHost) ResolveExe(bin string) (string, []string) {
 	bin = strings.TrimSpace(bin)

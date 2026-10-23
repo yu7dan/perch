@@ -368,7 +368,26 @@ func main() {
 		live := a.tabs.Live()
 		views := make([]transcript.View, 0, len(live))
 		for _, v := range live {
-			views = append(views, transcript.View{ID: v.ID, Transcript: v.Transcript, CWD: v.CWD})
+			path, format := v.Transcript, ""
+			// Claude 的路径由 hook 直接给（最权威）；其余 agent 由
+			// internal/agent 按会话 id / 起始时间找。OpenCode 不在这里：
+			// 它从 TUI 自己的 HTTP server 推流水（见 status.go 的 observeOpenCode）。
+			if v.Agent != "claude" && v.Agent != "opencode" {
+				f := agent.TranscriptFor(v.ID, v.Agent, v.CWD, v.SessionID, v.StartedAt)
+				if f.Path != "" {
+					path, format = f.Path, f.Format
+				} else if v.Agent != "qoder" {
+					// Qoder 有 hook 时路径在 v.Transcript；没有 hook 且还没
+					// 找到文件时，不能拿 claude 那张旧路径顶上。
+					path = ""
+				}
+			}
+			if path == "" {
+				continue
+			}
+			views = append(views, transcript.View{
+				ID: v.ID, Agent: v.Agent, Transcript: path, CWD: v.CWD, Format: format,
+			})
 		}
 		return views
 	}, a.push.Push)

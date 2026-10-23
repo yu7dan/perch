@@ -54,6 +54,24 @@ func agentExeHints(bin, home, local string) []string {
 			filepath.Join(local, "agy", "bin", "agy.exe"),
 			filepath.Join(local, "Programs", "agy", "agy.exe"),
 		}
+	case "qodercli", "qoder":
+		// Qoder 官方安装器把 dispatcher 放 ~/.qoder/entry/qoder.cmd，真实
+		// 二进制在 ~/.qoder/bin/qodercli/qodercli.exe。用户 PATH 里有 entry，
+		// 但从旧终端/GUI 启动的 Perch 可能还没继承到那条 PATH。
+		return []string{
+			// 真实 CLI 优先。entry\qoder.cmd 是 dispatcher：它还要再找一次
+			// qodercli/安装资源，在 Perch 这种短 PATH 的进程里会误报
+			// “Qoder CLI is not installed”。
+			filepath.Join(home, ".qoder", "bin", "qodercli", "qodercli.exe"),
+			filepath.Join(home, ".qoder", "entry", "qoder.cmd"),
+		}
+	case "cursor-agent":
+		if local == "" {
+			return nil
+		}
+		return []string{
+			filepath.Join(local, "cursor-agent", "cursor-agent.cmd"),
+		}
 	}
 	return nil
 }

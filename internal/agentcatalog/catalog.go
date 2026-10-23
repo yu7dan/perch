@@ -182,6 +182,11 @@ func Defs(stateDir string) map[string]agent.Def {
 	// agy 只有「启动」是深度适配：网关地址/密钥必须按 magpie 的 launch
 	// 命令在每次开格时注入（见 internal/agent/def.go 的 AgyDef）。
 	defs["agy"] = agent.AgyDef()
+	// 三个 launch 级 agent 的续接/状态：cursor 只跟转录，copilot 跟 events，
+	// qoder 走每格 --settings 注入的 Claude 形状 hooks。
+	defs["cursor"] = agent.CursorDef()
+	defs["copilot"] = agent.CopilotDef()
+	defs["qoder"] = agent.QoderDef()
 	// dsh 的终端界面是 dsh-tui profile，不是裸 dsh；启动/续接/状态身份都
 	// 在这一层（见 internal/agent/def.go 的 DshDef）。
 	defs["dsh"] = agent.DshDef()

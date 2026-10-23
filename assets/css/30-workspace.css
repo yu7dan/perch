@@ -542,7 +542,12 @@
 /* 终端的地面。**boxOk() 断言的是"宿主 = 它的父容器内缩 4px"** —— 原来那个
    父是 .pbody，现在下沉到这一层。这层必须真实存在且有确定尺寸，
    否则那条断言就会拿错基准（它当初就是用来挡"量到整个窗口"的假值的）。 */
-.cellbody{flex:1;position:relative;min-height:0}
+/* ⚠️ 2026-10-23：xterm 的 helper textarea 是绝对定位的，光标在旧的大尺寸
+   格子里时它会落到**隔壁格**的坐标上；只在 .cell 上 overflow:hidden 能裁掉
+   画面，却裁不掉那个透明 textarea 的命中区 —— 表现是“点右边格子，焦点和
+   输入却进了左边那格”（N=5/6 时实测）。clip-path 会一起裁掉命中测试，
+   .termhost 再兜一层，保证每一格的键盘焦点只可能来自自己这一格。 */
+.cellbody{flex:1;position:relative;min-height:0;overflow:hidden;clip-path:inset(0)}
 
 /* 格内横幅（冷恢复步 6）：把"这一格为什么不是上次那条会话"摆在**这一格**里。
    ⚠️ 它必须是一个**绝对定位的覆盖层**（父 .cellbody 已经是 relative），
@@ -600,7 +605,7 @@
    一起退役；这条 id 约定留着，因为"谁是当前格"在 DOM 里读得出来仍然有用。） */
 .termhost{box-sizing:border-box;position:relative;contain:paint;
           width:calc(100% - 4px);height:calc(100% - 4px);
-          margin:4px 0 0 4px}
+          margin:4px 0 0 4px;overflow:hidden;clip-path:inset(0)}
 .termhost .xterm{height:100%;width:100%}
 /* ⚠️ 2026-10-15 删掉了 .pfoot（面板尾）。它是用户说的「下面也是把它放在这个 UI
    框里面」的那一条，也是 Orca 里**根本不存在**的东西 —— Orca 的终端面板没有

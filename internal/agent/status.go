@@ -86,14 +86,14 @@ var agentAdapterCaps = map[string]Caps{
 		Mechanism: "hook",
 	},
 	"opencode": {
-		Launch: true, Inject: true, Status: true, Waiting: true,
+		Launch: true, Inject: true, Status: true, Waiting: true, Actions: true,
 		Mechanism: "http",
 	},
 	"pi": {
 		// 状态/等待来自 pi -e 挂进去的观察扩展（internal/agent/pi/observer.ts）。
 		// 等待是**条件性**的：Pi 没有内建审批，只有扩展的 ctx.ui 提示才会
 		// 出现 waiting；没有扩展提问时不会等 —— 这是能力边界，不假装。
-		Launch: true, Inject: true, Resume: true, Status: true, Waiting: true,
+		Launch: true, Inject: true, Resume: true, Status: true, Waiting: true, Actions: true,
 		Mechanism: "extension",
 	},
 	"codex": {
@@ -101,8 +101,36 @@ var agentAdapterCaps = map[string]Caps{
 		// thread/status/changed 的 activeFlags（waitingOnApproval /
 		// waitingOnUserInput）。批准本身仍然在 TUI 里回答（Approvals=false）：
 		// 实测 0.163.0 的批准请求只发给 TUI，不发给旁路观察者。
-		Launch: true, Inject: true, Resume: true, Status: true, Waiting: true,
+		Launch: true, Inject: true, Resume: true, Status: true, Waiting: true, Actions: true,
 		Mechanism: "app-server",
+	},
+	"agy": {
+		// Antigravity：启动/续接（--continue / --conversation）是命令行事实；
+		// 忙闲/等待来自它自己写的 transcript（无 hook）。等待只覆盖转录里
+		// 真的出现的 ask/permission 工具调用；没有时不会假装。
+		Launch: true, Resume: true, Status: true, Waiting: true, Actions: true,
+		Mechanism: "transcript",
+	},
+	"cursor": {
+		// Cursor Agent：续接 --continue/--resume；状态只从 agent-transcripts
+		// 的 user→assistant 轮次推。工具调用不在转录里，所以 Actions=false
+		// （有对话流，但没有工具/文件动作），也不假装有「改动台账」。
+		// 等待批准没有来源，Waiting=false。
+		Launch: true, Resume: true, Status: true,
+		Mechanism: "transcript",
+	},
+	"copilot": {
+		// Copilot CLI 1.0.103：--resume/--continue/--session-id 实测都在。
+		// 状态来自 session-state/<id>/events.jsonl 的 turn_start/turn_end；
+		// 等待只在能看到 permission/approval 事件时才发。
+		Launch: true, Resume: true, Status: true, Waiting: true, Actions: true,
+		Mechanism: "events",
+	},
+	"qoder": {
+		// Qoder 的 hooks 是 Claude 形状，Perch 通过每格 --settings 注入
+		// （不写 ~/.qoder/settings.json）。状态/等待/动作都走 hook 轮询。
+		Launch: true, Resume: true, Status: true, Waiting: true, Actions: true,
+		Mechanism: "hook",
 	},
 	"dsh": {
 		// 非官方 TUI 的接入（照 Orca）：终端界面来自社区的 dsh-tui profile，
@@ -111,7 +139,7 @@ var agentAdapterCaps = map[string]Caps{
 		// assets/js/10-term.js 的 armDshLateSettle / 80-live.js 的 markDshBusy）。
 		// Waiting 只覆盖 dsh 的 ask_user_question；批准没有 hook，按 Orca 的
 		// 口径算 working（harness 还在工具中间，不是 idle，也不假装看得见）。
-		Launch: true, Resume: true, Status: true, Waiting: true,
+		Launch: true, Resume: true, Status: true, Waiting: true, Actions: true,
 		Mechanism: "hook",
 	},
 }
@@ -284,7 +312,7 @@ func openCodeDef() Def {
 }
 
 // prepareOpenCode 在 PTY 起来之前分配端口/口令，并返回 PTY 起来后要跑的观察者。
-func prepareOpenCode(tag string, tabID int, _ string, _ []string) (map[string]string, []string, func(context.Context), error) {
+func prepareOpenCode(tag string, tabID int, cwd string, _ []string) (map[string]string, []string, func(context.Context), error) {
 	port, err := freeLoopbackPort()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("找空闲端口: %w", err)
@@ -309,7 +337,7 @@ func prepareOpenCode(tag string, tabID int, _ string, _ []string) (map[string]st
 	args := []string{"--port", strconv.Itoa(port), "--hostname", "127.0.0.1"}
 	log.Printf("[opencode %s] 状态观察口径 port=%d host=127.0.0.1（口令已设）", tag, port)
 	observe := func(ctx context.Context) {
-		observeOpenCode(ctx, tabID, base, pass, openCodePollEvery, emitAgentStatus)
+		observeOpenCode(ctx, tabID, cwd, base, pass, openCodePollEvery, emitAgentStatus)
 	}
 	return env, args, observe, nil
 }
@@ -364,7 +392,7 @@ type ocState struct {
 	text    string
 }
 
-func observeOpenCode(ctx context.Context, tabID int, baseURL, password string, every time.Duration, sink func(agentEvent)) {
+func observeOpenCode(ctx context.Context, tabID int, cwd, baseURL, password string, every time.Duration, sink func(agentEvent)) {
 	client := &http.Client{Timeout: 2 * time.Second}
 	if !waitOpenCode(ctx, client, baseURL, password, 20*time.Second) {
 		if ctx.Err() == nil {
@@ -378,6 +406,8 @@ func observeOpenCode(ctx context.Context, tabID int, baseURL, password string, e
 	defer ticker.Stop()
 	var lastStatus, lastKind, lastText, lastSession string
 	errLogged := ""
+	flow := &ocFlow{sent: map[string]string{}}
+	tick := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -410,6 +440,12 @@ func observeOpenCode(ctx context.Context, tabID int, baseURL, password string, e
 			bindOpenCodeSession(tabID, st.session)
 			lastSession = st.session
 			lastStatus = "" // 会话变了：即使状态相同也要让前端拿到新 session
+			flow = &ocFlow{sent: map[string]string{}}
+		}
+		// 流水每 1s 拉一次（状态 500ms 一次）。它只读 TUI 的 HTTP，不碰 DB。
+		tick++
+		if tick%2 == 0 {
+			flow.poll(ctx, client, baseURL, password, lastSession, tabID, cwd)
 		}
 		if st.status == lastStatus && st.kind == lastKind && st.text == lastText {
 			continue

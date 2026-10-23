@@ -52,6 +52,114 @@ export default function (pi) {
     write({ type: "status", status: st, session, ...(extra || {}) });
   };
 
+  /* —— 流水/改动（v2）——
+     Pi 的 session jsonl 在这台机器上实测**没有落盘**（1.4.0 + 当前 home），
+     所以右栏不能只等 session 文件。扩展本来就能看到 message/tool 生命周期，
+     这里直接把同一份事实写成 act 事件；Go 侧只负责转发，不再解析 Pi 文件。
+     形状与 transcript.ActItem 对齐（id/kind/tool/text/path/ok），字段只增不改。 */
+  const textOf = (content) => {
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return "";
+    const parts = [];
+    for (const b of content) {
+      if (!b) continue;
+      if (b.type === "text" && b.text) parts.push(b.text);
+    }
+    return parts.join("\n");
+  };
+  const blocksOf = (content) => (Array.isArray(content) ? content : []);
+  const pathOf = (args) => {
+    if (!args || typeof args !== "object") return "";
+    for (const k of ["file_path", "filePath", "path", "notebook_path", "target_file"]) {
+      const v = args[k];
+      if (typeof v === "string" && v.trim()) return v;
+    }
+    return "";
+  };
+  const baseOf = (p) => String(p || "").split(/[\\/]/).pop() || "";
+  const describeTool = (name, args) => {
+    const p = pathOf(args);
+    if (p) return `${name} ${baseOf(p)}`;
+    const a = args || {};
+    const cmd = typeof a.command === "string" ? a.command : "";
+    if (cmd) return cmd.split("\n")[0].slice(0, 120);
+    const pat = a.pattern || a.query;
+    if (typeof pat === "string") return `${name} ${pat.slice(0, 80)}`;
+    return name;
+  };
+  const fileOp = (name) => {
+    const n = String(name || "").toLowerCase();
+    if (n === "read" || n === "view") return "read";
+    if (n === "write") return "write";
+    if (n === "edit" || n === "patch" || n === "multiedit") return "edit";
+    return "";
+  };
+  const act = (id, kind, extra) => write({ type: "act", id, kind, session, ...(extra || {}) });
+  const actUpdate = (id, extra) => write({ type: "act_update", id, session, ...(extra || {}) });
+  const fileEvent = (path, op) => {
+    if (path && op) write({ type: "file", path, op, session });
+  };
+
+  // 用户发的消息：message_start 保留原文（比等 message_end 早一帧）。
+  pi.on("message_start", (event) => {
+    const m = event && event.message;
+    if (!m || m.role !== "user") return;
+    const text = textOf(m.content);
+    if (!text.trim()) return;
+    act(m.id || `u${Date.now()}`, "prompt", { text });
+  });
+
+  // assistant/toolResult 在 message_end 时内容已定稿；toolCall 也在 content 里，
+  // 和 tool_execution_start 同 id，Go 侧按 id 原地更新，不会重复。
+  pi.on("message_end", (event) => {
+    const m = event && event.message;
+    if (!m) return;
+    if (m.role === "assistant") {
+      let i = 0;
+      for (const b of blocksOf(m.content)) {
+        if (!b) continue;
+        if (b.type === "text" && b.text && b.text.trim()) {
+          act(`${m.id || "a"}:t${i++}`, "text", { text: b.text });
+        } else if (b.type === "thinking" && (b.thinking || b.text)) {
+          act(`${m.id || "a"}:h${i++}`, "thinking", { text: String(b.thinking || b.text).slice(0, 200) });
+        } else if (b.type === "toolCall") {
+          const tool = b.name || "tool";
+          const id = b.id || `${m.id || "a"}:c${i++}`;
+          const path = pathOf(b.arguments);
+          act(id, "tool", { tool, text: describeTool(tool, b.arguments), path });
+          fileEvent(path, fileOp(tool));
+        }
+      }
+      return;
+    }
+    if (m.role === "toolResult") {
+      const id = m.toolCallId || m.tool_call_id || m.id || "";
+      if (!id) return;
+      actUpdate(id, { ok: !m.isError, text: textOf(m.content) });
+      const p = pathOf(m);
+      if (p) fileEvent(p, "read");
+    }
+  });
+
+  pi.on("tool_execution_start", (event) => {
+    const e = event || {};
+    const path = pathOf(e.args);
+    act(e.toolCallId || `tool${Date.now()}`, "tool", {
+      tool: e.toolName || "tool",
+      text: describeTool(e.toolName, e.args),
+      path,
+    });
+    fileEvent(path, fileOp(e.toolName));
+  });
+
+  pi.on("tool_execution_end", (event) => {
+    const e = event || {};
+    actUpdate(e.toolCallId || "", {
+      ok: !e.isError,
+      text: typeof e.result === "string" ? e.result : "",
+    });
+  });
+
   // 没有等待源时才敢把 running 翻成 busy/idle；有等待就保持 waiting。
   const refresh = (aborted) => {
     if (isWaiting()) return;

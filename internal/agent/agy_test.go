@@ -3,10 +3,11 @@ package agent
 import "testing"
 
 type agyTestHost struct {
-	env     map[string]string
-	args    []string
-	ok      bool
-	homeEnv map[string]string
+	env          map[string]string
+	args         []string
+	ok           bool
+	homeEnv      map[string]string
+	hookSettings string
 }
 
 func (h agyTestHost) BindSession(int, string, string, string) bool { return false }
@@ -26,6 +27,7 @@ func (h agyTestHost) WireLaunch(id string) (map[string]string, []string, bool) {
 }
 func (h agyTestHost) EngineHomeEnv() map[string]string          { return h.homeEnv }
 func (h agyTestHost) EngineHomeEnvFor(string) map[string]string { return h.homeEnv }
+func (h agyTestHost) HookSettings(string) string                { return h.hookSettings }
 
 func TestAgyDefInjectsWireLaunch(t *testing.T) {
 	SetHost(agyTestHost{
@@ -105,8 +107,8 @@ func TestAgyDefSandboxesBeforeWireLaunch(t *testing.T) {
 	if env["USERPROFILE"] != `C:\sandbox` || env["HOME"] != `C:\sandbox` {
 		t.Fatalf("unwired agy must still get engine home: %#v", env)
 	}
-	if args != nil || obs != nil {
-		t.Fatalf("unwired agy must not get launch args: args=%#v observe=%v", args, obs != nil)
+	if args != nil || obs == nil {
+		t.Fatalf("unwired agy must not get launch args, but must still watch transcript: args=%#v observe=%v", args, obs != nil)
 	}
 }
 
@@ -119,7 +121,7 @@ func TestAgyDefFallsBackWhenUnwired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if env != nil || args != nil || obs != nil {
-		t.Fatalf("未接线时不应注入：env=%#v args=%#v", env, args)
+	if env != nil || args != nil || obs == nil {
+		t.Fatalf("未接线时不应注入 launch 参数，但仍要跟转录：env=%#v args=%#v observe=%v", env, args, obs != nil)
 	}
 }

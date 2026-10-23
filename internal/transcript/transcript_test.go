@@ -58,7 +58,7 @@ func findTouch(t *testing.T, tr *trace, path string) *FileTouch {
 func TestWriteSuccessKeepsContentAndCounts(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "hello.txt")
-	tr := newTrace(filepath.Join(dir, "t.jsonl"), dir)
+	tr := newTrace(filepath.Join(dir, "t.jsonl"), dir, "claude", "")
 
 	feedLine(t, tr, toolUseLine("call_1", "Write",
 		`{"file_path":`+jsonString(path)+`,"content":"a\nb\n"}`))
@@ -87,7 +87,7 @@ func TestEditSuccessKeepsStructuredPatch(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "code.go")
 	writeFile(t, path, "ctx\nnew\nextra\n")
-	tr := newTrace(filepath.Join(dir, "t.jsonl"), dir)
+	tr := newTrace(filepath.Join(dir, "t.jsonl"), dir, "claude", "")
 
 	feedLine(t, tr, toolUseLine("call_2", "Edit",
 		`{"file_path":`+jsonString(path)+`,"old_string":"old","new_string":"new\nextra"}`))
@@ -112,7 +112,7 @@ func TestEditSuccessKeepsStructuredPatch(t *testing.T) {
 func TestRejectedWriteUsesInputAndMarksState(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "blocked.txt") // 故意不创建：被拒绝，本来就没落盘
-	tr := newTrace(filepath.Join(dir, "t.jsonl"), dir)
+	tr := newTrace(filepath.Join(dir, "t.jsonl"), dir, "claude", "")
 
 	feedLine(t, tr, toolUseLine("call_3", "Write",
 		`{"file_path":`+jsonString(path)+`,"content":"secret\n"}`))
@@ -142,7 +142,7 @@ func TestRejectedWriteUsesInputAndMarksState(t *testing.T) {
 func TestRejectedEditKeepsOldAndNew(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "edit.txt")
-	tr := newTrace(filepath.Join(dir, "t.jsonl"), dir)
+	tr := newTrace(filepath.Join(dir, "t.jsonl"), dir, "claude", "")
 
 	feedLine(t, tr, toolUseLine("call_4", "Edit",
 		`{"file_path":`+jsonString(path)+`,"old_string":"old line","new_string":"new line"}`))
@@ -162,7 +162,7 @@ func TestRejectedEditKeepsOldAndNew(t *testing.T) {
 func TestEditToolFailureIsFailedNotRejected(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "edit.txt")
-	tr := newTrace(filepath.Join(dir, "t.jsonl"), dir)
+	tr := newTrace(filepath.Join(dir, "t.jsonl"), dir, "claude", "")
 
 	feedLine(t, tr, toolUseLine("call_6", "Edit",
 		`{"file_path":`+jsonString(path)+`,"old_string":"gone","new_string":"new"}`))
@@ -186,7 +186,7 @@ func TestEditToolFailureIsFailedNotRejected(t *testing.T) {
 func TestDiffCopyReportsFoundAndMissing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "gone.txt")
-	tr := newTrace(filepath.Join(dir, "t.jsonl"), dir)
+	tr := newTrace(filepath.Join(dir, "t.jsonl"), dir, "claude", "")
 
 	feedLine(t, tr, toolUseLine("call_5", "Write",
 		`{"file_path":`+jsonString(path)+`,"content":"x\n"}`))

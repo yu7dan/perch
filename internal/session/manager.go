@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/yu7dan/perch/internal/agent"
 	"github.com/yu7dan/perch/internal/panes"
@@ -119,6 +120,12 @@ func (m *Manager) EngineHomeEnv() map[string]string {
 	return fn()
 }
 
+// HookSettings 给 Qoder 这类 Claude 形状但走 --settings 的 agent 用。
+// 事件路径写死成这一格的 tN.jsonl，钩子接收器和 Claude 共用一条轮询腿。
+func (m *Manager) HookSettings(tag string) string {
+	return BuildHookSettings(m.stateDir, tag)
+}
+
 // SetEngineHomeEnvFor 给通用 CLI 用：按 agent id 决定是否换引擎沙盒。
 func (m *Manager) SetEngineHomeEnvFor(fn func(string) map[string]string) {
 	m.homeMu.Lock()
@@ -187,6 +194,9 @@ type Tab struct {
 	// transcript 是会话的 .jsonl 绝对路径。**由 hook 的 SessionStart 直接给**
 	// （payload 里有 transcript_path）—— 比我们去 projects\<有损slug>\ 下面拼路径可靠。
 	transcript string
+	// startedAt 是这一格起来的本地时间。给“没有会话 id 的 agent”（agy/cursor）
+	// 找转录用：只认这一格起来之后新写的文件，避免把上一格的会话接过来。
+	startedAt time.Time
 }
 
 // Create 只分配 id/stream/pane 记录；流注册与 PTY 由调用方接着做（组合根先
@@ -203,7 +213,8 @@ func (m *Manager) Create(spec SpawnSpec) *Tab {
 	}
 	m.mu.Lock()
 	m.next++
-	host := &Tab{ID: m.next, Stream: fmt.Sprintf("term:%d", m.next), Spec: spec, PaneID: paneID}
+	host := &Tab{ID: m.next, Stream: fmt.Sprintf("term:%d", m.next), Spec: spec, PaneID: paneID,
+		startedAt: time.Now()}
 	m.tabs[host.ID] = host
 	m.mu.Unlock()
 
@@ -236,11 +247,14 @@ func (m *Manager) panesClaim(id int, why string) {
 // 标记，记录留着）。
 func (m *Manager) Drop(id int) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if h := m.tabs[id]; h != nil && h.sessionID != "" {
 		delete(m.bySession, h.sessionID)
 	}
 	delete(m.tabs, id)
+	m.mu.Unlock()
+	// 转录认领是 agent 包的进程内状态（agy/cursor 没有会话 id，只能按文件认）。
+	// 放掉之后，冷恢复的下一格才能接上同一个文件。
+	agent.ReleaseTranscripts(id)
 }
 
 // AgentForTab 返回这一格启动时选的 agent id。hook 事件归一化要用它：
@@ -285,6 +299,7 @@ type LiveTab struct {
 	Name       string
 	Transcript string
 	CWD        string
+	StartedAt  time.Time
 }
 
 // Live 返回当前所有格子的只读快照。
@@ -296,6 +311,7 @@ func (m *Manager) Live() []LiveTab {
 		out = append(out, LiveTab{
 			ID: h.ID, Agent: h.Spec.Agent, PID: h.pid, SessionID: h.sessionID, Status: h.status,
 			Name: h.sessName, Transcript: h.transcript, CWD: m.EffectiveCWD(h.Spec),
+			StartedAt: h.startedAt,
 		})
 	}
 	return out

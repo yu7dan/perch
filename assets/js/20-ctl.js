@@ -728,7 +728,13 @@ function renderGrid() {
       // 序号和网格里的位置一一对应，也就是"该点哪一颗"。
       return `#${i + 1}=${Math.round(b.left + b.width / 2)},${Math.round(b.top + b.height / 2)}`;
     }).join(" ");
-    bootFact(`网格 N=${n} 摆法=${摆法} 容器=${W}×${H} 关格 ${关格}`);
+    // 点错格的排查靠这一行：关格坐标只能说明头在哪，说明不了**格子本体**
+    // 在命中测试里占多大（xterm 的 textarea/canvas 会撑出自己的盒子）。
+    const 格框 = TAB_LIST.map((t, i) => {
+      const b = t.cellEl.getBoundingClientRect();
+      return `#${i + 1}=${Math.round(b.left)},${Math.round(b.top)} ${Math.round(b.width)}×${Math.round(b.height)}`;
+    }).join(" ");
+    bootFact(`网格 N=${n} 摆法=${摆法} 容器=${W}×${H} 关格 ${关格} 格框 ${格框}`);
   });
 }
 
