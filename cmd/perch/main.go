@@ -9,6 +9,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -65,7 +66,31 @@ type perchApp struct {
 	push      *pushRelay
 }
 
+// teeLogToFile 让双击启动的 beta 也有日志可查：Explorer 里没有 stderr。
+// 8MB 轮转一次，只留 perch.log 和 perch.log.1；拿不到目录就继续只写 stderr。
+func teeLogToFile() {
+	p, err := appdir.PerchFile("perch.log")
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return
+	}
+	if fi, err := os.Stat(p); err == nil && fi.Size() > 8<<20 {
+		_ = os.Remove(p + ".1")
+		_ = os.Rename(p, p+".1")
+	}
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	// 文件放第一个：双击启动时 os.Stderr 可能是无效句柄，写它会返回错误；
+	// MultiWriter 遇到错误就停，放在后面才能保证文件一定拿到这一行。
+	log.SetOutput(io.MultiWriter(f, os.Stderr))
+}
+
 func main() {
+	teeLogToFile()
 	a := &perchApp{
 		stateDir:    appdir.ClaudeState(),
 		fallbackCWD: appdir.HomeOrDot(),

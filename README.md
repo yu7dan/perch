@@ -141,6 +141,13 @@ go build -o build\perch-hook.exe ./cmd/perch-hook   # hook receiver: the name is
 
 Two binaries are required: the main app and a separate hook receiver (the agent's hook events are written by it, and the main app reads them). The receiver's file name is hard-coded (`hookExeName` in the hook code) and both executables must sit side by side in the same directory. If one is missing, features disappear silently.
 
+For a portable friend-beta build (zip, no installer or signing yet):
+
+```powershell
+.\scripts\package.ps1 -Version 0.1.0-beta.1
+# -> dist\Perch-0.1.0-beta.1-win-x64.zip
+```
+
 ## Status
 
 - **Experimental**; interfaces will change.
