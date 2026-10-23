@@ -675,9 +675,10 @@ renderRsbMods();
 void (async () => {
 await fontsReady;
 const restoreSeats = await awaitRestorePlan();
+const bootSpec = restoreSeats.length ? null : defaultBootSpec();
 const bootPromises = restoreSeats.length
   ? restoreSeats.map((v) => createTab(seatSpecFrom(v)))
-  : [createTab(defaultSpawnSpec())];
+  : (bootSpec ? [createTab(bootSpec)] : []);
 const bootTabs = await Promise.all(bootPromises);
 /* 首格要挑一个**还在 TAB_LIST 里**的：被拒的格子会就地 closeTab（见 createTab ③），
    拿一个已经不在模型里的格子去 setActive 就是空指针那一类毛病。
@@ -685,6 +686,10 @@ const bootTabs = await Promise.all(bootPromises);
    而不是留一堆幽灵格）。 */
 const firstTab = bootTabs.find((t) => TAB_LIST.includes(t)) || null;
 if (firstTab) setActive(firstTab);
+// 干净机器上没有可启动的 agent：不建失败格，先把空态画出来（renderGrid 会
+// 同时更新零格空态、页签计数和会话区）。有格子时 createTab 已经画过一遍，
+// 但再画一次是幂等的。
+else renderGrid();
 // 起来之后立刻记一笔：页面白屏时这是**唯一**能区分"根本没建标签"和
 // "建了但渲染不出来"的证据（它走 ctl 通道，不依赖任何标签流）。
 // 走 bootFact 而不是 sendCtrl：这段现在可能跑在 ctl 连上**之前**（那条通道什么时候

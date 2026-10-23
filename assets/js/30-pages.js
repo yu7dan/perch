@@ -543,6 +543,15 @@ function defaultAgentId() {
 function defaultSpawnSpec() {
   return Object.assign({}, DEFAULT_SPAWN_SPEC, { agent: defaultAgentId() });
 }
+/* 启动时的默认格：**没有可启动的 agent 就不开**。
+   干净机器上目录/登记表都是空的，此时开一个 claude 格只会立刻失败；
+   正确的首屏是空态 + 安装入口，而不是一个报错的幽灵格。
+   名单还没到（cat 为空）时保持旧行为 —— 那是旧载荷/探测失败，不是“没装”。 */
+function defaultBootSpec() {
+  const cat = opCatalog();
+  if (cat.length && !cat.some(opLaunchable)) return null;
+  return defaultSpawnSpec();
+}
 function opCapsText(a) {
   const c = (a && a.caps) || {};
   const parts = [];

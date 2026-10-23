@@ -505,7 +505,8 @@ function renderDashStatus() {
   const live = TAB_LIST.filter((t) => t.id > 0);
   const running = live.filter((t) => !t.connDown).length;
   const need = needModel();
-  const projs = (STATE?.projects || []).length;
+  // 默认会话区是合成条目，不是“项目”；和左栏导航的计数用同一条口径。
+  const projs = (STATE?.projects || []).filter((p) => !p.synthetic).length;
   // ⚠️ 结构只建一次，之后只改数字 —— 这一行每 700ms 跟着 renderDashLive 重画，
   // 整块 innerHTML 会把按钮换掉；mousedown 与 mouseup 落在两个不同元素上，
   // 那次点击就静默丢了（和 seg 的 thumb 是同一类毛病）。
