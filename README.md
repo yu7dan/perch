@@ -110,7 +110,7 @@ More detail: [architecture](docs/ARCHITECTURE.md) · [frontend](docs/FRONTEND.md
 
 ## Beta notes
 
-- Windows 10/11 x64; ConPTY and Job Objects are required.
+- Windows 10/11 x64 with the WebView2 Runtime; ConPTY and Job Objects are required.
 - No installer or code signing yet; expect SmartScreen.
 - Qoder, Copilot, and Cursor use their own sign-in.
 - DeepSeek Harness tool execution still depends on the current upstream `dsh-tui` build.
