@@ -76,6 +76,9 @@ function rememberClosedPane(t) {
     sendCtrl({ type: "log", msg: `关格：tab=${t.id} 还没拿到 paneId（建格应答没到），这一格不留「已关闭」记录` });
     return;
   }
+  const live = (typeof LIVE !== "undefined") ? LIVE.get(t.id) : null;
+  const prompted = !!(live && Array.isArray(live.acts) && live.acts.some((a) => a.kind === "prompt"));
+  const known = !!(t.sessionID && findSess(t.sessionID));
   CLOSED_PANES.set(pane, {
     paneId: pane,
     agent: (t.spec && t.spec.agent) || DEFAULT_SPAWN_SPEC.agent,
@@ -85,15 +88,18 @@ function rememberClosedPane(t) {
     name: agentRowName(t),
     // 盘上有没有会话文件：关格这一刻不知道（零轮次的会话本来就没有），
     // 交给"点下去被 unavailable 拒了"或下一次冷恢复去判定 —— 不猜。
-    // `spoke` 只是一个**措辞用**的近似（会话在库里 ≈ 说过话）；判定接不接得上
-    // 永远只看 onDisk。
-    spoke: !!(t.sessionID && findSess(t.sessionID)),
-    // 发送过提示才会绑上 session；绑定本身不是精确证据，只用来撑到
-    // 下一次 panes.list / pane.closed 回来。
-    talked: !!t.sessionID,
-    // 这一条是**关格瞬间**乐观补的，还没有经过 panes.close 的“记录留没留”
-    // 判决。空态里的「接回」只列已经落盘的记录（冷恢复推回来的），
-    // 不列这种还在等答复的 —— 否则零轮次空壳会以“可接回”的样子闪一下。
+    // `spoke/talked` 只是**措辞和乐观行**用的证据；判定接不接得上永远只看 onDisk。
+    // ⚠️ 不能拿"有 sessionId"当说过话：Claude 启动就会绑 session，零轮次也有 id。
+    // 之前的写法让两个没发过提示的格子留下「已关闭」行，点下去后端已经删了记录，
+    // 只能被 unavailable 拒掉。
+    spoke: known || prompted,
+    talked: prompted || known,
+    // 关格瞬间乐观补的行还没经过 pane.closed 的判决：在确认前不许点。
+    // 否则用户点的是"后端马上要删掉/还没处理完"的记录，续接请求只会得到
+    // 一个拒绝或一次与关闭竞争的重建。
+    closing: true,
+    // 空态里的「接回」只列已经落盘的记录（冷恢复推回来的），
+    // 不列这种还在等答复的。
     optimistic: true,
   });
 }
@@ -495,8 +501,18 @@ function dispatchCtl(m) {
     case "pane.closed": {
       // 关格时前端乐观补的那一行，只有 Go 真的留下了记录才该存在；
       // 从没发过提示的格子 Go 会直接摘掉，这里把那一行撤回。
+      const pane = m.pane | 0;
       if (!m.kept || !m.found) {
-        CLOSED_PANES.delete(m.pane | 0);
+        CLOSED_PANES.delete(pane);
+        armRailRebuild();
+        return;
+      }
+      // 记录留下了：这一行从"正在关"变成可接。名字/会话 id 已经在乐观行里，
+      // 下一次 panes.list（重启）会用后端的事实覆盖。
+      const keep = CLOSED_PANES.get(pane);
+      if (keep) {
+        keep.closing = false;
+        keep.optimistic = false;
         armRailRebuild();
       }
       return;

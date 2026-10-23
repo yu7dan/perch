@@ -1228,6 +1228,11 @@ async function endAgent(tab) { // 参数别叫 t：会遮住 i18n 的 t()
    （要先把壳收掉），这条路连壳都没有 —— 关格那一刻就收掉了。 */
 async function resumeClosedPane(r) {
   if (!r || r.busy) return;
+  if (r.closing) {
+    showToast(t("shell.closed.closingTitle"), t("shell.closed.closingNote"), "info");
+    sendCtrl({ type: "log", msg: `已关闭的 agent 还在等 pane.closed 判决，先不接 pane=${r.paneId}` });
+    return;
+  }
   /* 已经知道接不上（盘上没有会话文件）：**别装作试一下**，直接把原因和出路
      说清楚。用户最容易困惑的正是这一下 —— "点了没反应/报个看不懂的错"。 */
   if (closedUnresumable(r)) {
