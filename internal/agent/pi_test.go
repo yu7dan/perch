@@ -115,7 +115,7 @@ func TestPiSessionFileExists(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := filepath.Join(proj, "2026-10-18T18-10-29-442Z_01a15035-3fc0-7204-8817-23e1bf203ddc.jsonl")
-	if err := os.WriteFile(file, []byte("{}\n"), 0o644); err != nil {
+	if err := os.WriteFile(file, []byte(`{"type":"message","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if !piSessionFileExists("", "01a15035-3fc0-7204-8817-23e1bf203ddc") {

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -375,12 +376,18 @@ func handlePiLine(tabID int, line string, st *piPaneState, sink func(agentEvent)
 		if ev.At > 0 {
 			at = time.UnixMilli(ev.At).Format(time.RFC3339)
 		}
+		if ev.Kind == "prompt" {
+			host.NoteActivity(tabID, false)
+		} else if ev.Kind != "" {
+			host.NoteActivity(tabID, true)
+		}
 		st.flow.put(tabID, transcript.ActItem{
 			ID: ev.ID, Kind: ev.Kind, Tool: ev.Tool, Text: ev.Text,
 			Path: ev.Path, OK: ev.OK, At: at,
 		})
 		return
 	case "act_update":
+		host.NoteActivity(tabID, true)
 		st.flow.put(tabID, transcript.ActItem{
 			ID: ev.ID, Text: ev.Text, Path: ev.Path, OK: ev.OK,
 		})
@@ -470,7 +477,18 @@ func piSessionFileExists(cwd, id string) bool {
 		return false
 	}
 	m, err := filepath.Glob(filepath.Join(root, "*", "*_"+id+".jsonl"))
-	return err == nil && len(m) > 0
+	if err != nil {
+		return false
+	}
+	// Pi 一启动就会写一条 session 文件，零轮次也有文件 —— 关格/续接不能被
+	// "文件存在"骗过去。只有真的出现过 user/assistant 消息才算一条会话。
+	for _, p := range m {
+		if b, err := os.ReadFile(p); err == nil &&
+			(bytes.Contains(b, []byte(`"role":"user"`)) || bytes.Contains(b, []byte(`"role":"assistant"`))) {
+			return true
+		}
+	}
+	return false
 }
 
 // SessionFileExistsFor：冷恢复/续接护栏的 agent 分派口。

@@ -72,3 +72,28 @@ func TestSessionFileExistsForEachAgent(t *testing.T) {
 		t.Fatal("claude 在临时 home 里没有 projects，不该报存在")
 	}
 }
+
+// Pi 一启动就写 session 文件；零轮次的那种不能被当成"有会话" —— 否则关掉
+// 一个从没说过话的 Pi，记录会留下来，左栏多一行永远接不上的壳。
+func TestPiSessionNeedsAConversationTurn(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", root)
+
+	const id = "01a16809-e424-706d-a0ad-4e753051336c"
+	p := filepath.Join(root, "--C-work--", "20261023_"+id+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(`{"type":"session","id":"`+id+`"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if SessionFileExistsFor("pi", `C:\work`, id) {
+		t.Fatal("零轮次的 Pi 会话文件被误判成可续")
+	}
+	if err := os.WriteFile(p, []byte(`{"type":"message","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !SessionFileExistsFor("pi", `C:\work`, id) {
+		t.Fatal("有过 user 消息的 Pi 会话应当可续")
+	}
+}
