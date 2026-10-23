@@ -129,7 +129,13 @@ func preparePi(tag string, tabID int, _ string, _ []string) (map[string]string, 
 	}
 	_ = f.Close()
 
-	env := map[string]string{"PERCH_PI_EVENTS": path}
+	// npm 全局装的是 pi.cmd，shim 里还要找 node；GUI 进程的 PATH 往往比
+	// 终端短（这台机器上就是 Program Files\nodejs 不在 PATH 里），必须自己补，
+	// 否则 Pi 一起来就退出，终端只留下一行「Process exited」。
+	env := map[string]string{
+		"PERCH_PI_EVENTS": path,
+		"PATH":            dshChildPath(),
+	}
 	args := []string{"-e", ext}
 	log.Printf("[pi %s] 观察扩展=%s 事件=%s", tag, ext, path)
 	observe := func(ctx context.Context) {
