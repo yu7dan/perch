@@ -13,17 +13,21 @@
 
 .PARAMETER SkipBuild
   Reuse whatever is already in build\ (useful when only the staging changed).
+
+.PARAMETER BuildDir
+  Optional directory containing perch.exe and perch-hook.exe. Defaults to build\.
 #>
 param(
   [string]$Version = "0.1.0-beta.1",
-  [switch]$SkipBuild
+  [switch]$SkipBuild,
+  [string]$BuildDir = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repo = Split-Path $PSScriptRoot -Parent
-$build = Join-Path $repo "build"
+$build = if ($BuildDir) { (Resolve-Path $BuildDir).Path } else { Join-Path $repo "build" }
 $dist = Join-Path $repo "dist"
 $name = "Perch-$Version-win-x64"
 $stage = Join-Path $dist $name
@@ -49,6 +53,11 @@ Copy-Item (Join-Path $repo "LICENSE") $stage
 Copy-Item (Join-Path $repo "THIRD-PARTY.md") $stage
 Copy-Item (Join-Path $repo "docs\START-HERE.txt") $stage
 
+# README links to the English docs; keep those files next to it in the zip.
+New-Item -ItemType Directory -Force (Join-Path $stage "docs") | Out-Null
+Copy-Item (Join-Path $repo "docs\*.md") (Join-Path $stage "docs")
+Copy-Item (Join-Path $repo "docs\START-HERE.txt") (Join-Path $stage "docs")
+
 # Licenses for binaries and fonts must travel with the build.
 New-Item -ItemType Directory -Force (Join-Path $stage "licenses") | Out-Null
 Copy-Item (Join-Path $repo "licenses\*") (Join-Path $stage "licenses") -Recurse
@@ -57,8 +66,7 @@ New-Item -ItemType Directory -Force (Join-Path $stage "docs\images") | Out-Null
 Copy-Item (Join-Path $repo "docs\images\*.png") (Join-Path $stage "docs\images")
 
 if (Test-Path $zip) { Remove-Item -Force $zip }
-Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Optimal
-if ($LASTEXITCODE -ne 0) { throw "Compress-Archive failed" }
+Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Optimal -ErrorAction Stop
 
 $h = Get-FileHash $zip -Algorithm SHA256
 "{0}  {1:N1} MB" -f $zip, ((Get-Item $zip).Length / 1MB)
