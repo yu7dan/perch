@@ -88,6 +88,11 @@ func (f *ocFlow) poll(ctx context.Context, client *http.Client, baseURL, passwor
 				kind := "text"
 				if role == "user" {
 					kind = "prompt"
+					// OpenCode 没有 Claude 形状的 hooks：关格时后端要知道
+					// 这条记录“说过话”，不能当成空开合把记录摘掉。
+					host.NoteActivity(tabID, false)
+				} else {
+					host.NoteActivity(tabID, true)
 				}
 				items = append(items, transcript.ActItem{ID: id, Kind: kind, Text: p.Text, At: at})
 			case "reasoning":
@@ -96,6 +101,7 @@ func (f *ocFlow) poll(ctx context.Context, client *http.Client, baseURL, passwor
 				}
 				items = append(items, transcript.ActItem{ID: id, Kind: "thinking", Text: clipText(p.Text, 200), At: at})
 			case "tool":
+				host.NoteActivity(tabID, true)
 				it := transcript.ActItem{ID: id, Kind: "tool", Tool: p.Tool, At: at}
 				var in map[string]json.RawMessage
 				if p.State != nil && len(p.State.Input) > 0 {
@@ -120,10 +126,7 @@ func (f *ocFlow) poll(ctx context.Context, client *http.Client, baseURL, passwor
 				}
 				items = append(items, it)
 				if path != "" {
-					op := ocFileOp(toolName)
-					files[strings.ToLower(filepath.Clean(path))] = &transcript.FileTouch{
-						Path: path, Rel: it.Rel, Ops: []string{op}, At: at,
-					}
+					ocTouch(files, path, it.Rel, ocFileOp(toolName), at)
 				}
 			case "patch":
 				for _, pth := range p.Files {
@@ -131,9 +134,7 @@ func (f *ocFlow) poll(ctx context.Context, client *http.Client, baseURL, passwor
 						ID: id + ":" + pth, Kind: "tool", Tool: "patch",
 						Text: "patch " + filepath.Base(pth), Path: pth, Rel: relTo(cwd, pth), At: at,
 					})
-					files[strings.ToLower(filepath.Clean(pth))] = &transcript.FileTouch{
-						Path: pth, Rel: relTo(cwd, pth), Ops: []string{"edit"}, At: at,
-					}
+					ocTouch(files, pth, relTo(cwd, pth), "edit", at)
 				}
 			}
 		}
@@ -181,6 +182,23 @@ func (f *ocFlow) poll(ctx context.Context, client *http.Client, baseURL, passwor
 		f.files = files
 		host.Push(map[string]any{"type": "files", "tab": tabID, "files": list})
 	}
+}
+
+// ocTouch 把一次文件动作并进本帧的台账。同一文件先写后读时**不能覆盖**：
+// 之前直接赋值，屏上只剩最后一次的 R（实测 1.19.4：write 之后 read 同一个文件）。
+func ocTouch(files map[string]*transcript.FileTouch, path, rel, op, at string) {
+	key := strings.ToLower(filepath.Clean(path))
+	ft := files[key]
+	if ft == nil {
+		ft = &transcript.FileTouch{Path: path, Rel: rel, At: at}
+		files[key] = ft
+	}
+	for _, o := range ft.Ops {
+		if o == op {
+			return
+		}
+	}
+	ft.Ops = append(ft.Ops, op)
 }
 
 func mustJSON(v any) string {

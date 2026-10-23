@@ -51,6 +51,22 @@ func TestSessionFileExistsForEachAgent(t *testing.T) {
 		t.Fatal("agy 有 brain transcript，却报不存在")
 	}
 
+	// OpenCode 没有 jsonl：会话 id 明文存在 perch-cli.db / -wal 里。
+	ocid := "ses_" + sid
+	ocDB := filepath.Join(home, ".local", "share", "opencode", "perch-cli.db")
+	if err := os.MkdirAll(filepath.Dir(ocDB), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ocDB, []byte("noise "+ocid+" noise"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !SessionFileExistsFor("opencode", `C:\work`, ocid) {
+		t.Fatal("opencode 的会话 id 在 perch-cli.db 里，却报不存在")
+	}
+	if SessionFileExistsFor("opencode", `C:\work`, "ses_missing") {
+		t.Fatal("opencode 不存在的 id 被误判成存在")
+	}
+
 	// 没有文件的 agent 不能借 Claude 的 projects\ 目录误判。
 	if SessionFileExistsFor("claude", `C:\work`, sid) {
 		t.Fatal("claude 在临时 home 里没有 projects，不该报存在")

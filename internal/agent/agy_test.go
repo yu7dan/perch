@@ -28,6 +28,8 @@ func (h agyTestHost) WireLaunch(id string) (map[string]string, []string, bool) {
 func (h agyTestHost) EngineHomeEnv() map[string]string          { return h.homeEnv }
 func (h agyTestHost) EngineHomeEnvFor(string) map[string]string { return h.homeEnv }
 func (h agyTestHost) HookSettings(string) string                { return h.hookSettings }
+func (h agyTestHost) NoteActivity(int, bool)                    {}
+func (h agyTestHost) ResumeSessionOf(int) string                { return "" }
 
 func TestAgyDefInjectsWireLaunch(t *testing.T) {
 	SetHost(agyTestHost{

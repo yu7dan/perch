@@ -489,6 +489,8 @@ func SessionFileExistsFor(name, cwd, id string) bool {
 		return anyExisting(cursorCandidates(cwd, id))
 	case "agy":
 		return agySessionPath(id) != ""
+	case "opencode":
+		return openCodeSessionExists(id)
 	}
 	return false
 }

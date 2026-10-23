@@ -44,6 +44,21 @@ func TestNormalizeAgentEvent(t *testing.T) {
 	}
 }
 
+func TestOpenCodeResumeArgs(t *testing.T) {
+	d := OpenCodeDef()
+	got := strings.Join(d.Args(ResumeIntent{Kind: "exact", ID: "ses_abc"}, ""), " ")
+	if got != "--session ses_abc" {
+		t.Fatalf("exact 续接参数不对: %q", got)
+	}
+	got = strings.Join(d.Args(ResumeIntent{Kind: "fork", ID: "ses_abc"}, ""), " ")
+	if got != "--session ses_abc --fork" {
+		t.Fatalf("fork 续接参数不对: %q", got)
+	}
+	if got = strings.Join(d.Args(ResumeIntent{Kind: "latest"}, ""), " "); got != "--continue" {
+		t.Fatalf("latest 续接参数不对: %q", got)
+	}
+}
+
 func TestCapsForAgent(t *testing.T) {
 	claude := CapsFor("claude", true)
 	if !claude.Resume || !claude.Status || !claude.Waiting || !claude.Actions {
@@ -54,11 +69,8 @@ func TestCapsForAgent(t *testing.T) {
 		t.Fatalf("没装的 claude 不能标 launch: %+v", c)
 	}
 	oc := CapsFor("opencode", true)
-	if !oc.Launch || !oc.Status || !oc.Waiting || !oc.Actions {
+	if !oc.Launch || !oc.Resume || !oc.Status || !oc.Waiting || !oc.Actions {
 		t.Fatalf("opencode 能力矩阵不对: %+v", oc)
-	}
-	if oc.Resume {
-		t.Fatalf("opencode 还没做续接，不能标成 resume: %+v", oc)
 	}
 	// Copilot 1.0.103 的 --help 实测有 --resume/--continue；状态来自
 	// events.jsonl 的 turn 边界。能力表必须按现在的事实写。

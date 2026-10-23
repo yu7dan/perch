@@ -123,8 +123,19 @@ func describeAnyTool(tool string, in toolInput) (text, path string, paths []stri
 		}
 		return name, "", nil
 	case strings.Contains(compact, "runcommand"), compact == "shell", compact == "bash",
-		compact == "powershell", compact == "terminal", compact == "execute", compact == "command":
+		compact == "powershell", compact == "terminal", compact == "execute",
+		compact == "command", compact == "execcommand":
 		c := cleanQuoted(in.commandOf("command", "CommandLine", "cmd", "script", "code"))
+		// Codex 在 Windows 上把 apply_patch 折进 exec_command 的脚本文本里；
+		// 补丁头是**结构化事实**，按它记文件，别把整条命令当无目标工具。
+		if strings.Contains(c, "*** Begin Patch") || strings.Contains(c, "*** Update File:") {
+			if ps := patchFilePaths(c); len(ps) > 0 {
+				if len(ps) == 1 {
+					return "apply_patch " + toolBase(ps[0]), ps[0], ps
+				}
+				return "apply_patch " + strconv.Itoa(len(ps)) + " 个文件", ps[0], ps
+			}
+		}
 		if i := strings.IndexByte(c, '\n'); i >= 0 {
 			c = c[:i]
 		}
@@ -274,6 +285,12 @@ func (tr *trace) appendTool(id, tool string, in toolInput, at string) *ActItem {
 		}
 		if path != "" {
 			tr.touch(path, op, 0, 0, at)
+		}
+	} else if len(paths) > 0 {
+		// shell 里折进去的 apply_patch：工具本身不是文件工具，但补丁头
+		// 明确说出了它要改哪个文件 —— 按 edit 记进台账。
+		for _, p := range paths {
+			tr.touch(p, "edit", 0, 0, at)
 		}
 	}
 	p := tr.append(it)

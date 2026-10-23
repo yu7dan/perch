@@ -31,6 +31,13 @@ type Host interface {
 	// HookSettings 造一份 Claude 形状的 hooks 配置（含本格的事件文件路径）。
 	// Qoder 用 --settings 接这份配置；它和 Claude 一样是**合并**，不碰用户文件。
 	HookSettings(tag string) string
+	// NoteActivity 记下这一格真的有对话。OpenCode/Pi 这类没有 Claude 形状
+	// hooks 的 agent，关格时后端只能靠它区分“空开合”和“说过话的已关闭”。
+	NoteActivity(tabID int, spoke bool)
+	// ResumeSessionOf 返回这一格**启动时请求接上的**会话 id（exact/fork）。
+	// OpenCode 冷恢复时 TUI 回到那条会话但 active 可能还是空的；流水得先按
+	// 这个 id 去读历史，不能等用户再发一条提示才长出来。
+	ResumeSessionOf(tabID int) string
 }
 
 var host Host = defaultHost{}
@@ -58,6 +65,8 @@ func (defaultHost) WireLaunch(string) (map[string]string, []string, bool) {
 func (defaultHost) EngineHomeEnv() map[string]string          { return nil }
 func (defaultHost) EngineHomeEnvFor(string) map[string]string { return nil }
 func (defaultHost) HookSettings(string) string                { return "" }
+func (defaultHost) NoteActivity(int, bool)                    {}
+func (defaultHost) ResumeSessionOf(int) string                { return "" }
 
 func (defaultHost) ResolveExe(bin string) (string, []string) {
 	bin = strings.TrimSpace(bin)

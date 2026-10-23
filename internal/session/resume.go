@@ -98,11 +98,10 @@ func (m *Manager) SessionFileExistsFor(agentName, cwd, id string) bool {
 	switch agentName {
 	case "claude":
 		return m.SessionFileExists(id)
-	case "pi", "codex", "qoder", "copilot", "dsh", "cursor", "agy":
+	case "pi", "codex", "qoder", "copilot", "dsh", "cursor", "agy", "opencode":
 		return agent.SessionFileExistsFor(agentName, cwd, id)
 	}
-	// OpenCode 的会话在它自己的 SQLite/HTTP 里，没有可按 id 查的磁盘文件；
-	// 未知 agent 也没有证据 —— 都按“没有可续文件”说真话，不拿 Claude 的
+	// 未知 agent 没有证据 —— 按“没有可续文件”说真话，不拿 Claude 的
 	// projects\ 目录去误判。
 	return false
 }

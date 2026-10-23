@@ -60,6 +60,23 @@ func TestCodexParser(t *testing.T) {
 	}
 }
 
+// Codex 在 Windows 上把 apply_patch 折进 exec_command 的脚本文本里：
+// 工具名不是文件工具，但补丁头就是结构化事实，台账不能空着。
+func TestCodexExecCommandApplyPatch(t *testing.T) {
+	tr := newAgentTrace(t, "codex")
+	feedLines(tr,
+		`{"type":"response_item","timestamp":"2026-10-23T08:45:03Z","payload":{"type":"function_call","name":"exec_command","call_id":"call_2","arguments":"{\"cmd\":\"$patch = @'\\n*** Begin Patch\\n*** Update File: perch-codex-edit.txt\\n@@\\n-old\\n+new\\n*** End Patch\\n'@\\n& apply_patch $patch\"}"}}`,
+		`{"type":"response_item","timestamp":"2026-10-23T08:45:04Z","payload":{"type":"function_call_output","call_id":"call_2","output":"Success"}}`,
+	)
+	tool := findAct(tr, "tool", "apply_patch")
+	if tool == nil || !strings.HasSuffix(tool.Path, "perch-codex-edit.txt") {
+		t.Fatalf("补丁头没有被读成 apply_patch 工具: %+v", tr.acts)
+	}
+	if tr.files[strings.ToLower(filepath.Clean(tool.Path))] == nil {
+		t.Fatalf("补丁里的文件没有进台账: %+v", tr.files)
+	}
+}
+
 func TestPiParser(t *testing.T) {
 	tr := newAgentTrace(t, "pi")
 	feedLines(tr,

@@ -156,6 +156,19 @@ func (m *Manager) EngineHomeEnvFor(id string) map[string]string {
 	return fn(id)
 }
 
+// NoteActivity 是没有 Claude 形状 hooks 的适配器（OpenCode/Pi）的“说过话”
+// 证据：关格时 panes.Close 用它保住记录，而不是把有对话的格子当空开合删掉。
+func (m *Manager) NoteActivity(tabID int, spoke bool) {
+	if m == nil || m.panes == nil {
+		return
+	}
+	if spoke {
+		m.panes.MarkSpoke(tabID, "agent 有产出（hooks 之外的适配器）")
+		return
+	}
+	m.panes.MarkTalked(tabID, "agent 收到提示（hooks 之外的适配器）")
+}
+
 func (m *Manager) profileFor(id string) (map[string]string, []string, bool) {
 	m.profileMu.RLock()
 	fn := m.wireProfile
@@ -304,6 +317,20 @@ func (m *Manager) PaneIDFor(tab int) int {
 		return h.PaneID
 	}
 	return 0
+}
+
+// ResumeSessionOf：这一格启动时请求接上的会话 id（只对 exact/fork 有意义）。
+// OpenCode 冷恢复回到那条会话、但 active 还是空的时候，流水靠它读历史。
+func (m *Manager) ResumeSessionOf(tab int) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if h := m.tabs[tab]; h != nil {
+		switch h.Spec.Resume.Kind {
+		case "exact", "fork":
+			return h.Spec.Resume.ID
+		}
+	}
+	return ""
 }
 
 // SetPID 在 PTY 起来之后登记 pid —— 登记表是按 pid 命名的，这是那条链子的起点。

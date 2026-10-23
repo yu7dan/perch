@@ -86,7 +86,10 @@ var agentAdapterCaps = map[string]Caps{
 		Mechanism: "hook",
 	},
 	"opencode": {
-		Launch: true, Inject: true, Status: true, Waiting: true, Actions: true,
+		// 续接：CLI 1.19.4 实测有 --continue / --session <id> / --fork。
+		// 会话在它自己的 perch-cli.db 里，没有 jsonl；存在性由
+		// openCodeSessionExists 按 id 查库回答。
+		Launch: true, Inject: true, Resume: true, Status: true, Waiting: true, Actions: true,
 		Mechanism: "http",
 	},
 	"pi": {
@@ -307,6 +310,23 @@ const openCodePollEvery = 500 * time.Millisecond
 
 func openCodeDef() Def {
 	d := GenericDef("opencode")
+	// 续接参数（1.19.4 --help 实测）：--continue 接最新；--session <id>
+	// 接指定会话；--fork 必须和 --continue/--session 一起用。
+	d.Args = func(r ResumeIntent, _ string) []string {
+		switch r.Kind {
+		case "latest":
+			return []string{"--continue"}
+		case "exact":
+			if SafeSessionID(r.ID) {
+				return []string{"--session", r.ID}
+			}
+		case "fork":
+			if SafeSessionID(r.ID) {
+				return []string{"--session", r.ID, "--fork"}
+			}
+		}
+		return nil
+	}
 	d.Prepare = prepareOpenCode
 	return d
 }
@@ -404,9 +424,16 @@ func observeOpenCode(ctx context.Context, tabID int, cwd, baseURL, password stri
 
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
-	var lastStatus, lastKind, lastText, lastSession string
+	var lastStatus, lastKind, lastText string
+	// 冷恢复接上的那条会话：TUI 已经回到它，但 active 可能还是空的。
+	// 先拿它当流水主语，右栏才能在用户再发一句话之前就显示历史。
+	lastSession := host.ResumeSessionOf(tabID)
 	errLogged := ""
 	flow := &ocFlow{sent: map[string]string{}}
+	if lastSession != "" {
+		log.Printf("[opencode t%d] 续接会话 %s：先读一遍历史流水", tabID, Short(lastSession))
+		flow.poll(ctx, client, baseURL, password, lastSession, tabID, cwd)
+	}
 	tick := 0
 	for {
 		select {

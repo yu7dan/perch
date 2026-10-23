@@ -105,6 +105,12 @@ function closedRowName(r) {
     const t = (STATE?.titles || {})[sid];
     if (t) return t;
   }
+  /* 冷恢复回来的 closed 记录只有 cwd/sessionId，没有 name（PaneView 不带名字）。
+     默认会话区给每格分的是 `sessions\<日期>-<agent>-<pane>`，这个目录名
+     本身就是一条能认出来的身份；再不济也比一排「已关闭的 agent」强。 */
+  const dir = String(r.cwd || "").replace(/[\\/]+$/, "");
+  const base = dir ? dir.split(/[\\/]/).pop() : "";
+  if (base) return base;
   return r.name || t("pane.closedAgent");
 }
 function closedMatch(r, key) {
