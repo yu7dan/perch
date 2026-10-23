@@ -1342,8 +1342,12 @@ const NEED_GLYPH = { stop: G_BELL, ask: G_ASK, perm: G_ASK, login: G_ASK,
 const LOGIN_GATES = new Map();   // tab id -> { at, text, agent }
 const LOGIN_PATTERNS = [
   /not log(?:ged)? in/i,
-  /sign in to (?:continue|get started)/i,
+  /sign in to (?:continue|get started|use)/i,
   /log ?in to (?:continue|get started)/i,
+  // Copilot CLI 的登录门实测是 "Please use /login to sign in to use Copilot"
+  // （1.0.103）；它既不写 "log in" 也不写 "to continue"。
+  /please use \/login/i,
+  /use \/login to (?:sign in|continue)/i,
   /press any key to log ?in/i,
   /how would you like to authenticate/i,
   /login with .*(?:platform|browser|google|github)/i,
