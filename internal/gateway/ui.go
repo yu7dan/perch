@@ -232,42 +232,45 @@ try{document.documentElement.dataset.theme="dark";document.title="Perch"}catch(e
   --font:"Geist","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
   --code:"Cascadia Code WB","JetBrains Mono WB",Consolas,"Microsoft YaHei",monospace;
 }
+/* Perch：供应商添加页不展示 magpie 的合作伙伴/赞助商货架。
+   magpie 原文的归属是"赞助 magpie 的服务"，嵌进 Perch 后这层商业内容
+   既不属于 Perch，也没有必要占一屏；只藏这一栏，订阅/供应商/中转照旧。
+   data-perch-hide 由下面的脚本打在 .kind 和它后面的 .grid 上。 */
+#addSheet [data-perch-hide]{display:none!important}
+#addProvider.has-new::after{display:none!important}
+
+/* Perch：路由页顶部的舞台动画讲的是 magpie 自己的路由叙事，和 Perch 的
+   外壳混在一起；隐藏整段舞台/回放/标题说明，下面的请求历史、步骤日志、
+   筛选和所有交互都保留。 */
+#view-routing .rt-top,#view-routing .rt-stage,#view-routing .rt-replay{display:none!important}
 </style>
 <script>(function(){
-  // The engine's UI still says "magpie" in a few visible places (the routing
-  // diagram's node, "through magpie's Agent", plugin copy). The product name
-  // is Perch: rewrite the standalone word in visible text and a few labels.
-  // Package names such as @magpie-community and ids such as magpie-web are
-  // left alone, so the copy stays truthful about what is running.
-  var rx=/(^|[^\w@-])magpie(?=$|[^\w-])/gi;
-  var skip={SCRIPT:1,STYLE:1,TEXTAREA:1};
-  function fix(s){return s.replace(rx,function(_,p){return p+"Perch";});}
-  function walk(n){
-    if(n.nodeType===3){
-      var p=n.parentElement;
-      // The routing stage's hub is magpie's own mascot and label; leave it
-      // saying "magpie" as visible credit for the engine Perch is using.
-      if(p && (skip[p.tagName] || p.closest(".rt-hub"))) return;
-      var v=fix(n.nodeValue||"");
-      if(v!==n.nodeValue) n.nodeValue=v;
-      return;
+  // Do not rewrite magpie's copy. The embedded page is magpie's own console;
+  // its visible text must keep saying magpie (that is also what makes the
+  // sponsor attribution truthful). Perch's own chrome is outside this iframe.
+  //
+  // The one thing Perch removes is the partner/sponsor shelf in the provider
+  // add sheet: it is magpie's commercial listing, not part of this product.
+  // The sheet is redrawn often, so sweep on mutations as well as once at boot.
+  var partnerName=/^(partners?|合作伙伴|合作夥伴|パートナー|partner|sponsoren)$/i;
+  var partnerHint=/sponsor|赞助|贊助|スポンサー|gesponsert/i;
+  function sweep(){
+    var kinds=document.querySelectorAll("#addSheet .kind");
+    for(var i=0;i<kinds.length;i++){
+      var k=kinds[i];
+      if(k.getAttribute("data-perch-hide")) continue;
+      var b=k.querySelector("b"), hint=k.querySelector("span");
+      var name=(b&&b.textContent||"").trim();
+      var h=(hint&&hint.textContent||"").trim();
+      if(!partnerName.test(name) && !partnerHint.test(h)) continue;
+      k.setAttribute("data-perch-hide","1");
+      var g=k.nextElementSibling;
+      if(g && g.classList && g.classList.contains("grid")) g.setAttribute("data-perch-hide","1");
     }
-    if(n.nodeType!==1) return;
-    ["title","aria-label","placeholder","alt"].forEach(function(a){
-      var v=n.getAttribute(a);
-      if(v && /magpie/i.test(v)) n.setAttribute(a,fix(v));
-    });
-    var w=document.createTreeWalker(n,NodeFilter.SHOW_TEXT), t;
-    while((t=w.nextNode())) walk(t);
   }
   function start(){
-    walk(document.body);
-    new MutationObserver(function(ms){
-      ms.forEach(function(m){
-        if(m.type==="characterData") walk(m.target);
-        else m.addedNodes.forEach(walk);
-      });
-    }).observe(document.body,{subtree:true,childList:true,characterData:true});
+    sweep();
+    new MutationObserver(sweep).observe(document.documentElement,{subtree:true,childList:true});
   }
   if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",start,{once:true});
   else start();
