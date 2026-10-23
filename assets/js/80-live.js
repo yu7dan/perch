@@ -1344,6 +1344,7 @@ const LOGIN_PATTERNS = [
   /not log(?:ged)? in/i,
   /sign in to (?:continue|get started)/i,
   /log ?in to (?:continue|get started)/i,
+  /press any key to log ?in/i,
   /how would you like to authenticate/i,
   /login with .*(?:platform|browser|google|github)/i,
   /use .*personal access token/i,
