@@ -812,6 +812,39 @@
           </div>
         </section>
 
+        <section class="settings-sec" data-search="关于 版本 鸣谢 引导 about version credits onboarding magpie">
+          <div class="settings-sec-head">
+            <h2 data-i18n="settings.section.about">关于</h2>
+            <p data-i18n="settings.section.about.note">版本、鸣谢，以及重新打开首次使用引导。</p>
+          </div>
+          <div class="settings-card">
+            <div class="settings-row" data-search="版本 构建 about version build">
+              <div class="settings-lab">
+                <b data-i18n="settings.about.version">版本</b>
+                <span>Perch <span id="set-version">dev</span></span>
+              </div>
+            </div>
+            <div class="settings-row" data-search="引导 欢迎 首次 onboarding welcome first run">
+              <div class="settings-lab">
+                <b data-i18n="settings.about.onboarding">首次使用引导</b>
+                <span data-i18n="settings.about.onboardingNote">重新看一遍欢迎卡，了解工作区、总览和本地网关。</span>
+              </div>
+              <div class="settings-ctl">
+                <button type="button" class="set-btn" id="set-onboard-again" data-i18n="settings.about.onboardingOpen">重新打开引导</button>
+              </div>
+            </div>
+            <div class="settings-row" data-search="鸣谢 网关 magpie credits thanks">
+              <div class="settings-lab">
+                <b data-i18n="settings.about.credits">鸣谢</b>
+                <span data-i18n="settings.about.creditsNote">Perch 的网关能力来自 magpie 的开源工作。</span>
+              </div>
+              <div class="settings-ctl">
+                <button type="button" class="set-btn quiet" id="set-magpie-site" data-i18n="settings.about.magpieSite">打开 magpie 官网</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <p class="settings-foot" data-i18n-html="settings.foot.html">
           设置保存在 <code>%APPDATA%\Perch\settings.json</code>。这里的选项只影响 Perch，不改 agent 自己的配置。
         </p>

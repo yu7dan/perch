@@ -23,6 +23,34 @@
     const tab = document.querySelector('#dash-tabs .opt[data-dtab="gateway"]');
     if (tab) tab.click();
   }
+  function showOnboarding() {
+    if (!box.hidden) return;
+    try { localStorage.removeItem(KEY); } catch (_) {}
+    box.hidden = false;
+    sendCtrl({ type: "log", msg: "设置 → 重新打开首次使用引导" });
+    setTimeout(() => { if (start) start.focus(); }, 40);
+  }
+  function renderAbout() {
+    const v = document.getElementById("set-version");
+    if (v) v.textContent = (typeof STATE !== "undefined" && STATE && STATE.version) || "dev";
+  }
+  window.showOnboarding = showOnboarding;
+  window.renderAbout = renderAbout;
+
+  const again = document.getElementById("set-onboard-again");
+  if (again) {
+    again.addEventListener("click", showOnboarding);
+    // 设置页里这排按钮的点击偶发被别的委托吃掉；capture 段是最后一道保险。
+    document.addEventListener("click", (e) => {
+      const b = e.target && e.target.closest && e.target.closest("#set-onboard-again");
+      if (b) showOnboarding();
+    }, true);
+    sendCtrl({ type: "log", msg: "引导：设置页「重新打开引导」已接线" });
+  }
+  const site = document.getElementById("set-magpie-site");
+  if (site) site.addEventListener("click", () => {
+    sendCtrl({ type: "open.url", url: "https://usemagpie.ai" });
+  });
 
   const start = document.getElementById("onb-start");
   const skip = document.getElementById("onb-skip");

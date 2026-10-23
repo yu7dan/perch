@@ -59,6 +59,8 @@ type UI interface {
 type Deps struct {
 	StateDir       string
 	SecondInstance bool
+	// Version 是构建时注入的版本号（main.buildVersion）；设置页「关于」显示它。
+	Version string
 
 	Tabs        *session.Manager
 	Panes       *panes.Store

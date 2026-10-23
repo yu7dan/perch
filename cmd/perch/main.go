@@ -404,6 +404,7 @@ func main() {
 	ctlSrv := ctl.New(ctl.Deps{
 		StateDir:       a.stateDir,
 		SecondInstance: secondInstance,
+		Version:        buildVersion,
 		Tabs:           a.tabs,
 		Panes:          a.panes,
 		Titles:         a.titles,

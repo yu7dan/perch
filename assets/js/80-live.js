@@ -583,6 +583,7 @@ function applyShell(p) {
      名字表 0 条`），名字是这份载荷（约 +3s）才到的。少了这一句，重开之后格子头
      就永远停在 agent 自己写的标题上，而左栏（读同一份 STATE.titles）已经是你起的名字。 */
   seedTabTitles();
+  if (typeof renderAbout === "function") renderAbout();
 }
 shell.onmessage = (ev) => {
   let p;

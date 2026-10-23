@@ -21,6 +21,7 @@ type ShellPayload struct {
 	Sessions []history.Session                `json:"sessions"`
 	History  map[string][]history.HistoryItem `json:"history"` // key = sessionId
 	StateDir string                           `json:"stateDir"`
+	Version  string                           `json:"version,omitempty"`
 	// Cwd 是终端的工作目录。以前它是前端 HTML 里写死的一行文本（#p-path），
 	// 那个副本从来没被更新过；现在由后端给出唯一一份事实，前端渲染到状态栏。
 	Cwd string `json:"cwd"`
@@ -64,6 +65,7 @@ func (s *Server) ShellPayload() ShellPayload {
 	}
 	p := ShellPayload{
 		StateDir: s.deps.StateDir,
+		Version:  s.deps.Version,
 		Cwd:      cwd,
 		Sessions: sessions,
 		Titles:   titles,
