@@ -160,9 +160,11 @@ $("termbody").addEventListener("pointerdown", (e) => {
   // （点在输入框本身上面那条已经挡掉了，这条挡的是头两侧的空白。）
   if (tabEditing && renameTab === t) return;
   dragState = { t, x0: e.clientX, y0: e.clientY, on: false, ghost: null, head: el };
-  // 捕获：指针拖到标签条上之后（早就不在这一格头顶了），move/up 仍然送回这里 ——
-  // 少了这一条，抬手事件会落到别的元素上，拖拽永远收不了尾。
-  try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+  // ⚠️ 捕获**不能在这里**做。pointerdown 就 setPointerCapture 之后，指针捕获会把
+  // 随后的 click 目标改写成 #termbody —— #termbody 的 click 处理器于是
+  // `closest(".cell")` 找不到这一格，**点格子头切当前格**静默失效（实测：
+  // 点头部哪一行都不换右栏，只有点终端正文才换）。捕获推迟到真正拖起来那一帧
+  // （见 pointermove 的 d.on = true），单击仍然是普通的 click。
 });
 $("termbody").addEventListener("pointermove", (e) => {
   const d = dragState;
@@ -179,6 +181,9 @@ $("termbody").addEventListener("pointermove", (e) => {
       return;
     }
     d.on = true;
+    // 真正开始拖了才捕获：指针要能离开这一格的头（拖到标签条）还继续收到
+    // move/up；单击不捕获，click 目标才不会丢（见 pointerdown 那条）。
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
     d.ghost = makeGhost(d.t);
     d.head.classList.add("dragging");
     // 探针：拖拽是**纯手势**，日志里没有它的话，"页面是怎么来的"就只剩结果了。

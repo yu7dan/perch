@@ -697,7 +697,11 @@ function renderTermEmpty() {
   const host = $("te-closed");
   if (!host) return;
   const rows = (typeof closedList === "function" ? closedList() : [])
-    .filter((r) => !r.busy && !r.optimistic)
+    .filter((r) => !r.busy)
+    // 刚关掉、还在等后端答复的那一条（optimistic）只要是说过话的，就先列出来 ——
+    // 否则"关掉最后一格"的空态会一边写着"能从这儿接回"，一边一条都不给。
+    // 零轮次的空壳仍然不列（它马上会被后端摘掉）。
+    .filter((r) => !r.optimistic || r.spoke || r.talked)
     .filter((r) => typeof closedUnresumable !== "function" || !closedUnresumable(r))
     .slice(0, 6);
   host.hidden = rows.length === 0;
