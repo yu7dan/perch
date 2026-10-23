@@ -839,6 +839,9 @@ function alreadyBlocked(v) {
 function cellState(t) {
   if (!t) return "idle";
   if (t.connDown) return "off";                    // 我们自己的态，Orca 没有这条
+  // A generic CLI at its sign-in screen is waiting for the user even though it
+  // has no LIVE event; the tab dot must say so, not "idle".
+  if (LOGIN_GATES.has(t.id)) return "ask";
   const v = LIVE.get(t.id);
   // ① 官方机器可读的"我卡在等你"（waiting = 提问和批准都算，见 status.go 的实测）
   if (v && v.st === "waiting") return "ask";
