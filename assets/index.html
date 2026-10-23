@@ -243,6 +243,22 @@
              想清楚"谁在管这块 DOM"再动它：Go 那边**一个标签一条 stream + 一个
              ConPTY**，前端这边一个标签一个 xterm 实例。面板本身只是个容器，
              它不记得"当前是谁" —— 那是 activeTab 的事。 --></div>
+        <!-- 零格空态（2026-10-23）：以前 #termbody 空了就露出一块 #3f3f46 的
+             网格底色 —— 用户的原话是"色彩和产品不匹配，也没有指示或快捷按键"。
+             这里是一块**产品自己的面**：主按钮开新格，下面列可接回的已关闭 agent。
+             它盖住 pbody、但不盖 .phead（z-index 4 < 20），恢复按钮还在。 -->
+        <div id="term-empty" hidden>
+          <div class="te-wrap">
+            <div class="te-mark"><img src="/icons/perch-logo.png" alt="" draggable="false"></div>
+            <div class="te-kicker" data-i18n="term.empty.kicker">并行区</div>
+            <h1 data-i18n="term.empty.title">还没有 agent</h1>
+            <p class="te-lead" data-i18n="term.empty.lead">开一个 agent 开始工作；上次关掉的 agent 也能从这里接回原来的会话。</p>
+            <button type="button" id="te-new" class="te-primary">
+              <span data-i18n="term.empty.cta">新开一个 agent</span><kbd>Ctrl+Alt+N</kbd>
+            </button>
+            <div id="te-closed" class="te-closed" hidden></div>
+          </div>
+        </div>
         <div class="phead">
           <div class="rt">
             <button class="pbtn" id="restore" title="把上次的输出恢复到这个面板"

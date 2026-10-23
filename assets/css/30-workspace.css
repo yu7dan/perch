@@ -441,13 +441,49 @@
 
    ⚠️ 它住在 #main 里（#main 因此必须是 position:relative）。不能塞进 #list：
    那样它在绘制顺序上排在 #main **下面**，会被终端盖住。 */
-#list-divider{left:0;width:12px;z-index:4}
+/* z-index 6：零格空态（#term-empty，z=4）盖住整个 pane 时，这条缝仍然要能拖。
+   它比空态高、比 .phead（z=20）低 —— 恢复按钮仍在最上面。 */
+#list-divider{left:0;width:12px;z-index:6}
 #list-divider::after{left:0;transform:none}
 /* 总览 ↔ 左栏那条缝（2026-10-17）：同一套几何 —— 可见线在缝上，12px 抓取带
    落在总览这一侧。它住在 #dash 里（所以 #dash 必须 position:relative）。 */
 #rail-divider{left:0;width:12px;z-index:4}
 #rail-divider::after{left:0;transform:none}
 .pbody{flex:1;position:relative;min-height:0}
+/* 零格空态：用产品自己的面（--bg），不是网格缝的 #3f3f46。
+   它只盖 pbody（z=4），.phead（z=20）的恢复按钮仍可点。 */
+#term-empty{position:absolute;inset:0;z-index:4;display:grid;place-items:center;
+            background:var(--bg);color:var(--fg);padding:32px}
+#term-empty[hidden]{display:none}
+.te-wrap{width:min(460px,100%);text-align:center;display:flex;flex-direction:column;
+         align-items:center;gap:10px}
+.te-mark{width:44px;height:44px;display:grid;place-items:center;margin-bottom:2px;
+         color:var(--muted)}
+.te-mark img{width:44px;height:44px;object-fit:contain;-webkit-user-drag:none}
+.te-kicker{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.te-wrap h1{margin:0;font-size:20px;line-height:1.35;font-weight:600;letter-spacing:.01em}
+.te-lead{margin:2px 0 8px;max-width:390px;font-size:12.5px;line-height:1.65;color:var(--muted)}
+.te-primary{display:inline-flex;align-items:center;gap:10px;height:34px;padding:0 14px;
+            border:1px solid color-mix(in srgb,var(--accent) 50%,transparent);
+            border-radius:7px;background:color-mix(in srgb,var(--accent) 14%,transparent);
+            color:var(--fg);font:inherit;font-size:12.5px;cursor:pointer}
+.te-primary:hover{background:color-mix(in srgb,var(--accent) 22%,transparent);
+                  border-color:color-mix(in srgb,var(--accent) 70%,transparent)}
+.te-primary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.te-primary kbd{font:inherit;font-size:10.5px;color:var(--faint);
+                border:1px solid var(--line-soft);border-radius:4px;padding:1px 5px;
+                background:color-mix(in srgb,var(--fg) 5%,transparent)}
+.te-closed{width:100%;margin-top:10px;padding-top:10px;border-top:1px solid var(--line-soft);
+           display:flex;flex-direction:column;gap:2px;text-align:left}
+.te-closed[hidden]{display:none}
+.te-closed-cap{font-size:10.5px;color:var(--faint);padding:0 8px 4px}
+.te-closed-row{display:flex;align-items:center;gap:8px;width:100%;min-width:0;
+               height:30px;padding:0 8px;border:0;border-radius:5px;background:none;
+               color:var(--muted);font:inherit;font-size:12px;cursor:pointer;text-align:left}
+.te-closed-row:hover{background:color-mix(in srgb,var(--fg) 7%,transparent);color:var(--fg)}
+.te-closed-row .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.te-closed-row .ag{flex:none;font-size:10.5px;color:var(--faint)}
+.te-closed-row .go{flex:none;font-size:11px;color:var(--accent)}
 /* Orca 的 .xterm-container：四边留 4px（可用 --pane-padding-x/y 覆盖），
    并且 contain:paint —— 光标每次闪烁都会 invalidate paint，
    不隔离的话会一路上溯到整个面板树，长会话下肉眼可见地卡。 */

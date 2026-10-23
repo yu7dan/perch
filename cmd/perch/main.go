@@ -13,7 +13,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -156,6 +158,10 @@ func main() {
 		// 会话层不反过来认识 agent 名单。
 		Caps: func(id string) agent.Caps { return agent.CapsFor(id, agentcatalog.Has(id)) },
 	})
+	// 默认会话区：每个新格一个独立目录（见 defaultSessionDir）。
+	a.tabs.SetSessionDir(a.defaultSessionDir)
+	// 登记表关格时用它区分“零轮次空壳”和“真跑过、有会话文件”。
+	a.panes.SessionExists = a.tabs.SessionFileExistsFor
 	// 步 8：适配器此后拿到的就是真正的会话表（绑定/状态/推送/Exe 解析）。
 	agent.SetHost(a.tabs)
 	// 步 9：Defs() 会走 Host.ResolveExe，所以**必须**在 SetHost 之后。
@@ -508,6 +514,46 @@ func (a *perchApp) defaultCWD() string {
 		return p
 	}
 	return a.fallbackCWD
+}
+
+// defaultSessionDir 给默认会话区里的新格分配一个独立目录：
+//
+//	<默认目录>\sessions\<YYYYMMDD-HHMMSS>-<agent>-<paneID>
+//
+// 用 paneID 当短 id 而不是随机串：座位身份本来就跨重启稳定（见 Tab.PaneID），
+// 同一格冷恢复时不会分叉出第二个目录；agent 名过一遍文件名白名单。
+// 建不出目录返回空串，调用方退回默认目录 —— 不拦启动。
+func (a *perchApp) defaultSessionDir(agentID string, paneID int) string {
+	root := filepath.Join(a.defaultCWD(), "sessions")
+	name := strings.Join([]string{
+		time.Now().Format("20060102-150405"),
+		sanitizeDirName(agentID),
+		strconv.Itoa(paneID),
+	}, "-")
+	dir := filepath.Join(root, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("[session] 默认会话目录建不出来 dir=%s err=%v（这一格退回默认目录）", dir, err)
+		return ""
+	}
+	log.Printf("[session] 默认会话目录 pane=%d agent=%s → %s", paneID, agentID, dir)
+	return dir
+}
+
+func sanitizeDirName(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "agent"
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 // agentWireProfile 是 session.Manager 开格前的注入点。

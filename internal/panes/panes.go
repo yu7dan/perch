@@ -169,6 +169,12 @@ type Store struct {
 	// forgetting：**本次**写入是 forget 触发的 —— 只有它允许把记录数写成 0
 	// （见 writeLocked 里那条断言）。
 	forgetting bool
+
+	// SessionExists 由组合根注入：判断一条会话在盘上还在不在。
+	// Close 用它区分“有 session id 但零轮次”（没有文件，记录该摘）和
+	// “真的跑过、有文件”（保留，左栏可以接回）。nil = 不知道，按有 id
+	// 就保留（宁可多留一条可解释的「接不上」，也不误删对话记录）。
+	SessionExists func(agent, cwd, id string) bool
 }
 
 // Load 读登记表。四条出口：
@@ -430,14 +436,25 @@ func (p *Store) Close(id int, why string) (kept, found bool) {
 		return false, false
 	}
 	cur := &p.Panes[i]
-	if !cur.Spoke && !cur.Talked {
+	// "没有对话" = 没发过提示、没跑完过一轮，而且盘上也找不到那条会话文件。
+	// 只看 Spoke/Talked 会误删**已经绑上会话、只是这一轮还没来得及打标**的格子；
+	// 反过来只看 session id 又会把“零轮次、盘上根本没有 jsonl”的空壳留下。
+	hasConvo := cur.Spoke || cur.Talked
+	if !hasConvo && strings.TrimSpace(cur.SessionID) != "" {
+		if p.SessionExists == nil {
+			hasConvo = true // 判不了时不误删；宁可多一条可解释的「接不上」
+		} else {
+			hasConvo = p.SessionExists(cur.Agent, cur.CWD, cur.SessionID)
+		}
+	}
+	if !hasConvo {
 		gone := *cur
 		p.Panes = append(p.Panes[:i], p.Panes[i+1:]...)
 		p.dirty = true
 		p.forgetting = true
-		p.writeLocked("关格摘掉没说过话的记录 pane=" + strconv.Itoa(id) + "（" + why + "）")
+		p.writeLocked("关格摘掉没有对话的记录 pane=" + strconv.Itoa(id) + "（" + why + "）")
 		p.forgetting = false
-		log.Printf("[panes] 关格摘掉 pane=%d（从没发过提示，%s）session=%s —— 磁盘上那条会话文件**一个字没动**",
+		log.Printf("[panes] 关格摘掉 pane=%d（没有对话/盘上没有会话文件，%s）session=%s —— 磁盘上那条会话文件**一个字没动**",
 			id, why, clip(gone.SessionID, 36))
 		return false, true
 	}
@@ -706,10 +723,19 @@ func (p *Store) RestorePlan(sessionExists func(agent, cwd, id string) bool) Plan
 	seen := map[string]int{}
 	var emptyClosed []int
 	for _, r := range snap {
-		// 用户关掉过、而且从没发过提示的格子只是一次空开合：不占左栏、
-		// 也没有可续的内容，冷恢复时顺手摘掉。发过提示（Talked）或跑完
-		// 过一轮（Spoke）的仍然保留。
-		if r.Closed && !r.Spoke && !r.Talked {
+		// 没有任何会话证据的格子（没发过提示、没跑完过一轮、盘上也找不到
+		// 它的会话文件）只是一次空开合：不占左栏、也没有可续的内容，冷恢复
+		// 时顺手摘掉。没有对话就没有座位。
+		// ⚠️ 2026-10-23：原来只摘 `Closed` 的。进程异常退出/Perch 被杀时，
+		// 记录**不会**被打上 Closed（那一路只说明"它现在不在跑"，见 main.go），
+		// 于是 cursor 这种"开了但没说过话"的格子会以 no_id 的身份在重启后
+		// 重新占一格 —— 用户看到的就是"已停止的空 agent 阴魂不散"。
+		// 也不能只看 session id：零轮次的会话有 id 但盘上没有 jsonl。
+		hasConvo := r.Spoke || r.Talked
+		if !hasConvo && strings.TrimSpace(r.SessionID) != "" {
+			hasConvo = sessionExists(r.Agent, r.CWD, r.SessionID)
+		}
+		if !hasConvo {
 			emptyClosed = append(emptyClosed, r.PaneID)
 			continue
 		}

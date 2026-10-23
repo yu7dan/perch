@@ -166,9 +166,12 @@ svg{display:block;flex:none}
                    width:34px;height:34px;max-width:none;display:block;
                    object-fit:contain;user-select:none;-webkit-user-drag:none}
 .tb-rail .tb-name{font-weight:600;font-size:13px;letter-spacing:.2px}
-/* 中段宽度 = 会话列表 240px，地面同色 */
-.tb-list{width:240px;flex:none;background:var(--side);
-         border-right:1px solid var(--line-soft)}
+/* 中段宽度 = 会话列表那一列。⚠️ 2026-10-23：原来写死 240px，用户把
+   #list-divider 往右拖之后，下面列表变宽、上面标题栏的缝却还在 240 ——
+   「并行」页签于是不跟着终端面板走。这里必须和 #app 的第二列用**同一个**
+   --list-w；border 也换成缝的颜色（--divider-line），让上下两条线连成一条。 */
+.tb-list{width:var(--list-w);flex:none;background:var(--side);
+         border-right:1px solid var(--divider-line)}
 /* C6a：标题栏在右栏那一列上的切片。地面同色（--side），所以收起时它看起来
    就是标题栏自己延长过去 —— 不会有"少了一格"的缝。 */
 .tb-rsb{width:var(--rsb-w);flex:none;background:var(--side)}

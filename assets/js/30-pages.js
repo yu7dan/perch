@@ -249,7 +249,22 @@ function setActive(t) {
      判据就是"当前终端还没接上"。不放宽的话这一格永远不活：用户点它 → 走这句话 →
      直接返回（activeTab 还是它），于是焦点/尺寸/term 一样都补不上，
      往里打字是打给 null 的。 */
-  if (!t || (activeTab === t && term === t.term)) return;
+  /* 零格：把"当前格"真的清掉。旧代码对 null 直接 return，于是关掉最后一格
+     之后 activeTab 还挂着那个已经不在 TAB_LIST 里的对象 —— 右栏继续写着
+     "当前 agent π - Perch"、几个模块继续读它的旧流水，和空态并存。 */
+  if (!t) {
+    if (activeTab) {
+      activeTab.host.removeAttribute("id");
+      activeTab.cellEl.classList.remove("cur");
+      activeTab.tabEl.classList.remove("on");
+    }
+    activeTab = null;
+    term = null;
+    scheduleLive();
+    sendCtrl({ type: "log", msg: `setActive tab=0（并行区已空）` });
+    return;
+  }
+  if (activeTab === t && term === t.term) return;
   if (activeTab) {
     activeTab.host.removeAttribute("id");   // #termhost 永远只属于当前格
     activeTab.cellEl.classList.remove("cur");
@@ -754,12 +769,12 @@ function closeAgentPanel(why) {
   if (why) sendCtrl({ type: "log", msg: `选择面板 关闭（${why}）` });
 }
 
-function openAgentPanel(why) {
+function openAgentPanel(why, opts) {
   const panel = $("openpanel");
   if (panel.classList.contains("on")) { closeAgentPanel("再点一次 +"); return; }
   opTab = "new";
   opAllWs = false;
-  opWSPath = currentWorkspacePath();
+  opWSPath = (opts && opts.folder) || currentWorkspacePath();
   // 默认预选（用户定的形态）：每次打开都回到默认，不记上一次选过谁。
   opAgent = defaultAgentId();
   $("op-search").value = "";
@@ -797,7 +812,10 @@ async function opNewAgent() {
       `选择面板 新会话：没有可启动的 Agent（opAgent=${opAgent || "空"}），不发建格` });
     return;
   }
-  const dir = opWSPath;
+  /* 默认会话区：发**空 cwd**，让 Go 给这一格分配独立目录
+     （Documents\Perch\sessions\<date>-<agent>-<pane>）。发默认目录本身
+     会让所有会话又挤回同一个文件夹 —— 那正是这次 IA 要修的事。 */
+  const dir = (opWSPath && opWSPath === defaultAreaPath()) ? "" : opWSPath;
   closeAgentPanel("新会话");
   sendCtrl({ type: "log", msg: `选择面板 新会话 agent=${a.id} cwd=${dir || "(默认)"}` });
   await newTabIn(dir, "选择面板 新会话", a.id);

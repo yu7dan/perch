@@ -91,6 +91,10 @@ function rememberClosedPane(t) {
     // 发送过提示才会绑上 session；绑定本身不是精确证据，只用来撑到
     // 下一次 panes.list / pane.closed 回来。
     talked: !!t.sessionID,
+    // 这一条是**关格瞬间**乐观补的，还没有经过 panes.close 的“记录留没留”
+    // 判决。空态里的「接回」只列已经落盘的记录（冷恢复推回来的），
+    // 不列这种还在等答复的 —— 否则零轮次空壳会以“可接回”的样子闪一下。
+    optimistic: true,
   });
 }
 function closedRowName(r) {
@@ -110,8 +114,19 @@ function closedMatch(r, key) {
 }
 function closedInProject(p) {
   const path = typeof p === "string" ? p : (p && p.path);
-  const defPath = defaultWorkspacePath();
-  return closedList().filter((r) => insidePath(r.cwd || defPath, path));
+  // 和 tabsInProject 共用 ownerProjectPath：最长前缀唯一归属，父目录不再
+  // 把子项目的 agent 重复数一遍。ownerProjectPath 在 60-shell 里定义，
+  // 这里只会在所有脚本加载完之后被调用（renderWorkspaceView）。
+  if (typeof ownerProjectPath !== "function") {
+    const defPath = defaultWorkspacePath();
+    return closedList().filter((r) => insidePath(r.cwd || defPath, path));
+  }
+  const want = String(path || "").replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  return closedList().filter((r) => {
+    const got = ownerProjectPath(r.cwd || "");
+    const k = String(got || "").replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+    return k === want;
+  });
 }
 /* 这一条「已关闭」的 agent 还接不接得上（盘上还有没有它上次那条会话）。
    只有**明确知道没有**（Go 冷恢复算出的 false，或这一次尝试被 unavailable 拒了）
@@ -373,6 +388,9 @@ function dispatchCtl(m) {
       t.id = m.tab;
       t.streamName = m.stream;
       if (m.pane) t.paneID = m.pane;
+      // Go 可能把空 cwd 换成了默认会话区的独立目录 —— 左栏归属和标题里的
+      // 目录提示都要用**生效后**的那个（见 ctl handlers_tabs.go 的 tab.ok）。
+      if (typeof m.cwd === "string" && m.cwd) t.spec.cwd = m.cwd;
       t.onSpawned = null;
       /* 2026-10-17：id 到了 = 这一格正式出现在左栏（行 = agent）。必须**在这里**
          重画一次 —— 建格时 id 还是 0（不在模型里），只等下一次状态推送的话，
@@ -661,6 +679,39 @@ function applyGridCols(n, cols) {
   });
 }
 
+/* 零格空态：格子在不在，和「已关闭」记录有没有，是两件事 ——
+   空态要同时说清"现在没格子"和"还能接回哪些"。这段只碰 #term-empty，
+   不参与网格布局（它是 .pane.a 里的覆盖层，见 CSS）。 */
+function renderTermEmpty() {
+  const box = $("term-empty");
+  if (!box) return;
+  const empty = TAB_LIST.length === 0;
+  box.hidden = !empty;
+  if (!empty) return;
+  const host = $("te-closed");
+  if (!host) return;
+  const rows = (typeof closedList === "function" ? closedList() : [])
+    .filter((r) => !r.busy && !r.optimistic)
+    .filter((r) => typeof closedUnresumable !== "function" || !closedUnresumable(r))
+    .slice(0, 6);
+  host.hidden = rows.length === 0;
+  host.innerHTML = rows.length
+    ? `<div class="te-closed-cap">${esc(t("term.empty.closedCap"))}</div>` +
+      rows.map((r) => `<button type="button" class="te-closed-row" data-pane="${r.paneId | 0}">` +
+        `<span class="nm">${esc(typeof closedRowName === "function" ? closedRowName(r) : r.agent || "")}</span>` +
+        `<span class="ag">${esc(r.agent || "")}</span>` +
+        `<span class="go">${esc(t("term.empty.resume"))}</span></button>`).join("")
+    : "";
+}
+
+$("te-new").addEventListener("click", () => openAgentPanel("空态新开"));
+$("te-closed").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-pane]");
+  if (!b) return;
+  const r = closedList().find((x) => String(x.paneId | 0) === b.dataset.pane);
+  if (r) resumeClosedPane(r);
+});
+
 // 网格重排。**只动容器上的一个变量**，格子元素由 createTab 建、归属它自己
 // （重命名会把 .nm 换成输入框，重建 DOM 等于把用户正在打的字一起删掉）。
 function renderGrid() {
@@ -681,6 +732,7 @@ function renderGrid() {
   // 启动路径上 createTab → renderGrid 会跑到这一句，那时 collapsed 还是 false，
   // 直接返回（这也是那批声明必须写在启动之前的原因，见 RSB_READY 那一块）。
   scheduleGroup();
+  renderTermEmpty();
   // C6a：这里原来还有一句 `applyPaneColsForCells()` —— 格数变了就把"每格多少列"
   // 这个用户偏好重新折成主区宽度。现在**没有这个动作了**：
   //   主区宽度只由"窗口 − 左栏 − 右栏"决定，格数变不改变它，只改变它怎么分

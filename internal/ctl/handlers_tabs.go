@@ -59,6 +59,10 @@ func (s *Server) tabNew(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		// paneId 是这一格**跨重启的身份**：前端拿着它，才能在用户显式
 		// 关格时发 pane.forget（那是唯一一条会删记录的路径）。
 		"pane": host.PaneID,
+		// cwd 是**生效后**的目录：默认会话区的新格会在这里被换成
+		// sessions\<date>-<agent>-<id>（见 session.Manager.Create）。前端
+		// 必须拿它，否则左栏还按空串/默认根归类，新会话会掉进"旧默认目录"。
+		"cwd": host.Spec.CWD,
 	})
 	_ = c.Send(reply)
 	if m.Req != 0 {

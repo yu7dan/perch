@@ -468,15 +468,61 @@ func piSessionFileExists(cwd, id string) bool {
 }
 
 // SessionFileExistsFor：冷恢复/续接护栏的 agent 分派口。
-// 这里只回答本包有适配器的 agent；其余（Claude）由宿主自己判。
+// 这里回答所有“有自己会话文件”的 agent；Claude 由宿主自己判（它的 projects
+// 目录在 Perch 的 stateDir 下）。
 func SessionFileExistsFor(name, cwd, id string) bool {
+	if !SafeSessionID(id) {
+		return false
+	}
 	switch name {
 	case "pi":
 		return PiSessionFileExists(cwd, id)
 	case "codex":
 		return CodexSessionFileExists(cwd, id)
+	case "qoder":
+		return anyExisting(qoderCandidates(cwd, id))
+	case "copilot":
+		return anyExisting(copilotCandidates(cwd, id))
+	case "dsh":
+		return dshSessionPath(cwd, id) != ""
+	case "cursor":
+		return anyExisting(cursorCandidates(cwd, id))
+	case "agy":
+		return agySessionPath(id) != ""
 	}
 	return false
+}
+
+// anyExisting 过滤 glob 结果：候选列表本身可能包含不存在的路径
+// （copilot 的 exact 路径不经过 glob，直接拼出来）。
+func anyExisting(paths []string) bool {
+	for _, p := range paths {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+// agySessionPath 按 conversation id 找 Antigravity 的转录。
+// agy 的续接参数是 --conversation <id>，所以这个 id 就是 brain 目录名。
+func agySessionPath(id string) string {
+	if !SafeSessionID(id) {
+		return ""
+	}
+	home := agentHome("agy")
+	if home == "" {
+		return ""
+	}
+	root := filepath.Join(home, ".gemini", "antigravity-cli", "brain", id,
+		".system_generated", "logs")
+	for _, name := range []string{"transcript_full.jsonl", "transcript.jsonl"} {
+		p := filepath.Join(root, name)
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p
+		}
+	}
+	return ""
 }
 
 // PiSessionFileExists：这条 Pi 会话在盘上还有没有（给宿主的分派口）。

@@ -18,6 +18,24 @@
 .grp{display:flex;align-items:center;gap:6px;padding:9px 12px 5px;
      font-size:11.5px;color:var(--muted);user-select:none}
 .grp .b{margin-left:auto;font:11px/1 var(--mono);color:var(--faint)}
+/* 左栏分组头（2026-10-23）：会话区不是文件夹，项目区才是。两种头共用几何，
+   但会话区用终端图标 + accent 色、没有文件夹菜单，视觉上先分层再读行。 */
+.sect{display:flex;align-items:center;gap:7px;padding:8px 6px 5px 4px;
+      user-select:none;border-radius:var(--r-sm)}
+.sect-ic{flex:none;display:grid;place-items:center;width:15px;height:15px;color:var(--muted)}
+.sect-sessions .sect-ic{color:var(--accent)}
+.sect-nm{font-size:12px;font-weight:600;color:var(--fg);letter-spacing:.01em}
+.sect-sub{font-size:10.5px;color:var(--faint);min-width:0;overflow:hidden;
+          text-overflow:ellipsis;white-space:nowrap}
+.sect-sum{margin-left:auto;font:10.5px/1.4 var(--mono);color:var(--faint);flex:none}
+.sect-acts{display:flex;align-items:center;flex:none}
+.sect-acts .cardbtn{opacity:0;pointer-events:none;transition:opacity .12s ease}
+.sect:hover .sect-acts .cardbtn,
+.sect:focus-within .sect-acts .cardbtn{opacity:1;pointer-events:auto}
+@media (hover:none){.sect .sect-acts .cardbtn{opacity:1;pointer-events:auto}}
+.sect-projects{margin-top:10px;padding-top:10px;border-top:1px solid var(--line-soft)}
+.sect-sep{padding:7px 6px 3px 42px;font-size:10.5px;color:var(--faint);user-select:none}
+.sect-empty{padding:4px 6px 8px 28px;font-size:11.5px;color:var(--faint);line-height:1.5}
 .scroll{overflow-y:auto;overflow-x:hidden;padding:0 8px 12px;min-height:0}
 /* C2 起卡片是 <div role="button">，不再是 <button> —— 里面要塞按钮，
    而 button 不能嵌套 button（HTML 解析器会当场把内层那颗吐到外面去）。
