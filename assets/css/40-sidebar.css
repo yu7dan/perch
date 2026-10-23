@@ -187,6 +187,7 @@
    （flex:0 1 auto + min-width:0 才能真的缩下去；只写 min-width 它照样撑开。） */
 .need .who{font-size:12.5px;font-weight:500;color:var(--fg);flex:0 1 auto;min-width:0}
 .need .why{flex:none;font:10.5px var(--mono);color:var(--ask)}
+.need .go{margin-left:auto;flex:none;font-size:10.5px;color:var(--accent)}
 .need .tx{margin-top:3px;font-size:11.5px;line-height:1.45;color:var(--muted);
           display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .need .tm{font:10.5px/1.7 var(--mono);color:var(--faint);white-space:nowrap}

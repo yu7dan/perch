@@ -1492,7 +1492,8 @@ function needRowHTML(r) {
     <span class="g">${svg(NEED_GLYPH[r.kind] || G_DOT, 12)}</span>
     <span class="m">
       <span class="hd"><span class="who ell">${esc(nm)}</span>
-        <span class="why">${esc(why)}</span></span>
+        <span class="why">${esc(why)}</span>
+        ${r.kind === "login" ? `<span class="go">${esc(t("live.need.loginGo"))} ›</span>` : ""}</span>
       ${r.text ? `<span class="tx">${esc(r.text)}</span>` : ""}
     </span>
     <span class="tm">${rel(r.at)}</span>
