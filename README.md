@@ -8,8 +8,11 @@
 
 Perch is a Windows desktop workspace for agent CLIs: one real terminal per pane, one place to see status, and a local gateway for models.
 
+**[Download the beta](https://github.com/yu7dan/perch/releases)** · Windows 10/11 x64 · macOS support is on the way.
+
 ![Windows 10/11](https://img.shields.io/badge/Windows%2010%2F11-0078D4?logo=windows&logoColor=white)
-![Private beta](https://img.shields.io/badge/private-beta-8A8A8A)
+![macOS coming soon](https://img.shields.io/badge/macOS-coming%20soon-8A8A8A?logo=apple&logoColor=white)
+![Beta](https://img.shields.io/badge/beta-8A8A8A)
 ![Go 1.27+](https://img.shields.io/badge/Go-1.27%2B-00ADD8?logo=go&logoColor=white)
 ![MIT](https://img.shields.io/badge/license-MIT-111111)
 
@@ -73,7 +76,7 @@ Desktop and web clients are outside this list. Any client that accepts a custom 
 
 ## Getting started
 
-Private beta builds are portable zips. Extract the zip, keep `perch.exe` and `perch-hook.exe` together, and run `perch.exe`. The build is unsigned, so Windows SmartScreen may ask you to confirm. See [START-HERE.txt](docs/START-HERE.txt) for the first-run walkthrough (Chinese).
+Beta builds are portable zips. Download the current build from [Releases](https://github.com/yu7dan/perch/releases), or build it yourself. Extract the zip, keep `perch.exe` and `perch-hook.exe` together, and run `perch.exe`. The build is unsigned, so Windows SmartScreen may ask you to confirm. See [START-HERE.txt](docs/START-HERE.txt) for the first-run walkthrough (Chinese).
 
 From source:
 
@@ -105,7 +108,7 @@ More detail: [architecture](docs/ARCHITECTURE.md) · [frontend](docs/FRONTEND.md
 
 ## Beta notes
 
-- Windows 10/11 x64 with the WebView2 Runtime; ConPTY and Job Objects are required.
+- Windows 10/11 x64 with the WebView2 Runtime; ConPTY and Job Objects are required. macOS support is in development.
 - Portable unsigned beta; no installer or code signing yet.
 - Qoder, Copilot, and Cursor use their own sign-in; DeepSeek Harness tool execution is upstream-dependent.
 - Agent installers and the magpie engine are downloaded from their official sources; neither is bundled in the zip. Agent installers run only after you click Install.
