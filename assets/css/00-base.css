@@ -148,7 +148,7 @@ svg{display:block;flex:none}
    =========================================================================== */
 :root{--titlebar-h:36px;--rail-w:132px}
 #titlebar{grid-area:tb;height:var(--titlebar-h);display:flex;align-items:stretch;
-          position:relative;/* #dash-tabs（绝对居中）的定位基准 */
+          position:relative;
           background:var(--side);border-bottom:1px solid var(--line-soft);
           user-select:none;--wails-draggable:drag}
 /* 左段宽度 = 导航栏 132px，地面同色，右缝与 #rail 的 border-right 对齐
@@ -166,9 +166,12 @@ svg{display:block;flex:none}
                    width:34px;height:34px;max-width:none;display:block;
                    object-fit:contain;user-select:none;-webkit-user-drag:none}
 .tb-rail .tb-name{font-weight:600;font-size:13px;letter-spacing:.2px}
-/* 中段宽度 = 会话列表 240px，地面同色 */
-.tb-list{width:240px;flex:none;background:var(--side);
-         border-right:1px solid var(--line-soft)}
+/* 中段宽度 = 会话列表那一列。⚠️ 2026-10-23：原来写死 240px，用户把
+   #list-divider 往右拖之后，下面列表变宽、上面标题栏的缝却还在 240 ——
+   「并行」页签于是不跟着终端面板走。这里必须和 #app 的第二列用**同一个**
+   --list-w；border 也换成缝的颜色（--divider-line），让上下两条线连成一条。 */
+.tb-list{width:var(--list-w);flex:none;background:var(--side);
+         border-right:1px solid var(--divider-line)}
 /* C6a：标题栏在右栏那一列上的切片。地面同色（--side），所以收起时它看起来
    就是标题栏自己延长过去 —— 不会有"少了一格"的缝。 */
 .tb-rsb{width:var(--rsb-w);flex:none;background:var(--side)}
@@ -190,7 +193,7 @@ svg{display:block;flex:none}
 /* 交互子元素必须显式 no-drag：`--wails-draggable` 是**继承**属性，
    不写的话它们会跟着标题栏一起变成拖拽区，点不动。 */
 #titlebar .tab,#titlebar .tab-add,#titlebar .tabs-right,
-#titlebar .icon-btn,#titlebar .segs{--wails-draggable:no-drag}
+#titlebar .icon-btn{--wails-draggable:no-drag}
 
 /* ---------------------------------------------------------------------------
    三个窗口按钮 —— 复刻 Windows 11 原生 caption 按钮

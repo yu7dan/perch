@@ -100,6 +100,9 @@
 .settings-lab{min-width:0;flex:1}
 .settings-lab b{display:block;font-size:13px;font-weight:550;color:var(--fg2)}
 .settings-lab span{display:block;margin-top:3px;font-size:12px;line-height:1.6;color:var(--faint)}
+/* 版本号是上面那条说明里的**行内值**，不能被 `.settings-lab span` 的
+   display:block 折成三段（首版实测：Perch / 0.1.0-dev / · 各占一行）。 */
+.settings-lab #set-version{display:inline;margin:0;font-variant-numeric:tabular-nums;color:var(--fg2)}
 .settings-ctl{flex:none;display:flex;align-items:center;justify-content:flex-end;min-width:0}
 .settings-foot{margin:30px 2px 0;font-size:11px;line-height:1.7;color:var(--faint)}
 .settings-foot code{font:11px var(--mono);color:var(--muted);background:rgba(255,255,255,.05);

@@ -13,13 +13,11 @@ package agentcatalog
 // Recipe 是一个 agent 的 Windows 安装配方。
 //   - Script：直接交给 PowerShell 的脚本（官方 irm ... | iex）
 //   - NPM：先确保 Node.js，再 npm i -g Pkg
-//   - NeedsGit：Kimi Code 的官方要求（Git for Windows）
 type Recipe struct {
-	Source   string // 页面里显示给用户的来源（命令或包名）
-	Script   string
-	NPM      bool
-	Pkg      string
-	NeedsGit bool
+	Source string // 页面里显示给用户的来源（命令或包名）
+	Script string
+	NPM    bool
+	Pkg    string
 }
 
 // Recipes 只装 CLI：官方 CLI 安装脚本，或 npm 包的 bin。
@@ -63,35 +61,15 @@ if (-not (Test-Path $dshTui)) { throw 'dsh-tui.cmd 没有出现：npm 安装可�
 		Source: `irm 'https://cursor.com/install?win32=true' | iex`,
 		Script: `irm 'https://cursor.com/install?win32=true' | iex`,
 	},
-	"codebuddy": {
-		Source: `npm install -g @tencent-ai/codebuddy-code`,
-		NPM:    true, Pkg: "@tencent-ai/codebuddy-code",
-	},
-	"kimi": {
-		Source:   `irm https://code.kimi.com/kimi-code/install.ps1 | iex`,
-		Script:   `irm https://code.kimi.com/kimi-code/install.ps1 | iex`,
-		NeedsGit: true,
-	},
-	"muse": {
-		// 2026-09 起官方提供原生 Windows 安装脚本：%LOCALAPPDATA%\Programs\muse\muse.cmd
-		Source: `irm https://dev.meta.ai/install.ps1 | iex`,
-		Script: `irm https://dev.meta.ai/install.ps1 | iex`,
-	},
-	"gemini": {
-		Source: `npm install -g @google/gemini-cli`,
-		NPM:    true, Pkg: "@google/gemini-cli",
-	},
 	"copilot": {
 		Source: `npm install -g @github/copilot`,
 		NPM:    true, Pkg: "@github/copilot",
 	},
-	"qwen": {
-		Source: `npm install -g @qwen-code/qwen-code`,
-		NPM:    true, Pkg: "@qwen-code/qwen-code",
-	},
-	"crush": {
-		Source: `npm install -g @charmland/crush`,
-		NPM:    true, Pkg: "@charmland/crush",
+	"qoder": {
+		// 官方推荐的原生安装脚本；它装的是 qodercli 原生可执行文件，
+		// 比 npm 版启动快，和 magpie 的 qodercli 探测也对得上。
+		Source: `irm https://qoder.com/install.ps1 | iex`,
+		Script: `irm https://qoder.com/install.ps1 | iex`,
 	},
 	// 网关本体（不是 agent，但用户 2026-10-17 定的规则一样："下载"要真的下载）。
 	// 2026-10-18 换成官方 feed：它同时给出各资产的 URL 与 SHA-256，而且

@@ -22,9 +22,14 @@
 | Cascadia Code / Cascadia Mono | 界面等宽字体 | SIL OFL 1.1 | `licenses/OFL-1.1.txt` |
 | JetBrains Mono | 终端等宽字体 | SIL OFL 1.1 | `licenses/OFL-1.1.txt` |
 | Geist | 界面无衬线字体 | SIL OFL 1.1 | `licenses/OFL-1.1.txt` |
+| [magpie](https://github.com/yetone/magpie) 网关引擎 | 本地网关（**首次运行时**从官方源下载，不随包分发） | MIT | `licenses/MIT-magpie.txt` |
 
 ⚠️ 发布**二进制**时，上面这些许可的全文要一并带上（OFL 明确要求随字体分发许可；
 MIT 要求保留版权声明与许可文本）。源码仓库里它们已经在 `licenses/` 下。
+`scripts/package.ps1` 打包时会连同 `licenses/` 一起复制。
+
+Perch 本身不做遥测；网关的模型请求只发往用户在网关里配置的供应商。
+下载的 magpie 引擎是独立进程，它的网络行为以 magpie 自己的发行说明为准。
 
 `assets/vendor/` 里的第三方 JS 保持上游原样分发；上游包未附带 source map，本仓库也不分发。
 `addon-image.js` 的 banner 指向的 `addon-image.js.LICENSE.txt` 原先没有随包发布，

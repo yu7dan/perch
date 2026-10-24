@@ -1,0 +1,119 @@
+package agentprofile
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestSetStoreRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sets.json")
+	s := LoadSets(path)
+	if got := s.List(); len(got) != 0 {
+		t.Fatalf("new store has %d sets", len(got))
+	}
+	agents := []Profile{
+		{Agent: "claude", Alias: "group/perch-claude", Model: "workbuddy/glm-5.3", Effort: "high"},
+		{Agent: "codex", Alias: "group/perch-codex", Model: "deepseek/deepseek-flash"},
+	}
+	if err := s.Save("写代码", agents); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := s.Get("写代码")
+	if !ok || len(got) != 2 || got[0].Effort != "high" {
+		t.Fatalf("get=%+v ok=%v", got, ok)
+	}
+	// A new Store reads the same file, so a restart keeps the set.
+	s2 := LoadSets(path)
+	list := s2.List()
+	if len(list) != 1 || list[0].Name != "写代码" || len(list[0].Agents) != 2 {
+		t.Fatalf("reloaded=%+v", list)
+	}
+	if err := s2.Delete("写代码"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s2.Get("写代码"); ok {
+		t.Fatal("deleted set still there")
+	}
+	if err := s2.Delete("不存在"); err != nil {
+		t.Fatalf("delete missing: %v", err)
+	}
+}
+
+func TestStoreTiers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	s := Load(path)
+	if _, err := s.SetTier("claude", "opus", "workbuddy/glm-5.3", "high"); err == nil {
+		t.Fatal("tier set without a main model accepted")
+	}
+	if err := s.Set(Profile{Agent: "claude", Alias: "group/perch-claude", Model: "deepseek/deepseek-flash", Effort: "low"}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.SetTier("claude", "opus", "workbuddy/glm-5.3", "high")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Tiers["opus"].Model != "workbuddy/glm-5.3" || p.Tiers["opus"].Effort != "high" {
+		t.Fatalf("tiers=%+v", p.Tiers)
+	}
+	// Reload keeps it, and clearing one tier leaves the main profile.
+	s2 := Load(path)
+	got, _ := s2.Get("claude")
+	if got.Tiers["opus"].Model != "workbuddy/glm-5.3" {
+		t.Fatalf("reloaded tiers=%+v", got.Tiers)
+	}
+	got, err = s2.SetTier("claude", "opus", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Tiers) != 0 || got.Model != "deepseek/deepseek-flash" {
+		t.Fatalf("after clear=%+v", got)
+	}
+}
+
+func TestStoreHiddenModels(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	s := Load(path)
+	if _, err := s.SetHidden("claude", []string{"x"}); err == nil {
+		t.Fatal("hidden set without a main model accepted")
+	}
+	if err := s.Set(Profile{Agent: "claude", Model: "deepseek/deepseek-flash"}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.SetHidden("claude", []string{"a/b", " a/b ", "", "c/d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Hidden) != 2 || p.Hidden[0] != "a/b" || p.Hidden[1] != "c/d" {
+		t.Fatalf("hidden=%v", p.Hidden)
+	}
+	s2 := Load(path)
+	got, _ := s2.Get("claude")
+	if len(got.Hidden) != 2 {
+		t.Fatalf("reloaded hidden=%v", got.Hidden)
+	}
+	got, err = s2.SetHidden("claude", nil)
+	if err != nil || len(got.Hidden) != 0 {
+		t.Fatalf("clear hidden=%v err=%v", got.Hidden, err)
+	}
+}
+
+func TestSetStoreRejectsBadNamesAndEmpty(t *testing.T) {
+	s := LoadSets(filepath.Join(t.TempDir(), "sets.json"))
+	if err := s.Save("  ", []Profile{{Agent: "claude", Model: "x"}}); err == nil {
+		t.Fatal("empty name accepted")
+	}
+	if err := s.Save("empty", nil); err == nil {
+		t.Fatal("empty set accepted")
+	}
+	long := make([]byte, 61)
+	for i := range long {
+		long[i] = 'a'
+	}
+	if err := s.Save(string(long), []Profile{{Agent: "claude", Model: "x"}}); err == nil {
+		t.Fatal("long name accepted")
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(s.path), "sets.json")); !os.IsNotExist(err) {
+		t.Fatalf("rejected saves wrote the file: %v", err)
+	}
+}

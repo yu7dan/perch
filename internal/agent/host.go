@@ -21,6 +21,23 @@ type Host interface {
 	// 只有把网关地址/密钥放在环境变量里的 agent（目前是 agy）才会用到；
 	// 没接线、没读到、或形状不认识时返回 ok=false，启动仍走通用路径。
 	WireLaunch(id string) (env map[string]string, args []string, ok bool)
+	// EngineHomeEnv 返回隔离引擎的沙盒用户目录（USERPROFILE/HOME/XDG_*）。
+	// 非隔离模式返回 nil；由 Perch 直接起、但配置由引擎管理的 agent 用它
+	// 与引擎读同一份配置。
+	EngineHomeEnv() map[string]string
+	// EngineHomeEnvFor 只给“当前确实已接入引擎网关”的通用 agent 返回沙盒
+	// 环境；未接入/非隔离时返回 nil，让它继续读用户自己的配置。
+	EngineHomeEnvFor(id string) map[string]string
+	// HookSettings 造一份 Claude 形状的 hooks 配置（含本格的事件文件路径）。
+	// Qoder 用 --settings 接这份配置；它和 Claude 一样是**合并**，不碰用户文件。
+	HookSettings(tag string) string
+	// NoteActivity 记下这一格真的有对话。OpenCode/Pi 这类没有 Claude 形状
+	// hooks 的 agent，关格时后端只能靠它区分“空开合”和“说过话的已关闭”。
+	NoteActivity(tabID int, spoke bool)
+	// ResumeSessionOf 返回这一格**启动时请求接上的**会话 id（exact/fork）。
+	// OpenCode 冷恢复时 TUI 回到那条会话但 active 可能还是空的；流水得先按
+	// 这个 id 去读历史，不能等用户再发一条提示才长出来。
+	ResumeSessionOf(tabID int) string
 }
 
 var host Host = defaultHost{}
@@ -45,6 +62,11 @@ func (defaultHost) Push(any)                             {}
 func (defaultHost) WireLaunch(string) (map[string]string, []string, bool) {
 	return nil, nil, false
 }
+func (defaultHost) EngineHomeEnv() map[string]string          { return nil }
+func (defaultHost) EngineHomeEnvFor(string) map[string]string { return nil }
+func (defaultHost) HookSettings(string) string                { return "" }
+func (defaultHost) NoteActivity(int, bool)                    {}
+func (defaultHost) ResumeSessionOf(int) string                { return "" }
 
 func (defaultHost) ResolveExe(bin string) (string, []string) {
 	bin = strings.TrimSpace(bin)

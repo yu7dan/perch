@@ -96,10 +96,14 @@ func (m *Manager) SessionFileExists(id string) bool {
 // Claude 的判据原样保留（projects/<slug>/<id>.jsonl），别的 agent 各问各的盘。
 func (m *Manager) SessionFileExistsFor(agentName, cwd, id string) bool {
 	switch agentName {
-	case "pi", "codex":
+	case "claude":
+		return m.SessionFileExists(id)
+	case "pi", "codex", "qoder", "copilot", "dsh", "cursor", "agy", "opencode":
 		return agent.SessionFileExistsFor(agentName, cwd, id)
 	}
-	return m.SessionFileExists(id)
+	// 未知 agent 没有证据 —— 按“没有可续文件”说真话，不拿 Claude 的
+	// projects\ 目录去误判。
+	return false
 }
 
 func (m *Manager) alive(pid int) bool {

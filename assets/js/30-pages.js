@@ -160,9 +160,11 @@ $("termbody").addEventListener("pointerdown", (e) => {
   // （点在输入框本身上面那条已经挡掉了，这条挡的是头两侧的空白。）
   if (tabEditing && renameTab === t) return;
   dragState = { t, x0: e.clientX, y0: e.clientY, on: false, ghost: null, head: el };
-  // 捕获：指针拖到标签条上之后（早就不在这一格头顶了），move/up 仍然送回这里 ——
-  // 少了这一条，抬手事件会落到别的元素上，拖拽永远收不了尾。
-  try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+  // ⚠️ 捕获**不能在这里**做。pointerdown 就 setPointerCapture 之后，指针捕获会把
+  // 随后的 click 目标改写成 #termbody —— #termbody 的 click 处理器于是
+  // `closest(".cell")` 找不到这一格，**点格子头切当前格**静默失效（实测：
+  // 点头部哪一行都不换右栏，只有点终端正文才换）。捕获推迟到真正拖起来那一帧
+  // （见 pointermove 的 d.on = true），单击仍然是普通的 click。
 });
 $("termbody").addEventListener("pointermove", (e) => {
   const d = dragState;
@@ -179,6 +181,9 @@ $("termbody").addEventListener("pointermove", (e) => {
       return;
     }
     d.on = true;
+    // 真正开始拖了才捕获：指针要能离开这一格的头（拖到标签条）还继续收到
+    // move/up；单击不捕获，click 目标才不会丢（见 pointerdown 那条）。
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
     d.ghost = makeGhost(d.t);
     d.head.classList.add("dragging");
     // 探针：拖拽是**纯手势**，日志里没有它的话，"页面是怎么来的"就只剩结果了。
@@ -249,7 +254,22 @@ function setActive(t) {
      判据就是"当前终端还没接上"。不放宽的话这一格永远不活：用户点它 → 走这句话 →
      直接返回（activeTab 还是它），于是焦点/尺寸/term 一样都补不上，
      往里打字是打给 null 的。 */
-  if (!t || (activeTab === t && term === t.term)) return;
+  /* 零格：把"当前格"真的清掉。旧代码对 null 直接 return，于是关掉最后一格
+     之后 activeTab 还挂着那个已经不在 TAB_LIST 里的对象 —— 右栏继续写着
+     "当前 agent π - Perch"、几个模块继续读它的旧流水，和空态并存。 */
+  if (!t) {
+    if (activeTab) {
+      activeTab.host.removeAttribute("id");
+      activeTab.cellEl.classList.remove("cur");
+      activeTab.tabEl.classList.remove("on");
+    }
+    activeTab = null;
+    term = null;
+    scheduleLive();
+    sendCtrl({ type: "log", msg: `setActive tab=0（并行区已空）` });
+    return;
+  }
+  if (activeTab === t && term === t.term) return;
   if (activeTab) {
     activeTab.host.removeAttribute("id");   // #termhost 永远只属于当前格
     activeTab.cellEl.classList.remove("cur");
@@ -283,8 +303,9 @@ function setActive(t) {
 // 关掉一个格子：关掉它的 stream，Go 那边 Receive 失败就 return，
 // defer 里会把 PTY 收掉、把 handler 从表里删掉（main.go handleTab）。
 /* 两种"用户点名"的关闭，语义**不同**（用户 2026-10-17 定的）：
-     `opts.close`   点格子头的 × = 关掉运行、**留着这个 agent**（发 `pane.close`，
-                     记录打 closed；重启不自动拉起，左栏列成「已关闭」）；
+     `opts.close`   点格子头的 × = 关掉运行；发过提示的格子记录打 closed，
+                     重启不自动拉起、左栏列成「已关闭」；从没发过提示的空开合
+                     由 Go 直接摘记录（`pane.closed kept=false` 撤回那一行）；
      `opts.forget`  左栏「结束这个 agent」= 不要它了（发 `pane.forget`，唯一删记录的路）。
    —— 见 main.go 的 tabs.drop 那段：流断了、进程挂了、窗口关了都**不许动记录**，
    那些只说明"它现在不在跑"，不说明"我不要它了"。
@@ -527,6 +548,15 @@ function defaultAgentId() {
 function defaultSpawnSpec() {
   return Object.assign({}, DEFAULT_SPAWN_SPEC, { agent: defaultAgentId() });
 }
+/* 启动时的默认格：**没有可启动的 agent 就不开**。
+   干净机器上目录/登记表都是空的，此时开一个 claude 格只会立刻失败；
+   正确的首屏是空态 + 安装入口，而不是一个报错的幽灵格。
+   名单还没到（cat 为空）时保持旧行为 —— 那是旧载荷/探测失败，不是“没装”。 */
+function defaultBootSpec() {
+  const cat = opCatalog();
+  if (cat.length && !cat.some(opLaunchable)) return null;
+  return defaultSpawnSpec();
+}
 function opCapsText(a) {
   const c = (a && a.caps) || {};
   const parts = [];
@@ -753,12 +783,12 @@ function closeAgentPanel(why) {
   if (why) sendCtrl({ type: "log", msg: `选择面板 关闭（${why}）` });
 }
 
-function openAgentPanel(why) {
+function openAgentPanel(why, opts) {
   const panel = $("openpanel");
   if (panel.classList.contains("on")) { closeAgentPanel("再点一次 +"); return; }
   opTab = "new";
   opAllWs = false;
-  opWSPath = currentWorkspacePath();
+  opWSPath = (opts && opts.folder) || currentWorkspacePath();
   // 默认预选（用户定的形态）：每次打开都回到默认，不记上一次选过谁。
   opAgent = defaultAgentId();
   $("op-search").value = "";
@@ -796,7 +826,10 @@ async function opNewAgent() {
       `选择面板 新会话：没有可启动的 Agent（opAgent=${opAgent || "空"}），不发建格` });
     return;
   }
-  const dir = opWSPath;
+  /* 默认会话区：发**空 cwd**，让 Go 给这一格分配独立目录
+     （Documents\Perch\sessions\<date>-<agent>-<pane>）。发默认目录本身
+     会让所有会话又挤回同一个文件夹 —— 那正是这次 IA 要修的事。 */
+  const dir = (opWSPath && opWSPath === defaultAreaPath()) ? "" : opWSPath;
   closeAgentPanel("新会话");
   sendCtrl({ type: "log", msg: `选择面板 新会话 agent=${a.id} cwd=${dir || "(默认)"}` });
   await newTabIn(dir, "选择面板 新会话", a.id);

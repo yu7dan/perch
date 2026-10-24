@@ -164,7 +164,9 @@ function renderNav() {
    （`g-proj` 那个 id 是列表标题上那枚数的旧落点，现在没有那个元素了 ——
    元素在就写、不在就算了，所以这里仍然两个 id 都写一遍。） */
 function syncCounts() {
-  const n = (STATE?.projects || []).length;
+  // 「工作区」这个数只数**用户自己的项目**：默认会话区不是文件夹，合成条目
+  // 不该被算成"第 1 个工作区"（用户 2026-10-23 点名的混淆来源之一）。
+  const n = (STATE?.projects || []).filter((p) => !p.synthetic).length;
   for (const id of ["nav-cnt-ws", "g-proj"]) {
     const el = $(id);
     if (el) el.textContent = n;
@@ -242,15 +244,36 @@ function insidePath(child, parent) {
   const c = normPath(child), k = normPath(parent);
   return !!c && !!k && (c === k || c.startsWith(k + "\\"));
 }
+function defaultAreaPath() {
+  return (STATE?.projects || []).find((x) => x.synthetic)?.path || "";
+}
+/* 一个 cwd **只属于一个**工作区：嵌套项目取最长前缀，默认会话区收下其余
+   落在默认目录里的 cwd，剩下的才是未归类。
+   为什么不让“所有祖先都算”：父目录（尤其默认目录）会把子项目里的 agent
+   再数一遍 —— 同一个 agent 在两行里出现，两边的数字也都偏大。 */
+function ownerProjectPath(cwd) {
+  const raw = String(cwd || "").trim();
+  const p = raw || defaultAreaPath();
+  if (!p) return "";
+  let best = "", bestLen = -1;
+  for (const pr of STATE?.projects || []) {
+    if (pr.synthetic || !pr.path) continue;
+    if (!insidePath(p, pr.path)) continue;
+    const n = normPath(pr.path).length;
+    if (n > bestLen) { best = pr.path; bestLen = n; }
+  }
+  if (best) return best;
+  const def = defaultAreaPath();
+  if (def && insidePath(p, def)) return def;
+  return "";
+}
 function tabsInProject(p) {
   const path = typeof p === "string" ? p : (p && p.path);
   /* ⚠️ 格的 `spec.cwd` 可能是**空串**（= "没指定目录"），而那种格实际落在
      **默认工作区**里（Go 那边只有一处答案，见 defaultCWD）。
-     所以空串要在这里映射成默认工作区的路径 —— 不映射的话，默认工作区那一行
-     会永远写着"0 会话 / 没有格在跑"，而格子明明就在它里面跑
-     （它自己的会话行又会出现在别处，看着像两件事，其实是同一件）。 */
-  const defPath = (STATE?.projects || []).find((x) => x.synthetic)?.path || "";
-  return TAB_LIST.filter((t) => t.id > 0 && insidePath((t.spec && t.spec.cwd) || defPath, path));
+     ownerProjectPath 会把空串映射成默认目录，并保证只归属一条路径。 */
+  return TAB_LIST.filter((t) =>
+    t.id > 0 && normPath(ownerProjectPath((t.spec && t.spec.cwd) || "")) === normPath(path));
 }
 // 一组格子里**最该被看见的那个态**（attention-first，表用群组那一张 —— 同一份
 // 排序不能在两处各写一遍）。
@@ -650,16 +673,68 @@ function sessMatch(s, key) {
     .toLowerCase().includes(key);
 }
 
+/* 默认会话区（2026-10-23 用户定的 IA）：
+     · 它不是文件夹，也不该长成项目行 —— 图标是终端，没有文件夹菜单；
+     · 每个新格一个独立目录（Go 侧 defaultSessionDir），这里只按目录把
+       "新会话"和"旧默认目录里的历史记录"分开呈现；
+     · 旧记录**不迁移文件**，只标成 legacy 一组。
+   它排在项目之前：用户没挑项目时，默认落点就是这里。 */
+function sessionSectionHTML(defPath, tabs, closed, total) {
+  const root = normPath(defPath) + "\\sessions\\";
+  const isNew = (cwd) => normPath(cwd || "").startsWith(root);
+  const nt = [], lt = [], nc = [], lc = [];
+  for (const t of tabs) (isNew(effCwd(t)) ? nt : lt).push(t);
+  for (const r of closed) (isNew(r.cwd) ? nc : lc).push(r);
+  const sum = tCount("shell.proj.sum", total);
+  let body = "";
+  if (nt.length || nc.length) {
+    body += agentRowsHTML(nt, defPath + "\\sessions", "sessions", nc, true);
+  }
+  if (lt.length || lc.length) {
+    body += `<div class="sect-sep">${esc(t("list.sessions.legacy"))}</div>`;
+    body += agentRowsHTML(lt, defPath, "sessions-legacy", lc, true);
+  }
+  if (!body) body = `<div class="sect-empty">${esc(t("list.sessions.empty"))}</div>`;
+  return `<div class="sect sect-sessions" data-path="${esc(defPath)}" data-n="${total}">`
+    + `<span class="sect-ic">${lucide(LIST_ICON.term, 15)}</span>`
+    + `<span class="sect-nm">${esc(t("list.sessions"))}</span>`
+    + `<span class="sect-sub">${esc(t("list.sessions.sub"))}</span>`
+    + `<span class="sect-sum">${esc(sum)}</span>`
+    + `<span class="sect-acts"><button class="cardbtn" data-pact="new-session"`
+    + ` title="${esc(t("list.sessions.newTitle", { tip: newAgentShortcutTip() }))}">${ICON_PLUS}</button></span>`
+    + `</div>${body}`;
+}
+
 /* 左栏的内容 = **agent**（一行一格），按 `spec.cwd` 归属到工作区。
    ⚠️ 这里**不再读 `STATE.sessions` / `STATE.assign`**：会话不再是界面实体
    （见上面"行的 HTML"那一大段）。归属判定只有 `tabsInProject` 一处，
    Go 那边数的是会话库 —— 两条不再是同一条不变量，别再拿它们往一起对。 */
 function renderWorkspaceView(key) {
   const projs = STATE?.projects || [];
+  const defPath = defaultAreaPath();
+  const realProjs = projs.filter((p) => !p.synthetic);
   const used = new Set();
   const usedClosed = new Set();
+  let html = "";
+
+  /* ① 会话区（非文件夹）—— 默认落点。新会话按独立目录，旧记录单列。 */
+  if (defPath) {
+    const mine = tabsInProject(defPath);
+    const cmine = closedInProject(defPath);
+    mine.forEach((t) => used.add(t.id));
+    cmine.forEach((r) => usedClosed.add(r.paneId));
+    const selfHit = !key || `${t("list.sessions")} ${t("list.sessions.sub")} ${defPath}`
+      .toLowerCase().includes(key);
+    const shown = (key && !selfHit) ? mine.filter((t) => tabMatch(t, key)) : mine;
+    const shownClosed = (key && !selfHit) ? cmine.filter((r) => closedMatch(r, key)) : cmine;
+    if (!key || selfHit || shown.length || shownClosed.length) {
+      html += sessionSectionHTML(defPath, shown, shownClosed, mine.length + cmine.length);
+    }
+  }
+
+  /* ② 项目（用户自己的文件夹）。这一层才是"文件夹行"，带 + / ⋯。 */
   const rows = [];
-  for (const p of projs) {
+  for (const p of realProjs) {
     const mine = tabsInProject(p.path);
     const cmine = closedInProject(p.path);
     // `used` 收的是**归属已定**的格（哪怕搜索把它藏起来了）—— 否则搜索时
@@ -676,14 +751,16 @@ function renderWorkspaceView(key) {
     // 已关闭的 agent 也算（关格 ≠ 删，它们仍然是这个工作区的 agent）。
     rows.push(projRowHTML(p, shown, "proj", mine.length + cmine.length, shownClosed, !!key));
   }
-  /* ⚠️ 空态**不能**再用"行数 == 0"判：默认工作区是 Go 合成的、永远在，
-     所以池子空着的时候也有一行 —— 那颗「添加项目」会再也不出现（首启的
-     第一屏就会变成"只有一行默认工作区"）。判据改成"有没有用户自己的项目"：
-     一个都没有就把那段说明和那颗键放在默认工作区**上面**。 */
-  const anyReal = projs.some((p) => !p.synthetic);
-  const rowsHTML = rows.join("");
-  const empty = rowsHTML ? (anyReal ? "" : poolEmptyHTML("")) : poolEmptyHTML(key);
-  $("proj-list").innerHTML = empty + rowsHTML;
+  if (realProjs.length && (rows.length || !key)) {
+    html += `<div class="sect sect-projects"><span class="sect-ic">${lucide(LIST_ICON.folder, 15)}</span>`
+      + `<span class="sect-nm">${esc(t("list.projects"))}</span>`
+      + `<span class="sect-sum">${realProjs.length}</span></div>`;
+  }
+  /* ⚠️ 空态判据是"有没有用户自己的项目"，不是"行数 == 0"：默认会话区
+     永远在，拿行数判会让「添加项目」再也不出现。 */
+  if (!realProjs.length) html += poolEmptyHTML(key);
+  html += rows.join("");
+  $("proj-list").innerHTML = html;
 
   // 未归类：**不在任何项目目录里的 agent**，按生效 cwd 分组（和 tabsInProject
   // 同一套判据：空串 = 默认工作区，那里已经归过一遍了）。
@@ -811,6 +888,14 @@ function renderProjLive() {
     if (sum) sum.textContent = `${n} agent`;
     el.dataset.n = String(n);
   }
+  // ①b 会话区头：它不是 .proj（没有文件夹语义），但 agent 数要跟着活数据走。
+  for (const el of document.querySelectorAll("#proj-list .sect-sessions")) {
+    const path = el.dataset.path || "";
+    const n = tabsInProject(path).length + closedInProject(path).length;
+    const sum = el.querySelector(".sect-sum");
+    if (sum) sum.textContent = tCount("shell.proj.sum", n);
+    el.dataset.n = String(n);
+  }
   // ② agent 行：**就地补**（每 400–700ms 就可能来一次，整表重建会杀 hover、
   //    滚动位置和正在编辑的名字框）。只有"行的形状"变了才整行换一次 ——
   //    停/跑切换会多出/收回那颗 ▶，时间从无到有会多出一个 `.tm`。
@@ -846,6 +931,7 @@ function renderProjLive() {
       if (tm.textContent !== r) tm.textContent = r;
     }
   }
+  if (typeof renderTermEmpty === "function") renderTermEmpty();
 }
 
 // ---------------------------------------------------------------------------
@@ -1142,6 +1228,11 @@ async function endAgent(tab) { // 参数别叫 t：会遮住 i18n 的 t()
    （要先把壳收掉），这条路连壳都没有 —— 关格那一刻就收掉了。 */
 async function resumeClosedPane(r) {
   if (!r || r.busy) return;
+  if (r.closing) {
+    showToast(t("shell.closed.closingTitle"), t("shell.closed.closingNote"), "info");
+    sendCtrl({ type: "log", msg: `已关闭的 agent 还在等 pane.closed 判决，先不接 pane=${r.paneId}` });
+    return;
+  }
   /* 已经知道接不上（盘上没有会话文件）：**别装作试一下**，直接把原因和出路
      说清楚。用户最容易困惑的正是这一下 —— "点了没反应/报个看不懂的错"。 */
   if (closedUnresumable(r)) {
@@ -1679,6 +1770,7 @@ function onLeftClick(e) {
     else if (what === "add") openNewSpace({ why: "空态「添加项目」" });
     else if (what === "adopt") adoptDir(row?.dataset.path || "");
     else if (what === "new") openNewSpace({ folder: row?.dataset.path || "", why: "左栏项目 +" });
+    else if (what === "new-session") openAgentPanel("会话区 +", { folder: defaultAreaPath() });
     return;
   }
   /* agent 行行尾的两颗（停了才有的 ▶ / 常驻 ⋯，2026-10-17）。
@@ -1933,9 +2025,9 @@ function renderShell() {
     // （我第一次还探成了 `#tablist .tab` = 「并行」那张页标签，它根本没有 ×，
     //   报回来是 `关=无`。格子头上的 × 才是"结束这个 agent"，见 :2963 那段。）
     bootFact(`标签条 加号=${box($("tab-add"))} 并行页=${box($("tab-parallel"))}`);
-    /* 顶栏模块切换的**命中读数**（2026-10-17 搬进窗口顶栏时加）：这个控件在
-       标题栏的拖拽区里，位置/尺寸/命中元素/继承到的 --wails-draggable 全都是
-       "截图看着对、点了没反应"时唯一能说清问题的字节证据。 */
+    /* 总览页头「面板 / 网关」切换的**命中读数**：位置/尺寸/命中元素/继承到的
+       --wails-draggable 全都是"截图看着对、点了没反应"时唯一能说清问题的字节证据。
+       2026-10-22 起它从窗口标题栏搬进了总览页头，不再依赖标题栏的拖拽区。 */
     {
       const seg = $("dash-tabs");
       const r = seg.getBoundingClientRect();
@@ -1943,7 +2035,7 @@ function renderShell() {
       const hit = document.elementFromPoint(cx, cy);
       const cs = hit ? getComputedStyle(hit) : null;
       const on = seg.querySelector(".on");
-      bootFact(`顶栏切换 ${box(seg)} 中心命中=${hit ? hit.tagName + (hit.id ? "#" + hit.id : "") : "无"}` +
+      bootFact(`面板切换 ${box(seg)} 中心命中=${hit ? hit.tagName + (hit.id ? "#" + hit.id : "") : "无"}` +
         ` drag=${cs ? JSON.stringify(cs.getPropertyValue("--wails-draggable").trim()) : "?"}` +
         ` 活动项=${on ? on.textContent : "无"} 白片=${box(seg.querySelector(":scope > .thumb"))}`);
     }

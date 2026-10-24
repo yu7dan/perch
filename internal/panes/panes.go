@@ -39,7 +39,10 @@ package panes
         左栏，点一下在原座位接上）；只有「结束这个 agent」才发 forget。
         格子因为别的原因消失（进程挂了、流断了、窗口关了）**一行都不许动** ——
         "记录是证据，不是垃圾"（Orca ③）。
-        ⚠️ 只有一条窄到不能再窄的例外：冷恢复时发现**两条记录指着同一条会话**
+        ⚠️ 唯一的例外是**空开合**：关格时这一格从没发过提示（`Talked` 与
+        `Spoke` 都为 false），没有会话可续，记录直接摘掉 —— 别让一次打开/
+        关闭在左栏留下一条「已关闭」幽灵。
+        ⚠️ 另一条例外是冷恢复时发现**两条记录指着同一条会话**
         （见 RestorePlan / pruneDup）。那不是"证据"，是一份自相矛盾的记录 ——
         同一条会话不可能同时被两格接上，留着它等于每次重启都重新判定一个
         永远不会被认领的座位。除它之外，任何"顺手清理"都是错的。
@@ -90,6 +93,12 @@ type Pane struct {
 	// session"）—— 而我们的文件恰恰在那时**不在**，所以只能在这里记一笔。
 	// 写它的是会话 hook 的 Stop/StopFailure（那是"一轮跑完"的官方信号）。
 	Spoke bool `json:"spoke,omitempty"`
+	// Talked：用户**至少发过一条提示**。它比 Spoke 早（Spoke 要等一轮跑完），
+	// 用来决定“关掉这一格时记录还值不值得留”：
+	//   · 从没发过提示的格子 = 只是一次打开/关闭，没有内容可续；
+	//   · 发过提示但这一轮还没跑完（甚至失败了）的格子 = 有会话，必须留。
+	// 老记录没有这个字段时按 Spoke 兼容（见 Close / RestorePlan）。
+	Talked bool `json:"talked,omitempty"`
 	// MismatchAt：**续接落空**时的那一笔（"我请求的是 X、实际来的是 Y"）。
 	// 留在记录里而不是只打一行日志：下一条记录要能看出"这一格上次没接上"，
 	// 而日志是会滚掉的。写它的是续接证据规则（步 5）。
@@ -160,6 +169,12 @@ type Store struct {
 	// forgetting：**本次**写入是 forget 触发的 —— 只有它允许把记录数写成 0
 	// （见 writeLocked 里那条断言）。
 	forgetting bool
+
+	// SessionExists 由组合根注入：判断一条会话在盘上还在不在。
+	// Close 用它区分“有 session id 但零轮次”（没有文件，记录该摘）和
+	// “真的跑过、有文件”（保留，左栏可以接回）。nil = 不知道，按有 id
+	// 就保留（宁可多留一条可解释的「接不上」，也不误删对话记录）。
+	SessionExists func(agent, cwd, id string) bool
 }
 
 // Load 读登记表。四条出口：
@@ -363,37 +378,6 @@ func (p *Store) Forget(id int, why string) bool {
 	return true
 }
 
-/*
-MarkClosed 记下"用户把这一格关了、但没说要结束这个 agent"（× 那条路）。
-
-	和 Forget 的区别是本轮的核心约定：
-	  MarkClosed  记录还在（Closed:true），重启**不自动拉起**，左栏列出「已关闭」；
-	  Forget      记录没了，重启连这一行都不出现。
-	两边都**不碰磁盘上的会话文件**。
-
-	⚠️ 用户动作**立刻写**（同 Forget）：他刚关掉一格，下一秒可能就把窗口关了；
-	走节流窗的话"关掉后马上退出"会把 Closed 漏掉，下次启动它又自动拉起来了。
-*/
-func (p *Store) MarkClosed(id int, why string) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if id <= 0 {
-		return false
-	}
-	i := p.findLocked(id)
-	if i < 0 {
-		return false
-	}
-	p.Panes[i].Closed = true
-	p.Panes[i].LastSeenAt = time.Now().UTC().Format(time.RFC3339)
-	// 已经是 Closed 也写一遍：可能是上一次写失败了，而这一次用户又点了一次关闭。
-	p.dirty = true
-	p.writeLocked("关格保留记录 pane=" + strconv.Itoa(id) + "（" + why + "）")
-	log.Printf("[panes] 记为已关闭 pane=%d（%s）session=%s —— 记录留着，重启不自动拉起",
-		id, why, clip(p.Panes[i].SessionID, 36))
-	return true
-}
-
 // MarkSpoke 记下"这一格真的说过话"（至少一轮跑完）。
 //
 // ⚠️ 只写一次：一个会话里每一轮跑完都会来喊一声，而这件事一旦为真是**单调**的 ——
@@ -410,12 +394,77 @@ func (p *Store) MarkSpoke(id int, why string) {
 	if i < 0 {
 		return
 	}
-	if p.Panes[i].Spoke {
+	if p.Panes[i].Spoke && p.Panes[i].Talked {
 		return
 	}
 	p.Panes[i].Spoke = true
+	p.Panes[i].Talked = true
 	p.dirty = true
 	p.scheduleLocked(why)
+}
+
+// MarkTalked 记下"用户发过提示"（UserPromptSubmit）。它不要求一轮跑完，
+// 所以比 MarkSpoke 早；关格时用它判断这条记录有没有内容值得保留。
+func (p *Store) MarkTalked(id int, why string) {
+	if id <= 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	i := p.findLocked(id)
+	if i < 0 || p.Panes[i].Talked {
+		return
+	}
+	p.Panes[i].Talked = true
+	p.dirty = true
+	p.scheduleLocked(why)
+}
+
+// Close 处理用户点格子头的 ×：
+//   - 从没发过提示（Spoke/Talked 都为 false）→ 直接摘掉记录，工作区不留空壳；
+//   - 说过话/发过提示 → 保留记录并标 Closed（原语义，重启不自动拉起，左栏可接回）。
+//
+// 返回 kept=true 表示记录还在；found=false 表示盘上本来就没有这条。
+func (p *Store) Close(id int, why string) (kept, found bool) {
+	if id <= 0 {
+		return false, false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	i := p.findLocked(id)
+	if i < 0 {
+		return false, false
+	}
+	cur := &p.Panes[i]
+	// "没有对话" = 没发过提示、没跑完过一轮，而且盘上也找不到那条会话文件。
+	// 只看 Spoke/Talked 会误删**已经绑上会话、只是这一轮还没来得及打标**的格子；
+	// 反过来只看 session id 又会把“零轮次、盘上根本没有 jsonl”的空壳留下。
+	hasConvo := cur.Spoke || cur.Talked
+	if !hasConvo && strings.TrimSpace(cur.SessionID) != "" {
+		if p.SessionExists == nil {
+			hasConvo = true // 判不了时不误删；宁可多一条可解释的「接不上」
+		} else {
+			hasConvo = p.SessionExists(cur.Agent, cur.CWD, cur.SessionID)
+		}
+	}
+	if !hasConvo {
+		gone := *cur
+		p.Panes = append(p.Panes[:i], p.Panes[i+1:]...)
+		p.dirty = true
+		p.forgetting = true
+		p.writeLocked("关格摘掉没有对话的记录 pane=" + strconv.Itoa(id) + "（" + why + "）")
+		p.forgetting = false
+		log.Printf("[panes] 关格摘掉 pane=%d（没有对话/盘上没有会话文件，%s）session=%s —— 磁盘上那条会话文件**一个字没动**",
+			id, why, clip(gone.SessionID, 36))
+		return false, true
+	}
+	cur.Closed = true
+	cur.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
+	p.dirty = true
+	p.writeLocked("关格保留记录 pane=" + strconv.Itoa(id) + "（" + why + "）")
+	log.Printf("[panes] 记为已关闭 pane=%d（%s）session=%s —— 记录留着，重启不自动拉起",
+		id, why, clip(cur.SessionID, 36))
+	return true, true
 }
 
 /*
@@ -505,6 +554,36 @@ func (p *Store) MarkDegraded(id int, from, why string) {
 	p.scheduleLocked(fmt.Sprintf("降级留证 pane=%d 原本要接=%s（%s）", id, short(from), why))
 }
 
+// PruneAgents 摘掉不在当前 Agent 名单里的记录（名单精简/产品边界变化）。
+// 只删记录；transcript 文件一个字不动。空 agent（shell 记录）保留。
+func (p *Store) PruneAgents(keep func(string) bool, why string) int {
+	if keep == nil {
+		return 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := p.Panes[:0]
+	n := 0
+	for _, r := range p.Panes {
+		if strings.TrimSpace(r.Agent) == "" || keep(r.Agent) {
+			out = append(out, r)
+			continue
+		}
+		n++
+		log.Printf("[panes] 摘掉名单外 agent 记录 pane=%d agent=%s（%s）—— 会话文件未动",
+			r.PaneID, r.Agent, why)
+	}
+	if n == 0 {
+		return 0
+	}
+	p.Panes = out
+	p.dirty = true
+	p.forgetting = true
+	p.writeLocked("名单精简摘掉 " + strconv.Itoa(n) + " 条记录")
+	p.forgetting = false
+	return n
+}
+
 // Snapshot 给一份副本（冷恢复那条路用它排座位序：**落盘的数组顺序就是座位序**）。
 func (p *Store) Snapshot() []Pane {
 	p.mu.Lock()
@@ -586,6 +665,9 @@ type PaneView struct {
 	// `no_session` 的格子要不要出"上次那条会话找不到了"的横幅 ——
 	// 没说过话就没丢东西，别拿同一句话说给一个什么都没干过的格子听。
 	Spoke bool `json:"spoke,omitempty"`
+	// Talked：用户至少发过一条提示（见 Pane.Talked）。没有 Spoke 但 Talked
+	// 的已关闭格子仍然有内容，措辞不能说成“从没说过话”。
+	Talked bool `json:"talked,omitempty"`
 	// Resume 是这一格该用什么**姿态**起：ok → exact（`--resume <id>`），
 	// 其余 → new。由 Go 给，而不是让前端从 verdict 自己推：把意图翻译成命令行
 	// 是 agent.Def 的事，前端多推一次就多一份迟早会漂的规则
@@ -639,7 +721,24 @@ func (p *Store) RestorePlan(sessionExists func(agent, cwd, id string) bool) Plan
 	plan := Plan{Views: []PaneView{}, Counts: map[string]int{}}
 	// seen：sessionId → 已经认下的那个代表（paneId）。dup 是从**第二条起**算的。
 	seen := map[string]int{}
+	var emptyClosed []int
 	for _, r := range snap {
+		// 没有任何会话证据的格子（没发过提示、没跑完过一轮、盘上也找不到
+		// 它的会话文件）只是一次空开合：不占左栏、也没有可续的内容，冷恢复
+		// 时顺手摘掉。没有对话就没有座位。
+		// ⚠️ 2026-10-23：原来只摘 `Closed` 的。进程异常退出/Perch 被杀时，
+		// 记录**不会**被打上 Closed（那一路只说明"它现在不在跑"，见 main.go），
+		// 于是 cursor 这种"开了但没说过话"的格子会以 no_id 的身份在重启后
+		// 重新占一格 —— 用户看到的就是"已停止的空 agent 阴魂不散"。
+		// 也不能只看 session id：零轮次的会话有 id 但盘上没有 jsonl。
+		hasConvo := r.Spoke || r.Talked
+		if !hasConvo && strings.TrimSpace(r.SessionID) != "" {
+			hasConvo = sessionExists(r.Agent, r.CWD, r.SessionID)
+		}
+		if !hasConvo {
+			emptyClosed = append(emptyClosed, r.PaneID)
+			continue
+		}
 		v := ""
 		onDisk := false
 		switch {
@@ -672,9 +771,12 @@ func (p *Store) RestorePlan(sessionExists func(agent, cwd, id string) bool) Plan
 		}
 		plan.Views = append(plan.Views, PaneView{
 			PaneID: r.PaneID, Agent: r.Agent, CWD: r.CWD,
-			SessionID: r.SessionID, Verdict: v, Resume: rv, Spoke: r.Spoke,
+			SessionID: r.SessionID, Verdict: v, Resume: rv, Spoke: r.Spoke, Talked: r.Talked,
 			Closed: r.Closed, LastSeenAt: r.LastSeenAt, OnDisk: onDisk,
 		})
+	}
+	if len(emptyClosed) > 0 {
+		p.pruneEmptyClosed(emptyClosed)
 	}
 	if len(plan.Dups) > 0 {
 		p.pruneDup(plan.Dups)
@@ -732,6 +834,30 @@ func (p *Store) pruneDup(ids []int) {
 	// 摘记录本来就该让条数变小，而那条断言是防"凭空少"的，不是防"摘"的。
 	p.forgetting = true
 	p.writeLocked("冷恢复摘掉重复记录 " + strconv.Itoa(n) + " 条")
+	p.forgetting = false
+}
+
+// pruneEmptyClosed 摘掉"关过、但从没说过话"的记录。它是产品行为，不是
+// dedupe：空开合的格子没有会话可续，留在左栏只是噪音。
+func (p *Store) pruneEmptyClosed(ids []int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	n := 0
+	for _, id := range ids {
+		i := p.findLocked(id)
+		if i < 0 {
+			continue
+		}
+		p.Panes = append(p.Panes[:i], p.Panes[i+1:]...)
+		n++
+		log.Printf("[panes] 摘掉没说过话的已关闭记录 pane=%d —— 没有会话可续", id)
+	}
+	if n == 0 {
+		return
+	}
+	p.dirty = true
+	p.forgetting = true
+	p.writeLocked("冷恢复摘掉没说过话的已关闭记录 " + strconv.Itoa(n) + " 条")
 	p.forgetting = false
 }
 

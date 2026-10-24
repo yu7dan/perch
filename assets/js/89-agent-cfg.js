@@ -70,14 +70,46 @@ function gwAgentOf(id) {
   return GW_AGENTS.find((a) => a.id === id) || null;
 }
 
-/* 进总览时预取一次接线状态，让名单上的网关绿点在"打开抽屉之前"就是准的。
-   后端（gwAgentPrefetch）只在用户以前用过网关时才碰控制面，所以这里不用再
-   判断 GW.connected。最多试 3 次（进入总览会重画）：控制面没起来时不让它
-   每 20 秒刷一条失败日志；抽屉打开时还会再显式读一次，不影响使用。 */
-let GW_AGENTS_TRIES = 0;
-function gwAgentsPrefetch() {
-  if (GW_AGENTS || GW_AGENTS_TRIES >= 3) return;
-  GW_AGENTS_TRIES++;
+/* 进总览时读接线状态，让名单上的网关绿点在"打开抽屉之前"就是准的。
+   后端（gwAgentPrefetch）只在用户以前用过网关时才碰控制面，所以首次不
+   判断 GW.connected；之后按 TTL 刷新，且控制面被用户主动断开时不再拿
+   后台轮询把它拉起来。连续失败 3 次后停手，等用户动作/重连重置。 */
+const GW_AGENTS_TTL = 10000;
+const GW_AGENTS_REQ_TIMEOUT = 15000;
+const GW_AGENTS_MAX_FAILS = 3;
+let GW_AGENTS_AT = 0;
+let GW_AGENTS_REQ_AT = 0;
+let GW_AGENTS_FAILS = 0;
+
+function gwAgentsReset() {
+  GW_AGENTS_FAILS = 0;
+  GW_AGENTS_REQ_AT = 0;
+}
+
+/* 选择器/写入/方案命名进行中时不要重画：renderDashAgents 会替换
+   #dash-agent-list 的 innerHTML，正在打开的 popover 会跟着消失。 */
+function gwAgentsBusyHere() {
+  return !!(AGENT_MODEL_POP || GW_FIELD_POP || AGENT_MODELS_POP ||
+            AGENT_SET_NAMING || AC_PICK || GW_AGENT_BUSY || AC_BUSY);
+}
+
+function gwAgentsPrefetch(force) {
+  if (document.hidden || gwAgentsBusyHere()) return;
+  if (!force && typeof instRunning === "function" && instRunning()) return;
+  const now = Date.now();
+  if (!force && GW_AGENTS && now - GW_AGENTS_AT < GW_AGENTS_TTL) return;
+  // 用户动作/安装完成触发的强制刷新要能越过在途请求和 TTL。
+  if (force) gwAgentsReset();
+  if (GW_AGENTS_REQ_AT && now - GW_AGENTS_REQ_AT >= GW_AGENTS_REQ_TIMEOUT) {
+    GW_AGENTS_REQ_AT = 0;
+    GW_AGENTS_FAILS++;
+  }
+  if (GW_AGENTS_REQ_AT) return;
+  // 非首次的 TTL 刷新只在控制面已经连上时做；否则会把用户主动断开的
+  // 引擎重新拉起来。首次预取保持不变（后端自己判断 UsedBefore）。
+  if (GW_AGENTS && !force && typeof gwOn === "function" && !gwOn()) return;
+  if (!GW_AGENTS && !force && GW_AGENTS_FAILS >= GW_AGENTS_MAX_FAILS) return;
+  GW_AGENTS_REQ_AT = now;
   sendCtrl({ type: "gw.agents.prefetch" });
 }
 
@@ -151,7 +183,7 @@ function acDriftWatch(on) {
     if (AC_DRIFT_TIMER) return;
     AC_DRIFT_TIMER = setInterval(() => {
       if (!AC_ID) { acDriftWatch(false); return; }
-      if (document.hidden || AC_PICK || AC_BUSY) return;
+      if (document.hidden || gwAgentsBusyHere()) return;
       sendCtrl({ type: "gw.agents.drift" });
     }, 15000);
   } else if (AC_DRIFT_TIMER) {

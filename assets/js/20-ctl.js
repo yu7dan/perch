@@ -55,9 +55,11 @@ const restoreCount = (v) => RESTORE.panes.filter((p) => p.verdict === v).length;
    里删掉"。用户的意思正好相反 —— 关掉只是"我现在不需要它开着"，那个 agent
    以后还要用。
 
-   现在 × 发 `pane.close`：Go 把记录打上 `closed`，**不删**；重启时它不占座位
-   （不自动拉起），只在左栏工作区里留一行「已关闭」，点一下用**同一个 paneId**
-   接上原来那条会话。真正删记录的只有「结束这个 agent」。
+   现在 × 发 `pane.close`：发过提示的格子，Go 把记录打上 `closed`，**不删**；
+   重启时它不占座位（不自动拉起），只在左栏工作区里留一行「已关闭」，点一下用
+   **同一个 paneId** 接上原来那条会话。从没发过提示的空开合没有会话可续，
+   Go 会直接摘掉记录，前端收到 `pane.closed kept=false` 后把乐观补的那行撤回。
+   真正删除有内容记录的仍然只有「结束这个 agent」。
 
    ⚠️ 这份 Map 是**薄快照**，只为画那一行/接回它；权威那份在
    %APPDATA%\Perch\panes.json，冷恢复时由 `panes.list` 推回来重建一遍。 */
@@ -74,6 +76,9 @@ function rememberClosedPane(t) {
     sendCtrl({ type: "log", msg: `关格：tab=${t.id} 还没拿到 paneId（建格应答没到），这一格不留「已关闭」记录` });
     return;
   }
+  const live = (typeof LIVE !== "undefined") ? LIVE.get(t.id) : null;
+  const prompted = !!(live && Array.isArray(live.acts) && live.acts.some((a) => a.kind === "prompt"));
+  const known = !!(t.sessionID && findSess(t.sessionID));
   CLOSED_PANES.set(pane, {
     paneId: pane,
     agent: (t.spec && t.spec.agent) || DEFAULT_SPAWN_SPEC.agent,
@@ -83,9 +88,19 @@ function rememberClosedPane(t) {
     name: agentRowName(t),
     // 盘上有没有会话文件：关格这一刻不知道（零轮次的会话本来就没有），
     // 交给"点下去被 unavailable 拒了"或下一次冷恢复去判定 —— 不猜。
-    // `spoke` 只是一个**措辞用**的近似（会话在库里 ≈ 说过话）；判定接不接得上
-    // 永远只看 onDisk。
-    spoke: !!(t.sessionID && findSess(t.sessionID)),
+    // `spoke/talked` 只是**措辞和乐观行**用的证据；判定接不接得上永远只看 onDisk。
+    // ⚠️ 不能拿"有 sessionId"当说过话：Claude 启动就会绑 session，零轮次也有 id。
+    // 之前的写法让两个没发过提示的格子留下「已关闭」行，点下去后端已经删了记录，
+    // 只能被 unavailable 拒掉。
+    spoke: known || prompted,
+    talked: prompted || known,
+    // 关格瞬间乐观补的行还没经过 pane.closed 的判决：在确认前不许点。
+    // 否则用户点的是"后端马上要删掉/还没处理完"的记录，续接请求只会得到
+    // 一个拒绝或一次与关闭竞争的重建。
+    closing: true,
+    // 空态里的「接回」只列已经落盘的记录（冷恢复推回来的），
+    // 不列这种还在等答复的。
+    optimistic: true,
   });
 }
 function closedRowName(r) {
@@ -96,6 +111,12 @@ function closedRowName(r) {
     const t = (STATE?.titles || {})[sid];
     if (t) return t;
   }
+  /* 冷恢复回来的 closed 记录只有 cwd/sessionId，没有 name（PaneView 不带名字）。
+     默认会话区给每格分的是 `sessions\<日期>-<agent>-<pane>`，这个目录名
+     本身就是一条能认出来的身份；再不济也比一排「已关闭的 agent」强。 */
+  const dir = String(r.cwd || "").replace(/[\\/]+$/, "");
+  const base = dir ? dir.split(/[\\/]/).pop() : "";
+  if (base) return base;
   return r.name || t("pane.closedAgent");
 }
 function closedMatch(r, key) {
@@ -105,8 +126,19 @@ function closedMatch(r, key) {
 }
 function closedInProject(p) {
   const path = typeof p === "string" ? p : (p && p.path);
-  const defPath = defaultWorkspacePath();
-  return closedList().filter((r) => insidePath(r.cwd || defPath, path));
+  // 和 tabsInProject 共用 ownerProjectPath：最长前缀唯一归属，父目录不再
+  // 把子项目的 agent 重复数一遍。ownerProjectPath 在 60-shell 里定义，
+  // 这里只会在所有脚本加载完之后被调用（renderWorkspaceView）。
+  if (typeof ownerProjectPath !== "function") {
+    const defPath = defaultWorkspacePath();
+    return closedList().filter((r) => insidePath(r.cwd || defPath, path));
+  }
+  const want = String(path || "").replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  return closedList().filter((r) => {
+    const got = ownerProjectPath(r.cwd || "");
+    const k = String(got || "").replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+    return k === want;
+  });
 }
 /* 这一条「已关闭」的 agent 还接不接得上（盘上还有没有它上次那条会话）。
    只有**明确知道没有**（Go 冷恢复算出的 false，或这一次尝试被 unavailable 拒了）
@@ -119,7 +151,9 @@ function closedUnresumable(r) {
    文件被删了；两种分开说，因为用户能做的判断不一样（"我还没让它干过活" vs
    "我的文件怎么没了"）。 */
 function closedWhy(r) {
-  return r.spoke ? t("pane.closedWhy.spoke") : t("pane.closedWhy.zero");
+  if (r.spoke) return t("pane.closedWhy.spoke");
+  if (r.talked) return t("pane.closedWhy.talked");
+  return t("pane.closedWhy.zero");
 }
 
 /* 等那份清单，最多 800ms。**为什么不是直接 await 一个 promise**：清单是 ctl 通道上
@@ -366,6 +400,9 @@ function dispatchCtl(m) {
       t.id = m.tab;
       t.streamName = m.stream;
       if (m.pane) t.paneID = m.pane;
+      // Go 可能把空 cwd 换成了默认会话区的独立目录 —— 左栏归属和标题里的
+      // 目录提示都要用**生效后**的那个（见 ctl handlers_tabs.go 的 tab.ok）。
+      if (typeof m.cwd === "string" && m.cwd) t.spec.cwd = m.cwd;
       t.onSpawned = null;
       /* 2026-10-17：id 到了 = 这一格正式出现在左栏（行 = agent）。必须**在这里**
          重画一次 —— 建格时 id 还是 0（不在模型里），只等下一次状态推送的话，
@@ -440,7 +477,7 @@ function dispatchCtl(m) {
           sessionId: p.sessionId || "", lastSeenAt: p.lastSeenAt || "", name: "",
           // 盘上还有没有它上次那条会话（Go 现算的）。没有的话，那一行先说
           // 「接不上」并把原因写进 title —— 别等用户点下去才吃一句莫名其妙的报错。
-          onDisk: !!p.onDisk, spoke: !!p.spoke,
+          onDisk: !!p.onDisk, spoke: !!p.spoke, talked: !!p.talked,
         });
       }
       bootFact(`冷恢复：${RESTORE.panes.length} 条候选（ok=${restoreCount("ok")} ` +
@@ -458,6 +495,25 @@ function dispatchCtl(m) {
         // 前端得说得出"这一条为什么没有座位"。
         bootFact("冷恢复清单：" + RESTORE.panes.map((p) =>
           `pane=${p.paneId}:${p.verdict}(${p.agent}→${p.resume ? p.resume.kind : "?"} cwd=${p.cwd || "(默认)"})`).join(" "));
+      }
+      return;
+    }
+    case "pane.closed": {
+      // 关格时前端乐观补的那一行，只有 Go 真的留下了记录才该存在；
+      // 从没发过提示的格子 Go 会直接摘掉，这里把那一行撤回。
+      const pane = m.pane | 0;
+      if (!m.kept || !m.found) {
+        CLOSED_PANES.delete(pane);
+        armRailRebuild();
+        return;
+      }
+      // 记录留下了：这一行从"正在关"变成可接。名字/会话 id 已经在乐观行里，
+      // 下一次 panes.list（重启）会用后端的事实覆盖。
+      const keep = CLOSED_PANES.get(pane);
+      if (keep) {
+        keep.closing = false;
+        keep.optimistic = false;
+        armRailRebuild();
       }
       return;
     }
@@ -501,8 +557,8 @@ function dispatchCtl(m) {
     case "gw.agents": applyGwAgents(m); return;
     case "gw.agents.drift": applyGwAgentsDrift(m); return;
     case "gw.agent.preview": applyGwPreview(m); return;
-    // magpie 本体的版本 / 更新（magpie_update.go）：只落状态，壳在 87-gateway.js。
-    case "magpie.update": applyGwUpdate(m); return;
+    // Perch 自己的 per-agent 配置（隔离网关，不写 agent 全局配置）。
+    case "agent.profiles": applyAgentProfiles(m); return;
     // 项目池（左栏那一轮）。它和 state 是两回事：state 是"扫出来的会话库"，
     // 这一条是"用户声明的项目池 + 归属"。分开发的理由和三条腿分开是同一条 ——
     // 池子只在动作时变（低频、全量），会话库每关一格就要重扫。
@@ -645,6 +701,43 @@ function applyGridCols(n, cols) {
   });
 }
 
+/* 零格空态：格子在不在，和「已关闭」记录有没有，是两件事 ——
+   空态要同时说清"现在没格子"和"还能接回哪些"。这段只碰 #term-empty，
+   不参与网格布局（它是 .pane.a 里的覆盖层，见 CSS）。 */
+function renderTermEmpty() {
+  const box = $("term-empty");
+  if (!box) return;
+  const empty = TAB_LIST.length === 0;
+  box.hidden = !empty;
+  if (!empty) return;
+  const host = $("te-closed");
+  if (!host) return;
+  const rows = (typeof closedList === "function" ? closedList() : [])
+    .filter((r) => !r.busy)
+    // 刚关掉、还在等后端答复的那一条（optimistic）只要是说过话的，就先列出来 ——
+    // 否则"关掉最后一格"的空态会一边写着"能从这儿接回"，一边一条都不给。
+    // 零轮次的空壳仍然不列（它马上会被后端摘掉）。
+    .filter((r) => !r.optimistic || r.spoke || r.talked)
+    .filter((r) => typeof closedUnresumable !== "function" || !closedUnresumable(r))
+    .slice(0, 6);
+  host.hidden = rows.length === 0;
+  host.innerHTML = rows.length
+    ? `<div class="te-closed-cap">${esc(t("term.empty.closedCap"))}</div>` +
+      rows.map((r) => `<button type="button" class="te-closed-row" data-pane="${r.paneId | 0}">` +
+        `<span class="nm">${esc(typeof closedRowName === "function" ? closedRowName(r) : r.agent || "")}</span>` +
+        `<span class="ag">${esc(r.agent || "")}</span>` +
+        `<span class="go">${esc(t("term.empty.resume"))}</span></button>`).join("")
+    : "";
+}
+
+$("te-new").addEventListener("click", () => openAgentPanel("空态新开"));
+$("te-closed").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-pane]");
+  if (!b) return;
+  const r = closedList().find((x) => String(x.paneId | 0) === b.dataset.pane);
+  if (r) resumeClosedPane(r);
+});
+
 // 网格重排。**只动容器上的一个变量**，格子元素由 createTab 建、归属它自己
 // （重命名会把 .nm 换成输入框，重建 DOM 等于把用户正在打的字一起删掉）。
 function renderGrid() {
@@ -665,6 +758,7 @@ function renderGrid() {
   // 启动路径上 createTab → renderGrid 会跑到这一句，那时 collapsed 还是 false，
   // 直接返回（这也是那批声明必须写在启动之前的原因，见 RSB_READY 那一块）。
   scheduleGroup();
+  renderTermEmpty();
   // C6a：这里原来还有一句 `applyPaneColsForCells()` —— 格数变了就把"每格多少列"
   // 这个用户偏好重新折成主区宽度。现在**没有这个动作了**：
   //   主区宽度只由"窗口 − 左栏 − 右栏"决定，格数变不改变它，只改变它怎么分
@@ -712,7 +806,13 @@ function renderGrid() {
       // 序号和网格里的位置一一对应，也就是"该点哪一颗"。
       return `#${i + 1}=${Math.round(b.left + b.width / 2)},${Math.round(b.top + b.height / 2)}`;
     }).join(" ");
-    bootFact(`网格 N=${n} 摆法=${摆法} 容器=${W}×${H} 关格 ${关格}`);
+    // 点错格的排查靠这一行：关格坐标只能说明头在哪，说明不了**格子本体**
+    // 在命中测试里占多大（xterm 的 textarea/canvas 会撑出自己的盒子）。
+    const 格框 = TAB_LIST.map((t, i) => {
+      const b = t.cellEl.getBoundingClientRect();
+      return `#${i + 1}=${Math.round(b.left)},${Math.round(b.top)} ${Math.round(b.width)}×${Math.round(b.height)}`;
+    }).join(" ");
+    bootFact(`网格 N=${n} 摆法=${摆法} 容器=${W}×${H} 关格 ${关格} 格框 ${格框}`);
   });
 }
 

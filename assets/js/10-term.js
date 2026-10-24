@@ -309,6 +309,8 @@ async function createTab(spec, opts) {
     freshSwitching: false,
     // —— 标题与状态点：都要跟着**这个标签**走，切换标签时不能串
     agentTitleRaw: "", agentState: null,
+    // dsh 的迟到 hook 收尾计时器（见下面的 armDshLateSettle）
+    dshSettleTimer: 0,
     liveTitle: "",
     // —— 尺寸：这是"吉祥物出现两次"那套去重的全部状态，每个标签必须各有一份
     lastSizeSent: "", resizeCount: 0,
@@ -792,6 +794,10 @@ term.onWriteParsed(() => {
   titleInThisChunk = false;
   if (hadTitle) return;
   if (!T.agentTitleRaw || detectAgentStatusFromTitle(T.agentTitleRaw) !== "working") return;
+  /* dsh-tui 只在终端有焦点时才换标题里的转圈帧（后台格子的字形是静止的）。
+     照这条“3 秒没标题变化就当成停了”的兜底，后台 dsh 只要模型停顿一下就会
+     被误判 idle；dsh 的标题 ✦ 已经是明确的结束证据，不走这个猜测。 */
+  if (isDshTitle(T.agentTitleRaw)) return;
   clearTimeout(staleTimer);
   staleTimer = setTimeout(() => {
     staleTimer = 0;
@@ -1737,7 +1743,13 @@ function applyAgentTitleStatus(t, rawTitle) {
        不会发 Stop（实测 0.2.1-rc.2：turn error 没有 Stop）。标题回到 ✦ 🐋
        是这一刻最硬的“已经停了”证据。不把 hook 的 busy 一起销掉的话，
        cellState 里 `v.st === "busy"` 会继续赢，格子永远转圈。 */
-    if (next === "idle") clearDshHookBusy(t);
+    if (next === "idle") {
+      cancelDshLateSettle(t);
+      clearDshHookBusy(t);
+    } else if (next === "working") {
+      // 又转起来了：迟到的收尾计时器必须撤销，否则会把新一轮熄掉。
+      cancelDshLateSettle(t);
+    }
   }
   renderAgentDot(t);
 }
@@ -1753,6 +1765,29 @@ function clearDshHookBusy(t) {
     v.evidence = "title";
     v.wait = null;
   }
+}
+
+// UserPromptSubmit 的 hook 要经过约 300ms 的文件轮询；很快的一轮里标题可能
+// 先回到 ✦，迟到的 hook 再把格子推成 busy —— 之后不会再有标题变化来销账。
+// 标题已经是 idle 时补一个短计时器，到点仍是 idle 就按同样的“标题收尾”处理；
+// 期间标题转回 working（真的又开了一轮）则取消。
+function armDshLateSettle(t) {
+  if (!t || !t.spec || t.spec.agent !== "dsh") return;
+  cancelDshLateSettle(t);
+  t.dshSettleTimer = setTimeout(() => {
+    t.dshSettleTimer = 0;
+    if (t.agentState !== "idle") return;
+    clearDshHookBusy(t);
+    sendCtrl({ type: "log", msg: `dsh 标题迟收尾 tab=${t.id}` });
+    renderAgentDot(t);
+    if (typeof scheduleLive === "function") scheduleLive();
+  }, 1200);
+}
+
+function cancelDshLateSettle(t) {
+  if (!t || !t.dshSettleTimer) return;
+  clearTimeout(t.dshSettleTimer);
+  t.dshSettleTimer = 0;
 }
 // clearWorkingIndicators（agent-title-status.ts:43-66）的 Claude 子集：
 // 把转圈字形从标题里抹掉。Orca 还要处理 Gemini/Pi/Grok 的记号，我们不需要。

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -9,8 +10,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/yu7dan/perch/internal/transcript"
 )
 
 // ---------------------------------------------------------------------------
@@ -105,7 +109,7 @@ func ensurePiObserver() (string, error) {
 	return path, nil
 }
 
-func preparePi(tag string, tabID int, _ string) (map[string]string, []string, func(context.Context), error) {
+func preparePi(tag string, tabID int, _ string, _ []string) (map[string]string, []string, func(context.Context), error) {
 	ext, err := ensurePiObserver()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("准备 Pi 观察扩展: %w", err)
@@ -126,7 +130,13 @@ func preparePi(tag string, tabID int, _ string) (map[string]string, []string, fu
 	}
 	_ = f.Close()
 
-	env := map[string]string{"PERCH_PI_EVENTS": path}
+	// npm 全局装的是 pi.cmd，shim 里还要找 node；GUI 进程的 PATH 往往比
+	// 终端短（这台机器上就是 Program Files\nodejs 不在 PATH 里），必须自己补，
+	// 否则 Pi 一起来就退出，终端只留下一行「Process exited」。
+	env := map[string]string{
+		"PERCH_PI_EVENTS": path,
+		"PATH":            dshChildPath(),
+	}
 	args := []string{"-e", ext}
 	log.Printf("[pi %s] 观察扩展=%s 事件=%s", tag, ext, path)
 	observe := func(ctx context.Context) {
@@ -146,6 +156,14 @@ type piEvent struct {
 	Name    string `json:"name"`
 	Reason  string `json:"reason"`
 	Aborted bool   `json:"aborted"`
+	At      int64  `json:"at"`
+
+	// v2：流水/改动（见 observer.ts 顶部）。ID 是工具调用 id 或消息块 id。
+	ID   string `json:"id"`
+	Tool string `json:"tool"`
+	Path string `json:"path"`
+	Op   string `json:"op"`
+	OK   *bool  `json:"ok"`
 }
 
 // observePi tail 一个格子的 JSONL。语义与 hooks 的轮询一致：
@@ -159,7 +177,7 @@ func observePi(ctx context.Context, tabID int, path string, every time.Duration,
 	// name 只是顺带记下：Pi 的 /name 改的是会话显示名，不是状态。
 	// 把它塞进**下一条** status 事件（emitAgentStatus 只认状态变化，
 	// 单发一条没有 status 的 agent 消息会把前端 v.st 清成 ""）。
-	st := &piPaneState{}
+	st := &piPaneState{flow: newPiFlow()}
 	for {
 		select {
 		case <-ctx.Done():
@@ -205,9 +223,128 @@ func observePi(ctx context.Context, tabID int, path string, every time.Duration,
 	}
 }
 
-// piPaneState 是一次观察里的格内上下文（目前只有显示名）。
+// piPaneState 是一次观察里的格内上下文：显示名 + 流水/改动。
 type piPaneState struct {
 	name string
+	flow *piFlow
+}
+
+// piFlow 是扩展直接推来的流水/改动。它和 transcript.Follower 是**两条互斥的
+// 腿**：Pi 的 session jsonl 在当前版本/Home 下实测没有落盘，所以 Pi 这条腿
+// 不跟文件，改用扩展已经看见的 message/tool 生命周期。
+type piFlow struct {
+	started  bool
+	acts     []transcript.ActItem
+	byID     map[string]int
+	files    map[string]*transcript.FileTouch
+	filesSig string
+	seq      int
+}
+
+func newPiFlow() *piFlow {
+	return &piFlow{byID: map[string]int{}, files: map[string]*transcript.FileTouch{}}
+}
+
+func (f *piFlow) reset(tabID int) {
+	f.started = false
+	f.acts = nil
+	f.byID = map[string]int{}
+	f.files = map[string]*transcript.FileTouch{}
+	f.filesSig = ""
+	host.Push(map[string]any{"type": "acts", "tab": tabID, "items": []transcript.ActItem{}, "replace": true})
+	host.Push(map[string]any{"type": "files", "tab": tabID, "files": []transcript.FileTouch{}})
+}
+
+func (f *piFlow) put(tabID int, it transcript.ActItem) {
+	if f == nil {
+		return
+	}
+	if it.ID == "" {
+		f.seq++
+		it.ID = fmt.Sprintf("pi:%d", f.seq)
+	}
+	if idx, ok := f.byID[it.ID]; ok {
+		// 原地更新：工具先由 tool_execution_start 出现，结果再由 act_update 补。
+		old := &f.acts[idx]
+		if it.Kind != "" {
+			old.Kind = it.Kind
+		}
+		if it.Tool != "" {
+			old.Tool = it.Tool
+		}
+		if it.Text != "" {
+			old.Text = it.Text
+		}
+		if it.Path != "" {
+			old.Path = it.Path
+		}
+		if it.OK != nil {
+			old.OK = it.OK
+		}
+		it = *old
+	} else {
+		if it.At == "" {
+			it.At = time.Now().Format(time.RFC3339)
+		}
+		f.acts = append(f.acts, it)
+		if len(f.acts) > 300 {
+			drop := len(f.acts) - 300
+			f.acts = append([]transcript.ActItem(nil), f.acts[drop:]...)
+			f.byID = map[string]int{}
+			for i, a := range f.acts {
+				f.byID[a.ID] = i
+			}
+		} else {
+			f.byID[it.ID] = len(f.acts) - 1
+		}
+	}
+	replace := !f.started
+	f.started = true
+	host.Push(map[string]any{"type": "acts", "tab": tabID, "items": []transcript.ActItem{it}, "replace": replace})
+}
+
+func (f *piFlow) file(tabID int, path, op string) {
+	if f == nil || strings.TrimSpace(path) == "" {
+		return
+	}
+	key := strings.ToLower(filepath.Clean(path))
+	t := f.files[key]
+	if t == nil {
+		t = &transcript.FileTouch{Path: path}
+		f.files[key] = t
+	}
+	if t.At == "" {
+		t.At = time.Now().Format(time.RFC3339)
+	}
+	found := false
+	for _, o := range t.Ops {
+		if o == op {
+			found = true
+			break
+		}
+	}
+	if !found && op != "" {
+		t.Ops = append(t.Ops, op)
+	}
+	f.pushFiles(tabID)
+}
+
+func (f *piFlow) pushFiles(tabID int) {
+	list := make([]transcript.FileTouch, 0, len(f.files))
+	keys := make([]string, 0, len(f.files))
+	for k := range f.files {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		list = append(list, *f.files[k])
+	}
+	sig := mustJSON(list)
+	if sig == f.filesSig {
+		return
+	}
+	f.filesSig = sig
+	host.Push(map[string]any{"type": "files", "tab": tabID, "files": list})
 }
 
 func handlePiLine(tabID int, line string, st *piPaneState, sink func(agentEvent)) {
@@ -228,8 +365,35 @@ func handlePiLine(tabID int, line string, st *piPaneState, sink func(agentEvent)
 
 	switch ev.Type {
 	case "session_start":
+		if st.flow != nil {
+			st.flow.reset(tabID)
+		}
 		log.Printf("[pi t%d] session_start reason=%s session=%s",
 			tabID, OrNone(ev.Reason), Short(ev.Session))
+		return
+	case "act":
+		at := ""
+		if ev.At > 0 {
+			at = time.UnixMilli(ev.At).Format(time.RFC3339)
+		}
+		if ev.Kind == "prompt" {
+			host.NoteActivity(tabID, false)
+		} else if ev.Kind != "" {
+			host.NoteActivity(tabID, true)
+		}
+		st.flow.put(tabID, transcript.ActItem{
+			ID: ev.ID, Kind: ev.Kind, Tool: ev.Tool, Text: ev.Text,
+			Path: ev.Path, OK: ev.OK, At: at,
+		})
+		return
+	case "act_update":
+		host.NoteActivity(tabID, true)
+		st.flow.put(tabID, transcript.ActItem{
+			ID: ev.ID, Text: ev.Text, Path: ev.Path, OK: ev.OK,
+		})
+		return
+	case "file":
+		st.flow.file(tabID, ev.Path, ev.Op)
 		return
 	case "name":
 		// 名字不是状态：**不能**单独推一条没有 status 的 agent 消息 ——
@@ -313,19 +477,78 @@ func piSessionFileExists(cwd, id string) bool {
 		return false
 	}
 	m, err := filepath.Glob(filepath.Join(root, "*", "*_"+id+".jsonl"))
-	return err == nil && len(m) > 0
+	if err != nil {
+		return false
+	}
+	// Pi 一启动就会写一条 session 文件，零轮次也有文件 —— 关格/续接不能被
+	// "文件存在"骗过去。只有真的出现过 user/assistant 消息才算一条会话。
+	for _, p := range m {
+		if b, err := os.ReadFile(p); err == nil &&
+			(bytes.Contains(b, []byte(`"role":"user"`)) || bytes.Contains(b, []byte(`"role":"assistant"`))) {
+			return true
+		}
+	}
+	return false
 }
 
 // SessionFileExistsFor：冷恢复/续接护栏的 agent 分派口。
-// 这里只回答本包有适配器的 agent；其余（Claude）由宿主自己判。
+// 这里回答所有“有自己会话文件”的 agent；Claude 由宿主自己判（它的 projects
+// 目录在 Perch 的 stateDir 下）。
 func SessionFileExistsFor(name, cwd, id string) bool {
+	if !SafeSessionID(id) {
+		return false
+	}
 	switch name {
 	case "pi":
 		return PiSessionFileExists(cwd, id)
 	case "codex":
 		return CodexSessionFileExists(cwd, id)
+	case "qoder":
+		return anyExisting(qoderCandidates(cwd, id))
+	case "copilot":
+		return anyExisting(copilotCandidates(cwd, id))
+	case "dsh":
+		return dshSessionPath(cwd, id) != ""
+	case "cursor":
+		return anyExisting(cursorCandidates(cwd, id))
+	case "agy":
+		return agySessionPath(id) != ""
+	case "opencode":
+		return openCodeSessionExists(id)
 	}
 	return false
+}
+
+// anyExisting 过滤 glob 结果：候选列表本身可能包含不存在的路径
+// （copilot 的 exact 路径不经过 glob，直接拼出来）。
+func anyExisting(paths []string) bool {
+	for _, p := range paths {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+// agySessionPath 按 conversation id 找 Antigravity 的转录。
+// agy 的续接参数是 --conversation <id>，所以这个 id 就是 brain 目录名。
+func agySessionPath(id string) string {
+	if !SafeSessionID(id) {
+		return ""
+	}
+	home := agentHome("agy")
+	if home == "" {
+		return ""
+	}
+	root := filepath.Join(home, ".gemini", "antigravity-cli", "brain", id,
+		".system_generated", "logs")
+	for _, name := range []string{"transcript_full.jsonl", "transcript.jsonl"} {
+		p := filepath.Join(root, name)
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p
+		}
+	}
+	return ""
 }
 
 // PiSessionFileExists：这条 Pi 会话在盘上还有没有（给宿主的分派口）。

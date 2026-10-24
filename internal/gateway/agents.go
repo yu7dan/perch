@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/yu7dan/perch/internal/uimsg"
@@ -42,6 +43,53 @@ func agentLogID(id string) string {
 		return ""
 	}
 	return " " + id
+}
+
+// SetEngineAgentsFile 从 Perch 的持久文件恢复“哪些 agent 已接入引擎”。
+// 冷恢复时格子比第一次 /api/state 更早启动；没有这份缓存，已接入的
+// Gemini 之类会按真实配置启动，弹出登录页。
+func (g *Gateway) SetEngineAgentsFile(path string) {
+	if path == "" {
+		return
+	}
+	var m map[string]bool
+	if b, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(b, &m)
+	}
+	g.launchMu.Lock()
+	g.engineAgentsFile = path
+	if m != nil {
+		g.agentEngine = m
+	}
+	g.launchMu.Unlock()
+}
+
+func (g *Gateway) setAgentEngine(next map[string]bool) {
+	if next == nil {
+		next = map[string]bool{}
+	}
+	g.launchMu.Lock()
+	g.agentEngine = next
+	path := g.engineAgentsFile
+	g.launchMu.Unlock()
+	if path == "" {
+		return
+	}
+	if b, err := json.Marshal(next); err == nil {
+		_ = os.WriteFile(path, append(b, '\n'), 0600)
+	}
+}
+
+// AgentEngineManaged 报告这个 agent 当前是否已由引擎接入网关。只有 true
+// 时，Perch 启动通用 CLI 才把 USERPROFILE/HOME 换到引擎沙盒；否则它会读
+// 用户自己的桌面配置，和「未接入」的语义一致。
+func (g *Gateway) AgentEngineManaged(id string) bool {
+	if id == "" {
+		return false
+	}
+	g.launchMu.Lock()
+	defer g.launchMu.Unlock()
+	return g.agentEngine[id]
 }
 
 // agentPushState 从 /api/state（写操作返回的也是同一份 stateJSON）里只取
@@ -72,9 +120,11 @@ func (g *Gateway) agentPushState(op, id string, b []byte) {
 	_ = json.Unmarshal(st.Agents, &rows)
 	wired := 0
 	launches := make(map[string]string, len(rows))
+	engineManaged := make(map[string]bool, len(rows))
 	for _, r := range rows {
 		if r.Wired {
 			wired++
+			engineManaged[r.ID] = true
 		}
 		if r.Launch != "" {
 			launches[r.ID] = r.Launch
@@ -83,6 +133,9 @@ func (g *Gateway) agentPushState(op, id string, b []byte) {
 	// 启动环境只认最新一份 state：断开 agy 后，旧的 launch 不能继续被
 	// 下一次开格捡到。
 	g.setAgentLaunch(launches)
+	// 同理：断开后下一次开格要回到用户自己的配置；只有 wired 的 agent
+	// 才让 GenericDef 换到引擎沙盒。
+	g.setAgentEngine(engineManaged)
 	log.Printf("[agentcfg] %s%s：%d 个 agent，已接网关 %d", op, agentLogID(id), len(rows), wired)
 	g.emit(map[string]any{
 		"type": "gw.agents", "op": op, "id": id, "agents": st.Agents,

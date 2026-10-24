@@ -3,9 +3,11 @@ package agent
 import "testing"
 
 type agyTestHost struct {
-	env  map[string]string
-	args []string
-	ok   bool
+	env          map[string]string
+	args         []string
+	ok           bool
+	homeEnv      map[string]string
+	hookSettings string
 }
 
 func (h agyTestHost) BindSession(int, string, string, string) bool { return false }
@@ -23,6 +25,11 @@ func (h agyTestHost) WireLaunch(id string) (map[string]string, []string, bool) {
 	}
 	return h.env, h.args, h.ok
 }
+func (h agyTestHost) EngineHomeEnv() map[string]string          { return h.homeEnv }
+func (h agyTestHost) EngineHomeEnvFor(string) map[string]string { return h.homeEnv }
+func (h agyTestHost) HookSettings(string) string                { return h.hookSettings }
+func (h agyTestHost) NoteActivity(int, bool)                    {}
+func (h agyTestHost) ResumeSessionOf(int) string                { return "" }
 
 func TestAgyDefInjectsWireLaunch(t *testing.T) {
 	SetHost(agyTestHost{
@@ -33,7 +40,7 @@ func TestAgyDefInjectsWireLaunch(t *testing.T) {
 	defer SetHost(defaultHost{})
 
 	d := AgyDef()
-	env, args, _, err := d.Prepare("tag", 1, `C:\work`)
+	env, args, _, err := d.Prepare("tag", 1, `C:\work`, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,16 +52,78 @@ func TestAgyDefInjectsWireLaunch(t *testing.T) {
 	}
 }
 
+func TestAgyDefUsesEngineHomeEnv(t *testing.T) {
+	SetHost(agyTestHost{
+		env:     map[string]string{"GEMINI_API_KEY": "k"},
+		ok:      true,
+		homeEnv: map[string]string{"USERPROFILE": `C:\sandbox`, "HOME": `C:\sandbox`},
+	})
+	defer SetHost(defaultHost{})
+
+	d := AgyDef()
+	env, _, _, err := d.Prepare("tag", 1, `C:\work`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["USERPROFILE"] != `C:\sandbox` || env["HOME"] != `C:\sandbox` {
+		t.Fatalf("engine home env not applied: %#v", env)
+	}
+	if env["GEMINI_API_KEY"] != "k" {
+		t.Fatalf("wire env lost: %#v", env)
+	}
+}
+
+func TestEngineDefUsesEngineHomeEnv(t *testing.T) {
+	SetHost(agyTestHost{
+		homeEnv: map[string]string{"USERPROFILE": `C:\sandbox`, "HOME": `C:\sandbox`},
+	})
+	defer SetHost(defaultHost{})
+
+	d := EngineDef("gemini", "gemini")
+	env, args, obs, err := d.Prepare("tag", 1, `C:\work`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["USERPROFILE"] != `C:\sandbox` || env["HOME"] != `C:\sandbox` {
+		t.Fatalf("engine home env not applied: %#v", env)
+	}
+	if args != nil || obs != nil {
+		t.Fatalf("unexpected args/observe: args=%#v observe=%v", args, obs != nil)
+	}
+}
+
+func TestAgyDefSandboxesBeforeWireLaunch(t *testing.T) {
+	// 冷恢复时 launch 可能还没到：env 仍必须是沙盒，否则 agy 会读写真实
+	// ~/.gemini/antigravity-cli。
+	SetHost(agyTestHost{
+		ok:      false,
+		homeEnv: map[string]string{"USERPROFILE": `C:\sandbox`, "HOME": `C:\sandbox`},
+	})
+	defer SetHost(defaultHost{})
+
+	d := AgyDef()
+	env, args, obs, err := d.Prepare("tag", 1, `C:\work`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["USERPROFILE"] != `C:\sandbox` || env["HOME"] != `C:\sandbox` {
+		t.Fatalf("unwired agy must still get engine home: %#v", env)
+	}
+	if args != nil || obs == nil {
+		t.Fatalf("unwired agy must not get launch args, but must still watch transcript: args=%#v observe=%v", args, obs != nil)
+	}
+}
+
 func TestAgyDefFallsBackWhenUnwired(t *testing.T) {
 	SetHost(agyTestHost{})
 	defer SetHost(defaultHost{})
 
 	d := AgyDef()
-	env, args, obs, err := d.Prepare("tag", 1, `C:\work`)
+	env, args, obs, err := d.Prepare("tag", 1, `C:\work`, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if env != nil || args != nil || obs != nil {
-		t.Fatalf("未接线时不应注入：env=%#v args=%#v", env, args)
+	if env != nil || args != nil || obs == nil {
+		t.Fatalf("未接线时不应注入 launch 参数，但仍要跟转录：env=%#v args=%#v observe=%v", env, args, obs != nil)
 	}
 }

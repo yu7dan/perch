@@ -44,6 +44,21 @@ func TestNormalizeAgentEvent(t *testing.T) {
 	}
 }
 
+func TestOpenCodeResumeArgs(t *testing.T) {
+	d := OpenCodeDef()
+	got := strings.Join(d.Args(ResumeIntent{Kind: "exact", ID: "ses_abc"}, ""), " ")
+	if got != "--session ses_abc" {
+		t.Fatalf("exact 续接参数不对: %q", got)
+	}
+	got = strings.Join(d.Args(ResumeIntent{Kind: "fork", ID: "ses_abc"}, ""), " ")
+	if got != "--session ses_abc --fork" {
+		t.Fatalf("fork 续接参数不对: %q", got)
+	}
+	if got = strings.Join(d.Args(ResumeIntent{Kind: "latest"}, ""), " "); got != "--continue" {
+		t.Fatalf("latest 续接参数不对: %q", got)
+	}
+}
+
 func TestCapsForAgent(t *testing.T) {
 	claude := CapsFor("claude", true)
 	if !claude.Resume || !claude.Status || !claude.Waiting || !claude.Actions {
@@ -54,20 +69,27 @@ func TestCapsForAgent(t *testing.T) {
 		t.Fatalf("没装的 claude 不能标 launch: %+v", c)
 	}
 	oc := CapsFor("opencode", true)
-	if !oc.Launch || !oc.Status || !oc.Waiting {
+	if !oc.Launch || !oc.Resume || !oc.Status || !oc.Waiting || !oc.Actions {
 		t.Fatalf("opencode 能力矩阵不对: %+v", oc)
 	}
-	if oc.Resume {
-		t.Fatalf("opencode 还没做续接，不能标成 resume: %+v", oc)
+	// Copilot 1.0.103 的 --help 实测有 --resume/--continue；状态来自
+	// events.jsonl 的 turn 边界。能力表必须按现在的事实写。
+	copilot := CapsFor("copilot", true)
+	if !copilot.Launch || !copilot.Status || !copilot.Resume || !copilot.Actions {
+		t.Fatalf("copilot 能力矩阵不对: %+v", copilot)
 	}
-	// 通用启动不等于有状态。qwen 有 Bin，能开一格；但没接状态。
-	qwen := CapsFor("qwen", true)
-	if !qwen.Launch || qwen.Status || qwen.Waiting {
-		t.Fatalf("通用 agent 只能 launch: %+v", qwen)
+	// 没装时不能假装能开。
+	if qoder := CapsFor("qoder", false); qoder.Launch {
+		t.Fatalf("没装的 qoder 不能标 launch: %+v", qoder)
 	}
-	// zcode 在 init 里被跳过（Bin 有但不能直接启动），不能假装能开。
-	if zcode := CapsFor("zcode", false); zcode.Launch {
-		t.Fatalf("zcode 没有启动适配器，不能标 launch: %+v", zcode)
+	if qoder := CapsFor("qoder", true); !qoder.Resume || !qoder.Status || !qoder.Waiting {
+		t.Fatalf("qoder 应当按 hooks 接状态: %+v", qoder)
+	}
+	if cursor := CapsFor("cursor", true); !cursor.Resume || !cursor.Status || cursor.Waiting {
+		t.Fatalf("cursor 只承诺转录能给的: %+v", cursor)
+	}
+	if agy := CapsFor("agy", true); !agy.Resume || !agy.Status || !agy.Actions {
+		t.Fatalf("agy 能力矩阵不对: %+v", agy)
 	}
 	pi := CapsFor("pi", true)
 	if !pi.Launch || !pi.Resume || !pi.Status || !pi.Waiting {
@@ -75,6 +97,25 @@ func TestCapsForAgent(t *testing.T) {
 	}
 	if pi.Mechanism != "extension" {
 		t.Fatalf("pi 的机制应当写明 extension（观察扩展）: %+v", pi)
+	}
+}
+
+// TestCapsInject 守住"哪些 agent 走 Perch 的每格注入"这唯一一份能力表：
+// frontend 不再写 claude/codex/pi/opencode 的 id 列表。
+func TestCapsInject(t *testing.T) {
+	for _, id := range []string{"claude", "codex", "pi", "opencode"} {
+		if !Injects(id) || !CapsFor(id, true).Inject {
+			t.Fatalf("%s 应当支持 Perch 每格注入", id)
+		}
+	}
+	for _, id := range []string{"dsh", "qoder", "cursor", "copilot", "agy", "gemini"} {
+		if Injects(id) || CapsFor(id, true).Inject {
+			t.Fatalf("%s 不应被标成可注入", id)
+		}
+	}
+	// 注入是能力，launch 是本机事实：没装仍然可以注入，只是开不了格。
+	if c := CapsFor("claude", false); !c.Inject || c.Launch {
+		t.Fatalf("inject 与 launch 不应互相污染: %+v", c)
 	}
 }
 
@@ -261,7 +302,7 @@ func TestOpenCodeObserver(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	events := make(chan agentEvent, 16)
-	go observeOpenCode(ctx, 1, srv.URL, "test-pass", 10*time.Millisecond, func(ev agentEvent) {
+	go observeOpenCode(ctx, 1, "", srv.URL, "test-pass", 10*time.Millisecond, func(ev agentEvent) {
 		events <- ev
 	})
 

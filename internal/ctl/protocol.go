@@ -82,4 +82,14 @@ type Msg struct {
 	// Value 不套 omitempty：别让"清空"在编码这一层变成静默无效。
 	Field string `json:"field,omitempty"`
 	Value string `json:"value"`
+	// agent.profile.set 用：effort 是网关路由组固定的档位（high/xhigh/...），
+	// 空串 = 不固定，用模型自己的默认。Value 仍然是模型 id。
+	Effort string `json:"effort,omitempty"`
+	// agent.profile.save/use/delete 用：配置方案的名字。
+	// （不能用 Name：那是 project.rename 的字段。）
+	SetName string `json:"setName,omitempty"`
+	// agent.profile.tier 用：Claude 的 opus/sonnet/haiku/fable。
+	Tier string `json:"tier,omitempty"`
+	// agent.profile.models 用：这个 agent 的模型选择器里要收起的模型 id。
+	Hidden []string `json:"hidden,omitempty"`
 }

@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="/vendor/xterm.css">
 <link rel="stylesheet" href="/css/00-base.css">
 <link rel="stylesheet" href="/css/10-nav.css">
+<link rel="stylesheet" href="/css/15-onboarding.css">
 <link rel="stylesheet" href="/css/20-list.css">
 <link rel="stylesheet" href="/css/30-workspace.css">
 <link rel="stylesheet" href="/css/40-sidebar.css">
@@ -49,14 +50,6 @@
       <span class="tb-name" title="Perch（栖枝）" data-i18n-title="app.nameTitle">Perch</span>
     </div>
     <div class="tb-list"></div>
-
-    <!-- 总览的模块切换：搬进窗口顶栏，形态照 magpie 的 .seg ——
-         绝对居中在窗口上（left:50%），**没有轨道**，只有活动项底下那枚白片。
-         只在 #app.dash 下显示（CSS），顶栏其余部分仍可拖动窗口。 -->
-    <div class="segs" id="dash-tabs" role="tablist" aria-label="总览分区" data-i18n-aria-label="dash.tabs.aria"></div>
-    <button class="icon-btn" id="dash-refresh" title="重扫会话库（轮次、活跃天数随之刷新）" data-i18n-title="dash.refresh.title">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></svg>
-    </button>
 
     <div id="tabs">
       <!-- 标签条的语义（C4 起）= **页面**，不是 agent。
@@ -250,6 +243,22 @@
              想清楚"谁在管这块 DOM"再动它：Go 那边**一个标签一条 stream + 一个
              ConPTY**，前端这边一个标签一个 xterm 实例。面板本身只是个容器，
              它不记得"当前是谁" —— 那是 activeTab 的事。 --></div>
+        <!-- 零格空态（2026-10-23）：以前 #termbody 空了就露出一块 #3f3f46 的
+             网格底色 —— 用户的原话是"色彩和产品不匹配，也没有指示或快捷按键"。
+             这里是一块**产品自己的面**：主按钮开新格，下面列可接回的已关闭 agent。
+             它盖住 pbody、但不盖 .phead（z-index 4 < 20），恢复按钮还在。 -->
+        <div id="term-empty" hidden>
+          <div class="te-wrap">
+            <div class="te-mark"><img src="/icons/perch-logo.png" alt="" draggable="false"></div>
+            <div class="te-kicker" data-i18n="term.empty.kicker">并行区</div>
+            <h1 data-i18n="term.empty.title">还没有 agent</h1>
+            <p class="te-lead" data-i18n="term.empty.lead">开一个 agent 开始工作；上次关掉的 agent 也能从这里接回原来的会话。</p>
+            <button type="button" id="te-new" class="te-primary">
+              <span data-i18n="term.empty.cta">新开一个 agent</span><kbd>Ctrl+Alt+N</kbd>
+            </button>
+            <div id="te-closed" class="te-closed" hidden></div>
+          </div>
+        </div>
         <div class="phead">
           <div class="rt">
             <button class="pbtn" id="restore" title="把上次的输出恢复到这个面板"
@@ -435,6 +444,14 @@
     <!-- 总览 ↔ 左栏的缝（可拖，改 --rail-w）。抓取带落在总览这一侧，
          可见线画在缝上 —— 和 #list-divider 同一套几何。 -->
     <div id="rail-divider" class="divider" title="拖动调整左栏宽度" data-i18n-title="dash.railDivider.title"></div>
+    <!-- 总览页内部的子切换：面板（现有总览内容）/ 网关（完整网关控制台）。
+         它住在页面里，不再占窗口标题栏 —— 层级只有「左栏 总览 → 页内子页」。 -->
+    <div class="dash-head">
+      <div class="segs" id="dash-tabs" role="tablist" aria-label="总览分区" data-i18n-aria-label="dash.tabs.aria"></div>
+      <button class="icon-btn" id="dash-refresh" title="重扫会话库（轮次、活跃天数随之刷新）" data-i18n-title="dash.refresh.title">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></svg>
+      </button>
+    </div>
     <div class="dash-scroll">
       <div class="dash-wrap">
         <section class="dash-pane" id="dash-overview">
@@ -520,12 +537,10 @@
              iframe 地址里没有 key —— 鉴权 cookie 由服务端注入。
              控制面没接上时 iframe 不设 src，盖一张安装/接入卡。 -->
         <section class="dash-pane gw-pane" id="dash-gateway" hidden>
-          <!-- 版本/更新条：magpie 自己管更新（/api/update），Perch 只显示和
-               转发用户那一下点击。接上控制面后才出现 —— 未接上时安装卡里
-               已经有版本。 -->
-          <div class="gw-ver" id="gw-ver" hidden></div>
+          <!-- 网关子页：控制面接上后内嵌网关控制台；没接上时显示 Perch
+               自己的安装/接入卡。它不再有 magpie 的版本/更新条。 -->
           <div class="gw-cover" id="gw-cover"></div>
-          <iframe id="gw-frame" title="magpie" hidden></iframe>
+          <iframe id="gw-frame" title="网关" hidden></iframe>
         </section>
       </div>
     </div>
@@ -797,6 +812,39 @@
           </div>
         </section>
 
+        <section class="settings-sec" data-search="关于 版本 鸣谢 引导 about version credits onboarding magpie">
+          <div class="settings-sec-head">
+            <h2 data-i18n="settings.section.about">关于</h2>
+            <p data-i18n="settings.section.about.note">版本、鸣谢，以及重新打开首次使用引导。</p>
+          </div>
+          <div class="settings-card">
+            <div class="settings-row" data-search="版本 构建 about version build">
+              <div class="settings-lab">
+                <b data-i18n="settings.about.version">版本</b>
+                <span>Perch <span id="set-version">dev</span></span>
+              </div>
+            </div>
+            <div class="settings-row" data-search="引导 欢迎 首次 onboarding welcome first run">
+              <div class="settings-lab">
+                <b data-i18n="settings.about.onboarding">首次使用引导</b>
+                <span data-i18n="settings.about.onboardingNote">重新看一遍欢迎卡，了解工作区、总览和本地网关。</span>
+              </div>
+              <div class="settings-ctl">
+                <button type="button" class="set-btn" id="set-onboard-again" data-i18n="settings.about.onboardingOpen">重新打开引导</button>
+              </div>
+            </div>
+            <div class="settings-row" data-search="鸣谢 网关 magpie credits thanks">
+              <div class="settings-lab">
+                <b data-i18n="settings.about.credits">鸣谢</b>
+                <span data-i18n="settings.about.creditsNote">Perch 的网关能力来自 magpie 的开源工作。</span>
+              </div>
+              <div class="settings-ctl">
+                <button type="button" class="set-btn quiet" id="set-magpie-site" data-i18n="settings.about.magpieSite">打开 magpie 官网</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <p class="settings-foot" data-i18n-html="settings.foot.html">
           设置保存在 <code>%APPDATA%\Perch\settings.json</code>。这里的选项只影响 Perch，不改 agent 自己的配置。
         </p>
@@ -1011,6 +1059,39 @@
     </div>
   </div>
 </div>
+
+<!-- First-run welcome card. Shown once by 90-onboarding.js; the magpie credit
+     is deliberate (the gateway engine is built on magpie). -->
+<div id="onb" class="onb" hidden>
+  <div class="onb-scrim"></div>
+  <section class="onb-card" role="dialog" aria-modal="true" aria-labelledby="onb-title">
+    <div class="onb-top">
+      <img class="onb-logo" src="/icons/perch-logo.png" alt="">
+      <span class="onb-mark">Perch <em>栖枝</em></span>
+      <button type="button" class="onb-x" id="onb-skip" data-i18n-aria-label="onb.skip" aria-label="跳过">×</button>
+    </div>
+    <div class="onb-kicker" data-i18n="onb.kicker">欢迎使用 PERCH</div>
+    <h1 class="onb-title" id="onb-title" data-i18n="onb.title">让你的 agent 在一个窗口里干活</h1>
+    <p class="onb-lead" data-i18n="onb.lead">Perch 是面向 agent 终端的工作台：并行跑多个 agent CLI，看清谁在忙、谁在等你，把模型经本地网关接进每个 agent。</p>
+    <div class="onb-points">
+      <div class="onb-point"><span class="onb-n">01</span><div><b data-i18n="onb.p1t">并行工作区</b><span data-i18n="onb.p1b">每个格子都是独立的 agent 会话；切换、接上、关掉，都不会影响其他格。</span></div></div>
+      <div class="onb-point"><span class="onb-n">02</span><div><b data-i18n="onb.p2t">一个地方看全</b><span data-i18n="onb.p2b">总览告诉你谁在跑、谁在等你，以及今天有多少请求走了网关。</span></div></div>
+      <div class="onb-point"><span class="onb-n">03</span><div><b data-i18n="onb.p3t">本地网关</b><span data-i18n="onb.p3b">接入你选择的模型供应商；密钥留在本机，agent 配置写在 Perch 的沙盒里。</span></div></div>
+    </div>
+    <div class="onb-thanks">
+      <div class="tx">
+        <b data-i18n="onb.thanks">特别鸣谢 magpie</b>
+        <span data-i18n="onb.thanksBody">Perch 的网关引擎基于 magpie 的开源工作。</span>
+      </div>
+      <button type="button" class="onb-link" id="onb-magpie" title="usemagpie.ai">usemagpie.ai ↗</button>
+    </div>
+    <div class="onb-actions">
+      <button type="button" class="onb-btn" id="onb-gateway" data-i18n="onb.gateway">打开网关</button>
+      <button type="button" class="onb-btn primary" id="onb-start" data-i18n="onb.start">开始使用</button>
+    </div>
+  </section>
+</div>
+
 <div id="toasts" role="status" aria-live="polite"></div>
 
 <!-- 第三方终端库保持原样分发（见 assets/vendor/ 与 THIRD-PARTY.md）。 -->
@@ -1091,6 +1172,7 @@ window.__facts = [];
 <script defer src="/js/87-gateway.js"></script>
 <script defer src="/js/88-install.js"></script>
 <script defer src="/js/89-agent-cfg.js"></script>
+<script defer src="/js/90-onboarding.js"></script>
 <script defer src="/js/99-boot.js"></script>
 </body>
 </html>

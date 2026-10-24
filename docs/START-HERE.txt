@@ -1,0 +1,52 @@
+Perch 0.1.0 beta — 给朋友的测试包
+=================================
+
+一、运行
+--------
+1. 把整个压缩包解压到一个普通文件夹，不要在压缩包里直接双击。
+2. 双击 perch.exe。测试包没有签名，Windows SmartScreen 可能提示：
+   点「更多信息」→「仍要运行」。
+3. 需要 Windows 10/11 x64。WebView2 一般系统已有；缺失时 Windows 会提示安装。
+4. perch-hook.exe 必须和 perch.exe 放在同一目录（解压后本来就在一起），
+   少这个文件时 hook 状态会静默消失。
+
+二、第一次打开
+--------------
+1. 欢迎卡：点「开始使用」，或点「打开网关」直接去网关页。
+2. 网关页：点「下载并安装网关引擎」。引擎来自 usemagpie.ai 官方源，
+   下载后会做 SHA-256 校验，装完自动启动。
+3. 供应商页：添加你自己的模型供应商，或按页面提示登录官方 CLI。
+4. 总览 → Agent CLI：安装你要用的 agent（Claude Code / Codex / Pi / …），
+   给这一行选一个模型，再点右侧打开。
+5. 新 agent 会在 Documents\Perch\sessions\<日期>-<agent>-<格子> 下拿到
+   独立目录；不同 agent 的会话不会混在同一个文件夹里。
+
+三、数据放在哪
+--------------
+- %APPDATA%\Perch
+  Perch 自己的设置、座位记录、hook 事件；日志在 perch.log（8MB 轮转）。
+- %LOCALAPPDATA%\Perch
+  Perch 安装的网关引擎、网关的 provider key、agent 配置沙盒。
+- 卸载：退出 Perch，删除本目录即可。要彻底清掉配置，再删上面两个目录。
+
+四、隐私与安全
+--------------
+- Perch 本身不需要账号，也不做遥测。
+- 模型请求只发给你在网关里配置的供应商；密钥由本地网关保存，
+  不会写进 Perch 的日志。
+- agent CLI 可能有自己的遥测、登录和配置策略，以它们自己的说明为准。
+- 安装 agent 使用官方安装脚本或 npm；请只从 Perch 里的安装按钮，
+  或你信任的源安装。
+
+五、已知边界（beta）
+--------------------
+- 未签名、没有安装器；SmartScreen 提示是预期行为。
+- 部分 agent 首次使用需要登录（Qoder / Copilot / Cursor 等）。
+- 个别 agent 的工具执行取决于它自身版本；Perch 会如实显示失败，
+  不会把失败画成成功。
+- 网关能力来自 magpie（https://usemagpie.ai，MIT）；
+  第三方组件与许可见 THIRD-PARTY.md 和 licenses/。
+
+六、遇到问题
+------------
+把 %APPDATA%\Perch\perch.log 发给我们就行。日志里不会有 provider key。

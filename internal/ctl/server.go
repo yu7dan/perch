@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/yu7dan/perch/internal/agentcatalog"
+	"github.com/yu7dan/perch/internal/agentprofile"
 	"github.com/yu7dan/perch/internal/gateway"
 	"github.com/yu7dan/perch/internal/install"
 	"github.com/yu7dan/perch/internal/panes"
@@ -58,15 +59,19 @@ type UI interface {
 type Deps struct {
 	StateDir       string
 	SecondInstance bool
+	// Version 是构建时注入的版本号（main.buildVersion）；设置页「关于」显示它。
+	Version string
 
-	Tabs       *session.Manager
-	Panes      *panes.Store
-	Titles     *session.TitleStore
-	Pool       *project.Pool
-	Prefs      *settings.Store
-	Gateway    *gateway.Gateway
-	Installer  *install.Installer
-	Transcript *transcript.Follower
+	Tabs        *session.Manager
+	Panes       *panes.Store
+	Titles      *session.TitleStore
+	Pool        *project.Pool
+	Prefs       *settings.Store
+	Gateway     *gateway.Gateway
+	Profiles    *agentprofile.Store
+	ProfileSets *agentprofile.SetStore
+	Installer   *install.Installer
+	Transcript  *transcript.Follower
 
 	DefaultCWD    func() string
 	SessionExists func(agentName, cwd, id string) bool
@@ -89,6 +94,18 @@ type Server struct {
 
 	mu       sync.Mutex
 	pushConn Conn
+
+	// 所有 c.Send 都过 sendMu：lib.reload 现在在 goroutine 里扫描，
+	// 它和 tab.ok / 推送会同时写同一条流。Send 是否线程安全没人保证，
+	// 一把锁比一个未知数便宜。
+	sendMu sync.Mutex
+
+	// lib.reload 是单飞 + 尾巴合并：扫描期间再来的请求只记一次，
+	// 扫完再补一次。它绝不能在 ctl 的 receive 循环里同步跑 ——
+	// 171 个会话的扫描会让后面的 tab.new 应答迟到，前端 7.5s 就放弃。
+	reloadMu    sync.Mutex
+	reloading   bool
+	reloadAgain bool
 
 	guard CloseGuard
 }
@@ -165,6 +182,11 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		"gw.agent.keep", "gw.agent.preview", "gw.agents.drift":
 		s.handleGateway(m)
 
+	// Perch 自己的 per-agent 配置（隔离网关；不写 agent 全局配置）
+	case "agent.profiles", "agent.profile.set", "agent.profile.tier", "agent.profile.models",
+		"agent.profile.save", "agent.profile.use", "agent.profile.delete":
+		s.handleAgentProfile(m)
+
 	// 安装器 / “只启动”agent 的状态接入
 	case "install.agent", "install.magpie", "install.cancel", "agent.setup":
 		s.handleInstall(m)
@@ -183,6 +205,14 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 	}
 }
 
+// send 是所有 c.Send 的唯一入口。lib.reload 的扫描在 goroutine 里跑，
+// 它和 tab.ok / 推送可能同时写同一条流；这里把写串起来。
+func (s *Server) send(c Conn, b []byte) error {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	return c.Send(b)
+}
+
 // Push 把一条消息推给前端（走 ctl 那条常驻通道）。
 //
 // 加锁是因为这里有**两个写者**（链路轮询的 goroutine 和可能的其它 goroutine），
@@ -198,7 +228,7 @@ func (s *Server) Push(v any) {
 	if c == nil {
 		return
 	}
-	if err := c.Send(b); err != nil {
+	if err := s.send(c, b); err != nil {
 		s.mu.Lock()
 		if s.pushConn == c {
 			s.pushConn = nil
@@ -247,5 +277,5 @@ func (s *Server) ServeShell(c Conn) {
 		return
 	}
 	log.Printf("[perch] 索引 %d 字节", len(b))
-	_ = c.Send(b)
+	_ = s.send(c, b)
 }

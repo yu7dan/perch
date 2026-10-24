@@ -65,6 +65,10 @@ type Gateway struct {
 	ours    bool
 	exe     string
 	lastErr string
+	// isolated：Perch 自己的 portable 引擎（isolated.go）。默认 false，
+	// 保持桌面 magpie 的旧路径；由组合根在 StartWatcher 之前打开。
+	isolated bool
+	isoPort  int
 
 	watcherMu  sync.RWMutex
 	docWatcher *watcher
@@ -88,11 +92,21 @@ type Gateway struct {
 	// 只能按 magpie 给的那条命令启动。每次 /api/state 到达时整份替换。
 	launchMu    sync.Mutex
 	agentLaunch map[string]string
+	// agentEngine：哪些 agent 现在确实由引擎接入了网关。只有这些 agent 的
+	// 启动才应该把用户目录换到引擎沙盒；没接线的仍读用户自己的配置。
+	// 这份表会落盘：冷恢复的格子比第一次 /api/state 更早启动，不能等状态
+	// 到了才知道该不该换沙盒。
+	agentEngine      map[string]bool
+	engineAgentsFile string
 }
 
 // New 构造一个未连接的网关。push 是发给前端的函数，可以为 nil（测试）。
 func New(push func(any)) *Gateway {
-	return &Gateway{push: push, agentLaunch: map[string]string{}}
+	return &Gateway{
+		push:        push,
+		agentLaunch: map[string]string{},
+		agentEngine: map[string]bool{},
+	}
 }
 
 func (g *Gateway) emit(v any) {
@@ -178,6 +192,9 @@ func gwPing(port int, key string) bool {
 
 // Ensure 接上或拉起控制面。只由用户点「连接」或启动时的被动探测调用。
 func (g *Gateway) Ensure() error {
+	if g.Isolated() {
+		return g.ensureIsolated()
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -447,7 +464,11 @@ func (g *Gateway) Refresh() {
 }
 
 // Probe 是启动时的被动探测：只接已经存在的控制面，绝不拉起进程。
+// 隔离模式下启动时不碰任何外部控制面；引擎由用户点开网关时才拉起。
 func (g *Gateway) Probe() {
+	if g.Isolated() {
+		return
+	}
 	key := g.loadKey()
 	for p := gwFirstPort; p < gwFirstPort+gwPortTries; p++ {
 		if gwPing(p, key) {

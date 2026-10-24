@@ -56,12 +56,21 @@ const (
 	maxPendingToolText = 32 * 1024
 )
 
-// View 是跟随器需要知道的活格子：id、转录路径、cwd。
+// View 是跟随器需要知道的活格子：id、agent、转录路径、cwd、格式。
 // 调用方从自己的标签管理器里映射出来 —— 本包不认识 session.Tab。
+//
+// Agent 决定用哪一份行解析器：Claude/Qoder 共用 Claude 形状，Codex/Pi/
+// Antigravity/Cursor/Copilot/DSH 各有一份。未知 agent 不产出流水（宁可空，
+// 也不拿别人的形状硬解）。
+//
+// Format 目前只有 DSH 用："zstd" 表示文件是**追加写的 zstd 帧流**，
+// 每帧里是 JSONL。空值 / "jsonl" 都按纯 JSONL 读。
 type View struct {
 	ID         int
+	Agent      string
 	Transcript string
 	CWD        string
+	Format     string
 }
 
 // FileHunk 是一次编辑里的一段 unified diff（形状照 claude 转录的

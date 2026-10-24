@@ -344,11 +344,14 @@ func (m *Manager) handleHookLine(line string, tabID int) {
 	case "UserPromptSubmit":
 		// ⚠️ 不记 prompt 文本（用户定的隐私边界）：只记“用户发了一轮”。
 		log.Printf("[hook t%d] UserPromptSubmit session=%s", tab, short(ev.SessionID))
-		// dsh 的错误轮不会发 Stop（实测 0.2.1-rc.2）。如果只在 Stop 记
-		// Spoke，用户发了提示但这一轮失败的格子会被冷恢复误判成“从没说过话”
-		// 而开新会话。用户按下发送本身就是这条会话有内容的最早证据。
-		if agentType == "dsh" {
-			if id := m.PaneIDFor(tab); id > 0 && m.panes != nil {
+		// 用户按下发送 = 这条会话已经有内容，哪怕这一轮还没跑完/失败了；
+		// 关格时靠它决定记录留不留。
+		if id := m.PaneIDFor(tab); id > 0 && m.panes != nil {
+			m.panes.MarkTalked(id, "用户已发提示 tab="+strconv.Itoa(tab))
+			// dsh 的错误轮不会发 Stop（实测 0.2.1-rc.2）。如果只在 Stop 记
+			// Spoke，用户发了提示但这一轮失败的格子会被冷恢复误判成“从没说过话”
+			// 而开新会话。用户按下发送本身就是这条会话有内容的最早证据。
+			if agentType == "dsh" {
 				m.panes.MarkSpoke(id, "dsh 用户已发提示 tab="+strconv.Itoa(tab))
 			}
 		}

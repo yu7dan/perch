@@ -116,9 +116,17 @@ function instPaint() {
   }
   const last = $("inst-last");
   if (last) {
-    last.textContent = it.phase === "queued"
+    let line = it.phase === "queued"
       ? t("inst.queuedWait")
       : (it.lines.length ? it.lines[it.lines.length - 1] : t("inst.waitingOutput"));
+    // Some installers download hundreds of MB and print one line and then
+    // nothing for minutes (Codex measured 7m49s). Keep the elapsed time on
+    // that line so it reads as "still working", not "stuck".
+    const ms = it.elapsedMs || (it.startedAt ? Date.now() - it.startedAt : 0);
+    if (it.state === "running" && it.phase !== "queued" && ms >= 60000) {
+      line += " · " + t("inst.stillRunning", { min: Math.max(1, Math.floor(ms / 60000)) });
+    }
+    last.textContent = line;
   }
   const log = $("inst-log");
   if (log) log.hidden = !INSTALL_LOG_OPEN;
@@ -180,6 +188,15 @@ function instDone(m) {
   if (!instRunning()) stopInstTicker();
   instPaint();
   renderDashAgents();
+  if (m.ok && m.id === "pi" && typeof showToast === "function") {
+    showToast(t("inst.piFirstRunTitle"), t("inst.piFirstRunNote"), "info");
+  }
+  // 新装的 agent 可能还没进 /api/state 的旧快照：装完立刻重读一次，
+  // 下一次总览的 TTL 刷新是兜底。
+  if (m.ok && m.id !== "magpie" && typeof gwAgentsPrefetch === "function") {
+    if (typeof gwAgentsReset === "function") gwAgentsReset();
+    gwAgentsPrefetch(true);
+  }
   if (!m.ok && m.id === INSTALL_AT) {
     const log = $("inst-log");
     if (log) log.scrollTop = log.scrollHeight;
@@ -224,8 +241,6 @@ function applyInstall(m) {
       GW_INSTALL.state = m.ok ? "done" : "failed";
       GW_INSTALL.err = m.ok ? null : errMsgOf(m);
       if (m.ok) {
-        // 新装的一份：版本状态要重新问（旧值属于上一个 exe）。
-        GW_UPD = null; GW_UPD_BUSY = ""; GW_UPD_ERR = null; GW_UPD_TRIES = 0;
         sendCtrl({ type: "gw.refresh" });
         sendCtrl({ type: "magpie.refresh" });
       }

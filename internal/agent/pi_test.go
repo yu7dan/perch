@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,6 +31,50 @@ func TestPiBlockedState(t *testing.T) {
 	if ev := got[len(got)-1]; ev.State != agentStateWorking || ev.Evidence != EvidenceExtension {
 		t.Fatalf("busy 事件不对: %+v", ev)
 	}
+}
+
+func TestPiFlowActsAndFiles(t *testing.T) {
+	h := &flowTestHost{}
+	SetHost(h)
+	defer SetHost(defaultHost{})
+	st := &piPaneState{flow: newPiFlow()}
+	noop := func(agentEvent) {}
+
+	handlePiLine(1, `{"type":"session_start","session":"ses_pi"}`, st, noop)
+	handlePiLine(1, `{"type":"act","id":"m1","kind":"prompt","text":"读 a.txt"}`, st, noop)
+	handlePiLine(1, `{"type":"act","id":"call_1","kind":"tool","tool":"read","text":"read a.txt","path":"a.txt"}`, st, noop)
+	handlePiLine(1, `{"type":"act_update","id":"call_1","ok":true,"text":"hello"}`, st, noop)
+	handlePiLine(1, `{"type":"file","path":"a.txt","op":"read"}`, st, noop)
+
+	if len(st.flow.acts) != 2 {
+		t.Fatalf("同 id 的 act_update 必须原地更新，实际 %+v", st.flow.acts)
+	}
+	tool := st.flow.acts[1]
+	if tool.OK == nil || !*tool.OK || tool.Text != "hello" {
+		t.Fatalf("工具结果没回填: %+v", tool)
+	}
+	if f := st.flow.files["a.txt"]; f == nil || len(f.Ops) != 1 || f.Ops[0] != "read" {
+		t.Fatalf("文件台账不对: %+v", st.flow.files)
+	}
+	// 第一帧必须 replace：否则新会话会叠在上一条 Pi 会话后面。
+	var first map[string]any
+	for _, p := range h.pushed {
+		m, ok := p.(map[string]any)
+		if ok && m["type"] == "acts" && len(fmtActs(m)) > 0 {
+			first = m
+			break
+		}
+	}
+	if first == nil || first["replace"] != true {
+		t.Fatalf("第一条非空流水必须 replace=true: %+v", h.pushed)
+	}
+}
+
+func fmtActs(m map[string]any) []any {
+	b, _ := json.Marshal(m["items"])
+	var out []any
+	_ = json.Unmarshal(b, &out)
+	return out
 }
 
 func TestPiResumeArgs(t *testing.T) {
@@ -70,7 +115,7 @@ func TestPiSessionFileExists(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := filepath.Join(proj, "2026-10-18T18-10-29-442Z_01a15035-3fc0-7204-8817-23e1bf203ddc.jsonl")
-	if err := os.WriteFile(file, []byte("{}\n"), 0o644); err != nil {
+	if err := os.WriteFile(file, []byte(`{"type":"message","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if !piSessionFileExists("", "01a15035-3fc0-7204-8817-23e1bf203ddc") {

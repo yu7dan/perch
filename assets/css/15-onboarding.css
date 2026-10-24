@@ -1,0 +1,61 @@
+/* First-run welcome card. One surface, no nested cards: the same quiet
+   density as the rest of Perch. The gateway credit for magpie lives here
+   (and in About later), not only in the routing mascot. */
+.onb{position:fixed;inset:0;z-index:1200;display:flex;align-items:center;
+     justify-content:center;padding:32px}
+.onb[hidden]{display:none}
+.onb-scrim{position:absolute;inset:0;background:rgba(0,0,0,.62);
+           backdrop-filter:blur(3px)}
+.onb-card{position:relative;width:min(680px,calc(100vw - 48px));
+          max-height:calc(100vh - 64px);overflow:auto;padding:26px 30px 24px;
+          border:1px solid var(--line);border-radius:16px;background:var(--bg);
+          box-shadow:0 24px 70px rgba(0,0,0,.55),0 0 0 .5px rgba(255,255,255,.06);
+          animation:onb-in .28s cubic-bezier(.2,.8,.2,1)}
+@keyframes onb-in{from{opacity:0;transform:translateY(8px) scale(.99)}
+                  to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){.onb-card{animation:none}}
+.onb-top{display:flex;align-items:center;gap:9px;min-height:30px}
+.onb-logo{width:28px;height:28px;object-fit:contain;border-radius:7px}
+.onb-mark{color:var(--fg);font-size:14px;font-weight:650;letter-spacing:.01em}
+.onb-mark em{color:var(--faint);font-style:normal;font-weight:450;margin-left:5px}
+.onb-x{margin-left:auto;width:28px;height:28px;border:0;border-radius:7px;
+       background:transparent;color:var(--faint);font-size:18px;line-height:1;
+       cursor:pointer}
+.onb-x:hover{background:rgba(255,255,255,.06);color:var(--fg)}
+.onb-kicker{margin-top:30px;color:var(--accent);font-size:10.5px;font-weight:600;
+            letter-spacing:.16em;text-transform:uppercase}
+.onb-title{margin:9px 0 0;color:var(--fg);font-size:30px;line-height:1.18;
+           font-weight:650;letter-spacing:-.02em}
+.onb-lead{margin:12px 0 0;max-width:58ch;color:var(--muted);font-size:13px;
+          line-height:1.65}
+.onb-points{margin-top:24px;border-top:1px solid var(--line-soft)}
+.onb-point{display:grid;grid-template-columns:24px minmax(0,1fr);column-gap:11px;
+           padding:12px 0;border-bottom:1px solid var(--line-soft)}
+.onb-n{color:var(--faint);font:10.5px/1.7 var(--mono)}
+.onb-point b{display:block;color:var(--fg2);font-size:12.5px;font-weight:600}
+.onb-point span{display:block;margin-top:3px;color:var(--muted);font-size:11.5px;
+                line-height:1.55}
+.onb-thanks{margin-top:18px;display:flex;align-items:flex-start;gap:12px}
+.onb-thanks .tx{min-width:0;flex:1}
+.onb-thanks b{display:block;color:var(--fg2);font-size:12px;font-weight:600}
+.onb-thanks span{display:block;margin-top:3px;color:var(--faint);font-size:11.5px;
+                 line-height:1.5}
+.onb-link{flex:none;margin-top:2px;padding:0;border:0;background:transparent;
+          color:var(--accent);font:11.5px/1.4 var(--mono);cursor:pointer}
+.onb-link:hover{text-decoration:underline}
+.onb-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;
+             margin-top:22px;padding-top:16px;border-top:1px solid var(--line-soft)}
+.onb-btn{height:34px;padding:0 15px;border:1px solid var(--line);border-radius:8px;
+         background:transparent;color:var(--muted);font-size:12.5px;cursor:pointer}
+.onb-btn:hover{border-color:var(--fg2);color:var(--fg)}
+.onb-btn.primary{border-color:var(--accent);background:var(--accent);color:#fff}
+.onb-btn.primary:hover{filter:brightness(1.06);color:#fff}
+.onb-btn:focus-visible,.onb-x:focus-visible,.onb-link:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px}
+@media (max-width:620px){
+  .onb{padding:16px}
+  .onb-card{width:100%;max-height:calc(100vh - 32px);padding:20px 18px 18px}
+  .onb-title{font-size:24px}
+  .onb-actions{flex-wrap:wrap}
+  .onb-actions .onb-btn{flex:1}
+}

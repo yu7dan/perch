@@ -197,12 +197,84 @@ func (h uiAssets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
  * 2) 再把不属于网关的导航拿掉：Agents / Sessions / Library（我们自己有总览
  *    和 Agent 页）、Settings、更新/同步/窗口按钮。视图 DOM 本身不动，magpie
  *    页面内自己的跳转仍然可用。 */
-const uiEmbed = `<script>try{localStorage.setItem("magpie.navLayout","top")}catch(e){}</script>
+const uiEmbed = `<script>try{localStorage.setItem("magpie.navLayout","top")}catch(e){}
+try{document.documentElement.dataset.theme="dark";document.title="Perch"}catch(e){}</script>
 <style id="perch-embed">
 #side,#sideEdge,#sideToggle,#prefs,#sync,#update,.update-wrap,#open,#openMain,#quit,#winclose,#ptabs{display:none!important}
 #nav .nav-gl{display:none!important}
 #nav button[data-view="agents"],#nav button[data-view="sessions"],#nav button[data-view="library"]{display:none!important}
+/* 品牌区整个退场：logo + magpie 字样都不要。五个网关标签改为左对齐，
+   和上面 Perch 的「面板 / 网关」页头同一条左基准线。 */
+.brand{display:none!important}
+.top .seg{position:relative!important;left:auto!important;top:auto!important;
+          transform:none!important;margin-left:2px!important}
+/* 把网关页的深蓝主题换成 Perch 的近黑中性色 + Perch 蓝。
+   只覆盖变量，magpie 自己的组件结构、密度、交互都不动。 */
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0a0a0a; --card:#171717; --card-2:#121212;
+  --pill:#1f1f1f; --pill-hover:#2a2a2a;
+  --seg-track:rgba(255,255,255,.04); --seg-thumb:rgba(255,255,255,.12);
+  --seg-edge:inset 0 .5px 0 rgba(255,255,255,.06),0 1px 2px rgba(0,0,0,.3);
+  --line:rgba(255,255,255,.07); --line-2:rgba(255,255,255,.045);
+  --fg:#fafafa; --fg-2:#d4d4d4; --muted:#a1a1a1; --faint:#737373; --ctl-fg:#a1a1a1;
+  --accent:#4d6bfe; --accent-soft:rgba(77,107,254,.16); --accent-fg:#ffffff;
+  --sel:rgba(77,107,254,.20);
+  --green:#86efac; --green-soft:rgba(134,239,172,.12);
+  --red:#ff6568; --red-soft:rgba(255,101,104,.12);
+  --amber:#eab308; --amber-soft:rgba(234,179,8,.12);
+  --drift:#ff6568; --drift-soft:rgba(255,101,104,.12);
+  --pop-bg:rgba(23,23,23,.96);
+  --shadow:0 16px 44px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.3),0 0 0 .5px rgba(255,255,255,.1);
+  --logo-invert:1;
+  --tk-s:#86efac; --tk-k:#c4b5fd; --tk-f:#93c5fd; --tk-n:#eab308; --tk-v:#67e8f9; --tk-o:#f0abfc; --tk-c:#737373;
+  --c1:#6b8cff; --c2:#67e8f9; --c3:#86efac; --c4:#eab308; --c5:#f0abfc; --c6:#c4b5fd; --c7:#94a3b8;
+  --font:"Geist","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+  --code:"Cascadia Code WB","JetBrains Mono WB",Consolas,"Microsoft YaHei",monospace;
+}
+/* Perch：供应商添加页不展示 magpie 的合作伙伴/赞助商货架。
+   magpie 原文的归属是"赞助 magpie 的服务"，嵌进 Perch 后这层商业内容
+   既不属于 Perch，也没有必要占一屏；只藏这一栏，订阅/供应商/中转照旧。
+   data-perch-hide 由下面的脚本打在 .kind 和它后面的 .grid 上。 */
+#addSheet [data-perch-hide]{display:none!important}
+#addProvider.has-new::after{display:none!important}
+
+/* Perch：路由页顶部的舞台动画讲的是 magpie 自己的路由叙事，和 Perch 的
+   外壳混在一起；隐藏整段舞台/回放/标题说明，下面的请求历史、步骤日志、
+   筛选和所有交互都保留。 */
+#view-routing .rt-top,#view-routing .rt-stage,#view-routing .rt-replay{display:none!important}
 </style>
+<script>(function(){
+  // Do not rewrite magpie's copy. The embedded page is magpie's own console;
+  // its visible text must keep saying magpie (that is also what makes the
+  // sponsor attribution truthful). Perch's own chrome is outside this iframe.
+  //
+  // The one thing Perch removes is the partner/sponsor shelf in the provider
+  // add sheet: it is magpie's commercial listing, not part of this product.
+  // The sheet is redrawn often, so sweep on mutations as well as once at boot.
+  var partnerName=/^(partners?|合作伙伴|合作夥伴|パートナー|partner|sponsoren)$/i;
+  var partnerHint=/sponsor|赞助|贊助|スポンサー|gesponsert/i;
+  function sweep(){
+    var kinds=document.querySelectorAll("#addSheet .kind");
+    for(var i=0;i<kinds.length;i++){
+      var k=kinds[i];
+      if(k.getAttribute("data-perch-hide")) continue;
+      var b=k.querySelector("b"), hint=k.querySelector("span");
+      var name=(b&&b.textContent||"").trim();
+      var h=(hint&&hint.textContent||"").trim();
+      if(!partnerName.test(name) && !partnerHint.test(h)) continue;
+      k.setAttribute("data-perch-hide","1");
+      var g=k.nextElementSibling;
+      if(g && g.classList && g.classList.contains("grid")) g.setAttribute("data-perch-hide","1");
+    }
+  }
+  function start(){
+    sweep();
+    new MutationObserver(sweep).observe(document.documentElement,{subtree:true,childList:true});
+  }
+  if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",start,{once:true});
+  else start();
+})();</script>
 `
 
 // uiEmbedHTML 在 </head> 前塞进 uiEmbed。读失败就原样放回，别让页面变空白。

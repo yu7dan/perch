@@ -505,7 +505,8 @@ function renderDashStatus() {
   const live = TAB_LIST.filter((t) => t.id > 0);
   const running = live.filter((t) => !t.connDown).length;
   const need = needModel();
-  const projs = (STATE?.projects || []).length;
+  // 默认会话区是合成条目，不是“项目”；和左栏导航的计数用同一条口径。
+  const projs = (STATE?.projects || []).filter((p) => !p.synthetic).length;
   // ⚠️ 结构只建一次，之后只改数字 —— 这一行每 700ms 跟着 renderDashLive 重画，
   // 整块 innerHTML 会把按钮换掉；mousedown 与 mouseup 落在两个不同元素上，
   // 那次点击就静默丢了（和 seg 的 thumb 是同一类毛病）。
@@ -594,12 +595,1519 @@ let INSTALL_AT = "";
    看到完整清单；要收起是他们自己的动作（同一个会话里不会被重画弹回去）。 */
 let agentsFoldOpen = true;
 
+/* ===========================================================================
+   Perch 自己的 Agent 工作板（隔离网关，2026-10-22）
+   ---------------------------------------------------------------------------
+   magpie 的 Agent 页上半部分在这里重生：每行一个 agent，明确写「未设置 /
+   已设置」，模型直接从网关目录里选；安装仍然走 Perch 自己的一键安装。
+   数据来自 ctl 的 agent.profiles（Perch 自己的 agent-profiles.json +
+   引擎 /api/providers），**不是** magpie 的全局 agent 配置。
+
+   非隔离模式（默认）保持旧的三列名单和右侧抽屉不变；只有后端说
+   isolated=true 时才启用这块。
+   =========================================================================== */
+let AGENT_UI_ISOLATED = false;
+let AGENT_PROFILES = Object.create(null);
+let AGENT_MODELS = [];
+let AGENT_PROFILE_ASKED = false;
+let AGENT_PROFILE_ERR = "";
+let AGENT_DETAIL_ID = "";
+let GW_AGENT_BUSY = "";
+let GW_FIELD_POP = null;
+let AGENT_MODEL_POP = null;
+let AGENT_MODELS_POP = null;
+let AGENT_SETS = [];
+let AGENT_SET_PENDING = "";
+let AGENT_SET_NAMING = false;
+let AGENT_SET_DRAFT = "";
+// magpie 的 Agents 页默认把未设置/未检测到的收在 "Show N more" 下面。
+let PERCH_FOLD_OPEN = false;
+// 网关 /api/state 已识别、但不在下载名单里的 agent：单独折叠，只配置、不安装/启动。
+let PERCH_EXTRA_FOLD_OPEN = false;
+
+function ensureAgentProfiles() {
+  if (AGENT_PROFILE_ASKED) return;
+  AGENT_PROFILE_ASKED = true;
+  try { sendCtrl({ type: "agent.profiles" }); } catch (e) { /* 控制通道还没起就等下次 */ }
+}
+
+function applyAgentProfiles(m) {
+  AGENT_UI_ISOLATED = !!(m && m.isolated);
+  const next = Object.create(null);
+  for (const p of (m && m.agents) || []) {
+    if (p && p.agent) next[p.agent] = p;
+  }
+  AGENT_PROFILES = next;
+  AGENT_MODELS = Array.isArray(m && m.models) ? m.models : [];
+  AGENT_SETS = Array.isArray(m && m.sets) ? m.sets : [];
+  // 不因为一次普通推送关掉正在输入的方案名：只有保存/取消/应用成功才关。
+  AGENT_SET_PENDING = "";
+  AGENT_PROFILE_ERR = (m && typeof errMsgOf === "function") ? (errMsgOf(m) || "") : "";
+  if (AGENT_MODEL_POP) dashModelClose(false);
+  if (AGENT_UI_ISOLATED && typeof AC_ID !== "undefined" && AC_ID &&
+      typeof acClose === "function") acClose();
+  if (NAV_HERE === "dash") renderDashAgents();
+}
+
+/* 模型标签压缩：网关路由的标签常带引擎前缀（magpie/deepseek/...），
+   在行里没有信息量；完整标签留在 title 里。 */
+function dashModelShort(label) {
+  const s = String(label || "");
+  return /^magpie\//i.test(s) ? s.slice(7) : s;
+}
+
+function dashContextLabel(n) {
+  n = Number(n) || 0;
+  if (!n) return "—";
+  if (n >= 1000000) return (Math.round(n / 100000) / 10) + "M";
+  return Math.round(n / 1000) + "k";
+}
+
+function perchAlias(id) {
+  const s = String(id || "agent").toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  return "group/perch-" + (s || "agent");
+}
+
+function perchProfileOf(id) { return AGENT_PROFILES[id] || null; }
+
+function perchModelOf(p) {
+  if (!p || !p.model) return null;
+  return AGENT_MODELS.find((m) => m && m.id === p.model) || null;
+}
+
+function perchHiddenSet(id) {
+  const p = perchProfileOf(id);
+  return new Set(Array.isArray(p && p.hidden) ? p.hidden : []);
+}
+
+// 这个 agent 的模型选择器里实际展示的模型：收起的去掉，但当前主模型/
+// 档位模型始终保留（magpie 也不允许把正在用的模型藏掉）。
+function perchVisibleModels(id, extraKeep) {
+  const p = perchProfileOf(id);
+  const hidden = perchHiddenSet(id);
+  const keep = new Set(extraKeep || []);
+  if (p && p.model) keep.add(p.model);
+  if (p && p.tiers) for (const t of Object.keys(p.tiers)) {
+    if (p.tiers[t] && p.tiers[t].model) keep.add(p.tiers[t].model);
+  }
+  return AGENT_MODELS.filter((m) => m && m.id && (!hidden.has(m.id) || keep.has(m.id)));
+}
+
+function perchModelLabel(p) {
+  if (!p || !p.model) return "";
+  const m = perchModelOf(p);
+  return m ? (m.name || m.id) : dashModelShort(p.model);
+}
+
+function perchGoGateway() {
+  const b = document.querySelector('#dash-tabs .opt[data-dtab="gateway"]');
+  if (b) b.click();
+}
+
+function perchCaps(a) {
+  return a.caps || {
+    launch: !!a.adapter, status: !!a.adapter, waiting: !!a.adapter, inject: false,
+  };
+}
+
+/* ---------------------------------------------------------------------------
+   引擎托管的 agent（agy / dsh / Gemini 这类）：配置由 magpie 的 /api/state
+   字段和 /api/set 写进 Perch 自己的沙盒，不在 Perch 里另存一份模型。
+   Claude/Codex/Pi/OpenCode 继续走 Perch 的每格注入（下面 wireable），
+   因为它们的运行中会话要下一轮生效、还要状态适配器。
+   --------------------------------------------------------------------------- */
+function gwFieldOfAgent(g, key) {
+  const fs = g && Array.isArray(g.fields) ? g.fields : [];
+  return fs.find((f) => f && f.key === key) || null;
+}
+
+function gwFieldName(f) {
+  if (!f) return "";
+  return (typeof acFieldLabel === "function") ? acFieldLabel(f) : (f.label || f.key);
+}
+
+function gwOptionLabel(f, o) {
+  if (!o) return "";
+  if (typeof acOptName === "function") return acOptName(f, o);
+  return o.label || o.value || "";
+}
+
+function gwValueLabel(f, value) {
+  if (!f) return "";
+  const o = (f.options || []).find((x) => x && x.value === value);
+  return o ? gwOptionLabel(f, o) : dashModelShort(value);
+}
+
+function gwDefaultLabel(g, f) {
+  if (typeof acDefaultLabel === "function") return acDefaultLabel(g, f);
+  return t("dash.agents.gwFieldDefault");
+}
+
+// 引擎字段里有 magpie/… 选项 = 这个字段能接进 Perch 的网关。只有这类
+// agent 才画模型 chip 和接入开关；Cursor 这种官方只让选 auto 的仍是本机配置。
+// magpie 的选项值不一定带 magpie/ 前缀：Gemini 用自己的拼法（gemini-4-argon，
+// workbuddy/auto…），但会带 ref / “via magpie” 标记。ref 是更稳的判据。
+function gwIsGatewayOption(o) {
+  return !!o && !gwIsRoutingGroup(o) &&
+    (!!o.ref || String(o.value || "").startsWith("magpie/"));
+}
+
+function gwGatewayOptions(f) {
+  return (f && Array.isArray(f.options) ? f.options : []).filter(gwIsGatewayOption);
+}
+
+// magpie 的 Routing groups 是路由组别名，不是供应商模型。`group/perch-*`
+// 是 Perch 给四个每格注入的 agent 建的内部别名（换模型/档位下一轮生效），
+// `auto/*` 是 magpie 自己的路由组。agy/dsh 的模型选择器不该出现它们。
+function gwIsRoutingGroup(o) {
+  return !!o && (o.group === "Routing groups" ||
+    /^magpie\/group\//.test(String(o.value || "")));
+}
+
+function gwVisibleFieldOptions(f) {
+  let out = (f && Array.isArray(f.options) ? f.options : []).filter((o) => !gwIsRoutingGroup(o));
+  // 引擎托管行是“经 Perch 网关”的模型选择器：DSH 这类还会列出本机
+  // DeepSeek 直连模型，选了就等于绕过网关（甚至断开）。这里只留
+  // magpie/… 的网关模型，直连留在「使用自己的配置」那一侧。
+  if (f && f.key === "model") {
+    out = out.filter(gwIsGatewayOption);
+  }
+  return out;
+}
+
+// 引擎字段里有 magpie/… 模型选项，就说明这个 CLI 能被网关接入。未接入
+// 时它仍按用户自己的配置启动（EngineDef 只在 wired 后换沙盒）；开关和
+// 模型选择先在这里完成，接入后的下一次开格才走引擎沙盒。
+// 引擎状态是配置资格的权威：只要 /api/state 认出了它，且已接入或有网关模型，
+// 就应该能配置。不再看 Perch 自己的 installed/launch —— Qoder 的 PATH 探测
+// 失败时仍要能选模型/接入；开格能力另由 caps.launch 控制。
+function gwStateConnectable(g) {
+  if (!g) return false;
+  if (g.wired) return true;
+  const fields = Array.isArray(g.fields) ? g.fields : [];
+  return fields.some((f) => gwGatewayOptions(f).length > 0);
+}
+
+function gwEngineManaged(a) {
+  if (!a || perchCaps(a).inject) return false;
+  return gwStateConnectable(gwAgentOf(a.id));
+}
+
+// 名单外但网关已识别的 agent：只生成配置卡，不进入下载/安装/启动路径。
+// 完整 caps 形状是给 perchCaps/分组用的，别只写 launch。
+function gwStateOnlyCards(list) {
+  const known = new Set((list || []).map((a) => String(a.id).toLowerCase()));
+  const seen = new Set();
+  const out = [];
+  for (const g of (Array.isArray(GW_AGENTS) ? GW_AGENTS : [])) {
+    if (!g || !g.id) continue;
+    const id = String(g.id);
+    if (known.has(id.toLowerCase()) || seen.has(id) || !gwStateConnectable(g)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      name: g.name || id,
+      icon: g.icon || "",
+      vendor: "",
+      url: "",
+      path: g.path || "",
+      installed: true,
+      adapter: false,
+      install: false,
+      windows: true,
+      stateOnly: true,
+      caps: {
+        launch: false, inject: false, status: false, waiting: false,
+        resume: false, actions: false, approvals: false, mechanism: "gateway",
+      },
+    });
+  }
+  return out;
+}
+
+function gwModelField(g) { return gwFieldOfAgent(g, "model"); }
+
+function gwModelLabel(g) {
+  const f = gwModelField(g);
+  if (!f || !f.value) return "";
+  const o = (f.options || []).find((x) => x && x.value === f.value);
+  if (o && gwIsRoutingGroup(o)) return t("dash.agents.gwInternalRoute");
+  return gwValueLabel(f, f.value);
+}
+
+// 引擎字段的 chip：结构照搬 magpie 的 fieldBtn（app.js:422-448）：
+// 选项图标 → agent 图标 → 纯文字，值 + chevron；点击交给统一 picker。
+// 不再把字段倒成原生 <select>，否则和 profile 行是两套控件语言。
+function gwFieldChipHTML(g, f, id, busy) {
+  const opts = gwVisibleFieldOptions(f);
+  const cur = opts.find((o) => o.value === f.value) ||
+    (f.options || []).find((o) => o && o.value === f.value);
+  const routing = cur && gwIsRoutingGroup(cur);
+  const label = routing ? t("dash.agents.gwInternalRoute")
+    : f.value ? (cur ? gwOptionLabel(f, cur) : gwValueLabel(f, f.value))
+      : gwDefaultLabel(g, f);
+  const icon = cur && cur.icon ? iconHTML(cur.icon, "agp-mic") : "";
+  const title = gwFieldName(f) + ": " + label + (cur && cur.note ? " · " + cur.note : "");
+  return `<button type="button" class="agp-field${f.value ? "" : " empty"}"` +
+    ` data-gwfieldpick="${esc(f.key)}" data-gwid="${esc(id)}"` +
+    ` aria-haspopup="listbox" aria-expanded="false" title="${esc(title)}"` +
+    `${busy ? " disabled" : ""}>${icon}` +
+    `<span class="v">${esc(label)}</span><span class="chev" aria-hidden="true">▾</span></button>`;
+}
+
+// effort 用和 profile 行相同的分段 chip，而不是一个裸 select。
+function gwEffortChipsHTML(g, f, id, busy) {
+  const opts = gwVisibleFieldOptions(f);
+  const on = (v) => (v === "" ? !f.value : f.value === v);
+  const chip = (v, label) => `<button type="button" class="agp-effort${on(v) ? " on" : ""}"` +
+    ` data-gwfieldset="${esc(id)}" data-field="${esc(f.key)}" data-value="${esc(v)}"` +
+    `${busy ? " disabled" : ""}>${esc(label)}</button>`;
+  const levels = opts.filter((o) => o.value !== "").map((o) => chip(o.value, gwOptionLabel(f, o))).join("");
+  return `<span class="agp-efforts">${chip("", t("dash.agents.perchEffortDefault"))}${levels}</span>`;
+}
+
+// 一行 = label + 控件；label 列由 CSS 统一宽度，所有字段从同一条竖线开始。
+function gwFieldRowHTML(g, f, id, busy) {
+  const effort = f.key === "effort" || f.label === "effort" || f.label === "thinking";
+  const value = effort ? gwEffortChipsHTML(g, f, id, busy) : gwFieldChipHTML(g, f, id, busy);
+  return `<div class="agp-kv"><div class="agp-k">${esc(gwFieldName(f))}</div>` +
+    `<div class="agp-v">${value}</div></div>`;
+}
+
+// magpie 的模型列表摘要：提供商 + 数量。settings 里的 g.models.by 已经分好组；
+// 没有时从网关选项里推，不额外发请求。
+function gwModelsSummaryHTML(g, id, busy) {
+  const modelField = gwModelField(g);
+  if (!modelField) return "";
+  let by = g && g.models && Array.isArray(g.models.by) ? g.models.by : [];
+  by = by.filter((m) => m && m.name && m.name !== "Routing groups" && (m.n | 0) > 0);
+  if (!by.length) {
+    const seen = new Map();
+    for (const o of gwVisibleFieldOptions(modelField)) {
+      const name = o.group || "";
+      if (!name) continue;
+      const cur = seen.get(name) || { name, icon: o.icon || "", n: 0 };
+      cur.n++;
+      if (!cur.icon && o.icon) cur.icon = o.icon;
+      seen.set(name, cur);
+    }
+    by = [...seen.values()];
+  }
+  if (!by.length) return "";
+  const chips = by.map((m) => `<span class="agp-pchip">` +
+    `${m.icon ? iconHTML(m.icon, "agp-pic") : ""}` +
+    `<span>${esc(m.name)}</span><span class="n">${m.n | 0}</span></span>`).join("");
+  return `<div class="agp-kv"><div class="agp-k">${esc(t("dash.agents.perchModelList"))}</div>` +
+    `<div class="agp-v agp-mlist"><span class="agp-pchips">${chips}</span>` +
+    `<button type="button" class="agp-quiet" data-gwfieldpick="model" data-gwid="${esc(id)}"` +
+    `${busy ? " disabled" : ""}>${esc(t("dash.agents.perchPick"))}</button>` +
+    `</div></div>`;
+}
+
+function perchConfirm(opts) {
+  if (typeof askConfirm === "function") return askConfirm(opts);
+  return Promise.resolve(true);
+}
+
+// 引擎托管 agent 的接入开关：接入立刻写 magpie 的配置；断开先确认（会
+// 恢复接入前的值）。繁忙时忽略重复点击，等下一次 /api/state 推送。
+function gwToggleAgent(id) {
+  const g = gwAgentOf(id);
+  if (!g || GW_AGENT_BUSY) return;
+  if (!g.wired) {
+    GW_AGENT_BUSY = id;
+    sendCtrl({ type: "gw.agent.connect", id });
+    if (NAV_HERE === "dash") renderDashAgents();
+    return;
+  }
+  perchConfirm({
+    title: t("dash.agents.perchDisconnectTitle"),
+    body: t("dash.agents.perchDisconnectBody"),
+    ok: t("dash.agents.perchDisconnectOk"),
+    danger: true,
+  }).then((yes) => {
+    if (!yes) return;
+    GW_AGENT_BUSY = id;
+    sendCtrl({ type: "gw.agent.disconnect", id });
+    if (NAV_HERE === "dash") renderDashAgents();
+  });
+}
+
+// Profiles 条：已保存的方案 + 保存当前。方案存的是 per-agent 模型/档位，
+// 应用时由后端把每个 agent 写回并同步网关别名组；运行中的会话下一轮生效。
+function perchProfilesHTML() {
+  const chips = AGENT_SETS.map((s) => {
+    const n = Array.isArray(s && s.agents) ? s.agents.length : 0;
+    const pending = AGENT_SET_PENDING === s.name;
+    return `<span class="agp-chip${pending ? " pending" : ""}" data-perchset="${esc(s.name)}"` +
+      ` role="button" tabindex="0" title="${esc(t("dash.agents.perchProfileHint", { name: s.name, n }))}">` +
+      `<span class="nm">${esc(s.name)}</span><span class="dot" aria-hidden="true"></span>` +
+      `<span class="x" data-perchsetdel="${esc(s.name)}"` +
+      ` title="${esc(t("dash.agents.perchProfileDelete"))}" aria-label="${esc(t("dash.agents.perchProfileDelete"))}">×</span>` +
+      `</span>`;
+  }).join("");
+  let editor = "";
+  if (AGENT_SET_NAMING) {
+    editor = `<input id="perch-set-name" class="agp-setname" type="text" maxlength="60"` +
+      ` value="${esc(AGENT_SET_DRAFT)}" placeholder="${esc(t("dash.agents.perchProfileName"))}"` +
+      ` aria-label="${esc(t("dash.agents.perchProfileName"))}">` +
+      `<button type="button" class="agp-setdo" data-perchsetapply>${esc(t("dash.agents.perchProfileSave"))}</button>` +
+      `<button type="button" class="agp-setcancel" data-perchsetcancel>${esc(t("common.cancel"))}</button>`;
+  } else {
+    editor = `<button type="button" class="agp-setsave" data-perchsetsave>` +
+      `${esc(t("dash.agents.perchSaveProfile"))}</button>`;
+  }
+  return `<div class="agp-profiles"><span class="agp-plabel">${esc(t("dash.agents.perchProfiles"))}</span>` +
+    `<span class="agp-chips">${chips || `<span class="agp-phint">${esc(t("dash.agents.perchNoProfiles"))}</span>`}</span>` +
+    `<span class="agp-pedit">${editor}</span></div>`;
+}
+
+function perchLeadHTML() {
+  return `<div class="agp-lead">${esc(t("dash.agents.perchLead"))}</div>`;
+}
+
+function renderPerchAgentList(host, list, sub) {
+  if (AGENT_MODEL_POP) dashModelClose(false);
+  if (GW_FIELD_POP) gwFieldPopClose(false);
+  const extras = gwStateOnlyCards(list);
+  const installed = list.filter((a) => a.installed);
+  // Claude/Codex/Pi/OpenCode 走 Perch 的每格注入（运行中的会话下一轮生效）。
+  // 这个能力来自后端的 caps.inject，不再在这里写四个 id。
+  const wireable = (a) => {
+    const c = perchCaps(a);
+    return !!(c.inject && c.launch);
+  };
+  const wired = installed.filter((a) => {
+    const p = perchProfileOf(a.id);
+    return wireable(a) && !!(p && p.model);
+  });
+  const unset = installed.filter((a) => {
+    const p = perchProfileOf(a.id);
+    return wireable(a) && !(p && p.model) && perchCaps(a).launch;
+  });
+  // 其余能由 magpie 字段写进 Perch 沙盒的 agent（agy、dsh、qoder…）：
+  // 直接用 /api/state 的字段做配置。engine 从整份名单算，不要求 Perch 自己
+  // 已经探测到可执行文件 —— 状态里的 wired/网关字段才是配置资格。
+  const engine = list.filter((a) => !wireable(a) && gwEngineManaged(a));
+  const engineIds = new Set(engine.map((a) => a.id));
+  const own = installed.filter((a) =>
+    !wireable(a) && !engineIds.has(a.id) && perchCaps(a).launch);
+  const needs = installed.filter((a) =>
+    !perchCaps(a).launch && !engineIds.has(a.id));
+  const missing = list.filter((a) => !a.installed && !engineIds.has(a.id));
+
+  const engineWired = (a) => !!(gwAgentOf(a.id) || {}).wired;
+  const engineOn = engine.filter(engineWired).length;
+  const engineOnAll = engineOn + extras.filter(engineWired).length;
+  if (sub) {
+    const bits = [];
+    if (wired.length + engineOn) bits.push(t("dash.agents.perchSumSet", { n: wired.length + engineOn }));
+    if (AGENT_MODELS.length) bits.push(t("dash.agents.perchSumModels", { n: AGENT_MODELS.length }));
+    else if (AGENT_PROFILE_ERR) bits.push(t("dash.agents.perchGatewayErr"));
+    sub.textContent = bits.join(" · ");
+  }
+
+  let html = perchLeadHTML();
+  if (!AGENT_MODELS.length && !wired.length && !engineOnAll) {
+    html += `<div class="agp-guide">` +
+      `<b>${esc(t("dash.agents.perchGuideTitle"))}</b>` +
+      `<p>${esc(t("dash.agents.perchGuideBody"))}</p>` +
+      `<button type="button" class="dl" data-gwlink>${esc(t("dash.agents.perchGuideAction"))}</button>` +
+      `</div>`;
+  } else if (!AGENT_MODELS.length) {
+    html += `<div class="agp-guide"><p>${esc(t("dash.agents.perchGatewayConnecting"))}</p></div>`;
+  }
+
+  const rows = wired.map((a) => perchRowHTML(a, "set")).join("") +
+    engine.map((a) => perchEngineRowHTML(a)).join("") +
+    unset.map((a) => perchRowHTML(a, "unset")).join("") +
+    own.map((a) => perchRowHTML(a, "own")).join("") +
+    needs.map((a) => perchRowHTML(a, "needs")).join("");
+  html += `<div class="agp-list">` + rows;
+  if (!installed.length && !engine.length) {
+    html += `<div class="agp-empty">${esc(t("dash.agents.emptyAll"))}</div>`;
+  }
+  if (missing.length) {
+    const label = PERCH_FOLD_OPEN
+      ? t("dash.agents.perchFoldHide")
+      : t("dash.agents.perchFoldShow", { n: missing.length });
+    html += `<button type="button" class="agp-more${PERCH_FOLD_OPEN ? " open" : ""}"` +
+      ` id="dash-agent-more" data-perchfold data-fold-count="${missing.length}"` +
+      ` aria-expanded="${PERCH_FOLD_OPEN}"><span id="dash-agent-more-label">${esc(label)}</span>` +
+      `<span class="chev" aria-hidden="true">▾</span></button>` +
+      `<div class="agp-fold${PERCH_FOLD_OPEN ? " open" : ""}" id="dash-agent-fold"><div class="agp-fold-inner">` +
+      `<div class="agp-cap">${esc(t("dash.agents.perchNotInstalled"))}<span>${missing.length}</span></div>` +
+      missing.map((a) => perchRowHTML(a, "missing")).join("") +
+      `</div></div>`;
+  }
+  if (extras.length) {
+    const label = PERCH_EXTRA_FOLD_OPEN
+      ? t("dash.agents.perchGwFoldHide")
+      : t("dash.agents.perchGwFoldShow", { n: extras.length });
+    html += `<button type="button" class="agp-more${PERCH_EXTRA_FOLD_OPEN ? " open" : ""}"` +
+      ` id="dash-agent-gwmore" data-gwfold data-fold-count="${extras.length}"` +
+      ` aria-expanded="${PERCH_EXTRA_FOLD_OPEN}"><span id="dash-agent-gwmore-label">${esc(label)}</span>` +
+      `<span class="chev" aria-hidden="true">▾</span></button>` +
+      `<div class="agp-fold${PERCH_EXTRA_FOLD_OPEN ? " open" : ""}" id="dash-agent-gwfold"><div class="agp-fold-inner">` +
+      `<div class="agp-cap">${esc(t("dash.agents.perchGwFoldCap"))}<span>${extras.length}</span></div>` +
+      extras.map(perchEngineRowHTML).join("") +
+      `</div></div>`;
+  }
+  html += `</div>` + perchProfilesHTML();
+
+  host.innerHTML = html;
+  if (AGENT_SET_NAMING) {
+    const inp = $("perch-set-name");
+    if (inp) {
+      inp.focus();
+      try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (_) {}
+      inp.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          perchCommitProfileSave(inp.value.trim());
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          AGENT_SET_NAMING = false;
+          AGENT_SET_DRAFT = "";
+          renderDashAgents();
+        }
+      });
+    }
+  }
+}
+
+// 引擎托管行：magpie /api/state 的字段就是配置界面，Perch 只负责画和转发。
+function perchEngineRowHTML(a) {
+  const id = esc(a.id);
+  const g = gwAgentOf(a.id) || {};
+  const wired = !!g.wired;
+  const busy = GW_AGENT_BUSY === a.id;
+  const open = AGENT_DETAIL_ID === a.id;
+  const name = a.name || g.name || a.id;
+  const live = typeof liveAgentTab === "function" ? liveAgentTab(a.id) : null;
+  const detail = a.path || g.path || a.vendor || "";
+  const fields = Array.isArray(g.fields) ? g.fields : [];
+  const modelField = gwModelField(g);
+  const modelOpt = modelField && modelField.value
+    ? (modelField.options || []).find((o) => o && o.value === modelField.value) : null;
+  const modelLabel = gwModelLabel(g);
+  const cliMissing = !!g.cliMissing || (!!a.install && !a.installed);
+  const status = busy ? t("dash.agents.gwBusy")
+    : wired ? t("dash.agents.gwConnected", { model: modelLabel || "—" })
+      : cliMissing ? t("dash.agents.gwCliMissing")
+        : t("dash.agents.gwUnwired");
+  const chipLabel = modelLabel || t("dash.agents.perchPickModel");
+  const chipIcon = modelOpt && modelOpt.icon ? iconHTML(modelOpt.icon, "agp-mic") : "";
+  const chip = modelField
+    ? `<button type="button" class="agp-field${wired ? "" : " empty"}"` +
+      ` data-gwmodelpick="${id}" aria-haspopup="listbox" aria-expanded="false"` +
+      ` title="${esc(t("dash.agents.gwModelHint"))}">` +
+      `${chipIcon}<span class="v">${esc(chipLabel)}</span><span class="chev" aria-hidden="true">▾</span></button>`
+    : `<span class="agp-field-slot" aria-hidden="true"></span>`;
+  const link = `<button type="button" class="agp-link" data-gwdetail="${id}"` +
+    ` aria-expanded="${open}">${esc(t("dash.agents.settings"))}` +
+    `<span class="chev" aria-hidden="true">${open ? "⌄" : "›"}</span></button>`;
+  const sw = `<button type="button" class="agp-switch${wired ? " on" : ""}"` +
+    ` data-gwswitch="${id}" role="switch" aria-checked="${wired}"` +
+    ` title="${esc(wired ? t("dash.agents.perchSwitchOffHint") : t("dash.agents.perchSwitchOnHint"))}">` +
+    `<i></i></button>`;
+  const canOpen = !a.stateOnly && !!perchCaps(a).launch;
+  const openBtn = canOpen
+    ? `<button type="button" class="agp-open" data-launch="${id}"` +
+      ` title="${esc(t("dash.agents.openTitle", { name }))}"` +
+      ` aria-label="${esc(t("dash.agents.openTitle", { name }))}">▶</button>`
+    : `<button type="button" class="agp-open off" aria-disabled="true"` +
+      ` title="${esc(t("dash.agents.gwNoLaunch"))}"` +
+      ` aria-label="${esc(t("dash.agents.gwNoLaunch"))}">▶</button>`;
+  const installBtn = a.install && !perchCaps(a).launch
+    ? `<button type="button" class="agp-quiet" data-install="${id}">${esc(t("dash.agents.perchRepairInstall"))}</button>`
+    : "";
+
+  let exp = "";
+  if (open) {
+    // 字段顺序和 magpie 的 agentRow 一致：model 最宽，effort 第二，其余在后。
+    // 每个字段都是一行 label + 同一个 chip 控件；不再有“网关字段”这层嵌套。
+    const rank = (f) => f.key === "model" ? 0
+      : (f.key === "effort" || f.label === "effort" || f.label === "thinking") ? 1 : 2;
+    const ordered = fields.slice().sort((x, y) => rank(x) - rank(y));
+    const fieldRows = ordered.length
+      ? ordered.map((f) => gwFieldRowHTML(g, f, a.id, busy)).join("")
+      : `<div class="agp-kv"><div class="agp-k"></div>` +
+        `<div class="agp-v"><span class="agp-dim">${esc(t("ac.fields.none"))}</span></div></div>`;
+    let driftHTML = "";
+    const d = g.drift;
+    if (d) {
+      const df = fields.find((f) => f.key === d.field);
+      const want = df && d.want ? gwValueLabel(df, d.want) : (d.want || "");
+      const whyKey = {
+        unwired: "ac.drift.unwired", replaced: "ac.drift.replaced",
+        bypassed: "ac.drift.bypassed", unreachable: "ac.drift.unreachable",
+        proxied: "ac.drift.proxied",
+      }[d.kind] || "ac.drift.generic";
+      driftHTML = `<div class="ac-drift"><b>${esc(t(whyKey, { who: name, want }))}</b>` +
+        `<div class="agp-exp-acts">` +
+        `<button type="button" class="agp-quiet" data-gwreapply="${id}">${esc(t("ac.action.reapply"))}</button>` +
+        (d.kind === "replaced"
+          ? `<button type="button" class="agp-quiet" data-gwkeep="${id}">${esc(t("ac.keep"))}</button>`
+          : "") +
+        `</div></div>`;
+    }
+    exp = `<div class="agp-exp"><div class="agp-exp-body">` +
+      fieldRows + gwModelsSummaryHTML(g, a.id, busy) + driftHTML +
+      `</div><div class="agp-exp-foot">` +
+      (canOpen
+        ? `<button type="button" class="agp-quiet accent" data-launch="${id}">${esc(t("dash.agents.open"))}</button>`
+        : `<button type="button" class="agp-quiet accent off" aria-disabled="true"` +
+          ` title="${esc(t("dash.agents.gwNoLaunch"))}">${esc(t("dash.agents.open"))}</button>`) +
+      installBtn +
+      (a.id === "dsh"
+        ? `<button type="button" class="agp-quiet" data-gwsetup="dsh"` +
+          ` title="${esc(t("dash.agents.gwSetupHooksHint"))}">${esc(t("dash.agents.gwSetupHooks"))}</button>`
+        : "") +
+      `<span class="agp-grow"></span>` +
+      (wired
+        ? `<button type="button" class="agp-quiet red" data-gwdisconnect="${id}">${esc(t("ac.action.disconnect"))}</button>`
+        : `<button type="button" class="agp-quiet" data-gwconnect="${id}"${fields.length ? "" : " disabled"}>${esc(t("ac.action.connect"))}</button>`) +
+      `</div></div>`;
+  }
+
+  return `<div class="agp-row${wired ? " conn" : " unplugged"}${open ? " open" : ""}"` +
+    ` data-perchrow="${id}" data-gwrow="${id}" title="${esc(detail)}"` +
+    ` aria-expanded="${open}">` +
+    `<span class="agp-ic">${iconHTML(a.icon)}</span>` +
+    `<div class="agp-who"><div class="agp-name">${esc(name)}` +
+    `${live ? `<i class="agp-live" title="${esc(t("dash.agents.running"))}"></i>` : ""}</div>` +
+    `<div class="agp-status"><i class="agp-dot${wired ? " on" : ""}"></i><span>${esc(status)}</span></div></div>` +
+    link + chip + openBtn + sw + exp + `</div>`;
+}
+
+function perchRowHTML(a, gid) {
+  const id = esc(a.id);
+  const name = a.name || a.id;
+  const p = gid === "missing" ? null : perchProfileOf(a.id);
+  const model = perchModelOf(p);
+  const caps = perchCaps(a);
+  const live = typeof liveAgentTab === "function" ? liveAgentTab(a.id) : null;
+  const detail = gid === "missing" ? (a.vendor || "") : (a.path || a.vendor || "");
+  const calls = (a.calls | 0) > 0 ? t("dash.agents.calls", { n: dashNum(a.calls) }) : "";
+  const open = AGENT_DETAIL_ID === a.id && (gid === "set" || gid === "unset");
+  const inst = INSTALLS[a.id];
+  const busy = inst && inst.state === "running";
+  const busySpan = busy
+    ? `<span class="agp-state">${esc(inst.phase === "scanning"
+        ? t("dash.agents.installScanning")
+        : inst.phase === "queued" ? t("dash.agents.installQueued")
+          : t("dash.agents.installBusy"))}</span>`
+    : "";
+
+  // 使用自己配置的 CLI / 需要补可执行文件 / 没装：仍然是平面列表里的一行。
+  if (gid === "own" || gid === "needs" || gid === "missing") {
+    let action = "";
+    if (gid === "own") {
+      action = `<button type="button" class="agp-install" data-launch="${id}"` +
+        ` title="${esc(t("dash.agents.openTitle", { name }))}">${esc(t("dash.agents.open"))}</button>`;
+    } else if (a.install) {
+      action = busy ? busySpan
+        : `<button type="button" class="agp-install" data-install="${id}"` +
+          ` title="${esc(t("dash.agents.installTitle", { name }))}">` +
+          `${esc(gid === "needs" ? t("dash.agents.perchRepairInstall") : t("dash.agents.install"))}</button>`;
+    } else if (a.url) {
+      action = `<button type="button" class="agp-install" data-docs="${id}"` +
+        ` title="${esc(t("dash.agents.docsTitle", { name }))}">${esc(t("dash.agents.docs"))}</button>`;
+    }
+    const status = gid === "own"
+      ? t("dash.agents.perchOwnConfig")
+      : gid === "needs"
+        ? t("dash.agents.perchNeedsInstall")
+        : (a.vendor || t("dash.agents.notDetected"));
+    return `<div class="agp-row flat ${gid}" data-perchrow="${id}" title="${esc(detail + calls)}">` +
+      `<span class="agp-ic">${iconHTML(a.icon)}</span>` +
+      `<div class="agp-who"><div class="agp-name">${esc(name)}</div>` +
+      `<div class="agp-status"><i class="agp-dot"></i><span>${esc(status)}</span></div></div>` +
+      action + `</div>`;
+  }
+
+  const wired = gid === "set" && !!(p && p.model);
+  const modelIcon = wired && model && model.icon ? iconHTML(model.icon, "agp-mic") : "";
+  const modelLabel = wired ? perchModelLabel(p) : t("dash.agents.perchPickModel");
+  const modelTitle = wired ? t("dash.agents.perchModelHint") : t("dash.agents.perchPickHint");
+  const linkLabel = t("dash.agents.settings");
+  const link = `<button type="button" class="agp-link" data-perchdetail="${id}" aria-expanded="${open}">` +
+    `${esc(linkLabel)}<span class="chev" aria-hidden="true">${open ? "⌄" : "›"}</span></button>`;
+  const sw = `<button type="button" class="agp-switch${wired ? " on" : ""}"` +
+    ` data-perchtoggle="${id}" role="switch" aria-checked="${wired}"` +
+    ` title="${esc(wired ? t("dash.agents.perchSwitchOffHint") : t("dash.agents.perchSwitchOnHint"))}">` +
+    `<i></i></button>`;
+  const openBtn = `<button type="button" class="agp-open" data-launch="${id}"` +
+    ` title="${esc(t("dash.agents.openTitle", { name }))}"` +
+    ` aria-label="${esc(t("dash.agents.openTitle", { name }))}">▶</button>`;
+
+  let exp = "";
+  if (open) {
+    const efforts = model && Array.isArray(model.efforts)
+      ? model.efforts.map((e) => String(e).toLowerCase()).filter(Boolean) : [];
+    const cur = String((p && p.effort) || "").toLowerCase();
+    if (cur && !efforts.includes(cur)) efforts.push(cur);
+    const elabel = (v) => (typeof acOptName === "function"
+      ? acOptName({ key: "effort" }, { value: v }) : v);
+    const chip = (v, label) =>
+      `<button type="button" class="agp-effort${cur === v ? " on" : ""}"` +
+      ` data-percheffort="${id}" data-effort="${esc(v)}"` +
+      ` title="${esc(t("dash.agents.perchEffortHint"))}">${esc(label)}</button>`;
+    const effortsHTML = [chip("", t("dash.agents.perchEffortDefault"))]
+      .concat(efforts.map((e) => chip(e, elabel(e)))).join("");
+    const provs = [];
+    const byProv = Object.create(null);
+    const visible = perchVisibleModels(a.id);
+    for (const m of visible) {
+      const key = m.provider || m.providerName || "?";
+      if (!byProv[key]) {
+        byProv[key] = { name: m.providerName || key, icon: m.icon || "", n: 0 };
+        provs.push(key);
+      }
+      byProv[key].n++;
+    }
+    const hiddenN = Math.max(0, AGENT_MODELS.length - visible.length);
+    const provChips = provs.map((k) => {
+      const g = byProv[k];
+      return `<span class="agp-pchip">${g.icon ? iconHTML(g.icon, "agp-pic") : ""}` +
+        `<span>${esc(g.name)}</span><span class="n">${g.n}</span></span>`;
+    }).join("");
+    let tiersHTML = "";
+    if (a.id === "claude") {
+      const tierDefs = [["opus", "Opus"], ["sonnet", "Sonnet"], ["haiku", "Haiku"], ["fable", "Fable"]];
+      // 每一档也是一行 label + 控件，和模型/推理强度共用同一条 label 竖线；
+      // 不再在 value 里再嵌一层 58px 的小标签列。
+      tiersHTML = tierDefs.map(([key, label]) => {
+        const tp = p && p.tiers ? p.tiers[key] : null;
+        const tm = tp && tp.model ? AGENT_MODELS.find((x) => x && x.id === tp.model) : null;
+        const tlabel = tp && tp.model ? ((tm && tm.name) || tp.model) : t("dash.agents.perchTierFollow");
+        const ticon = tm && tm.icon ? iconHTML(tm.icon, "agp-mic") : "";
+        const tlevels = tm && Array.isArray(tm.efforts)
+          ? tm.efforts.map((e) => String(e).toLowerCase()).filter(Boolean) : [];
+        const tcur = tp && tp.effort ? String(tp.effort).toLowerCase() : "";
+        const teff = (tp && tp.model)
+          ? [t("dash.agents.perchEffortDefault")].concat(tlevels).map((e, i) => {
+            const v = i === 0 ? "" : e;
+            return `<button type="button" class="agp-effort${tcur === v ? " on" : ""}"` +
+              ` data-percheffort="${id}" data-perchtier="${key}" data-effort="${esc(v)}">` +
+              `${esc(i === 0 ? t("dash.agents.perchEffortDefault") : elabel(e))}</button>`;
+          }).join("")
+          : "";
+        return `<div class="agp-kv"><div class="agp-k">${esc(label)}</div>` +
+          `<div class="agp-v agp-tier">` +
+          `<button type="button" class="agp-field agp-tier-field${tp && tp.model ? "" : " empty"}"` +
+          ` data-perchmodel="${id}" data-tier="${key}" aria-haspopup="listbox" aria-expanded="false">` +
+          `${ticon}<span class="v">${esc(tlabel)}</span><span class="chev" aria-hidden="true">▾</span></button>` +
+          (teff ? `<span class="agp-efforts">${teff}</span>` : "") +
+          `<span class="agp-tier-hint">/model ${esc(key)}</span>` +
+          `</div></div>`;
+      }).join("");
+    }
+    const modelIcon = model && model.icon ? iconHTML(model.icon, "agp-mic") : "";
+    const modelBtn = `<button type="button" class="agp-field${modelLabel ? "" : " empty"}"` +
+      ` data-perchmodel="${id}" aria-haspopup="listbox" aria-expanded="false"` +
+      ` title="${esc(t("dash.agents.perchModelHint"))}">${modelIcon}` +
+      `<span class="v">${esc(modelLabel || t("dash.agents.perchPickModel"))}</span>` +
+      `<span class="chev" aria-hidden="true">▾</span></button>`;
+    exp = `<div class="agp-exp">` +
+      `<div class="agp-exp-body">` +
+      `<div class="agp-kv"><div class="agp-k">${esc(t("ac.field.model"))}</div>` +
+      `<div class="agp-v">${modelBtn}` +
+      `<span class="agp-dim"> · ${esc(model && model.context ? dashContextLabel(model.context) : "—")}</span>` +
+      `</div></div>` +
+      tiersHTML +
+      `<div class="agp-kv"><div class="agp-k">${esc(t("ac.field.effort"))}</div>` +
+      `<div class="agp-v"><span class="agp-efforts"${efforts.length ? "" : ` title="${esc(t("dash.agents.perchEffortNone"))}"`}>${effortsHTML}</span></div></div>` +
+      `<div class="agp-kv"><div class="agp-k">${esc(t("dash.agents.perchModelList"))}</div>` +
+      `<div class="agp-v agp-mlist"><span class="agp-pchips">${provChips}` +
+      (hiddenN ? `<span class="agp-pchip agp-pdim">${esc(t("dash.agents.perchHiddenCount", { n: hiddenN }))}</span>` : "") +
+      `</span>` +
+      `<button type="button" class="agp-quiet" data-perchmodels="${id}">${esc(t("dash.agents.perchManageModels"))}</button>` +
+      `<button type="button" class="agp-quiet" data-perchpick="${id}">${esc(t("dash.agents.perchPick"))}</button>` +
+      `</div></div>` +
+      `</div>` +
+      `<div class="agp-exp-foot">` +
+      `<button type="button" class="agp-quiet accent" data-launch="${id}">${esc(t("dash.agents.open"))}</button>` +
+      `<span class="agp-grow"></span>` +
+      `<button type="button" class="agp-quiet red" data-perchclear="${id}">${esc(t("dash.agents.perchClear"))}</button>` +
+      `</div></div>`;
+  }
+
+  return `<div class="agp-row${wired ? " conn" : " unplugged"}${open ? " open" : ""}"` +
+    ` data-perchrow="${id}" title="${esc(detail + calls)}"` +
+    ` aria-expanded="${open}">` +
+    `<span class="agp-ic">${iconHTML(a.icon)}</span>` +
+    `<div class="agp-who"><div class="agp-name">${esc(name)}` +
+    `${live ? `<i class="agp-live" title="${esc(t("dash.agents.running"))}"></i>` : ""}</div>` +
+    `<div class="agp-status"><i class="agp-dot${wired ? " on" : ""}"></i><span>${esc(wired
+      ? t("dash.agents.perchConnected", { model: modelLabel })
+      : t("dash.agents.perchUnset"))}</span></div></div>` +
+    link +
+    `<button type="button" class="agp-field${wired ? "" : " empty"}"` +
+    ` data-perchmodel="${id}" aria-haspopup="listbox" aria-expanded="false"` +
+    ` title="${esc(modelTitle)}">${modelIcon}<span class="v">${esc(modelLabel)}</span>` +
+    `<span class="chev" aria-hidden="true">▾</span></button>` +
+    openBtn + sw + exp + `</div>`;
+}
+
+function dashModelPickTitle(m) {
+  const bits = [m.name || m.id, m.providerName || m.provider || ""];
+  if (m.context) bits.push(Math.round(m.context / 1000) + "k");
+  return bits.filter(Boolean).join(" · ");
+}
+
+function dashModelPickOpen(anchor, id, tier) {
+  if (!anchor || !anchor.isConnected) return;
+  const key = id + (tier ? ":" + tier : "");
+  if (AGENT_MODEL_POP && AGENT_MODEL_POP.key === key) { dashModelClose(true); return; }
+  dashModelClose(false);
+  const p = perchProfileOf(id);
+  const tp = tier && p && p.tiers ? p.tiers[tier] : null;
+  const curModel = tier ? ((tp && tp.model) || "") : ((p && p.model) || "");
+  const pop = document.createElement("div");
+  pop.className = "ac-pop dash-model-pop";
+  if (!AGENT_MODELS.length) {
+    pop.innerHTML = `<div class="dash-model-empty">` +
+      `<p>${esc(AGENT_PROFILE_ERR || t("dash.agents.perchNoModels"))}</p>` +
+      `<button type="button" class="dl" data-gwlink>${esc(t("dash.agents.perchGuideAction"))}</button>` +
+      `</div>`;
+  } else {
+    let listHTML = `<button type="button" class="ac-pop-opt dm-opt dm-default${curModel ? "" : " on"}"` +
+      ` data-val=""><span class="dm-ic"></span>` +
+      `<span class="dm-txt"><span class="nm">${esc(tier ? t("dash.agents.perchTierFollow") : t("dash.agents.perchModelDefault"))}</span>` +
+      `<span class="dm-prov">${esc(tier ? t("dash.agents.perchTierFollowSub") : t("dash.agents.perchModelDefaultSub"))}</span></span>` +
+      `${curModel ? "" : `<span class="dm-check" aria-hidden="true">✓</span>`}</button>`;
+    const pickModels = perchVisibleModels(id, tier && tp && tp.model ? [tp.model] : []);
+    let grp = null;
+    for (const m of pickModels) {
+      const g = m.providerName || m.provider || "";
+      if (g !== grp) {
+        listHTML += `<div class="ac-pop-grp">${esc(g)}</div>`;
+        grp = g;
+      }
+      const on = curModel === m.id;
+      const prov = m.providerName || m.provider || "";
+      const ctx = m.context ? dashContextLabel(m.context) : "";
+      const mi = m.icon ? iconHTML(m.icon) : "";
+      listHTML += `<button type="button" class="ac-pop-opt dm-opt${on ? " on" : ""}"` +
+        ` data-val="${esc(m.id)}" title="${esc(dashModelPickTitle(m))}">` +
+        `<span class="dm-ic">${mi}</span>` +
+        `<span class="dm-txt"><span class="nm">${esc(m.name || m.id)}</span>` +
+        `<span class="dm-prov">${esc(prov)}</span></span>` +
+        `<span class="dm-ctx">${esc(ctx)}</span>` +
+        (on ? `<span class="dm-check" aria-hidden="true">✓</span>` : ``) +
+        `</button>`;
+    }
+    if (!pickModels.length) {
+      listHTML += `<div class="dash-model-empty"><p>${esc(t("dash.agents.perchAllModelsHidden"))}</p></div>`;
+    }
+    pop.innerHTML = `<input class="ac-pop-find" type="search" autocomplete="off"` +
+      ` placeholder="${esc(t("dash.agents.perchSearch"))}"` +
+      ` aria-label="${esc(t("dash.agents.perchSearch"))}">` +
+      `<div class="ac-pop-list" role="listbox">${listHTML}</div>`;
+  }
+  pop.style.visibility = "hidden";
+  document.body.appendChild(pop);
+
+  const r = anchor.getBoundingClientRect();
+  const w = pop.offsetWidth || 320;
+  const h = pop.offsetHeight || 260;
+  let left = r.left;
+  if (left + w > window.innerWidth - 8) left = Math.max(8, r.right - w);
+  let top = r.bottom + 6;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - 6 - h);
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+  pop.style.visibility = "";
+  anchor.setAttribute("aria-expanded", "true");
+  AGENT_MODEL_POP = { anchor, pop, id, tier, key };
+
+  pop.addEventListener("pointerdown", (e) => e.stopPropagation());
+  pop.addEventListener("input", (e) => {
+    if (e.target.classList.contains("ac-pop-find") && typeof acPickFilter === "function") {
+      acPickFilter(pop, e.target.value);
+    }
+  });
+  pop.addEventListener("click", (e) => {
+    const gw = e.target.closest("[data-gwlink]");
+    if (gw) { dashModelClose(false); perchGoGateway(); return; }
+    const b = e.target.closest(".ac-pop-opt");
+    if (!b) return;
+    const val = b.dataset.val;
+    dashModelClose(false);
+    if (tier) {
+      if (val === "") {
+        const np = { ...p, tiers: { ...((p && p.tiers) || {}) } };
+        delete np.tiers[tier];
+        if (!Object.keys(np.tiers).length) delete np.tiers;
+        AGENT_PROFILES[id] = np;
+        if (NAV_HERE === "dash") renderDashAgents();
+        sendCtrl({ type: "agent.profile.tier", id, tier, value: "", effort: "" });
+        return;
+      }
+      if (!val) return;
+      const m = AGENT_MODELS.find((x) => x && x.id === val);
+      const levels = (m && Array.isArray(m.efforts) ? m.efforts : [])
+        .map((e) => String(e).toLowerCase());
+      const oldEffort = tp && tp.effort ? String(tp.effort).toLowerCase() : "";
+      const keep = oldEffort && levels.includes(oldEffort) ? oldEffort : "";
+      AGENT_PROFILES[id] = {
+        ...p,
+        tiers: { ...((p && p.tiers) || {}), [tier]: { model: val, effort: keep } },
+      };
+      if (NAV_HERE === "dash") renderDashAgents();
+      sendCtrl({ type: "agent.profile.tier", id, tier, value: val, effort: keep });
+      return;
+    }
+    if (val === "") {
+      // magpie picker 的 Default：回到 agent 自己的配置，等同于关掉开关。
+      delete AGENT_PROFILES[id];
+      renderDashAgents();
+      sendCtrl({ type: "agent.profile.set", id, value: "", effort: "" });
+      return;
+    }
+    if (!val) return;
+    const m = AGENT_MODELS.find((x) => x && x.id === val);
+    // 换模型时只保留新模型也支持的档位；不支持就回到默认，别把上一款
+    // 模型的档位硬塞进新组的成员写法里。
+    const levels = (m && Array.isArray(m.efforts) ? m.efforts : [])
+      .map((e) => String(e).toLowerCase());
+    const keep = p && p.effort && levels.includes(String(p.effort).toLowerCase())
+      ? String(p.effort).toLowerCase() : "";
+    if (m) {
+      AGENT_PROFILES[id] = { agent: id, alias: perchAlias(id), model: val, effort: keep };
+      if (NAV_HERE === "dash") renderDashAgents();
+    }
+    sendCtrl({ type: "agent.profile.set", id, value: val, effort: keep });
+  });
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault(); e.stopPropagation(); dashModelClose(true); return;
+    }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const items = [...pop.querySelectorAll(".ac-pop-opt")].filter((o) => !o.hidden);
+    if (!items.length) return;
+    const cur = items.indexOf(document.activeElement);
+    const i = e.key === "ArrowDown"
+      ? (cur < 0 ? 0 : Math.min(items.length - 1, cur + 1))
+      : (cur < 0 ? items.length - 1 : Math.max(0, cur - 1));
+    items[i].focus();
+  });
+  const inp = pop.querySelector(".ac-pop-find");
+  if (inp) inp.focus();
+}
+
+/* 引擎字段的模型选择器：选项来自 /api/state 的 Field.Options（magpie 已经把
+   分组、图标、上下文长度和 note 都给了），选中后走 /api/set 写进沙盒。 */
+function gwFieldPopClose(refocus) {
+  if (!GW_FIELD_POP) return;
+  const { anchor, pop } = GW_FIELD_POP;
+  GW_FIELD_POP = null;
+  if (pop) pop.remove();
+  if (anchor) {
+    anchor.setAttribute("aria-expanded", "false");
+    if (refocus && anchor.isConnected) anchor.focus();
+  }
+}
+
+function gwFieldPopOpen(anchor, id, key) {
+  if (!anchor || !anchor.isConnected) return;
+  if (GW_FIELD_POP && GW_FIELD_POP.id === id && GW_FIELD_POP.key === key) {
+    gwFieldPopClose(true);
+    return;
+  }
+  gwFieldPopClose(false);
+  const g = gwAgentOf(id);
+  const f = gwFieldOfAgent(g, key);
+  if (!f) return;
+  const opts = gwVisibleFieldOptions(f);
+  let listHTML = "";
+  if (f.value && !opts.some((o) => o.value === f.value)) {
+    listHTML += `<div class="dash-model-empty"><p>` +
+      `${esc(t("dash.agents.gwInternalRoute"))}</p></div>`;
+  }
+  if (!opts.some((o) => o.value === "")) {
+    listHTML += `<button type="button" class="ac-pop-opt dm-opt${f.value ? "" : " on"}"` +
+      ` role="option" aria-selected="${!f.value}" data-val="">` +
+      `<span class="dm-ic"></span><span class="dm-txt">` +
+      `<span class="nm">${esc(gwDefaultLabel(g, f))}</span>` +
+      `<span class="dm-prov">${esc(t("dash.agents.gwFieldDefaultSub"))}</span></span>` +
+      `${f.value ? "" : `<span class="dm-check" aria-hidden="true">✓</span>`}</button>`;
+  }
+  let grp = null;
+  for (const o of opts) {
+    const gname = o.group || "";
+    if (gname !== grp && gname) {
+      listHTML += `<div class="ac-pop-grp">${esc(gname)}</div>`;
+    }
+    grp = gname;
+    const on = o.value === f.value;
+    const note = o.note || gname || "";
+    listHTML += `<button type="button" class="ac-pop-opt dm-opt${on ? " on" : ""}"` +
+      ` role="option" aria-selected="${on}" data-val="${esc(o.value)}"` +
+      `${o.note ? ` title="${esc(o.note)}"` : ""}>` +
+      `<span class="dm-ic">${o.icon ? iconHTML(o.icon) : ""}</span>` +
+      `<span class="dm-txt"><span class="nm">${esc(gwOptionLabel(f, o))}</span>` +
+      `<span class="dm-prov">${esc(note)}</span></span>` +
+      `${o.context ? `<span class="dm-ctx">${esc(dashContextLabel(o.context))}</span>` : ""}` +
+      `${on ? `<span class="dm-check" aria-hidden="true">✓</span>` : ""}</button>`;
+  }
+  const pop = document.createElement("div");
+  pop.className = "ac-pop dash-model-pop";
+  pop.innerHTML = `<input class="ac-pop-find" type="search" autocomplete="off"` +
+    ` placeholder="${esc(t("dash.agents.perchSearch"))}"` +
+    ` aria-label="${esc(t("dash.agents.perchSearch"))}">` +
+    `<div class="ac-pop-list" role="listbox">${listHTML}</div>`;
+  pop.style.visibility = "hidden";
+  document.body.appendChild(pop);
+
+  const r = anchor.getBoundingClientRect();
+  const w = pop.offsetWidth || 320;
+  const h = pop.offsetHeight || 260;
+  let left = r.left;
+  if (left + w > window.innerWidth - 8) left = Math.max(8, r.right - w);
+  let top = r.bottom + 6;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - 6 - h);
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+  pop.style.visibility = "";
+  anchor.setAttribute("aria-expanded", "true");
+  GW_FIELD_POP = { anchor, pop, id, key };
+
+  pop.addEventListener("pointerdown", (e) => e.stopPropagation());
+  pop.addEventListener("input", (e) => {
+    if (!e.target.classList.contains("ac-pop-find")) return;
+    if (typeof acPickFilter === "function") { acPickFilter(pop, e.target.value); return; }
+    const q = String(e.target.value || "").trim().toLowerCase();
+    for (const el of pop.querySelectorAll(".ac-pop-opt")) {
+      el.hidden = !!q && !el.textContent.toLowerCase().includes(q);
+    }
+  });
+  pop.addEventListener("click", (e) => {
+    const b = e.target.closest(".ac-pop-opt");
+    if (!b) return;
+    const value = b.dataset.val || "";
+    gwFieldPopClose(false);
+    if (GW_AGENT_BUSY) return;
+    GW_AGENT_BUSY = id;
+    sendCtrl({ type: "gw.agent.set", id, field: key, value });
+    if (NAV_HERE === "dash") renderDashAgents();
+  });
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault(); e.stopPropagation(); gwFieldPopClose(true); return;
+    }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const items = [...pop.querySelectorAll(".ac-pop-opt")].filter((o) => !o.hidden);
+    if (!items.length) return;
+    const cur = items.indexOf(document.activeElement);
+    const i = e.key === "ArrowDown"
+      ? (cur < 0 ? 0 : Math.min(items.length - 1, cur + 1))
+      : (cur < 0 ? items.length - 1 : Math.max(0, cur - 1));
+    items[i].focus();
+  });
+  const inp = pop.querySelector(".ac-pop-find");
+  if (inp) inp.focus();
+}
+
+function dashModelClose(refocus) {
+  if (!AGENT_MODEL_POP) return;
+  const { anchor, pop } = AGENT_MODEL_POP;
+  AGENT_MODEL_POP = null;
+  if (pop) pop.remove();
+  if (anchor) {
+    anchor.setAttribute("aria-expanded", "false");
+    if (refocus && anchor.isConnected) anchor.focus();
+  }
+}
+
+function dashModelListClose() {
+  if (!AGENT_MODELS_POP) return;
+  const { pop } = AGENT_MODELS_POP;
+  AGENT_MODELS_POP = null;
+  if (pop) pop.remove();
+}
+
+function dashModelListOpen(anchor, id) {
+  if (!anchor || !anchor.isConnected) return;
+  if (AGENT_MODELS_POP && AGENT_MODELS_POP.id === id) { dashModelListClose(); return; }
+  dashModelListClose();
+  dashModelClose(false);
+  const p = perchProfileOf(id);
+  if (!p) return;
+  const keep = new Set([p.model].filter(Boolean));
+  if (p.tiers) for (const t of Object.keys(p.tiers)) {
+    if (p.tiers[t] && p.tiers[t].model) keep.add(p.tiers[t].model);
+  }
+  const pop = document.createElement("div");
+  pop.className = "ac-pop dash-model-pop agp-models-pop";
+  let listHTML = "";
+  let grp = null;
+  for (const m of AGENT_MODELS) {
+    const g = m.providerName || m.provider || "";
+    if (g !== grp) {
+      listHTML += `<div class="ac-pop-grp">${esc(g)}</div>`;
+      grp = g;
+    }
+    const on = keep.has(m.id) || !perchHiddenSet(id).has(m.id);
+    const locked = keep.has(m.id);
+    const mi = m.icon ? iconHTML(m.icon) : "";
+    const ctx = m.context ? dashContextLabel(m.context) : "";
+    listHTML += `<button type="button" class="ac-pop-opt dm-opt dm-manage${on ? " on" : ""}"` +
+      ` data-mhide="${esc(m.id)}"${locked ? " disabled" : ""}>` +
+      `<span class="dm-box" aria-hidden="true">${on ? "✓" : ""}</span>` +
+      `<span class="dm-ic">${mi}</span>` +
+      `<span class="dm-txt"><span class="nm">${esc(m.name || m.id)}</span>` +
+      `<span class="dm-prov">${esc(g)}</span></span>` +
+      `<span class="dm-ctx">${locked ? esc(t("dash.agents.perchCurrentModel")) : esc(ctx)}</span>` +
+      `</button>`;
+  }
+  pop.innerHTML = `<div class="agp-mpop-head"><span>${esc(t("dash.agents.perchModelList"))}</span>` +
+    `<button type="button" class="agp-mpop-x" data-mpopclose aria-label="${esc(t("common.close"))}">×</button></div>` +
+    `<input class="ac-pop-find" type="search" autocomplete="off"` +
+    ` placeholder="${esc(t("dash.agents.perchSearch"))}"` +
+    ` aria-label="${esc(t("dash.agents.perchSearch"))}">` +
+    `<div class="ac-pop-list" role="listbox">${listHTML}</div>` +
+    `<div class="agp-mpop-foot"><span class="agp-mpop-count"></span>` +
+    `<button type="button" class="agp-quiet" data-mpopall>${esc(t("dash.agents.perchShowAllModels"))}</button>` +
+    `<button type="button" class="agp-quiet accent" data-mpopdone>${esc(t("dash.agents.perchManageDone"))}</button></div>`;
+  document.body.appendChild(pop);
+
+  const count = () => {
+    const hidden = perchHiddenSet(id);
+    const shown = AGENT_MODELS.filter((m) => keep.has(m.id) || !hidden.has(m.id)).length;
+    pop.querySelector(".agp-mpop-count").textContent =
+      t("dash.agents.perchModelsSelected", { n: shown, total: AGENT_MODELS.length });
+  };
+  count();
+
+  const r = anchor.getBoundingClientRect();
+  const w = pop.offsetWidth || 460;
+  const h = pop.offsetHeight || 440;
+  let left = r.left;
+  if (left + w > window.innerWidth - 8) left = Math.max(8, r.right - w);
+  let top = r.bottom + 6;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - 6 - h);
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+
+  AGENT_MODELS_POP = { anchor, pop, id };
+  pop.addEventListener("pointerdown", (e) => e.stopPropagation());
+  pop.addEventListener("click", (e) => {
+    if (e.target.closest("[data-mpopclose]") || e.target.closest("[data-mpopdone]")) {
+      dashModelListClose();
+      return;
+    }
+    if (e.target.closest("[data-mpopall]")) {
+      const p2 = perchProfileOf(id) || {};
+      AGENT_PROFILES[id] = { ...p2, hidden: [] };
+      sendCtrl({ type: "agent.profile.models", id, hidden: [] });
+      for (const b of pop.querySelectorAll("[data-mhide]")) {
+        const m = b.dataset.mhide;
+        if (!keep.has(m)) {
+          b.classList.remove("on");
+          const box = b.querySelector(".dm-box");
+          if (box) box.textContent = "";
+        }
+      }
+      // "Show all" means every model visible: re-mark all rows on.
+      for (const b of pop.querySelectorAll("[data-mhide]")) {
+        b.classList.add("on");
+        const box = b.querySelector(".dm-box");
+        if (box) box.textContent = "✓";
+      }
+      count();
+      return;
+    }
+    const b = e.target.closest("[data-mhide]");
+    if (!b || b.disabled) return;
+    const mid = b.dataset.mhide;
+    const hidden = new Set(perchHiddenSet(id));
+    if (hidden.has(mid)) hidden.delete(mid); else hidden.add(mid);
+    const arr = [...hidden];
+    const p2 = perchProfileOf(id) || {};
+    AGENT_PROFILES[id] = { ...p2, hidden: arr };
+    sendCtrl({ type: "agent.profile.models", id, hidden: arr });
+    const on = !hidden.has(mid);
+    b.classList.toggle("on", on);
+    const box = b.querySelector(".dm-box");
+    if (box) box.textContent = on ? "✓" : "";
+    count();
+  });
+  pop.addEventListener("input", (e) => {
+    if (!e.target.classList.contains("ac-pop-find")) return;
+    const q = e.target.value.trim().toLowerCase();
+    for (const b of pop.querySelectorAll("[data-mhide]")) {
+      b.hidden = !!q && !b.textContent.toLowerCase().includes(q);
+    }
+  });
+  const inp = pop.querySelector(".ac-pop-find");
+  if (inp) inp.focus();
+}
+
+document.addEventListener("pointerdown", (e) => {
+  if (AGENT_MODELS_POP && !e.target.closest(".agp-models-pop") && !e.target.closest("[data-perchmodels]")) {
+    dashModelListClose();
+  }
+  if (GW_FIELD_POP && !e.target.closest(".dash-model-pop") && !e.target.closest("[data-gwmodelpick]")) {
+    gwFieldPopClose(false);
+  }
+  if (!AGENT_MODEL_POP) return;
+  if (e.target.closest(".dash-model-pop") || e.target.closest("[data-perchmodel]")) return;
+  dashModelClose(false);
+}, true);
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (AGENT_MODELS_POP) {
+    e.preventDefault();
+    e.stopPropagation();
+    dashModelListClose();
+    return;
+  }
+  if (GW_FIELD_POP) {
+    e.preventDefault();
+    e.stopPropagation();
+    gwFieldPopClose(true);
+    return;
+  }
+  if (!AGENT_MODEL_POP) return;
+  e.preventDefault();
+  e.stopPropagation();
+  dashModelClose(true);
+}, true);
+
+function perchSetEditorName() {
+  const inp = $("perch-set-name");
+  return (inp ? inp.value : AGENT_SET_DRAFT).trim();
+}
+
+function perchCommitProfileSave(name) {
+  if (!name) return;
+  const same = AGENT_SETS.some((s) => s && s.name === name);
+  const go = () => {
+    AGENT_SET_PENDING = name;
+    AGENT_SET_NAMING = false;
+    AGENT_SET_DRAFT = "";
+    sendCtrl({ type: "agent.profile.save", setName: name });
+    renderDashAgents();
+  };
+  if (!same) { go(); return; }
+  perchConfirm({
+    title: t("dash.agents.perchProfileOverwriteTitle"),
+    body: t("dash.agents.perchProfileOverwriteBody", { name }),
+    ok: t("dash.agents.perchProfileOverwriteOk"),
+  }).then((yes) => { if (yes) go(); });
+}
+
+function perchApplyProfileSet(name) {
+  if (!name || AGENT_SET_PENDING) return;
+  AGENT_SET_PENDING = name;
+  sendCtrl({ type: "agent.profile.use", setName: name });
+  renderDashAgents();
+}
+
+function perchDeleteProfileSet(name) {
+  if (!name) return;
+  perchConfirm({
+    title: t("dash.agents.perchProfileDeleteTitle"),
+    body: t("dash.agents.perchProfileDeleteBody", { name }),
+    ok: t("dash.agents.perchProfileDeleteOk"),
+    danger: true,
+  }).then((yes) => {
+    if (!yes) return;
+    AGENT_SET_PENDING = name;
+    sendCtrl({ type: "agent.profile.delete", setName: name });
+    renderDashAgents();
+  });
+}
+
+$("dash-agent-list").addEventListener("click", (e) => {
+  if (!AGENT_UI_ISOLATED) return;
+  const gw = e.target.closest("[data-gwlink]");
+  if (gw) { e.preventDefault(); e.stopPropagation(); perchGoGateway(); return; }
+  const fb = e.target.closest("[data-perchfold]");
+  if (fb) {
+    e.preventDefault();
+    e.stopPropagation();
+    PERCH_FOLD_OPEN = !PERCH_FOLD_OPEN;
+    fb.classList.toggle("open", PERCH_FOLD_OPEN);
+    fb.setAttribute("aria-expanded", String(PERCH_FOLD_OPEN));
+    const fold = $("dash-agent-fold");
+    if (fold) fold.classList.toggle("open", PERCH_FOLD_OPEN);
+    const label = $("dash-agent-more-label");
+    if (label) {
+      const n = Number(fb.dataset.foldCount || 0);
+      label.textContent = PERCH_FOLD_OPEN
+        ? t("dash.agents.perchFoldHide")
+        : t("dash.agents.perchFoldShow", { n });
+    }
+    return;
+  }
+  const gfold = e.target.closest("[data-gwfold]");
+  if (gfold) {
+    e.preventDefault();
+    e.stopPropagation();
+    PERCH_EXTRA_FOLD_OPEN = !PERCH_EXTRA_FOLD_OPEN;
+    gfold.classList.toggle("open", PERCH_EXTRA_FOLD_OPEN);
+    gfold.setAttribute("aria-expanded", String(PERCH_EXTRA_FOLD_OPEN));
+    const fold = $("dash-agent-gwfold");
+    if (fold) fold.classList.toggle("open", PERCH_EXTRA_FOLD_OPEN);
+    const label = $("dash-agent-gwmore-label");
+    if (label) {
+      const n = Number(gfold.dataset.foldCount || 0);
+      label.textContent = PERCH_EXTRA_FOLD_OPEN
+        ? t("dash.agents.perchGwFoldHide")
+        : t("dash.agents.perchGwFoldShow", { n });
+    }
+    return;
+  }
+  const gfp = e.target.closest("[data-gwfieldpick]");
+  if (gfp) {
+    e.preventDefault();
+    e.stopPropagation();
+    gwFieldPopOpen(gfp, gfp.dataset.gwid, gfp.dataset.gwfieldpick);
+    return;
+  }
+  const gfs = e.target.closest("[data-gwfieldset]");
+  if (gfs) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (GW_AGENT_BUSY) return;
+    const id = gfs.dataset.gwfieldset;
+    GW_AGENT_BUSY = id;
+    sendCtrl({
+      type: "gw.agent.set", id,
+      field: gfs.dataset.field, value: gfs.dataset.value,
+    });
+    renderDashAgents();
+    return;
+  }
+  const gmp = e.target.closest("[data-gwmodelpick]");
+  if (gmp) {
+    e.preventDefault();
+    e.stopPropagation();
+    gwFieldPopOpen(gmp, gmp.dataset.gwmodelpick, "model");
+    return;
+  }
+  const gsw = e.target.closest("[data-gwswitch]");
+  if (gsw) {
+    e.preventDefault();
+    e.stopPropagation();
+    gwToggleAgent(gsw.dataset.gwswitch);
+    return;
+  }
+  const gdb = e.target.closest("[data-gwdetail]");
+  if (gdb) {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = gdb.dataset.gwdetail;
+    AGENT_DETAIL_ID = AGENT_DETAIL_ID === id ? "" : id;
+    renderDashAgents();
+    return;
+  }
+  const gcn = e.target.closest("[data-gwconnect]");
+  if (gcn) {
+    e.preventDefault();
+    e.stopPropagation();
+    gwToggleAgent(gcn.dataset.gwconnect);
+    return;
+  }
+  const gdc = e.target.closest("[data-gwdisconnect]");
+  if (gdc) {
+    e.preventDefault();
+    e.stopPropagation();
+    gwToggleAgent(gdc.dataset.gwdisconnect);
+    return;
+  }
+  const gsu = e.target.closest("[data-gwsetup]");
+  if (gsu) {
+    e.preventDefault();
+    e.stopPropagation();
+    sendCtrl({ type: "agent.setup", id: gsu.dataset.gwsetup });
+    bootFact(`Agent 状态接入 → ${gsu.dataset.gwsetup}`);
+    return;
+  }
+  const grp = e.target.closest("[data-gwreapply]");
+  if (grp) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (GW_AGENT_BUSY) return;
+    GW_AGENT_BUSY = grp.dataset.gwreapply;
+    sendCtrl({ type: "gw.agent.reapply", id: grp.dataset.gwreapply });
+    renderDashAgents();
+    return;
+  }
+  const gkp = e.target.closest("[data-gwkeep]");
+  if (gkp) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (GW_AGENT_BUSY) return;
+    GW_AGENT_BUSY = gkp.dataset.gwkeep;
+    sendCtrl({ type: "gw.agent.keep", id: gkp.dataset.gwkeep });
+    renderDashAgents();
+    return;
+  }
+  const mdl = e.target.closest("[data-perchmodels]");
+  if (mdl) {
+    e.preventDefault();
+    e.stopPropagation();
+    dashModelListOpen(mdl, mdl.dataset.perchmodels);
+    return;
+  }
+  const pk = e.target.closest("[data-perchpick]");
+  if (pk) {
+    e.preventDefault();
+    e.stopPropagation();
+    const row = pk.closest("[data-perchrow]");
+    const anchor = row && row.querySelector("[data-perchmodel]");
+    if (anchor) dashModelPickOpen(anchor, pk.dataset.perchpick);
+    return;
+  }
+  const tgl = e.target.closest("[data-perchtoggle]");
+  if (tgl) {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = tgl.dataset.perchtoggle;
+    const p = perchProfileOf(id);
+    if (p && p.model) {
+      perchConfirm({
+        title: t("dash.agents.perchDisconnectTitle"),
+        body: t("dash.agents.perchDisconnectBody"),
+        ok: t("dash.agents.perchDisconnectOk"),
+        danger: true,
+      }).then((yes) => {
+        if (!yes) return;
+        delete AGENT_PROFILES[id];
+        renderDashAgents();
+        sendCtrl({ type: "agent.profile.set", id, value: "", effort: "" });
+      });
+    } else {
+      const row = tgl.closest("[data-perchrow]");
+      const anchor = row && row.querySelector("[data-perchmodel]");
+      if (anchor) dashModelPickOpen(anchor, id);
+    }
+    return;
+  }
+  const del = e.target.closest("[data-perchsetdel]");
+  if (del) {
+    e.preventDefault();
+    e.stopPropagation();
+    perchDeleteProfileSet(del.dataset.perchsetdel);
+    return;
+  }
+  const set = e.target.closest("[data-perchset]");
+  if (set) {
+    e.preventDefault();
+    e.stopPropagation();
+    perchApplyProfileSet(set.dataset.perchset);
+    return;
+  }
+  const save = e.target.closest("[data-perchsetsave]");
+  if (save) {
+    e.preventDefault();
+    e.stopPropagation();
+    AGENT_SET_NAMING = true;
+    AGENT_SET_DRAFT = "";
+    renderDashAgents();
+    return;
+  }
+  const apply = e.target.closest("[data-perchsetapply]");
+  if (apply) {
+    e.preventDefault();
+    e.stopPropagation();
+    perchCommitProfileSave(perchSetEditorName());
+    return;
+  }
+  const cancel = e.target.closest("[data-perchsetcancel]");
+  if (cancel) {
+    e.preventDefault();
+    e.stopPropagation();
+    AGENT_SET_NAMING = false;
+    AGENT_SET_DRAFT = "";
+    renderDashAgents();
+    return;
+  }
+  const mb = e.target.closest("[data-perchmodel]");
+  if (mb) {
+    e.preventDefault();
+    e.stopPropagation();
+    dashModelPickOpen(mb, mb.dataset.perchmodel, mb.dataset.tier || "");
+    return;
+  }
+  const eb = e.target.closest("[data-percheffort]");
+  if (eb) {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = eb.dataset.percheffort;
+    const p = perchProfileOf(id);
+    if (!p || !p.model) return;
+    const effort = String(eb.dataset.effort || "").toLowerCase();
+    const tier = String(eb.dataset.perchtier || "").toLowerCase();
+    if (tier) {
+      const tp = p.tiers && p.tiers[tier];
+      if (!tp || !tp.model) return;
+      AGENT_PROFILES[id] = {
+        ...p,
+        tiers: { ...p.tiers, [tier]: { ...tp, effort } },
+      };
+      renderDashAgents();
+      sendCtrl({ type: "agent.profile.tier", id, tier, value: tp.model, effort });
+      return;
+    }
+    AGENT_PROFILES[id] = { ...p, effort };
+    renderDashAgents();
+    sendCtrl({ type: "agent.profile.set", id, value: p.model, effort });
+    return;
+  }
+  const cb = e.target.closest("[data-perchclear]");
+  if (cb) {
+    e.preventDefault();
+    e.stopPropagation();
+    sendCtrl({ type: "agent.profile.set", id: cb.dataset.perchclear, value: "" });
+    return;
+  }
+  const db = e.target.closest("[data-perchdetail]");
+  if (db) {
+    e.preventDefault();
+    e.stopPropagation();
+    AGENT_DETAIL_ID = AGENT_DETAIL_ID === db.dataset.perchdetail ? "" : db.dataset.perchdetail;
+    renderDashAgents();
+    return;
+  }
+});
+
+$("dash-agent-list").addEventListener("input", (e) => {
+  if (e.target && e.target.id === "perch-set-name") AGENT_SET_DRAFT = e.target.value;
+});
+
+$("dash-agent-list").addEventListener("keydown", (e) => {
+  if (!AGENT_UI_ISOLATED) return;
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const set = e.target.closest("[data-perchset]");
+  if (set && !e.target.closest("[data-perchsetdel]")) {
+    e.preventDefault();
+    perchApplyProfileSet(set.dataset.perchset);
+    return;
+  }
+});
+
 function renderDashAgents() {
   const host = $("dash-agent-list");
   if (!host) return;
   const m = mg();
   const list = m && (m.catalog || []).length ? m.catalog : [];
   const sub = $("dash-agent-sub");
+  ensureAgentProfiles();
+  if (AGENT_UI_ISOLATED) {
+    renderPerchAgentList(host, list, sub);
+    return;
+  }
   // caps 是权威；老 magpie 还没有这个字段时退回 adapter（只认结构化状态）。
   const capsOf = (a) => a.caps || {
     launch: !!a.adapter, status: !!a.adapter, waiting: !!a.adapter,
@@ -880,6 +2388,7 @@ $("dash-tabs").addEventListener("click", (e) => {
   // 网关页的自动接入只在它真的可见时才跑（这条守卫在 gwAutoAttach 里），
   // 所以切进来这一下必须立刻画一次，否则要等到下一条 2.5s 推送。
   if (dashTab === "gateway") renderGateway();
+  if (dashTab === "overview" && typeof gwAgentsPrefetch === "function") gwAgentsPrefetch();
   bootFact(`总览 切页=${dashTab}`);
 });
 

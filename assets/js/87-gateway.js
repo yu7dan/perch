@@ -26,14 +26,8 @@ let GW_FRAME_AT = "";
    （会把按钮的 hover 和安装日志的滚动位置冲掉）。 */
 let GW_COVER_SIG = "";
 
-/* 控制面的版本 / 更新（来自 magpie 自己的 GET /api/update）。
-   GW_UPD = null 表示还没读到；GW_UPD_BUSY 非空表示一条更新链路在跑
-   （checking / downloading / restarting）。 */
-let GW_UPD = null;
-let GW_UPD_BUSY = "";
-let GW_UPD_ERR = null;
-let GW_UPD_TRIES = 0;
-let GW_VER_SIG = "";
+/* 引擎自己的版本/更新条已随 2026-10-22 的去品牌撤掉：网关页只负责
+   控制台本身，升级由 Perch 管理。 */
 
 function gwOn() {
   return !!(GW && GW.connected);
@@ -44,14 +38,16 @@ function gwErrText() {
 }
 
 /* embed=1 是稳定的标记，也让地址和旧缓存区分开（internal/gateway/ui.go 只在这个地址上裁剪
-   页面）；view=providers 是每轮启动进来的那一页。 */
+   页面）；view=providers 是每轮启动进来的那一页。theme=dark 是**强制**的：
+   magpie 的 applyPrefs() 看到地址里有 theme 就不再按它自己的设置切主题，
+   否则用户之前的 magpie 主题会把 Perch 的深色覆盖掉。 */
 function gwFrameURL() {
-  return "/gwui/?view=providers&embed=1";
+  return "/gwui/?view=providers&embed=1&theme=dark";
 }
 
 function renderGateway() {
   if (NAV_HERE !== "dash" || dashTab !== "gateway") return;
-  const frame = $("gw-frame"), cover = $("gw-cover"), ver = $("gw-ver");
+  const frame = $("gw-frame"), cover = $("gw-cover");
   if (!frame || !cover) return;
   const m = mg();
   if (gwOn()) {
@@ -64,21 +60,10 @@ function renderGateway() {
     frame.hidden = false;
     cover.hidden = true;
     if (GW_COVER_SIG) { cover.innerHTML = ""; GW_COVER_SIG = ""; }
-    if (ver) {
-      const html = gwUpdateHTML();
-      ver.hidden = !html;
-      if (html !== GW_VER_SIG) { GW_VER_SIG = html; ver.innerHTML = html; }
-    }
-    // 版本状态只在打开网关页后问一两次：控制面没应答时别每帧重试。
-    if (!GW_UPD && !GW_UPD_BUSY && GW_UPD_TRIES < 2) {
-      GW_UPD_TRIES++;
-      sendCtrl({ type: "magpie.update.get" });
-    }
   } else {
     GW_FRAME_AT = "";
     frame.hidden = true;
     cover.hidden = false;
-    if (ver) { ver.hidden = true; if (GW_VER_SIG) { ver.innerHTML = ""; GW_VER_SIG = ""; } }
     const html = gwCoverHTML(m);
     if (html !== GW_COVER_SIG) {
       GW_COVER_SIG = html;
@@ -114,15 +99,13 @@ function gwCoverHTML(m) {
   const st = GW_INSTALL;
   const running = !!(st && st.state === "running");
   const installed = !!(m && m.state !== "absent");
-  const version = (GW && GW.version) || (m && m.version) || "";
   const state = !m ? t("gw.state.reading")
     : !installed ? t("gw.state.absent")
     : GW_BUSY === "connect" ? t("gw.state.connecting")
     : t("gw.state.installed");
   const dot = running ? " warn" : installed ? " warn" : "";
   return `<div class="console-bar">` +
-      `<span class="brand">${magpieLogo()}<b>magpie</b></span>` +
-      (version ? `<span>${esc(version)}</span><span class="sep">·</span>` : "") +
+      `<span class="brand"><b>${esc(t("gw.engineName"))}</b></span>` +
       `<span class="dot${dot}"></span><span>${esc(state)}</span>` +
       `<span class="right gw-actions">` +
         `<button type="button" class="gw-btn sm" data-gw-act="refresh">${esc(t("gw.refresh"))}</button>` +
@@ -170,68 +153,8 @@ function gwInstallCard(m) {
     `</div>`;
 }
 
-/* ---- 版本 / 更新条 ----------------------------------------------------
-   magpie 自己负责更新（/api/update）；这里只显示 current / latest，并把
-   用户那一下点击转成 magpie.update.install。进度由 Go 侧推回来。 */
-
-function gwUpdateHTML() {
-  const u = GW_UPD;
-  if (GW_UPD_ERR) {
-    return `<span class="err">${esc(t("gw.update.readErr", { err: msgText(GW_UPD_ERR) }))}</span>`;
-  }
-  if (!u) return "";
-  const cur = u.current || "";
-  const latest = u.latest || "";
-  const upd = !!latest && latest !== cur;
-  const pct = u.total > 0 ? Math.min(99, Math.floor((u.done | 0) * 100 / u.total)) : 0;
-  if (GW_UPD_BUSY) {
-    const what = GW_UPD_BUSY === "restarting" ? t("gw.update.restarting")
-      : GW_UPD_BUSY === "downloading"
-        ? (u.total > 0 ? t("gw.update.downloadingPct", { pct }) : t("gw.update.downloading"))
-        : t("gw.update.checking");
-    return `<span>magpie${cur ? " " + esc(cur) : ""}</span>` +
-      `<span class="sep">·</span><span class="upd">${esc(what)}</span>`;
-  }
-  if (!cur) return "";
-  let html = `<span>magpie ${esc(cur)}</span>`;
-  if (upd) {
-    html += `<span class="sep">·</span><span class="upd">${esc(t("gw.update.available", { v: latest }))}</span>` +
-      `<button type="button" class="gw-btn sm" data-gw-act="update-magpie">${esc(t("gw.update.button"))}</button>`;
-  } else if (latest) {
-    html += `<span class="sep">·</span><span>${esc(t("gw.update.latest"))}</span>`;
-  }
-  return html;
-}
-
-/* 更新状态的落点（magpie_update.go → {type:"magpie.update"}）。
-   updated=true 时控制面已经 re-exec 过：清掉 iframe 的地址标记并重接，
-   否则页面还停在旧进程加载的那一份。 */
-function applyGwUpdate(m) {
-  if (!m || typeof m !== "object") return;
-  if (m.update && typeof m.update === "object") GW_UPD = m.update;
-  GW_UPD_BUSY = typeof m.busy === "string" ? m.busy : "";
-  GW_UPD_ERR = errMsgOf(m);
-  if (GW_UPD || m.err) GW_UPD_TRIES = 2; // 问过就不再自动问
-  if (m.updated) {
-    GW_FRAME_AT = "";
-    sendCtrl({ type: "gw.connect" });
-    sendCtrl({ type: "magpie.refresh" });
-  }
-  renderGateway();
-}
-
-$("gw-ver").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-gw-act]");
-  if (!b || b.dataset.gwAct !== "update-magpie") return;
-  GW_UPD_BUSY = "checking";
-  GW_UPD_ERR = null;
-  bootFact("网关 更新 magpie");
-  sendCtrl({ type: "magpie.update.install" });
-  renderGateway();
-});
-
 /* 卡片上的动作。只服务网关页自己的壳；provider/group/plugin 的写操作
-   全部由 magpie 的界面直接打它自己的 /api/*，Perch 不再中转。 */
+   全部由网关控制台直接打它自己的 /api/*，Perch 不再中转。 */
 $("gw-cover").addEventListener("click", (e) => {
   const b = e.target.closest("[data-gw-act]");
   if (!b) return;
@@ -287,6 +210,7 @@ function applyGwLang(m) {
 
 function applyGw(g) {
   if (!g || typeof g !== "object") return;
+  const wasOn = gwOn();
   GW = g;
   GW_BUSY = "";
   if (!g.connected) {
@@ -295,6 +219,11 @@ function applyGw(g) {
   }
   // 接上了就把自动接入的尝试次数清零：以后进程真掉了，还有三次自动恢复的机会。
   gwAutoTries = 0;
+  // 刚接上控制面时立刻重读 agent 状态，别等下一次 TTL；也清掉后台预取失败计数。
+  if (!wasOn && NAV_HERE === "dash") {
+    if (typeof gwAgentsReset === "function") gwAgentsReset();
+    if (typeof gwAgentsPrefetch === "function") gwAgentsPrefetch(true);
+  }
   if (NAV_HERE === "dash" && dashTab === "gateway") renderGateway();
 }
 
@@ -321,9 +250,19 @@ function applyGwAgents(m) {
     return;
   }
   GW_AGENTS_NOTICE = m.notice || "";
-  if (Array.isArray(m.agents)) GW_AGENTS = m.agents;
-  // 任何一次动作（读/写/接入/断开/重应用）回来都结束了忙碌态。
-  AC_BUSY = "";
+  if (Array.isArray(m.agents)) {
+    GW_AGENTS = m.agents;
+    GW_AGENTS_AT = Date.now();
+  }
+  if (m.op === "state") {
+    // 后台预取不是用户动作：不能清掉正在进行的接入/写入忙碌态。
+    GW_AGENTS_REQ_AT = 0;
+    GW_AGENTS_FAILS = m.err ? GW_AGENTS_FAILS + 1 : 0;
+  } else {
+    // 用户动作（读/写/接入/断开/重应用）回来，忙碌态结束。
+    AC_BUSY = "";
+    GW_AGENT_BUSY = "";
+  }
   if (m.err) {
     // 存结构而不是渲染好的句子：切语言时 89-agent-cfg 会重画。
     GW_AGENTS_ERR = errMsgOf(m);
@@ -332,8 +271,12 @@ function applyGwAgents(m) {
     GW_AGENTS_ERR = null;
     AC_ERR = null;
   }
-  renderDashAgents();
-  renderAgentDrawer();
+  // 后台 state 到达时如果用户正开着选择器/正在写，先存数据不重画；
+  // 下一次动作或总览重绘会把新 state 带出来。
+  if (m.op !== "state" || !gwAgentsBusyHere()) {
+    renderDashAgents();
+    renderAgentDrawer();
+  }
 }
 
 /* 漂移轮询的落点（internal/gateway/agents.go → {type:"gw.agents.drift"}）。
@@ -353,8 +296,10 @@ function applyGwAgentsDrift(m) {
     }
   }
   if (!changed) return;
+  // 选择器/写入/方案命名期间只更新数据，不重画：重画会把用户正在挑的东西关掉。
+  if (gwAgentsBusyHere()) return;
   renderDashAgents();
-  if (!AC_PICK && !AC_BUSY) renderAgentDrawer();
+  renderAgentDrawer();
 }
 
 /* magpie 快照到达（shell 首帧 + 每 2.5s 的推送都走这里）。
@@ -366,7 +311,12 @@ function applyMagpie(s) {
   MAGPIE = s;
   const sig = JSON.stringify([s.state, (s.series || []).length,
     (s.series || []).reduce((n, x) => n + (x.calls | 0), 0), (s.today || {}).calls]);
-  const catSig = JSON.stringify((s.catalog || []).map((a) => [a.id, !!a.installed, a.calls | 0]));
+  // 名单只在“身份”变了时重画：今日 call 数每 2.5 秒都在变，把它算进
+  // 指纹会让行内的模型选择器/展开状态每 2.5 秒被冲掉一次。
+  const catSig = JSON.stringify((s.catalog || []).map((a) => [
+    a.id, !!a.installed, a.icon, a.name, a.path, !!a.install, a.url,
+    !!(a.caps && a.caps.launch), !!(a.caps && a.caps.inject),
+  ]));
   const seriesChanged = sig !== MG_SIG;
   const catChanged = catSig !== MG_CAT_SIG;
   MG_SIG = sig;

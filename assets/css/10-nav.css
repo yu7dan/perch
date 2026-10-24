@@ -54,16 +54,15 @@
           margin-right:4px}
 #app.settings #settings{display:flex}
 
-/* 模块切换在窗口顶栏里：不占 flex 空间，所以顶栏其余部分照旧可拖窗。
-   ⚠️ 水平基准是**总览版面**（左栏右沿 → 窗口右沿），不是整窗：左栏占着
-   132~320px，按 left:50% 居中的话会偏左 railW/2（用户 2026-10-17 明确纠正）。
-   (W + railW)/2 = railW + (W - railW)/2；--rail-w 是变量，拖左栏时同一帧
-   跟着走，thumb 坐标相对 .segs，不受盒子整体平移影响。
-   源码里它**没有灰色轨道**（magpie app.css:229 的注释），只有活动项底下那一枚
-   白片；网站截图里那种轨道是旧样式，以源码为准。 */
-.segs{position:absolute;left:calc((100% + var(--rail-w)) / 2);top:50%;
-      transform:translate(-50%,-50%);display:none;padding:2px;border-radius:8px}
-#app.dash .segs{display:inline-flex}
+/* 总览页头：面板 / 网关的子切换 + 刷新。2026-10-22 用户定了层级 ——
+   网关不再是和总览平级的顶层页，而是总览下的子页；所以这排控件从窗口
+   标题栏搬进页面里，标题栏只留品牌和窗口按钮。
+   形态照 magpie 的 .seg：没有灰色轨道，只有活动项底下那一枚白片。 */
+.dash-head{flex:none;display:flex;align-items:center;gap:8px;height:38px;
+           padding:0 12px;border-bottom:1px solid var(--line-soft);
+           background:var(--bg);position:relative}
+.segs{position:relative;display:none;padding:2px;border-radius:8px}
+.dash-head .segs{display:inline-flex}
 .segs .opt{position:relative;z-index:1;white-space:nowrap;height:24px;padding:0 12px;
            border-radius:6px;font-size:12.5px;color:var(--muted);
            transition:color .18s cubic-bezier(.2,.8,.2,1),
@@ -80,10 +79,8 @@
              transform:translateX(0);transition:opacity .15s;
              pointer-events:none}
 .segs .thumb.still{transition:none}
-/* 刷新按钮跟 magpie 的 actions 一样贴在窗口按钮左侧，垂直居中。 */
-#dash-refresh{position:absolute;right:calc(138px + 8px);top:50%;
-              transform:translateY(-50%);display:none}
-#app.dash #dash-refresh{display:grid}
+/* 刷新按钮退到页头右端，不再贴着窗口按钮。 */
+.dash-head #dash-refresh{display:grid;margin-left:auto}
 @media (prefers-reduced-motion:reduce){
   .segs .opt{transition:none}
 }
@@ -225,6 +222,109 @@
 .ag .ag-cfg-chev{margin-left:6px;color:#4a4a52;font-size:14px;line-height:1;flex:none}
 .ag.cfg:hover .ag-cfg-chev{color:var(--muted)}
 
+/* ---- Perch Agent 工作板（隔离网关，2026-10-22）----------------------------
+   一列行，和 magpie 的 Agent 页上半部分同一套密度：logo / 名字 /
+   未设置·已设置 / 模型 chip / 打开 / 展开。安装仍走 Perch 自己的按钮。 */
+.roster.one{grid-template-columns:minmax(0,1fr)}
+.roster.one .ag{border-left:0!important;padding-left:0}
+.ag-item.perch{min-width:0}
+.ag.perch{height:auto;min-height:56px;align-items:center;cursor:pointer;border-radius:4px}
+.ag.perch:hover{background:rgba(255,255,255,.03)}
+.ag.perch:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
+.ag .ag-live{display:inline-block;width:5px;height:5px;margin-left:6px;border-radius:999px;
+             background:var(--green);box-shadow:0 0 0 2px rgba(134,239,172,.14);vertical-align:1px}
+.ag .ag-prof{flex:none;font-size:10px;line-height:18px;padding:0 7px;border-radius:999px;
+             border:1px solid var(--line);color:var(--faint);white-space:nowrap}
+.ag .ag-prof.on{color:var(--green);border-color:rgba(134,239,172,.24);
+                background:rgba(134,239,172,.06)}
+.ag .ag-model-chip{display:inline-flex;align-items:center;gap:5px;flex:none;max-width:190px;
+                   height:24px;padding:0 9px;border:1px solid var(--line);border-radius:6px;
+                   background:var(--card);color:var(--fg2);font-size:11px;white-space:nowrap}
+.ag .ag-model-chip span{overflow:hidden;text-overflow:ellipsis}
+.ag .ag-model-chip i{font-style:normal;color:var(--faint);font-size:9px}
+.ag .ag-model-chip:hover{border-color:var(--fg2);color:var(--fg)}
+.ag .ag-model-chip.none{color:var(--muted);border-style:dashed}
+.ag .ag-model-chip.none:hover{color:var(--fg)}
+.ag-detail{padding:10px 12px 12px 41px;border-bottom:1px solid var(--line-soft);
+           background:rgba(255,255,255,.018)}
+.ag-det-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.ag-det-head b{font-size:11px;font-weight:600;color:var(--fg2)}
+.ag-det-clear{margin-left:auto;font-size:10.5px;color:var(--faint)}
+.ag-det-clear:hover{color:var(--red)}
+.ag-det-row{display:flex;gap:12px;font-size:11px;line-height:1.7;color:var(--muted)}
+.ag-det-row span{width:64px;flex:none;color:var(--faint)}
+.ag-det-row b{font-weight:500;color:var(--fg2);min-width:0;overflow:hidden;
+              text-overflow:ellipsis;white-space:nowrap}
+.ag-det-row code{font:10.5px/1.6 var(--mono);color:var(--muted);min-width:0;
+                 overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ag-det-note{margin:6px 0 0;font-size:10.5px;line-height:1.6;color:var(--faint)}
+.ag-profiles{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:2px 0 10px;
+            padding:6px 8px;border:1px solid var(--line-soft);border-radius:7px;
+            background:rgba(255,255,255,.014)}
+.ag-profiles .lbl{color:var(--faint);font-size:10.5px;margin-right:2px}
+.ag-profiles .hint{color:var(--muted);font-size:10.5px}
+.ag-profiles .ed{margin-left:auto;display:flex;align-items:center;gap:4px;min-width:0}
+.ag-pset{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px;
+         border:1px solid var(--line);border-radius:6px;background:var(--card);
+         color:var(--fg2);font-size:10.5px;white-space:nowrap;cursor:pointer}
+.ag-pset:hover{border-color:var(--fg2);color:var(--fg)}
+.ag-pset.pending{opacity:.55;pointer-events:none}
+.ag-pset .nm{overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.ag-pset em{font-style:normal;color:var(--faint);font-size:9.5px;font-variant-numeric:tabular-nums}
+.ag-pset .x{margin-left:1px;color:var(--faint);font-size:12px;line-height:1}
+.ag-pset .x:hover{color:var(--red)}
+.ag-set-save,.ag-set-do,.ag-set-cancel{height:22px;padding:0 8px;border:1px solid var(--line);
+         border-radius:5px;background:transparent;color:var(--muted);font-size:10.5px;cursor:pointer}
+.ag-set-save:hover,.ag-set-cancel:hover{color:var(--fg);border-color:var(--fg2)}
+.ag-set-do{color:var(--fg);border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.05)}
+.ag-set-do:hover{border-color:var(--fg2)}
+.ag-set-name{width:150px;height:22px;padding:0 7px;border:1px solid var(--line);
+             border-radius:5px;background:var(--bg);color:var(--fg);font-size:10.5px;outline:none}
+.ag-set-name:focus{border-color:var(--accent)}
+.ag-det-row .ag-efforts{display:flex;flex:1 1 auto;flex-wrap:wrap;gap:4px;width:auto;
+                        min-width:0;color:var(--muted)}
+.ag-effort{height:20px;padding:0 7px;border:1px solid var(--line);border-radius:5px;
+           background:transparent;color:var(--muted);font-size:10.5px;line-height:1;cursor:pointer}
+.ag-effort:hover{border-color:var(--fg2);color:var(--fg)}
+.ag-effort.on{color:var(--green);border-color:rgba(134,239,172,.28);
+              background:rgba(134,239,172,.07)}
+.ag-guide{display:flex;flex-direction:column;align-items:flex-start;gap:6px;
+          margin:10px 0 2px;padding:12px 14px;border:1px solid var(--line-soft);
+          border-radius:8px;background:rgba(255,255,255,.018)}
+.ag-guide b{font-size:12px;font-weight:600;color:var(--fg)}
+.ag-guide p{margin:0;font-size:11px;line-height:1.65;color:var(--muted);max-width:680px}
+.ag-guide .dl{margin-top:2px}
+.ac-pop.dash-model-pop{width:460px;max-height:440px}
+.dash-model-pop .ac-pop-find{height:30px;font-size:12px}
+.dash-model-pop .ac-pop-list{padding:0 6px 7px}
+.dash-model-pop .ac-pop-grp{padding:8px 9px 4px;font-size:10px}
+.dash-model-pop .dm-opt{align-items:center;gap:10px;min-height:46px;padding:6px 9px;border-radius:8px}
+.dash-model-pop .dm-opt:hover,.dash-model-pop .dm-opt:focus{background:rgba(255,255,255,.06)}
+.dash-model-pop .dm-opt.on{background:rgba(77,107,254,.10)}
+.dash-model-pop .dm-ic{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;flex:none}
+.dash-model-pop .dm-ic .ico-img,.dash-model-pop .dm-ic .ico-mask{width:20px;height:20px}
+.dash-model-pop .dm-txt{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}
+.dash-model-pop .dm-txt .nm{font-size:12.5px;font-weight:500;color:var(--fg2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dash-model-pop .dm-prov{font-size:10.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dash-model-pop .dm-ctx{flex:none;font-size:10px;color:var(--faint);font-variant-numeric:tabular-nums}
+.dash-model-pop .dm-check{flex:none;width:14px;color:var(--accent);font-size:11px;text-align:right}
+.dash-model-pop .dm-box{flex:none;display:inline-flex;align-items:center;justify-content:center;
+                        width:15px;height:15px;border:1px solid var(--line);border-radius:4px;
+                        color:var(--accent);font-size:10px}
+.dm-manage.on .dm-box{border-color:var(--accent);background:rgba(77,107,254,.12)}
+.dm-manage[disabled]{opacity:.65;cursor:default}
+.agp-mpop-head{display:flex;align-items:center;gap:8px;padding:8px 10px 0;
+               color:var(--fg2);font-size:12px;font-weight:600}
+.agp-mpop-x{margin-left:auto;width:22px;height:22px;border:0;border-radius:6px;
+            background:transparent;color:var(--muted);font-size:15px;cursor:pointer}
+.agp-mpop-x:hover{background:rgba(255,255,255,.06);color:var(--fg)}
+.agp-mpop-foot{display:flex;align-items:center;gap:6px;padding:7px 8px 8px;
+               border-top:1px solid var(--line-soft)}
+.agp-mpop-count{margin-right:auto;color:var(--faint);font-size:10.5px;font-variant-numeric:tabular-nums}
+.agp-pdim{color:var(--faint)}
+.dash-model-empty{padding:12px 14px;display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.dash-model-empty p{margin:0;font-size:11px;line-height:1.65;color:var(--muted)}
+
 /* "显示 N 个未检测到的" —— magpie agents 页那条 fold 的同一形态：
    一行居中文字 + 会转的 chevron，展开用 grid-template-rows 0fr→1fr
    （高度能动、不需要先量内容，也不会把上面的行挤跳）。 */
@@ -234,6 +334,169 @@
 .agent-more:hover{color:var(--fg2)}
 .agent-more .chev{font-size:9px;transition:transform .18s ease}
 .agent-more.open .chev{transform:rotate(180deg)}
+
+/* ---- Perch Agent board, aligned with magpie's Agents window ---- */
+.agp-lead{margin:0 2px 12px;font-size:12.5px;line-height:1.55;color:var(--fg2)}
+.agp-lead b{font-weight:600;color:var(--fg)}
+.agp-guide{display:flex;flex-direction:column;align-items:flex-start;gap:6px;
+           margin:6px 0 12px;padding:0 2px}
+.agp-guide b{font-size:12.5px;font-weight:600;color:var(--fg)}
+.agp-guide p{margin:0;max-width:680px;color:var(--muted);font-size:11.5px;line-height:1.6}
+.agp-list{flex:none}
+.agp-row{position:relative;display:grid;
+         grid-template-columns:30px minmax(0,1fr) 96px minmax(220px,350px) 28px 40px;
+         align-items:center;column-gap:12px;min-height:56px;padding:8px 14px;
+         border-top:1px solid var(--line-soft)}
+.agp-row:first-child{border-top:0}
+.agp-row:hover{background:rgba(255,255,255,.014)}
+.agp-ic{grid-column:1}
+.agp-ic .ico-img,.agp-ic .ico-mask{display:block;width:30px;height:30px}
+.agp-who{grid-column:2;min-width:0}
+.agp-link,.agp-link-slot{grid-column:3}
+.agp-field{grid-column:4}
+.agp-open{grid-column:5}
+.agp-switch{grid-column:6}
+.agp-name{display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;
+          color:var(--fg);font-size:13.5px;font-weight:600;white-space:nowrap;text-overflow:ellipsis}
+.agp-live{width:6px;height:6px;border-radius:50%;background:var(--green);flex:none}
+.agp-status{display:flex;align-items:center;gap:6px;margin-top:3px;min-width:0;
+            color:var(--muted);font-size:11.5px;line-height:1.35}
+.agp-status span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agp-dot{width:6px;height:6px;border-radius:50%;background:var(--faint);flex:none}
+.agp-dot.on{background:var(--green)}
+.agp-link{justify-self:end;display:inline-flex;align-items:center;gap:4px;height:26px;
+          padding:0 6px;border:0;border-radius:6px;background:transparent;
+          color:var(--muted);font-size:11.5px;white-space:nowrap;cursor:pointer}
+.agp-link:hover{background:rgba(255,255,255,.05);color:var(--fg)}
+.agp-link .chev{color:var(--faint);font-size:12px}
+.agp-link-slot{display:block}
+.agp-field{display:flex;align-items:center;gap:6px;width:100%;height:30px;padding:0 8px;
+           border:0;border-radius:7px;background:rgba(255,255,255,.06);color:var(--fg2);
+           font-size:12.5px;text-align:left;cursor:pointer}
+.agp-field:hover{background:rgba(255,255,255,.09)}
+.agp-field:disabled{opacity:.55;cursor:default}
+.agp-field .v{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.agp-field.empty .v{color:var(--faint);font-weight:400}
+.agp-field .chev{margin-left:auto;color:var(--faint);font-size:10px}
+.agp-field .agp-mic{width:16px;height:16px;flex:none}
+.agp-open{justify-self:center;width:24px;height:24px;padding:0;border:0;border-radius:6px;
+          background:rgba(255,255,255,.06);color:var(--muted);font-size:10px;
+          opacity:0;pointer-events:none;transition:opacity .12s,background .12s;cursor:pointer}
+.agp-row:hover .agp-open,.agp-row:focus-within .agp-open{opacity:1;pointer-events:auto}
+.agp-open:hover{background:rgba(255,255,255,.09);color:var(--fg)}
+.agp-open.off,.agp-row:hover .agp-open.off,.agp-row:focus-within .agp-open.off{
+  opacity:1;pointer-events:auto;background:transparent;color:var(--faint);cursor:default}
+.agp-field-slot{grid-column:4;min-width:0}
+.agp-switch{position:relative;justify-self:end;width:32px;height:19px;padding:0;
+            border:0;border-radius:10px;background:var(--line);cursor:pointer;
+            transition:background .2s}
+.agp-switch i{position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
+              background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .22s}
+.agp-switch.on{background:var(--fg)}
+.agp-switch.on i{transform:translateX(13px);background:var(--bg)}
+.agp-exp{grid-column:1/-1;margin:2px 0;border-top:1px solid var(--line-soft)}
+.agp-exp-body{padding:10px 0 6px}
+/* One label column for every expanded row: profile and engine fields start on
+   the same vertical line. The value column may hold a chip, a chip row, or prose. */
+.agp-kv{display:grid;grid-template-columns:72px minmax(0,1fr);column-gap:12px;
+        align-items:start;padding:4px 0;font-size:11.5px;line-height:1.55}
+.agp-k{width:auto;padding-top:7px;color:var(--faint)}
+.agp-v{min-width:0;color:var(--fg2)}
+.agp-v code{font:10.5px/1.6 var(--mono);color:var(--muted)}
+/* The row's model chip is a grid child; inside the open panel the same chip is
+   a normal inline control, so reset the row grid placement there. */
+.agp-exp .agp-field{display:inline-flex;vertical-align:middle;grid-column:auto;flex:none;width:min(100%,320px)}
+.agp-exp .agp-tier-field{width:200px}
+.agp-exp .agp-field .v{font-weight:400}
+.agp-exp-acts{display:flex;gap:4px;margin-top:4px}
+.agp-dim{color:var(--faint)}
+.agp-efforts{display:flex;flex-wrap:wrap;gap:4px}
+.agp-effort{height:22px;padding:0 8px;border:1px solid var(--line);border-radius:5px;
+            background:transparent;color:var(--muted);font-size:10.5px;cursor:pointer}
+.agp-effort:hover{color:var(--fg);border-color:var(--fg2)}
+.agp-effort:disabled{opacity:.55;cursor:default}
+.agp-effort.on{color:var(--green);border-color:rgba(134,239,172,.28);
+               background:rgba(134,239,172,.07)}
+.agp-tier{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-height:30px}
+.agp-tier-field{flex:none;width:200px}
+.agp-tier .agp-efforts{gap:3px}
+.agp-tier .agp-effort{height:20px;padding:0 7px}
+.agp-tier-hint{flex:none;color:var(--faint);font-size:10px;font-family:var(--mono)}
+.agp-mlist{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.agp-pchips{display:flex;align-items:center;flex-wrap:wrap;gap:5px}
+.agp-pchip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px;
+           border:1px solid var(--line);border-radius:6px;color:var(--fg2);font-size:10.5px}
+.agp-pchip .agp-pic{width:14px;height:14px}
+.agp-pchip .n{color:var(--faint);font-variant-numeric:tabular-nums}
+.agp-note{margin:4px 0 0 84px;font-size:10.5px;line-height:1.6;color:var(--faint)}
+.agp-exp-foot{display:flex;align-items:center;gap:8px;padding:8px 0 2px;
+              border-top:1px solid var(--line-soft)}
+.agp-grow{flex:1}
+.agp-quiet{height:26px;padding:0 9px;border:0;border-radius:6px;background:transparent;
+           color:var(--muted);font-size:11.5px;cursor:pointer}
+.agp-quiet:hover{background:rgba(255,255,255,.05);color:var(--fg)}
+.agp-quiet.accent{color:var(--accent)}
+.agp-quiet.red{color:var(--red)}
+.agp-quiet.off,.agp-quiet.off:hover{background:transparent;color:var(--faint);cursor:default}
+.agp-more{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;height:42px;
+          border:0;border-top:1px solid var(--line-soft);background:transparent;
+          color:var(--muted);font-size:12px;cursor:pointer}
+.agp-more:hover{background:rgba(255,255,255,.014);color:var(--fg2)}
+.agp-more .chev{font-size:10px;transition:transform .2s}
+.agp-more.open .chev{transform:rotate(180deg)}
+.agp-fold{display:grid;grid-template-rows:0fr;border-top:1px solid var(--line-soft);
+          transition:grid-template-rows .35s cubic-bezier(.4,0,.2,1)}
+.agp-fold.open{grid-template-rows:1fr}
+.agp-fold-inner{min-height:0;overflow:hidden}
+.agp-cap{display:flex;justify-content:space-between;padding:10px 14px 3px;
+         border-top:1px solid var(--line-soft);color:var(--muted);font-size:11px}
+.agp-cap:first-child{border-top:0}
+.agp-cap span{color:var(--faint);font-variant-numeric:tabular-nums}
+.agp-row.flat{grid-template-columns:30px minmax(0,1fr) auto;min-height:52px;padding:9px 14px}
+.agp-row.flat .agp-name{font-size:13px;font-weight:500}
+.agp-row.flat .agp-state{color:var(--faint);font-size:11px}
+.agp-install{height:26px;padding:0 10px;border:1px solid var(--line);border-radius:6px;
+             background:var(--card);color:var(--fg2);font-size:11.5px;cursor:pointer}
+.agp-install:hover{border-color:var(--fg2);color:var(--fg)}
+.agp-empty{padding:18px 14px;color:var(--muted);font-size:11.5px}
+.agp-profiles{display:flex;align-items:center;gap:10px;min-height:36px;padding:12px 2px 2px}
+.agp-plabel{flex:none;color:var(--faint);font-size:11px;font-weight:500;
+            letter-spacing:.08em;text-transform:uppercase}
+.agp-chips{flex:1;display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}
+.agp-chip{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 8px 0 13px;
+          border:1px solid var(--line);border-radius:9px;background:var(--card);
+          color:var(--fg2);font-size:12px;cursor:pointer}
+.agp-chip:hover{border-color:var(--fg2);color:var(--fg)}
+.agp-chip.pending{opacity:.55;pointer-events:none}
+.agp-chip .nm{max-width:150px;overflow:hidden;text-overflow:ellipsis}
+.agp-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none}
+.agp-chip .x{opacity:0;color:var(--faint);font-size:13px;line-height:1;transition:opacity .12s}
+.agp-chip:hover .x{opacity:1}
+.agp-chip .x:hover{color:var(--red)}
+.agp-pedit{display:flex;align-items:center;gap:4px;flex:none;margin-left:auto}
+.agp-setsave{height:28px;padding:0 2px;border:0;background:transparent;color:var(--muted);
+             font-size:12px;cursor:pointer}
+.agp-setsave:hover{color:var(--fg)}
+.agp-setname{width:150px;height:28px;padding:0 8px;border:1px solid var(--line);
+             border-radius:6px;background:var(--bg);color:var(--fg);font-size:12px;outline:none}
+.agp-setname:focus{border-color:var(--accent)}
+.agp-setdo,.agp-setcancel{height:28px;padding:0 9px;border:1px solid var(--line);
+             border-radius:6px;background:transparent;color:var(--muted);font-size:11.5px;cursor:pointer}
+.agp-setdo{color:var(--fg);border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.05)}
+.agp-setdo:hover,.agp-setcancel:hover{border-color:var(--fg2);color:var(--fg)}
+.agp-phint{color:var(--muted);font-size:11px}
+@media (max-width: 980px){
+  .agp-row{grid-template-columns:30px minmax(0,1fr) 28px 40px;row-gap:6px;padding:10px 12px}
+  .agp-row.flat{grid-template-columns:30px minmax(0,1fr) auto}
+  .agp-row .agp-ic{grid-column:1;grid-row:1}
+  .agp-row .agp-who{grid-column:2;grid-row:1}
+  .agp-row .agp-open{grid-column:3;grid-row:1;justify-self:center}
+  .agp-row .agp-switch{grid-column:4;grid-row:1}
+  .agp-row .agp-field{grid-column:1/5;grid-row:2}
+  .agp-row .agp-field-slot{grid-column:1/5;grid-row:2}
+  .agp-row .agp-link{grid-column:1;grid-row:3;justify-self:start}
+  .agp-exp{grid-column:1/-1}
+}
 .agent-fold{display:grid;grid-template-rows:0fr;transition:grid-template-rows .22s ease;
             overflow:hidden}
 .agent-fold>div{min-height:0;overflow:hidden}

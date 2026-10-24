@@ -10,7 +10,22 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
+
+// traceZstd 只被跟随协程使用（poll 串行），所以一个 decoder 就够。
+// 64MB 上限把“某个会话文件坏了/被塞大了”挡在内存之外，而不是拖垮 Perch。
+var traceZstd = func() *zstd.Decoder {
+	d, err := zstd.NewReader(nil,
+		zstd.WithDecoderConcurrency(1),
+		zstd.WithDecoderMaxMemory(64<<20),
+	)
+	if err != nil {
+		panic(err) // 只会在构造参数非法时发生；那是编码时错误，不是运行期输入
+	}
+	return d
+}()
 
 // pending 是一次工具调用里、结果还没回来时需要留着的那些参数。
 type pending struct {
@@ -27,17 +42,24 @@ type pending struct {
 // trace 是一格转录跟随中的全部内存态。它只被跟随协程读写 —— 没有锁，
 // 因为没有任何别的协程直接碰它（取快照走请求通道，见 Follower.Acts）。
 type trace struct {
-	path string
-	cwd  string
-	off  int64
-	buf  string
+	agent  string
+	path   string
+	cwd    string
+	format string
+	off    int64 // 已消费的**解压后**字节数（zstd 也是这个口径）
+	buf    string
 
-	files  map[string]*FileTouch
-	acts   []ActItem
-	byID   map[string]int // ActItem.ID → acts 下标
-	wait   map[string]pending
-	dirtyF bool
-	seq    int // 给没有 id 的条目发号（见 append）
+	files map[string]*FileTouch
+	acts  []ActItem
+	byID  map[string]int // ActItem.ID → acts 下标
+	wait  map[string]pending
+	// waitOrder 是给**没有 call_id** 的转录（Antigravity 等）用的 FIFO：
+	// 调用和结果只能靠先后顺序对上。结果到了就从头取一个。
+	waitOrder []string
+	// sawResponseItem 让 Codex 避免 event_msg 和 response_item 两条腿重复落同一句。
+	sawResponseItem bool
+	dirtyF          bool
+	seq             int // 给没有 id 的条目发号（见 append）
 
 	// 第一次读盘（可能是恢复的会话，历史很长）：只把**最后 30 条**流水推给前端。
 	// 全推会把刚打开的界面淹掉，而且那些是过去的事。
@@ -48,9 +70,9 @@ type trace struct {
 	lastCompactTurn int
 }
 
-func newTrace(path, cwd string) *trace {
+func newTrace(path, cwd, agent, format string) *trace {
 	return &trace{
-		path: path, cwd: cwd,
+		agent: agent, path: path, cwd: cwd, format: format,
 		files: map[string]*FileTouch{},
 		byID:  map[string]int{},
 		wait:  map[string]pending{},
@@ -264,10 +286,11 @@ func (f *Follower) run() {
 		}
 		for id, v := range live {
 			tr := traces[id]
-			if tr == nil || tr.path != v.Transcript {
-				tr = newTrace(v.Transcript, v.CWD)
+			if tr == nil || tr.path != v.Transcript || tr.agent != v.Agent {
+				tr = newTrace(v.Transcript, v.CWD, v.Agent, v.Format)
 				traces[id] = tr
-				log.Printf("[trace t%d] 开始跟随 %s（cwd=%s）", id, v.Transcript, v.CWD)
+				log.Printf("[trace t%d] 开始跟随 %s（agent=%s cwd=%s format=%s）",
+					id, v.Transcript, v.Agent, v.CWD, v.Format)
 			}
 			// 一格的一行坏数据**不许**带走整条腿。这个协程一死，「流水」和
 			// 「改动」两条腿一起静默停更，而界面上完全看不出来（用户看到的
@@ -291,25 +314,49 @@ func (tr *trace) poll(tabID int, push func(any)) {
 	if err != nil {
 		return
 	}
-	if fi.Size() < tr.off { // 被截断/换文件
-		tr.off, tr.buf = 0, ""
-	}
-	if fi.Size() == tr.off {
-		return
-	}
 	readStart := time.Now()
-	f, err := os.Open(tr.path)
-	if err != nil {
-		return
-	}
-	if _, err := f.Seek(tr.off, io.SeekStart); err != nil {
+	var b []byte
+	if tr.format == "zstd" {
+		/* DSH 的 session.v4.jsonl.zstd 是**一帧一条追加**的帧流。我们不做流式
+		   帧切割：会话文件实测只有十几 KB，整份解压再按“解压后偏移”增量消费
+		   最稳。写到一半的尾帧解码会失败 —— 这一轮直接跳过，下一轮就有了。 */
+		raw, rerr := os.ReadFile(tr.path)
+		if rerr != nil {
+			return
+		}
+		decoded, derr := traceZstd.DecodeAll(raw, nil)
+		if derr != nil || len(decoded) == 0 {
+			return
+		}
+		if int64(len(decoded)) < tr.off { // 被截断/换文件
+			tr.off, tr.buf = 0, ""
+		}
+		if int64(len(decoded)) == tr.off {
+			return
+		}
+		b = decoded[tr.off:]
+		tr.off = int64(len(decoded))
+	} else {
+		if fi.Size() < tr.off { // 被截断/换文件
+			tr.off, tr.buf = 0, ""
+		}
+		if fi.Size() == tr.off {
+			return
+		}
+		f, oerr := os.Open(tr.path)
+		if oerr != nil {
+			return
+		}
+		if _, serr := f.Seek(tr.off, io.SeekStart); serr != nil {
+			f.Close()
+			return
+		}
+		b, err = io.ReadAll(f) // 读尾巴：一次最多几 MB，够用
 		f.Close()
-		return
-	}
-	b, rerr := io.ReadAll(f) // 读尾巴：一次最多几 MB，够用
-	f.Close()
-	if rerr != nil {
-		return
+		if err != nil {
+			return
+		}
+		tr.off += int64(len(b))
 	}
 	// ⚠️ 初次读盘可能是**整份**（长会话实测 44MB），这期间跟随协程无法应答
 	// traceAsk —— 页面重载时那次补发快照正好撞上就会"超时"。所以把时长量出来：
@@ -320,7 +367,6 @@ func (tr *trace) poll(tabID int, push func(any)) {
 			log.Printf("[trace t%d] 初次读入用掉 %dms / %d 字节（这期间快照请求应答不了）", tabID, readMS, len(b))
 		}
 	}
-	tr.off += int64(len(b))
 	tr.buf += string(b)
 
 	var newActs []ActItem

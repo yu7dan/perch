@@ -235,6 +235,9 @@ type watcher struct {
 	lastCat  string // 本地 Agent 名单的指纹：变了就先推，不等 HTTP
 	client   *http.Client
 	push     func(any)
+	// isolated 时读 Perch 自己 portable 引擎的 data\，不是 ~/.config/magpie。
+	isolated bool
+	dataDir  string
 }
 
 // StartWatcher 先扫本机（瞬时），再把 HTTP 那条腿放进协程。
@@ -246,7 +249,9 @@ func (g *Gateway) StartWatcher() {
 			// 本机地址绝不能被系统代理截走（Windows 上 HTTP_PROXY 很常见）。
 			Transport: &http.Transport{Proxy: nil},
 		},
-		push: g.push,
+		push:     g.push,
+		isolated: g.Isolated(),
+		dataDir:  g.engineDataDir(),
 	}
 	// 本机那份先出（版本 / Provider / 插件 / Agent 名单），网关读数稍后补。
 	w.mu.Lock()
@@ -334,6 +339,9 @@ func (w *watcher) refresh() bool {
 func (w *watcher) scanLocal() *Snapshot {
 	home, _ := os.UserHomeDir()
 	dir := magpieConfigDir(home)
+	if w.isolated && w.dataDir != "" {
+		dir = w.dataDir
+	}
 	s := &Snapshot{
 		State:     "absent",
 		Gateway:   gatewayURL,
@@ -502,6 +510,15 @@ func magpieConfigDir(home string) string {
 		return filepath.Join(d, "magpie")
 	}
 	return filepath.Join(home, ".config", "magpie")
+}
+
+// magpieCacheDir 和 magpie 的 appdir 缓存规则一致：XDG_CACHE_HOME 优先，
+// 否则 ~/.cache/magpie。providers-state.json 在这里。
+func magpieCacheDir(home string) string {
+	if d := strings.TrimSpace(os.Getenv("XDG_CACHE_HOME")); d != "" {
+		return filepath.Join(d, "magpie")
+	}
+	return filepath.Join(home, ".cache", "magpie")
 }
 
 func scanMagpieProviders(dir string) []Provider {

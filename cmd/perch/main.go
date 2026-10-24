@@ -9,10 +9,14 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -20,6 +24,7 @@ import (
 	perchassets "github.com/yu7dan/perch"
 	"github.com/yu7dan/perch/internal/agent"
 	"github.com/yu7dan/perch/internal/agentcatalog"
+	"github.com/yu7dan/perch/internal/agentprofile"
 	"github.com/yu7dan/perch/internal/appdir"
 	"github.com/yu7dan/perch/internal/ctl"
 	"github.com/yu7dan/perch/internal/dsh"
@@ -45,11 +50,13 @@ type perchApp struct {
 	stateDir    string
 	fallbackCWD string
 
-	titles *session.TitleStore
-	prefs  *settings.Store
-	pool   *project.Pool
-	panes  *panes.Store
-	tabs   *session.Manager
+	titles      *session.TitleStore
+	prefs       *settings.Store
+	pool        *project.Pool
+	panes       *panes.Store
+	tabs        *session.Manager
+	profiles    *agentprofile.Store
+	profileSets *agentprofile.SetStore
 
 	defs map[string]agent.Def
 
@@ -59,13 +66,58 @@ type perchApp struct {
 	push      *pushRelay
 }
 
+// teeLogToFile 让双击启动的 beta 也有日志可查：Explorer 里没有 stderr。
+// 8MB 轮转一次，只留 perch.log 和 perch.log.1；拿不到目录就继续只写 stderr。
+func teeLogToFile() {
+	p, err := appdir.PerchFile("perch.log")
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return
+	}
+	if fi, err := os.Stat(p); err == nil && fi.Size() > 8<<20 {
+		_ = os.Remove(p + ".1")
+		_ = os.Rename(p, p+".1")
+	}
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	// 文件放第一个：双击启动时 os.Stderr 可能是无效句柄，写它会返回错误；
+	// MultiWriter 遇到错误就停，放在后面才能保证文件一定拿到这一行。
+	log.SetOutput(io.MultiWriter(f, os.Stderr))
+}
+
 func main() {
+	teeLogToFile()
 	a := &perchApp{
 		stateDir:    appdir.ClaudeState(),
 		fallbackCWD: appdir.HomeOrDot(),
 		push:        &pushRelay{},
 	}
 	log.Printf("[perch] 版本 %s（pid %d）", buildVersion, os.Getpid())
+
+	// Perch 自己的 per-agent 配置（模型别名/档位）。和 agent 的全局配置分开，
+	// 由隔离网关在开格时注入；默认路径在 %APPDATA%\Perch\agent-profiles.json。
+	if p, err := appdir.PerchFile("agent-profiles.json"); err == nil {
+		a.profiles = agentprofile.Load(p)
+	} else {
+		a.profiles = agentprofile.Load("")
+	}
+	// 名单精简：删掉已移除 agent 的 Perch 会话配置；不影响会话/转录文件。
+	for _, p := range a.profiles.All() {
+		if p.Agent != "" && !agentcatalog.Exists(p.Agent) {
+			_ = a.profiles.Set(agentprofile.Profile{Agent: p.Agent})
+			log.Printf("[perch] 名单精简：移除已下架 agent 的 Perch 配置 %s", p.Agent)
+		}
+	}
+	// 配置方案（Profiles）：当前 per-agent 配置的快照，存成独立文件。
+	if p, err := appdir.PerchFile("agent-profile-sets.json"); err == nil {
+		a.profileSets = agentprofile.LoadSets(p)
+	} else {
+		a.profileSets = agentprofile.LoadSets("")
+	}
 
 	// 状态根按 Claude Code 自己的规则取：环境里有 CLAUDE_CONFIG_DIR 就用它，
 	// 否则 <用户主目录>\.claude。仓库里不留任何本机绝对路径。
@@ -107,6 +159,11 @@ func main() {
 		a.panes.SetReadOnly("已经有一个我在跑（步 7 的单实例闸）")
 	}
 	a.panes.Warn()
+	// 名单精简后，旧名字（Gemini/Qwen/CodeBuddy…）的记录不再恢复、不再出现在
+	// 左栏；只摘记录，磁盘上的会话文件保留。
+	if n := a.panes.PruneAgents(agentcatalog.Exists, "Agent 名单精简"); n > 0 {
+		log.Printf("[panes] 名单精简：摘掉 %d 条名单外 agent 记录（会话文件保留）", n)
+	}
 
 	// C3：第一个动作就是给自己上"随进程退出清理整棵树"的保险 ——
 	// 必须早于任何子进程（窗口的 WebView2、每个格子的 ConPTY 都在这之后才起）。
@@ -126,6 +183,10 @@ func main() {
 		// 会话层不反过来认识 agent 名单。
 		Caps: func(id string) agent.Caps { return agent.CapsFor(id, agentcatalog.Has(id)) },
 	})
+	// 默认会话区：每个新格一个独立目录（见 defaultSessionDir）。
+	a.tabs.SetSessionDir(a.defaultSessionDir)
+	// 登记表关格时用它区分“零轮次空壳”和“真跑过、有会话文件”。
+	a.panes.SessionExists = a.tabs.SessionFileExistsFor
 	// 步 8：适配器此后拿到的就是真正的会话表（绑定/状态/推送/Exe 解析）。
 	agent.SetHost(a.tabs)
 	// 步 9：Defs() 会走 Host.ResolveExe，所以**必须**在 SetHost 之后。
@@ -134,10 +195,41 @@ func main() {
 
 	// 网关与安装器：网关先建（安装完成回调要接它）；两者都只通过 push 出站。
 	a.gw = gateway.New(a.push.Push)
+	// 已接入引擎的 agent 表要跨重启：冷恢复的格子比 /api/state 先起来，
+	// 没这份缓存，Gemini 这类通用 CLI 会拿真实配置启动并弹登录页。
+	if p, err := appdir.PerchFile("engine-agents.json"); err == nil {
+		a.gw.SetEngineAgentsFile(p)
+	}
+	// 2026-10-22：隔离引擎是产品默认路径：只用 Perch 自己安装的 portable
+	// magpie，不碰桌面 magpie/3425，也不写 agent 的全局配置。
+	// 排障时可以显式设 PERCH_ISOLATED_GATEWAY=0 回到旧的桌面 magpie 发现路径。
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("PERCH_ISOLATED_GATEWAY"))); v != "0" && v != "false" && v != "off" {
+		a.gw.SetIsolated(true)
+		log.Printf("[gw] 使用 Perch 自己的隔离网关引擎")
+	}
 	// agy 这类 agent 的网关地址/密钥只能从环境变量拿；magpie 的 /api/state
 	// 带一条 launch 命令，网关把它解析成 env+args，开格时由 AgyDef 现取。
 	// 没接线时 Launch 返回 false，启动退回通用路径。
 	a.tabs.SetWireLaunch(a.gw.Launch)
+	// Phase 2：Perch 自己的 per-agent 模型注入。只在隔离引擎模式下有内容；
+	// 旧路径（桌面 magpie）保持不注入、行为不变。
+	a.tabs.SetWireProfile(a.agentWireProfile)
+	// 隔离引擎的 USERPROFILE 是沙盒；agy 直接由 Perch 启动，也要用同一份
+	// 用户目录，才能和引擎读到同一份 settings/信任列表。
+	a.tabs.SetEngineHomeEnv(func() map[string]string {
+		if !a.gw.Isolated() {
+			return nil
+		}
+		return gateway.EngineHomeEnv()
+	})
+	// 通用 CLI 只有当前确实由引擎接入网关时才换沙盒；否则继续读用户自己
+	// 的配置（未接入 = 不替用户改运行环境）。
+	a.tabs.SetEngineHomeEnvFor(func(id string) map[string]string {
+		if !a.gw.Isolated() || !a.gw.AgentEngineManaged(id) {
+			return nil
+		}
+		return gateway.EngineHomeEnv()
+	})
 	// 内嵌网关页的语言跟 Perch 的设置走：先记下偏好，控制面连上时再写进
 	// magpie（它自己的 settings.lang），见 internal/gateway/language.go。
 	a.gw.SetLanguage(a.prefs.Snapshot().Language)
@@ -147,6 +239,23 @@ func main() {
 	setupAgent := func(id string, log func(string)) error {
 		if id != "dsh" {
 			return nil
+		}
+		// 隔离模式下 Perch 启动的 dsh 读的是引擎沙盒里的 DSH_HOME；hook 桥/
+		// home patch 也必须写进同一份，否则真实 ~/.dsh 装好了、Perch 的格子
+		// 仍然看不到状态。这个函数只在用户点「接入状态钩子」时跑，短暂设置
+		// 环境变量即可。
+		if a.gw.Isolated() {
+			if home := gateway.PerchEngineHomeDir(); home != "" {
+				old, had := os.LookupEnv("DSH_HOME")
+				_ = os.Setenv("DSH_HOME", filepath.Join(home, ".dsh"))
+				defer func() {
+					if had {
+						_ = os.Setenv("DSH_HOME", old)
+					} else {
+						_ = os.Unsetenv("DSH_HOME")
+					}
+				}()
+			}
 		}
 		return dsh.EnsureHooks(a.stateDir, session.HookDir(a.stateDir), session.HookExePath(), log)
 	}
@@ -290,7 +399,26 @@ func main() {
 		live := a.tabs.Live()
 		views := make([]transcript.View, 0, len(live))
 		for _, v := range live {
-			views = append(views, transcript.View{ID: v.ID, Transcript: v.Transcript, CWD: v.CWD})
+			path, format := v.Transcript, ""
+			// Claude 的路径由 hook 直接给（最权威）；其余 agent 由
+			// internal/agent 按会话 id / 起始时间找。OpenCode 不在这里：
+			// 它从 TUI 自己的 HTTP server 推流水（见 status.go 的 observeOpenCode）。
+			if v.Agent != "claude" && v.Agent != "opencode" {
+				f := agent.TranscriptFor(v.ID, v.Agent, v.CWD, v.SessionID, v.StartedAt)
+				if f.Path != "" {
+					path, format = f.Path, f.Format
+				} else if v.Agent != "qoder" {
+					// Qoder 有 hook 时路径在 v.Transcript；没有 hook 且还没
+					// 找到文件时，不能拿 claude 那张旧路径顶上。
+					path = ""
+				}
+			}
+			if path == "" {
+				continue
+			}
+			views = append(views, transcript.View{
+				ID: v.ID, Agent: v.Agent, Transcript: path, CWD: v.CWD, Format: format,
+			})
 		}
 		return views
 	}, a.push.Push)
@@ -301,12 +429,15 @@ func main() {
 	ctlSrv := ctl.New(ctl.Deps{
 		StateDir:       a.stateDir,
 		SecondInstance: secondInstance,
+		Version:        buildVersion,
 		Tabs:           a.tabs,
 		Panes:          a.panes,
 		Titles:         a.titles,
 		Pool:           a.pool,
 		Prefs:          a.prefs,
 		Gateway:        a.gw,
+		Profiles:       a.profiles,
+		ProfileSets:    a.profileSets,
 		Installer:      a.installer,
 		Transcript:     a.follower,
 		DefaultCWD:     a.defaultCWD,
@@ -409,6 +540,119 @@ func (a *perchApp) defaultCWD() string {
 		return p
 	}
 	return a.fallbackCWD
+}
+
+// defaultSessionDir 给默认会话区里的新格分配一个独立目录：
+//
+//	<默认目录>\sessions\<YYYYMMDD-HHMMSS>-<agent>-<paneID>
+//
+// 用 paneID 当短 id 而不是随机串：座位身份本来就跨重启稳定（见 Tab.PaneID），
+// 同一格冷恢复时不会分叉出第二个目录；agent 名过一遍文件名白名单。
+// 建不出目录返回空串，调用方退回默认目录 —— 不拦启动。
+func (a *perchApp) defaultSessionDir(agentID string, paneID int) string {
+	root := filepath.Join(a.defaultCWD(), "sessions")
+	name := strings.Join([]string{
+		time.Now().Format("20060102-150405"),
+		sanitizeDirName(agentID),
+		strconv.Itoa(paneID),
+	}, "-")
+	dir := filepath.Join(root, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("[session] 默认会话目录建不出来 dir=%s err=%v（这一格退回默认目录）", dir, err)
+		return ""
+	}
+	log.Printf("[session] 默认会话目录 pane=%d agent=%s → %s", paneID, agentID, dir)
+	return dir
+}
+
+func sanitizeDirName(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "agent"
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// agentWireProfile 是 session.Manager 开格前的注入点。
+//
+// 只做 Perch 自己的配置：模型指向 group/perch-<agent> 这个稳定别名，
+// 引擎里的 group 目标换了，运行中的会话下一轮就生效。绝不写 agent 的
+// 全局配置；拿不到配置就返回 false，让这一格按 agent 自己的方式启动。
+func (a *perchApp) agentWireProfile(id string) (map[string]string, []string, bool) {
+	if a.profiles == nil || !a.gw.Isolated() || !agent.Injects(id) {
+		return nil, nil, false
+	}
+	p, ok := a.profiles.Get(id)
+	if !ok || p.Alias == "" || p.Model == "" {
+		return nil, nil, false
+	}
+	// 每次开格都确认一次组存在；CLI 只改 Perch 引擎的 portable data，
+	// 不碰桌面 magpie，也不碰 agent 配置。
+	if err := a.gw.EnsureAgentGroup(p.Alias, p.Model, p.Effort); err != nil {
+		log.Printf("[gw] agent %s 的 Perch 模型配置没有生效：%v", id, err)
+		return nil, nil, false
+	}
+	switch id {
+	case "claude":
+		env := gateway.ClaudeProfileEnv(p.Alias)
+		// 档位自己的模型：每一档一个稳定组，换这一档只动它。
+		// 组没建起来就退回主模型，不挡整格启动。
+		for tier, tp := range p.Tiers {
+			if tp.Model == "" {
+				continue
+			}
+			key := gateway.ClaudeTierEnvKey(tier)
+			if key == "" {
+				continue
+			}
+			alias := gateway.ClaudeTierAlias(p.Alias, tier)
+			if err := a.gw.EnsureAgentGroup(alias, tp.Model, tp.Effort); err != nil {
+				log.Printf("[gw] agent %s 的 %s 档位没有生效，退回主模型：%v", id, tier, err)
+				continue
+			}
+			env[key] = alias
+			if strings.EqualFold(tier, "haiku") {
+				// Claude Code 的小任务（标题/背景）走 haiku 档。
+				env["ANTHROPIC_SMALL_FAST_MODEL"] = alias
+			}
+		}
+		return env, nil, true
+	case "codex":
+		return nil, gateway.CodexProfileArgs(p.Alias), true
+	case "pi":
+		home, herr := os.UserHomeDir()
+		if herr != nil || home == "" {
+			return nil, nil, false
+		}
+		env, err := gateway.PiProfileEnv(home, p.Alias, p.Model, p.Effort)
+		if err != nil {
+			log.Printf("[gw] agent %s 的 Pi 配置没有生成：%v", id, err)
+			return nil, nil, false
+		}
+		return env, nil, true
+	case "opencode":
+		home, herr := os.UserHomeDir()
+		if herr != nil || home == "" {
+			return nil, nil, false
+		}
+		env, err := gateway.OpenCodeProfileEnv(home, p.Alias, p.Model, p.Effort)
+		if err != nil {
+			log.Printf("[gw] agent %s 的 OpenCode 配置没有生成：%v", id, err)
+			return nil, nil, false
+		}
+		return env, nil, true
+	default:
+		return nil, nil, false
+	}
 }
 
 // mergeCatalogCalls 把“今日经过网关”的读数保留下来：刚扫出来的名单没有

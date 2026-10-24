@@ -7,9 +7,35 @@ import (
 	"strings"
 )
 
-// consumeLine 吃一行，返回**新增或更新后**的流水条（没有就返回 nil）。
-// 返回值既用于"追加"，也用于"原地更新"—— 前端按 id 覆盖。
+// consumeLine 按这一格所属的 agent 分派行解析器。
+//
+// 每条腿只认**自己实测过的形状**：形状不认识就返回 nil，不猜、不硬套。
+// Claude 和 Qoder 共用同一份（Qoder 1.1.77 的转录是 Claude 形状：assistant/
+// user、tool_use/tool_result 都在）。其余 agent 各有自己的文件。
 func (tr *trace) consumeLine(line string) *ActItem {
+	switch tr.agent {
+	case "", "claude", "qoder":
+		return tr.consumeClaudeLine(line)
+	case "codex":
+		return tr.consumeCodexLine(line)
+	case "pi":
+		return tr.consumePiLine(line)
+	case "dsh":
+		return tr.consumeDshLine(line)
+	case "agy":
+		return tr.consumeAgyLine(line)
+	case "cursor":
+		return tr.consumeCursorLine(line)
+	case "copilot":
+		return tr.consumeCopilotLine(line)
+	default:
+		return nil
+	}
+}
+
+// consumeClaudeLine 吃一行 Claude 形状的转录，返回**新增或更新后**的流水条
+// （没有就返回 nil）。返回值既用于"追加"，也用于"原地更新"—— 前端按 id 覆盖。
+func (tr *trace) consumeClaudeLine(line string) *ActItem {
 	if !strings.Contains(line, `"type":`) {
 		return nil
 	}
@@ -45,6 +71,11 @@ func (tr *trace) consumeLine(line string) *ActItem {
 		}
 		if len(ev.ToolUseResult) > 0 {
 			return tr.consumeResult(ev.Message, ev.ToolUseResult, ev.Timestamp)
+		}
+		// Qoder（以及某些 Claude 形状的变体）只落 message.content 里的
+		// tool_result，不落顶层 toolUseResult。没有这一条，工具会永远停在 OK=nil。
+		if it := tr.consumeBareToolResult(ev.Message, ev.Timestamp); it != nil {
+			return it
 		}
 		return tr.consumePrompt(ev.Message, ev.Timestamp)
 	}
@@ -108,6 +139,35 @@ func (tr *trace) consumeAssistant(raw json.RawMessage, at string) *ActItem {
 			}
 			last = tr.append(it)
 		}
+	}
+	return last
+}
+
+// consumeBareToolResult 处理“只有 message.content[tool_result]、没有顶层
+// toolUseResult”的 Claude 形状变体（Qoder 实测会走这条路）。真正的 Claude
+// 行不会命中：它们的 tool_result 一定带 toolUseResult，走的是 consumeResult。
+func (tr *trace) consumeBareToolResult(raw json.RawMessage, at string) *ActItem {
+	var msg struct {
+		Content []struct {
+			Type      string          `json:"type"`
+			ToolUseID string          `json:"tool_use_id"`
+			IsError   bool            `json:"is_error"`
+			Content   json.RawMessage `json:"content"`
+		} `json:"content"`
+	}
+	if json.Unmarshal(raw, &msg) != nil {
+		return nil
+	}
+	var last *ActItem
+	for _, b := range msg.Content {
+		if b.Type != "tool_result" || b.ToolUseID == "" {
+			continue
+		}
+		id, p, found := tr.takeWait(b.ToolUseID)
+		if !found {
+			continue
+		}
+		last = tr.finishAnyTool(id, p, !b.IsError, textOf(b.Content), at)
 	}
 	return last
 }

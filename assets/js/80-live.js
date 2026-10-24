@@ -583,6 +583,7 @@ function applyShell(p) {
      名字表 0 条`），名字是这份载荷（约 +3s）才到的。少了这一句，重开之后格子头
      就永远停在 agent 自己写的标题上，而左栏（读同一份 STATE.titles）已经是你起的名字。 */
   seedTabTitles();
+  if (typeof renderAbout === "function") renderAbout();
 }
 shell.onmessage = (ev) => {
   let p;
@@ -787,6 +788,18 @@ function leaveWaitingFromHook(t, v, why) {
   scheduleLive();
 }
 
+// dsh 的 hook busy 只有一条路（它没有登记表）。标题已经是 ✦ 时，这条 busy
+// 可能是迟到的 UserPromptSubmit；补一个收尾计时器，别让格子永久转圈。
+function markDshBusy(t, v, why) {
+  v.st = "busy";
+  v.state = "working";
+  v.evidence = "hook";
+  v.wait = null;
+  if (t.agentState === "idle" && typeof armDshLateSettle === "function") {
+    armDshLateSettle(t);
+  }
+}
+
 /* 这条 PostToolUse/PostToolUseFailure 能不能销掉当前的等待？
    判据照 Orca 的 claude-events.ts:112-166：
      · **工具调用 id 优先**（waitingToolUseId）—— 平行兄弟调用（比如同时跑了
@@ -827,6 +840,9 @@ function alreadyBlocked(v) {
 function cellState(t) {
   if (!t) return "idle";
   if (t.connDown) return "off";                    // 我们自己的态，Orca 没有这条
+  // A generic CLI at its sign-in screen is waiting for the user even though it
+  // has no LIVE event; the tab dot must say so, not "idle".
+  if (LOGIN_GATES.has(t.id)) return "ask";
   const v = LIVE.get(t.id);
   // ① 官方机器可读的"我卡在等你"（waiting = 提问和批准都算，见 status.go 的实测）
   if (v && v.st === "waiting") return "ask";
@@ -904,8 +920,10 @@ function applyHook(m) {
     case "Stop":
       // 这轮结束了：hook 记下的“在等你”随之作废（理由见 leaveWaitingFromHook）。
       leaveWaitingFromHook(t, v, "hook Stop：这轮结束");
-      // dsh 没有登记表：Stop 是唯一可靠的“这一轮完了”信号。
+      // dsh 没有登记表：Stop 是“这一轮完了”的直接信号；收到它时把标题
+      // 兜底的迟到计时器一起撤掉，避免下一轮刚开始又被旧计时器熄掉。
       if (isDsh) {
+        if (typeof cancelDshLateSettle === "function") cancelDshLateSettle(t);
         v.st = "idle";
         v.state = "done";
         v.evidence = "hook";
@@ -961,10 +979,7 @@ function applyHook(m) {
       if (ask || (!isDsh && (!m.tool || m.tool === "AskUserQuestion"))) {
         enterWaitingFromHook(t, v, "ask", m.tool || "", "PreToolUse", m.tid, m.agent);
       } else if (isDsh) {
-        v.st = "busy";
-        v.state = "working";
-        v.evidence = "hook";
-        v.wait = null;
+        markDshBusy(t, v, "PreToolUse");
       }
       break;
     }
@@ -978,10 +993,7 @@ function applyHook(m) {
       // 就是它唯一的忙信号。
       leaveWaitingFromHook(t, v, "hook UserPromptSubmit：用户发了新提示");
       if (isDsh) {
-        v.st = "busy";
-        v.state = "working";
-        v.evidence = "hook";
-        v.wait = null;
+        markDshBusy(t, v, "UserPromptSubmit");
       }
       break;
     case "PostToolUse":
@@ -997,10 +1009,14 @@ function applyHook(m) {
          —— 那会把一个真的还挂着的问题销掉（Orca 的
          isParallelSiblingCompletionDuringQuestion 就是挡这件事）。 */
       if (!m.agent && (!wasWaiting || closed)) {
-        v.st = "busy";
-        v.state = "working";
-        v.evidence = "hook";
-        v.wait = null;
+        if (isDsh) {
+          markDshBusy(t, v, m.event);
+        } else {
+          v.st = "busy";
+          v.state = "working";
+          v.evidence = "hook";
+          v.wait = null;
+        }
       }
       break;
     }
@@ -1023,6 +1039,7 @@ function applyHook(m) {
       if (isDsh) {
         // dsh 没有登记表：新建/续接出来的会话先落到 idle，别让上一格的
         // busy 一直挂着。SessionStart 不是 turn-end，但这里没有别的收尾腿。
+        if (typeof cancelDshLateSettle === "function") cancelDshLateSettle(t);
         v.st = "idle";
         v.state = "done";
         v.evidence = "hook";
@@ -1308,56 +1325,163 @@ function swapList(vlistId, html) {
 
 // 日志仍用中文；UI 走 NEED_WHY_KEY + t()，这样切语言时列表跟着变。
 const NEED_WHY = { stop: "跑完了一轮", ask: "在等你回答", perm: "要你批权限",
-                   fail: "出错了", idle: "空闲" };
+                   login: "在等你登录", fail: "出错了", idle: "空闲" };
 const NEED_WHY_KEY = { stop: "live.need.whyStop", ask: "live.need.whyAsk",
-                       perm: "live.need.whyPerm", fail: "live.need.whyFail",
-                       idle: "live.need.whyIdle" };
+                       perm: "live.need.whyPerm", login: "live.need.whyLogin",
+                       fail: "live.need.whyFail", idle: "live.need.whyIdle" };
 function needWhy(kind) {
   return NEED_WHY_KEY[kind] ? t(NEED_WHY_KEY[kind]) : kind;
 }
-const NEED_GLYPH = { stop: G_BELL, ask: G_ASK, perm: G_ASK, fail: G_DOT, idle: G_DOT };
+const NEED_GLYPH = { stop: G_BELL, ask: G_ASK, perm: G_ASK, login: G_ASK,
+                     fail: G_DOT, idle: G_DOT };
+
+/* Login gates are not agent events: a generic CLI at its sign-in screen has no
+   hook/registry waiting flag, so its title still says "Ready" and the pane
+   looks idle. Read the visible terminal screen instead. This is deliberately
+   conservative: only strong login-screen lines count, and only the viewport,
+   so code/history containing the word "sign in" does not create a ghost. */
+const LOGIN_GATES = new Map();   // tab id -> { at, text, agent }
+const LOGIN_PATTERNS = [
+  /not log(?:ged)? in/i,
+  /sign in to (?:continue|get started|use)/i,
+  /log ?in to (?:continue|get started)/i,
+  // Copilot CLI 的登录门实测是 "Please use /login to sign in to use Copilot"
+  // （1.0.103）；它既不写 "log in" 也不写 "to continue"。
+  /please use \/login/i,
+  /use \/login to (?:sign in|continue)/i,
+  /press any key to log ?in/i,
+  /how would you like to authenticate/i,
+  /login with .*(?:platform|browser|google|github)/i,
+  /use .*personal access token/i,
+  /authentication is required/i,
+  /sign in with (?:google|github|microsoft)/i,
+  /(?:choose|select) (?:a )?(?:login|sign-in) method/i,
+];
+
+function loginGateLine(s) {
+  return LOGIN_PATTERNS.some((re) => re.test(s));
+}
+
+function readLoginGate(tab) {
+  // A pane whose process exited keeps its last screen (including the login
+  // menu) in the buffer; that is history, not a live gate.
+  if (!tab || tab.connDown) return null;
+  const b = tab && tab.term && tab.term.buffer.active;
+  if (!b) return null;
+  const rows = tab.term.rows || 50;
+  const lo = Math.max(0, b.viewportY);
+  const hi = Math.min(b.length - 1, lo + rows - 1);
+  let hit = "";
+  for (let i = lo; i <= hi; i++) {
+    const line = b.getLine(i);
+    if (!line) continue;
+    const s = line.translateToString(true).replace(/\s+$/, "");
+    if (s && loginGateLine(s)) hit = s;
+  }
+  if (!hit) return null;
+  return { text: hit.length > 140 ? hit.slice(0, 140) + "…" : hit };
+}
+
+function scanLoginGates() {
+  const present = new Set();
+  let changed = false;
+  for (const tab of TAB_LIST) {
+    if (!tab || !tab.id) continue;
+    present.add(tab.id);
+    const hit = readLoginGate(tab);
+    const prev = LOGIN_GATES.get(tab.id);
+    if (!hit) {
+      if (prev) {
+        LOGIN_GATES.delete(tab.id);
+        changed = true;
+        uiFact("login", `登录门消失 tab=${tab.id}`);
+      }
+      continue;
+    }
+    if (!prev) {
+      LOGIN_GATES.set(tab.id, {
+        at: Date.now(), text: hit.text,
+        agent: (tab.spec && tab.spec.agent) || "",
+      });
+      changed = true;
+      uiFact("login", `登录门 tab=${tab.id} agent=${(tab.spec && tab.spec.agent) || "?"} ` +
+        `首行=${hit.text.replace(/\s+/g, " ").slice(0, 32)}`);
+    } else if (prev.text !== hit.text) {
+      prev.text = hit.text;
+      prev.at = Date.now();
+      changed = true;
+    }
+  }
+  for (const id of [...LOGIN_GATES.keys()]) {
+    if (!present.has(id)) {
+      LOGIN_GATES.delete(id);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+// Terminal output is not a LIVE event: a CLI that stops at a sign-in screen
+// writes bytes only, so scheduleLive() never fires. Poll the viewport so the
+// dashboard's "在等你" and the taskbar badge learn about the gate.
+setInterval(() => {
+  if (document.hidden) return;
+  if (scanLoginGates()) scheduleLive();
+}, 1000);
+
+function loginGateText(tab, gate) {
+  const agent = (gate && gate.agent) || (tab.spec && tab.spec.agent) || "";
+  return agent === "qoder" ? t("live.need.loginQoder") : t("live.need.loginHint");
+}
 
 // 「需要你」的模型 = 每一格当前该怎么归类。抽出来是因为徽标和列表要读**同一个**
 // 结果（两处各算一遍迟早会出现"徽标 2、列表 1"）。
 function needModel() {
   const rows = [];
   for (const t of TAB_LIST) {
-    const v = LIVE.get(t.id);
-    if (!v) continue;
-    const n = v.note;
+    const v = LIVE.get(t.id) || null;
+    const login = LOGIN_GATES.get(t.id) || null;
+    // Generic CLIs (Qoder, etc.) may have no LIVE entry at all; a login gate is
+    // still a "waiting for you" fact and must not be skipped with `!v`.
+    if (!v && !login) continue;
+    const n = v && v.note;
     // ⚠️ 2026-10-16：这条 if/else 链**就是"谁说了算"**，顺序不是随便排的。
     //   原来是 `if (n)…` 打头 —— 于是 6 秒后到的那条 hook 通知压过一切，并把转录
     //   里更具体的话换成一句泛化套话（实测：11:44:30「在等你回答「提问：Which
     //   color should th」」→ 11:44:36 变成「要你批权限「Claude needs your permis」」）。
     //   现在是：登记表 waiting（官方、≤700ms、提问和批准都算）> hook 的 note
-    //   > 转录里挂着的提问 > idle。
-    const pt = pendingTool(v);   // 挂着的那个工具调用：问题或权限框
-    const ask = pendingAsk(v);
+    //   > 转录里挂着的提问 > 登录门 > idle。
+    const pt = v ? pendingTool(v) : null;   // 挂着的那个工具调用：问题或权限框
+    const ask = v ? pendingAsk(v) : null;
     let kind = "";
-    if (v.st === "waiting") {
+    if (v && v.st === "waiting") {
       // 转录里的 tool 最具体（Claude）；没有转录的外部状态源用消息自带的 kind。
       kind = (pt ? (pt.tool === "AskUserQuestion" ? "ask" : "perm") : "") ||
         (v.wait && v.wait.kind) || "ask";
     }
     else if (n) kind = n.kind;
     else if (ask) kind = "ask";
-    else if (v.st === "idle") kind = "idle";
+    else if (login) kind = "login";
+    else if (v && v.st === "idle") kind = "idle";
     if (!kind) continue;
     // 未读 = 有事发生而你没看。note 只在"没看着它"的时候才写下（见 applyHook /
     // applyAgent 的跃迁），所以有 note 就是未读；而"挂着的提问/权限框"那一类
     // **只在你不看它的时候**算未读 —— 你正看着它，那一行就在你眼前，不必再报一次。
+    // 登录门是阻塞在等用户动作，即使当前格也不该被藏进"空闲"。
     // ⚠️ 这一条原来是 `kind === "ask"`，2026-10-16 补上 perm：waiting 现在两种都算，
     //    只留 ask 就会变成"同一种等待，问题算未读、权限框不算"这种没有道理的区别。
     // ⚠️ 2026-10-19（Wave 2）：冷恢复的 resync waiting 先**可见但不算未读**
     //    （Orca 的 restoredUnconfirmed）。否则重开一次就凭空多一条“需要你”，
     //    而那条等待可能在你关掉 Perch 之前就已经答过了。
-    const unread = !t.waitUnconfirmed &&
-      (!!n || ((kind === "ask" || kind === "perm") && t !== activeTab));
+    const unread = kind === "login" || (!t.waitUnconfirmed &&
+      (!!n || ((kind === "ask" || kind === "perm") && t !== activeTab)));
     // ⚠️ 文字和时间**取最具体那条腿**：转录里那条 tool 的 text 就是权限框自己那句
     //   描述（实测 `Write permtest file`，和屏幕上的权限框一字不差），比 hook 的
     //   "Claude needs your permission" 有用得多。
-    const at = (pt && pt.at) || (n && n.at) || (ask && ask.at) || v.at || "";
-    const text = (pt && pt.text) || (n && n.text) || (v.wait && v.wait.text) || "";
+    const at = kind === "login" ? login.at
+      : (pt && pt.at) || (n && n.at) || (ask && ask.at) || (v && v.at) || "";
+    const text = kind === "login" ? loginGateText(t, login)
+      : (pt && pt.text) || (n && n.text) || (v && v.wait && v.wait.text) || "";
     rows.push({ t, kind, unread, at, text });
   }
   // 未读的在前（新的在上），没未读的那组按"最后听到它的时刻"排。
@@ -1374,7 +1498,8 @@ function needRowHTML(r) {
     <span class="g">${svg(NEED_GLYPH[r.kind] || G_DOT, 12)}</span>
     <span class="m">
       <span class="hd"><span class="who ell">${esc(nm)}</span>
-        <span class="why">${esc(why)}</span></span>
+        <span class="why">${esc(why)}</span>
+        ${r.kind === "login" ? `<span class="go">${esc(t("live.need.loginGo"))} ›</span>` : ""}</span>
       ${r.text ? `<span class="tx">${esc(r.text)}</span>` : ""}
     </span>
     <span class="tm">${rel(r.at)}</span>
@@ -1792,6 +1917,7 @@ function renderSideLive() {
 }
 
 function renderLive() {
+  scanLoginGates();                       // generic CLIs at a sign-in screen
   paintNeedBadge();                       // 徽标永远要（模块条可能收着）
   for (const t of TAB_LIST) renderAgentDot(t);
   /* ⚠️ 模块**每次都全画**，不是只画当前显示的那个。

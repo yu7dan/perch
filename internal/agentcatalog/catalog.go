@@ -21,7 +21,7 @@ type Entry struct {
 	Paths                             []string
 	Bin                               string
 	// Launch：Perch 能不能在终端里启动它。必须显式 —— 以前是
-	// "有 Bin 且不是 zcode" 这种藏在 init() 里的隐式例外。
+	// "有 Bin 但某个 agent 例外" 这种藏在 init() 里的隐式规则。
 	Launch bool
 }
 
@@ -46,7 +46,9 @@ type Card struct {
 	Calls   int    `json:"calls"`
 }
 
-// entries 是用户 2026-10-17 点名的那份清单（外加几枚同类里最该有的）。
+// entries 是用户 2026-10-23 定的产品名单：Claude Code、Codex、Pi、OpenCode、
+// Antigravity、DeepSeek Harness、Cursor、Copilot CLI、Qoder。名单外的 agent
+// 不再安装、探测或出现在 UI 里；加回时要同时补 recipes 和图标。
 //
 // 这份清单是**使用层**：只收能在终端里跑的 CLI agent，不收桌面应用。
 // 桌面客户端属于 magpie 的**网关层**，可以出现在 /api/state 里，但不从这里
@@ -81,23 +83,12 @@ var entries = []Entry{
 		[]string{"~/.dsh/profiles/dsh-tui/package.json", "~/.dsh/config.yaml", "~/.dsh/cordis.patch.yml"}, "dsh-tui", true},
 	{"cursor", "Cursor", "cursor", "Anysphere", "https://cursor.com/cli", "", true, false,
 		[]string{"~/.cursor/cli-config.json"}, "cursor-agent", true},
-	{"codebuddy", "CodeBuddy Code", "codebuddy-color", "Tencent", "https://www.codebuddy.ai/docs/cli/installation", "", true, false,
-		[]string{"~/.codebuddy/models.json", "~/.codebuddy/settings.json"}, "codebuddy", true},
-	{"kimi", "Kimi Code", "kimi", "Moonshot", "https://github.com/MoonshotAI/kimi-code", "", true, false,
-		[]string{"~/.kimi/config.toml", "~/.kimi-code/config.toml"}, "kimi", true},
-	{"muse", "Muse Code", "meta-color", "Meta", "https://dev.meta.ai/docs/muse-code", "原生 Windows（2026-09 起）", true, false,
-		[]string{"~/.config/muse/settings.json", "~/.muse", "~/AppData/Local/Programs/muse"}, "muse", true},
-	{"zcode", "ZCode", "zcode", "Zhipu", "https://zcode.z.ai", "", true, false,
-		[]string{"~/.zcode/v2/config.json", "~/.zcode/v2/provider_config.json"}, "zcode", false},
-	// 追加的同类：magpie 都有图标与配置格式，接进来不增加猜测。
-	{"gemini", "Gemini CLI", "geminicli-color", "Google", "https://github.com/google-gemini/gemini-cli", "", true, false,
-		[]string{"~/.gemini/settings.json"}, "gemini", true},
 	{"copilot", "Copilot CLI", "githubcopilot", "GitHub", "https://github.com/github/copilot-cli", "", true, false,
 		[]string{"~/.copilot/settings.json"}, "copilot", true},
-	{"qwen", "Qwen Code", "qwen-color", "Alibaba", "https://github.com/QwenLM/qwen-code", "", true, false,
-		[]string{"~/.qwen/settings.json"}, "qwen", true},
-	{"crush", "Crush", "crush", "Charm", "https://github.com/charmbracelet/crush", "", true, false,
-		[]string{"~/.config/crush/crush.json"}, "crush", true},
+	// Qoder 的官方安装脚本放的是原生 qodercli；CLI 首次运行要登录 Qoder，
+	// 自定义供应商（包括 Perch 网关）只对 BYOK 计划开放。
+	{"qoder", "Qoder", "qoder", "Qoder", "https://docs.qoder.com/cli/installation", "首次运行需登录 Qoder；BYOK 计划可用自定义供应商", true, false,
+		[]string{"~/.qoder/settings.json"}, "qodercli", true},
 }
 
 // Entries 返回清单的副本，调用方不能改到包内那份。
@@ -180,7 +171,9 @@ func Defs(stateDir string) map[string]agent.Def {
 		if e.ID == "claude" || !e.Launch || e.Bin == "" {
 			continue
 		}
-		defs[e.ID] = agent.GenericDef(e.Bin)
+		// 通用 CLI 在「已接入引擎网关」时也要读引擎沙盒；没接入时
+		// EngineDef 返回 nil，行为与 GenericDef 完全一样。
+		defs[e.ID] = agent.EngineDef(e.ID, e.Bin)
 	}
 	// 深度适配器覆盖通用那条。
 	defs["opencode"] = agent.OpenCodeDef()
@@ -189,6 +182,11 @@ func Defs(stateDir string) map[string]agent.Def {
 	// agy 只有「启动」是深度适配：网关地址/密钥必须按 magpie 的 launch
 	// 命令在每次开格时注入（见 internal/agent/def.go 的 AgyDef）。
 	defs["agy"] = agent.AgyDef()
+	// 三个 launch 级 agent 的续接/状态：cursor 只跟转录，copilot 跟 events，
+	// qoder 走每格 --settings 注入的 Claude 形状 hooks。
+	defs["cursor"] = agent.CursorDef()
+	defs["copilot"] = agent.CopilotDef()
+	defs["qoder"] = agent.QoderDef()
 	// dsh 的终端界面是 dsh-tui profile，不是裸 dsh；启动/续接/状态身份都
 	// 在这一层（见 internal/agent/def.go 的 DshDef）。
 	defs["dsh"] = agent.DshDef()

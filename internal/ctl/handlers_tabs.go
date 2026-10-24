@@ -16,7 +16,7 @@ func (s *Server) tabNew(c Conn, m *Msg, tabReqCache map[int][]byte) {
 	// 令牌去重（见 Serve 开头那张表）：前端超时后会拿同一个 req 重发
 	if m.Req != 0 {
 		if prev, ok := tabReqCache[m.Req]; ok {
-			_ = c.Send(prev)
+			_ = s.send(c, prev)
 			log.Printf("[ctl] tab.new 令牌 req=%d 重复（前端重发同一次请求）→ 重放上次的应答，不建第二个格子", m.Req)
 			return
 		}
@@ -44,7 +44,7 @@ func (s *Server) tabNew(c Conn, m *Msg, tabReqCache map[int][]byte) {
 			out["msgParams"] = ref.MsgParams
 		}
 		reply, _ := json.Marshal(out)
-		_ = c.Send(reply)
+		_ = s.send(c, reply)
 		if m.Req != 0 {
 			tabReqCache[m.Req] = reply // 拒绝也是应答：重发时重放它，不重新判一次护栏
 		}
@@ -59,8 +59,12 @@ func (s *Server) tabNew(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		// paneId 是这一格**跨重启的身份**：前端拿着它，才能在用户显式
 		// 关格时发 pane.forget（那是唯一一条会删记录的路径）。
 		"pane": host.PaneID,
+		// cwd 是**生效后**的目录：默认会话区的新格会在这里被换成
+		// sessions\<date>-<agent>-<id>（见 session.Manager.Create）。前端
+		// 必须拿它，否则左栏还按空串/默认根归类，新会话会掉进"旧默认目录"。
+		"cwd": host.Spec.CWD,
 	})
-	_ = c.Send(reply)
+	_ = s.send(c, reply)
 	if m.Req != 0 {
 		tabReqCache[m.Req] = reply // 重发同一令牌时重放它 —— 绝不建第二个格子
 	}
@@ -89,7 +93,7 @@ func (s *Server) panesQuery(c Conn) {
 			"agents": s.bootAgentCards(), "defaultAgent": s.defaultAgentSetting(),
 			"err": "已经有一个我在跑（单实例闸）—— 这一轮不恢复任何会话",
 		})
-		_ = c.Send(reply)
+		_ = s.send(c, reply)
 		return
 	}
 	if s.deps.Panes == nil {
@@ -97,7 +101,7 @@ func (s *Server) panesQuery(c Conn) {
 			"type": "panes.list", "panes": []any{}, "err": "登记表不可用",
 			"agents": s.bootAgentCards(), "defaultAgent": s.defaultAgentSetting(),
 		})
-		_ = c.Send(reply)
+		_ = s.send(c, reply)
 		return
 	}
 	plan := s.deps.Panes.RestorePlan(s.deps.SessionExists) // 这一行自己打计数 + 座位序（见 panes）
@@ -109,7 +113,7 @@ func (s *Server) panesQuery(c Conn) {
 		log.Printf("[panes] 冷恢复清单序列化失败（前端会走无应答那条兜底）：%v", err)
 		return
 	}
-	_ = c.Send(reply)
+	_ = s.send(c, reply)
 }
 
 // paneClose 是用户**关掉了这一格的运行**（点格子头的 ×）—— 记录留着、打上 Closed。
@@ -119,11 +123,19 @@ func (s *Server) paneClose(m *Msg) {
 	if s.deps.Panes == nil {
 		return
 	}
-	if s.deps.Panes.MarkClosed(m.Pane, "用户点格子头的 ×") {
-		log.Printf("[ctl] pane.close pane=%d（关格保留记录，重启不自动拉起）", m.Pane)
-	} else {
+	kept, found := s.deps.Panes.Close(m.Pane, "用户点格子头的 ×")
+	switch {
+	case !found:
 		log.Printf("[ctl] pane.close pane=%d：盘上没有这条记录（可能已经摘过），不动", m.Pane)
+	case kept:
+		log.Printf("[ctl] pane.close pane=%d（关格保留记录，重启不自动拉起）", m.Pane)
+	default:
+		log.Printf("[ctl] pane.close pane=%d（没发过提示，记录已摘掉）", m.Pane)
 	}
+	// 前端关格时先乐观地留了一行「已关闭」；空记录已经摘掉时要把那一行撤掉。
+	s.Push(map[string]any{
+		"type": "pane.closed", "pane": m.Pane, "kept": kept, "found": found,
+	})
 }
 
 // paneForget 是**唯一**一条会删记录的路径：用户明确不要这个 agent 了
@@ -181,22 +193,48 @@ func (s *Server) titleSet(m *Msg) {
 // 库里那些"本格在跑的"子代理，跑完也不会露面。顺带一提，这条路也把
 // "这一格自己的会话文件"带进库里（新起的 claude 在 boot 时同样还不存在）。
 //
-// 代价：载荷几十 KB、扫一遍毫秒级，而关格子是低频动作 —— 所以直接**同步**
-// 重扫。不换协程，是因为 Send 走的就是手里这根流，换协程反而要和
-// 在途的推送处理并发，而这里慢的那几十毫秒没有任何人等着。
+// 代价：载荷几十 KB，但会话多了以后扫描并不总是"毫秒级"（2026-10-24
+// 实测 171 个会话时，前端把 tab.new 的应答等了 24 秒）。它绝不能再占着
+// ctl 的 receive 循环 —— 否则后面的 tab.new / pane.closed 应答全部排队，
+// 前端 2.5s × 3 次超时后放弃，后端却已经把格子建出来了，留下空白格。
+//
+// 现在：扫描放 goroutine；同一时间只跑一次，扫描期间再来的请求只记一个
+// "尾巴"，扫完补一次。发送统一走 s.send（和 tab.ok / Push 串行）。
 func (s *Server) libReload(c Conn) {
-	st := s.ShellPayload()
-	b, err := json.Marshal(map[string]any{"type": "state", "state": st})
-	if err != nil {
-		log.Printf("[ctl] 会话库刷新失败: %v", err)
+	s.reloadMu.Lock()
+	if s.reloading {
+		s.reloadAgain = true
+		s.reloadMu.Unlock()
 		return
 	}
-	nSide := 0
-	for _, sess := range st.Sessions {
-		if sess.Sidechain {
-			nSide++
+	s.reloading = true
+	s.reloadMu.Unlock()
+
+	go func() {
+		for {
+			st := s.ShellPayload()
+			b, err := json.Marshal(map[string]any{"type": "state", "state": st})
+			if err != nil {
+				log.Printf("[ctl] 会话库刷新失败: %v", err)
+			} else {
+				nSide := 0
+				for _, sess := range st.Sessions {
+					if sess.Sidechain {
+						nSide++
+					}
+				}
+				log.Printf("[ctl] 会话库刷新：%d 会话（其中子代理 %d）%d 字节", len(st.Sessions), nSide, len(b))
+				_ = s.send(c, b)
+			}
+
+			s.reloadMu.Lock()
+			if !s.reloadAgain {
+				s.reloading = false
+				s.reloadMu.Unlock()
+				return
+			}
+			s.reloadAgain = false
+			s.reloadMu.Unlock()
 		}
-	}
-	log.Printf("[ctl] 会话库刷新：%d 会话（其中子代理 %d）%d 字节", len(st.Sessions), nSide, len(b))
-	_ = c.Send(b)
+	}()
 }

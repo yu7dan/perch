@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/yu7dan/perch/internal/agent"
 	"github.com/yu7dan/perch/internal/panes"
@@ -48,6 +49,23 @@ type Manager struct {
 	// 唯一调用点是 agent.AgyDef 的 Prepare；没接网关时保持 nil。
 	wireMu     sync.RWMutex
 	wireLaunch func(id string) (map[string]string, []string, bool)
+
+	// profileMu：Perch 自己的 per-agent 配置（模型/档位）注入。
+	// 只有隔离网关模式下列表函数才返回内容；旧路径保持 nil。
+	profileMu   sync.RWMutex
+	wireProfile func(id string) (map[string]string, []string, bool)
+
+	// homeMu：隔离引擎的沙盒用户目录。agy 这类由 Perch 直接启动、
+	// 但配置由引擎管理的 agent 要和引擎读同一份配置。
+	homeMu     sync.RWMutex
+	homeEnv    func() map[string]string
+	homeEnvFor func(string) map[string]string
+
+	// sessionDir 给“默认会话区里新开的格子”分配一个独立目录
+	// （Documents\Perch\sessions\<date>-<agent>-<short id>）。只在
+	// Resume.Kind=="new" 且调用方没给 cwd 时用；拿不到就退回默认目录。
+	// 它必须和 defaultCWD 一样是**唯一**答案，所以由组合根注入。
+	sessionDir func(agent string, paneID int) string
 }
 
 // New 构造空的会话表。Defs 在 agent.SetHost 之后由 SetDefs 填 —— 顺序见
@@ -81,6 +99,84 @@ func (m *Manager) SetWireLaunch(fn func(id string) (map[string]string, []string,
 	m.wireMu.Lock()
 	m.wireLaunch = fn
 	m.wireMu.Unlock()
+}
+
+// SetWireProfile 由组合根注入：返回这一格要用的 Perch 网关配置。
+// Claude 的 env 会合并进 --settings；Codex 的 args 是顶层 -c 覆盖。
+func (m *Manager) SetWireProfile(fn func(id string) (map[string]string, []string, bool)) {
+	m.profileMu.Lock()
+	m.wireProfile = fn
+	m.profileMu.Unlock()
+}
+
+// SetEngineHomeEnv 由组合根在隔离模式确定后注入。
+func (m *Manager) SetEngineHomeEnv(fn func() map[string]string) {
+	m.homeMu.Lock()
+	m.homeEnv = fn
+	m.homeMu.Unlock()
+}
+
+// SetSessionDir 由组合根注入「默认会话区里新格子落在哪个独立目录」。
+func (m *Manager) SetSessionDir(fn func(agent string, paneID int) string) {
+	m.homeMu.Lock()
+	m.sessionDir = fn
+	m.homeMu.Unlock()
+}
+
+func (m *Manager) EngineHomeEnv() map[string]string {
+	m.homeMu.RLock()
+	fn := m.homeEnv
+	m.homeMu.RUnlock()
+	if fn == nil {
+		return nil
+	}
+	return fn()
+}
+
+// HookSettings 给 Qoder 这类 Claude 形状但走 --settings 的 agent 用。
+// 事件路径写死成这一格的 tN.jsonl，钩子接收器和 Claude 共用一条轮询腿。
+func (m *Manager) HookSettings(tag string) string {
+	return BuildHookSettings(m.stateDir, tag)
+}
+
+// SetEngineHomeEnvFor 给通用 CLI 用：按 agent id 决定是否换引擎沙盒。
+func (m *Manager) SetEngineHomeEnvFor(fn func(string) map[string]string) {
+	m.homeMu.Lock()
+	m.homeEnvFor = fn
+	m.homeMu.Unlock()
+}
+
+func (m *Manager) EngineHomeEnvFor(id string) map[string]string {
+	m.homeMu.RLock()
+	fn := m.homeEnvFor
+	m.homeMu.RUnlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(id)
+}
+
+// NoteActivity 是没有 Claude 形状 hooks 的适配器（OpenCode/Pi）的“说过话”
+// 证据：关格时 panes.Close 用它保住记录，而不是把有对话的格子当空开合删掉。
+func (m *Manager) NoteActivity(tabID int, spoke bool) {
+	if m == nil || m.panes == nil {
+		return
+	}
+	if spoke {
+		m.panes.MarkSpoke(tabID, "agent 有产出（hooks 之外的适配器）")
+		return
+	}
+	m.panes.MarkTalked(tabID, "agent 收到提示（hooks 之外的适配器）")
+}
+
+func (m *Manager) profileFor(id string) (map[string]string, []string, bool) {
+	m.profileMu.RLock()
+	fn := m.wireProfile
+	m.profileMu.RUnlock()
+	if fn == nil {
+		return nil, nil, false
+	}
+	return fn(id)
 }
 
 func (m *Manager) defFor(id string) (agent.Def, bool) {
@@ -124,6 +220,9 @@ type Tab struct {
 	// transcript 是会话的 .jsonl 绝对路径。**由 hook 的 SessionStart 直接给**
 	// （payload 里有 transcript_path）—— 比我们去 projects\<有损slug>\ 下面拼路径可靠。
 	transcript string
+	// startedAt 是这一格起来的本地时间。给“没有会话 id 的 agent”（agy/cursor）
+	// 找转录用：只认这一格起来之后新写的文件，避免把上一格的会话接过来。
+	startedAt time.Time
 }
 
 // Create 只分配 id/stream/pane 记录；流注册与 PTY 由调用方接着做（组合根先
@@ -138,9 +237,24 @@ func (m *Manager) Create(spec SpawnSpec) *Tab {
 	} else if m.panes != nil {
 		paneID = m.panes.NextID()
 	}
+	/* 默认会话区：新格没给 cwd 时，给它一个**独立目录**，而不是所有会话
+	   挤在 Documents\Perch 一个文件夹里（用户 2026-10-23 定）。
+	   只在 Resume.Kind=="new" 时分配 —— exact/latest 的 cwd 必须沿用记录里
+	   那一个，换了目录会接不上原会话。分配失败就退回默认目录（不拦启动）。 */
+	if strings.TrimSpace(spec.CWD) == "" && spec.Resume.Kind == "new" {
+		m.homeMu.RLock()
+		fn := m.sessionDir
+		m.homeMu.RUnlock()
+		if fn != nil {
+			if dir := strings.TrimSpace(fn(spec.Agent, paneID)); dir != "" {
+				spec.CWD = dir
+			}
+		}
+	}
 	m.mu.Lock()
 	m.next++
-	host := &Tab{ID: m.next, Stream: fmt.Sprintf("term:%d", m.next), Spec: spec, PaneID: paneID}
+	host := &Tab{ID: m.next, Stream: fmt.Sprintf("term:%d", m.next), Spec: spec, PaneID: paneID,
+		startedAt: time.Now()}
 	m.tabs[host.ID] = host
 	m.mu.Unlock()
 
@@ -173,11 +287,14 @@ func (m *Manager) panesClaim(id int, why string) {
 // 标记，记录留着）。
 func (m *Manager) Drop(id int) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if h := m.tabs[id]; h != nil && h.sessionID != "" {
 		delete(m.bySession, h.sessionID)
 	}
 	delete(m.tabs, id)
+	m.mu.Unlock()
+	// 转录认领是 agent 包的进程内状态（agy/cursor 没有会话 id，只能按文件认）。
+	// 放掉之后，冷恢复的下一格才能接上同一个文件。
+	agent.ReleaseTranscripts(id)
 }
 
 // AgentForTab 返回这一格启动时选的 agent id。hook 事件归一化要用它：
@@ -202,6 +319,20 @@ func (m *Manager) PaneIDFor(tab int) int {
 	return 0
 }
 
+// ResumeSessionOf：这一格启动时请求接上的会话 id（只对 exact/fork 有意义）。
+// OpenCode 冷恢复回到那条会话、但 active 还是空的时候，流水靠它读历史。
+func (m *Manager) ResumeSessionOf(tab int) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if h := m.tabs[tab]; h != nil {
+		switch h.Spec.Resume.Kind {
+		case "exact", "fork":
+			return h.Spec.Resume.ID
+		}
+	}
+	return ""
+}
+
 // SetPID 在 PTY 起来之后登记 pid —— 登记表是按 pid 命名的，这是那条链子的起点。
 func (m *Manager) SetPID(id, pid int) {
 	m.mu.Lock()
@@ -222,6 +353,7 @@ type LiveTab struct {
 	Name       string
 	Transcript string
 	CWD        string
+	StartedAt  time.Time
 }
 
 // Live 返回当前所有格子的只读快照。
@@ -233,6 +365,7 @@ func (m *Manager) Live() []LiveTab {
 		out = append(out, LiveTab{
 			ID: h.ID, Agent: h.Spec.Agent, PID: h.pid, SessionID: h.sessionID, Status: h.status,
 			Name: h.sessName, Transcript: h.transcript, CWD: m.EffectiveCWD(h.Spec),
+			StartedAt: h.startedAt,
 		})
 	}
 	return out
