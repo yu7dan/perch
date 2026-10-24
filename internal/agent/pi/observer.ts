@@ -167,7 +167,7 @@ export default function (pi) {
   };
 
   pi.on("session_start", (event, ctx) => {
-    // 会话 id 不在事件里，只有 sessionManager 有（实测 1.2.0）。
+    // 会话 id 不在事件里，只有 sessionManager 有（实测 1.4.x）。
     try {
       session = ctx.sessionManager.getSessionId() || "";
     } catch {

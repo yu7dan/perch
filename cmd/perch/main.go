@@ -461,6 +461,8 @@ func main() {
 	// 控制面只做**被动探测**：接已经存在的那个，不在这里拉起 magpie web ——
 	// 用户没点「连接」之前，Perch 不该多出一个后台进程。
 	go a.gw.Probe()
+	// 把已配置的模型组提前写进引擎；不创建 agent，不阻塞窗口。
+	go a.warmAgentProfiles()
 
 	/* 关窗那一刻**同步**把登记表写一遍（写的是内存里那份，见 panes.Store.FlushSync）。
 	   ⚠️ 为什么挂在**窗口事件**上而不是 app.OnShutdown —— 2026-10-16 实测：
@@ -653,6 +655,50 @@ func (a *perchApp) agentWireProfile(id string) (map[string]string, []string, boo
 	default:
 		return nil, nil, false
 	}
+}
+
+// warmAgentProfiles 在后台把已配置的模型组提前写进引擎。
+//
+// 组设置要启动 magpie CLI；以前第一次开格才做，用户就得先等 3–5 秒。
+// 这里只预热“组”，不创建任何 agent 进程，也不碰用户配置；预热失败仍然
+// 由开格时的同一段逻辑重试并报错。
+func (a *perchApp) warmAgentProfiles() {
+	if a.profiles == nil || !a.gw.Isolated() {
+		return
+	}
+	profiles := a.profiles.All()
+	if len(profiles) == 0 {
+		return
+	}
+	start := time.Now()
+	for _, p := range profiles {
+		if p.Alias == "" || p.Model == "" {
+			continue
+		}
+		var err error
+		for attempt := 0; attempt < 3; attempt++ {
+			if err = a.gw.EnsureAgentGroup(p.Alias, p.Model, p.Effort); err == nil {
+				break
+			}
+			time.Sleep(400 * time.Millisecond)
+		}
+		if err != nil {
+			log.Printf("[gw] 预热 %s 模型组失败：%v", p.Agent, err)
+			continue
+		}
+		if p.Agent == "claude" {
+			for tier, tp := range p.Tiers {
+				if tp.Model == "" {
+					continue
+				}
+				alias := gateway.ClaudeTierAlias(p.Alias, tier)
+				if err := a.gw.EnsureAgentGroup(alias, tp.Model, tp.Effort); err != nil {
+					log.Printf("[gw] 预热 %s/%s 档位失败：%v", p.Agent, tier, err)
+				}
+			}
+		}
+	}
+	log.Printf("[gw] 模型组预热完成（%d 个配置，%s）", len(profiles), time.Since(start).Round(time.Millisecond))
 }
 
 // mergeCatalogCalls 把“今日经过网关”的读数保留下来：刚扫出来的名单没有

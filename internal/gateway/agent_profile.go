@@ -330,15 +330,45 @@ func (g *Gateway) EnsureAgentGroup(alias, model, effort string) error {
 	if err := g.Ensure(); err != nil {
 		return err
 	}
-	_, key, _, _ := g.connState()
+	port, key, _, _ := g.connState()
 	if key == "" {
 		return uimsg.New("gw.agentProfileKey", "网关引擎还没准备好")
+	}
+	cacheKey := fmt.Sprintf("%d\x00%s\x00%s", port, key, alias)
+	g.profileMu.Lock()
+	if g.profileApplied != nil && g.profileApplied[cacheKey] == target {
+		g.profileMu.Unlock()
+		log.Printf("[gw] agent %s 的模型组已应用，跳过 CLI", strings.TrimPrefix(alias, "group/"))
+		return nil
+	}
+	g.profileMu.Unlock()
+	name := strings.TrimPrefix(alias, "group/")
+	// Prefer the control-plane API over spawning the magpie CLI: the CLI
+	// starts a whole process for a 2-field group save and was the 3–5s
+	// blocking part of tab creation. SaveGroup is the same path the Routing
+	// page uses. The CLI below remains as a compatibility fallback.
+	body := map[string]any{
+		"id":      name,
+		"name":    name,
+		"members": []string{target},
+		"routing": "order",
+	}
+	if _, apiErr := g.API("POST", "/api/groups/save", body); apiErr == nil {
+		log.Printf("[gw] agent %s 的模型别名 %s → %s（API）", name, alias, target)
+		g.profileMu.Lock()
+		if g.profileApplied == nil {
+			g.profileApplied = map[string]string{}
+		}
+		g.profileApplied[cacheKey] = target
+		g.profileMu.Unlock()
+		return nil
+	} else {
+		log.Printf("[gw] agent group %s API 保存失败，退回 CLI：%v", name, apiErr)
 	}
 	env, err := engineEnv(key)
 	if err != nil {
 		return err
 	}
-	name := strings.TrimPrefix(alias, "group/")
 	exe := PerchEngineExe()
 	run := func(args ...string) (string, error) {
 		cmd := exec.Command(exe, args...)
@@ -380,5 +410,11 @@ func (g *Gateway) EnsureAgentGroup(alias, model, effort string) error {
 			map[string]string{"group": name, "err": tail})
 	}
 	log.Printf("[gw] agent %s 的模型别名 %s → %s", name, alias, target)
+	g.profileMu.Lock()
+	if g.profileApplied == nil {
+		g.profileApplied = map[string]string{}
+	}
+	g.profileApplied[cacheKey] = target
+	g.profileMu.Unlock()
 	return nil
 }

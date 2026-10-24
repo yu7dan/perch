@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -18,7 +19,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Pi 适配器（1.2.0）
+// Pi 适配器（1.4.x）
 //
 // 机制选的是 **每格一个扩展**，而不是 RPC/JSON 模式：
 //
@@ -37,9 +38,11 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	piPollEvery     = 200 * time.Millisecond
-	piExtDirName    = "pi-ext"
-	piEventsDirName = "pi-events"
+	piPollEvery      = 200 * time.Millisecond
+	piExtDirName     = "pi-ext"
+	piEventsDirName  = "pi-events"
+	piToolsDirName   = "pi-tools"
+	piSessionDirName = "pi-sessions"
 )
 
 //go:embed pi/observer.ts
@@ -57,7 +60,7 @@ func piDef() Def {
 				// ⚠️ 用 --session-id 而不是 --session：后者“先在本项目找，找不到
 				// 就提出 fork 一个跨项目匹配”，那是一个**交互式提问**，会把格子
 				// 停在没人能回答的菜单上。--session-id 是确定的：本项目里有这条
-				// 就打开，没有就用这个 id 建一条（实测 1.2.0，docs/cli.md:90-93）。
+				// 就打开，没有就用这个 id 建一条（实测 1.4.x，docs/cli.md:90-93）。
 				return []string{"--session-id", r.ID}
 			}
 		case "fork":
@@ -78,6 +81,148 @@ func piDataDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(d, DataDirName), nil
+}
+
+// piToolsBinDir 是 Perch 自己的 Pi 工具缓存。
+//
+// Pi 1.4.0 在启动时找不到 fd/ripgrep 会去 GitHub 下载；它的超时是 10s+
+// 并且会把 TUI 卡在 “Downloading...” 上。fd/rg 是 Pi 的通用工具依赖，
+// 放在 Perch 这边缓存一次，后面每个格子都从 PATH 直接命中，不再重复下载。
+func piToolsBinDir() (string, error) {
+	base, err := piDataDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(base, piToolsDirName, "bin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func piSessionDir() (string, error) {
+	base, err := piDataDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(base, piSessionDirName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func piStableSessionRoot() (string, bool) {
+	base, err := piDataDir()
+	if err != nil {
+		return "", false
+	}
+	dir := filepath.Join(base, piSessionDirName)
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) == 0 {
+		return "", false
+	}
+	return dir, true
+}
+
+// ensurePiTools 尝试从本机已有的 Pi 目录/系统 PATH 取 fd、rg，放进 Perch
+// 的共享缓存。找不到就返回 ready=false，让 Pi 自己按原逻辑处理（首次安装）。
+func ensurePiTools() (dir string, ready bool) {
+	dir, err := piToolsBinDir()
+	if err != nil {
+		return "", false
+	}
+	ready = true
+	for _, item := range []struct {
+		name string
+		file string
+	}{
+		{name: "fd", file: "fd.exe"},
+		{name: "rg", file: "rg.exe"},
+	} {
+		dst := filepath.Join(dir, item.file)
+		if fileExists(dst) {
+			continue
+		}
+		src := findPiTool(item.name, item.file)
+		if src != "" {
+			if err := copyPiTool(src, dst); err == nil {
+				log.Printf("[pi] 工具已缓存 %s → %s", item.name, dst)
+				continue
+			} else {
+				log.Printf("[pi] 缓存 %s 失败: %v", item.name, err)
+			}
+		}
+		ready = false
+	}
+	return dir, ready
+}
+
+func findPiTool(name, file string) string {
+	names := []string{name}
+	if filepath.Ext(name) == "" {
+		names = append(names, name+".exe")
+	}
+	for _, n := range names {
+		if p, err := exec.LookPath(n); err == nil && !isDir(p) {
+			return p
+		}
+	}
+	home, _ := os.UserHomeDir()
+	candidates := []string{
+		filepath.Join(home, ".pi", "agent", "bin", file),
+	}
+	// 兼容旧版 Perch 为 Pi 生成的临时 profile：这些目录里有 Pi 自己下载
+	// 过的 fd/rg。只在共享缓存缺失时迁移一次，之后完全不依赖临时目录。
+	if matches, _ := filepath.Glob(filepath.Join(os.TempDir(), "perch-pi-*", "bin", file)); len(matches) > 0 {
+		candidates = append(candidates, matches...)
+	}
+	for _, p := range candidates {
+		if fileExists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+func copyPiTool(src, dst string) error {
+	if filepath.Clean(src) == filepath.Clean(dst) {
+		return nil
+	}
+	// Same-volume hardlinks are instant; fall back to a copy on other volumes.
+	_ = os.Remove(dst)
+	if err := os.Link(src, dst); err == nil {
+		return nil
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		_ = os.Remove(dst)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(dst)
+		return err
+	}
+	return nil
+}
+
+func fileExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
+}
+
+func isDir(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
 }
 
 // ensurePiObserver 把二进制里的扩展释放到磁盘。
@@ -133,12 +278,30 @@ func preparePi(tag string, tabID int, _ string, _ []string) (map[string]string, 
 	// npm 全局装的是 pi.cmd，shim 里还要找 node；GUI 进程的 PATH 往往比
 	// 终端短（这台机器上就是 Program Files\nodejs 不在 PATH 里），必须自己补，
 	// 否则 Pi 一起来就退出，终端只留下一行「Process exited」。
+	//
+	// 另外把 Perch 共享的 fd/rg 目录放到 PATH 最前：Pi 启动时会先查 PATH，
+	// 命中就不再去 GitHub 下载（下载超时会把 TUI 卡住十几秒）。
+	toolsDir, toolsReady := ensurePiTools()
+	childPath := dshChildPath()
+	if toolsDir != "" {
+		childPath = toolsDir + ";" + childPath
+	}
 	env := map[string]string{
 		"PERCH_PI_EVENTS": path,
-		"PATH":            dshChildPath(),
+		"PATH":            childPath,
+	}
+	// Pi 自己的 session 目录必须稳定：否则每一格都在临时 profile 里落盘，
+	// 关格后 piSessionFileExists 在真实 ~/.pi 下找不到，续接就静默失败。
+	if sessionDir, err := piSessionDir(); err == nil {
+		env["PI_CODING_AGENT_SESSION_DIR"] = sessionDir
+	}
+	// 工具齐了就关掉 Pi 启动时的自动网络刷新；模型请求不受影响，但少一次
+	// 与网关启动争网络的 catalog refresh。工具缺失时保留原逻辑，让 Pi 自己补。
+	if toolsReady {
+		env["PI_OFFLINE"] = "1"
 	}
 	args := []string{"-e", ext}
-	log.Printf("[pi %s] 观察扩展=%s 事件=%s", tag, ext, path)
+	log.Printf("[pi %s] 观察扩展=%s 事件=%s 工具=%s 就绪=%v", tag, ext, path, toolsDir, toolsReady)
 	observe := func(ctx context.Context) {
 		observePi(ctx, tabID, path, piPollEvery, emitAgentStatus)
 	}
@@ -438,6 +601,12 @@ func piSessionRoot(cwd string) string {
 		}
 		return filepath.Join(cwd, v)
 	}
+	// Perch 启动的 Pi 用共享 session 目录；子进程的 env 不会回流到 Go，
+	// 所以这里也要认这份稳定目录，否则关格后找不到会话文件。只有目录里
+	// 已经有内容时才优先使用它，避免把用户原本 ~/.pi 下的会话遮住。
+	if dir, ok := piStableSessionRoot(); ok {
+		return dir
+	}
 	agentDir := strings.TrimSpace(os.Getenv("PI_CODING_AGENT_DIR"))
 	if agentDir == "" {
 		if home, err := os.UserHomeDir(); err == nil {
@@ -467,7 +636,7 @@ func piSessionRoot(cwd string) string {
 //
 // 项目目录名是有损 slug（`C:\a\b` → `--C--a-b--`），不从 cwd 反推 ——
 // 只 glob 一层项目目录。找到的是**文件名以 _<id>.jsonl 结尾**的文件；
-// Pi 默认命名是 <时间戳>_<session-id>.jsonl（实测 1.2.0）。
+// Pi 默认命名是 <时间戳>_<session-id>.jsonl（实测 1.4.x）。
 func piSessionFileExists(cwd, id string) bool {
 	if !SafeSessionID(id) {
 		return false

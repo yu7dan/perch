@@ -70,6 +70,12 @@ type Gateway struct {
 	isolated bool
 	isoPort  int
 
+	// profileApplied 记录当前引擎进程里已经成功设置过的模型组。
+	// 开格时同一个 alias/model/effort 不再启动 magpie CLI；引擎重连（key/port
+	// 变化）自然会 miss，下一次开格重新应用。
+	profileMu      sync.Mutex
+	profileApplied map[string]string
+
 	watcherMu  sync.RWMutex
 	docWatcher *watcher
 

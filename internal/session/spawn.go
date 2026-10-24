@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/yu7dan/perch/internal/agent"
 	"github.com/yu7dan/perch/internal/term"
@@ -72,14 +73,17 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 	// 它也要拿到同一组 -c 覆盖，否则 TUI 连上的还是桌面 magpie 的配置。
 	var profEnv map[string]string
 	var profArgs []string
+	t0 := time.Now()
 	if e, a, ok := m.profileFor(tab.Spec.Agent); ok {
 		profEnv, profArgs = e, a
 	}
+	profileTook := time.Since(t0)
 	// Prepare 是“这一格才有的”启动准备（OpenCode 的端口/口令、Codex 的
 	// app-server 都是它给的）。
 	var prepEnv map[string]string
 	var prepArgs []string
 	var observe func(context.Context)
+	t1 := time.Now()
 	if def.Prepare != nil {
 		var perr error
 		prepEnv, prepArgs, observe, perr = def.Prepare(tag, tab.ID, cwd, profArgs)
@@ -87,6 +91,7 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 			return nil, &StartError{Stage: StagePrepare, Agent: tab.Spec.Agent, Err: perr}
 		}
 	}
+	prepareTook := time.Since(t1)
 	// hooks 是**每格子一份**：事件文件路径写死进这一份 --settings 里，
 	// 于是"这条事件属于哪个格子"由文件名决定，不需要任何反查。
 	// 只有 Claude 用这份 --settings；别的 agent 传空串。
@@ -125,7 +130,15 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 			env[k] = v
 		}
 	}
+	t2 := time.Now()
 	sess, err := term.Start(exe, args, cwd, agent.BuildEnv(env), cols, rows)
+	ptyTook := time.Since(t2)
+	if err == nil {
+		log.Printf("[startup t%d] agent=%s profile=%s prepare=%s pty=%s total=%s",
+			tab.ID, tab.Spec.Agent, profileTook.Round(time.Millisecond),
+			prepareTook.Round(time.Millisecond), ptyTook.Round(time.Millisecond),
+			time.Since(t0).Round(time.Millisecond))
+	}
 	if err != nil {
 		// Prepare 可能已经在外面起了东西（Codex 的 app-server）。PTY 没起来
 		// 就没有“流的寿命”来取消观察者 —— 给它一个已取消的 ctx 让它自己收尾，
