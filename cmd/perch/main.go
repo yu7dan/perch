@@ -91,6 +91,11 @@ func teeLogToFile() {
 
 func main() {
 	teeLogToFile()
+	if len(embeddedHook) > 0 {
+		if _, err := session.InstallEmbeddedHook(embeddedHook); err != nil {
+			log.Printf("[perch] 释放内嵌 hook 接收器失败：%v（状态栏会降级）", err)
+		}
+	}
 	a := &perchApp{
 		stateDir:    appdir.ClaudeState(),
 		fallbackCWD: appdir.HomeOrDot(),
@@ -280,7 +285,8 @@ func main() {
 
 	app := application.New(application.Options{
 		Name:        "Perch",
-		Description: "面向 agent 终端的 Windows 桌面网关",
+		Description: "面向 agent 终端的 Windows 桌面工作台",
+		Icon:        appIcon,
 		Assets: application.AssetOptions{
 			// /gwui/ 只做一次跳转：把网关页的 iframe 指到本地反代
 			// （见 internal/gateway/ui.go；真正的 /gwui/* 与 /api/* 在 127.0.0.1 的
@@ -497,6 +503,12 @@ func main() {
 	// 网关页内嵌 magpie 界面所需的本地反代（127.0.0.1，随机端口 + token）。
 	// 必须在 Run 之前起：页面首帧就可能落到网关页。
 	a.gw.StartUI()
+
+	// Must be before app.Run: Wails exits while making the first window when
+	// WebView2 is absent, and there would be no surface to explain that.
+	if !webView2Check(app) {
+		return
+	}
 
 	if err := app.Run(); err != nil {
 		log.Fatal(err)

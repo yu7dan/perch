@@ -48,6 +48,7 @@ package session
 // ---------------------------------------------------------------------------
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -117,21 +118,61 @@ func HookEventsPathFor(stateDir, tag string) string {
 	return filepath.Join(HookDir(stateDir), tag+".jsonl")
 }
 
-// HookExePath 找 hook 接收器：和主程序同目录。
-//
-// ⚠️ 当前形态是两个产物并排构建（主程序 + 几 KB 的接收器）。以后可以把它
-// go:embed 进主程序、启动时释放到状态目录 —— 否则"少一个 exe"就变成
-// "功能静默消失"。
-func HookExePath() string {
-	exe, err := os.Executable()
+// ExtractedHookPath 是单文件发行版释放 hook 接收器的位置：
+// %LOCALAPPDATA%\Perch\bin\perch-hook.exe。用户下载目录里只留一个 Perch.exe。
+func ExtractedHookPath() (string, error) {
+	base, err := os.UserCacheDir()
 	if err != nil {
-		return ""
+		return "", err
 	}
-	p := filepath.Join(filepath.Dir(exe), HookExeName)
-	if fi, err := os.Stat(p); err != nil || fi.IsDir() {
-		return ""
+	return filepath.Join(base, "Perch", "bin", HookExeName), nil
+}
+
+// InstallEmbeddedHook 把主程序里嵌入的 hook 接收器释放出来。内容相同就
+// 不重复写；先写临时文件再 rename，避免 hook 读到半截 exe。
+func InstallEmbeddedHook(data []byte) (string, error) {
+	if len(data) == 0 {
+		return HookExePath(), nil
 	}
-	return p
+	p, err := ExtractedHookPath()
+	if err != nil {
+		return "", err
+	}
+	if old, err := os.ReadFile(p); err == nil && bytes.Equal(old, data) {
+		return p, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return "", err
+	}
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o755); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	log.Printf("[perch] 已释放内嵌 hook 接收器：%s", p)
+	return p, nil
+}
+
+// HookExePath 找 hook 接收器。
+//
+// 开发构建优先用主程序旁边的 build\perch-hook.exe；单文件发行版旁边没有
+// 第二个文件，于是用 InstallEmbeddedHook 释放到 %LOCALAPPDATA%\Perch\bin。
+func HookExePath() string {
+	if exe, err := os.Executable(); err == nil {
+		p := filepath.Join(filepath.Dir(exe), HookExeName)
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p
+		}
+	}
+	if p, err := ExtractedHookPath(); err == nil {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p
+		}
+	}
+	return ""
 }
 
 // BuildHookSettings 造那份 --settings。造不出来返回空串，调用方据此不注入。

@@ -76,7 +76,7 @@ Desktop and web clients are outside this list. Any client that accepts a custom 
 
 ## Getting started
 
-Beta builds are portable zips. Download the current build from [Releases](https://github.com/yu7dan/perch/releases), or build it yourself. Extract the zip, keep `perch.exe` and `perch-hook.exe` together, and run `perch.exe`. The build is unsigned, so Windows SmartScreen may ask you to confirm. See [START-HERE.txt](docs/START-HERE.txt) for the first-run walkthrough (Chinese).
+Beta builds are a single portable `Perch.exe`. Download it from [Releases](https://github.com/yu7dan/perch/releases) and run it; there is no installer and no second file to keep beside it. The hook receiver is embedded and unpacked to `%LOCALAPPDATA%\Perch\bin` on first run. The build is unsigned, so Windows SmartScreen may ask you to confirm. See [START-HERE.txt](docs/START-HERE.txt) for the first-run walkthrough (Chinese).
 
 From source:
 
@@ -89,13 +89,13 @@ go build -o build\perch-hook.exe .\cmd\perch-hook
 .\build\perch.exe
 ```
 
-Both executables are required. The agent hooks are written by `perch-hook.exe` and read by the main app; if it is missing, hook-backed status silently disappears.
+Development builds produce both executables. The release build embeds `perch-hook.exe` into `Perch.exe` and extracts it on first run, so users only download one file.
 
-Build a portable beta zip with:
+Build the single-file beta package with:
 
 ```powershell
 .\scripts\package.ps1 -Version 0.1.0-beta.1
-# -> dist\Perch-0.1.0-beta.1-win-x64.zip
+# -> dist\Perch-0.1.0-beta.1-win-x64.exe
 ```
 
 ## How it works

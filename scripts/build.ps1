@@ -49,11 +49,18 @@ Push-Location $repo
 try {
   $env:CGO_ENABLED = "0"
 
-  & go @common -o (Join-Path $outDir "perch.exe") ./cmd/perch
-  if ($LASTEXITCODE -ne 0) { throw "构建 cmd/perch 失败（exit $LASTEXITCODE）" }
-
+  # Build the hook receiver first and embed it in the main executable. The
+  # release is then one file; the receiver is extracted to
+  # %LOCALAPPDATA%\Perch\bin on first run.
   & go @common -o (Join-Path $outDir "perch-hook.exe") ./cmd/perch-hook
   if ($LASTEXITCODE -ne 0) { throw "构建 cmd/perch-hook 失败（exit $LASTEXITCODE）" }
+
+  $embedDir = Join-Path $repo "cmd\perch\hookbin"
+  New-Item -ItemType Directory -Force $embedDir | Out-Null
+  Copy-Item (Join-Path $outDir "perch-hook.exe") (Join-Path $embedDir "perch-hook.exe") -Force
+
+  & go @common -tags perch_embedded_hook -o (Join-Path $outDir "perch.exe") ./cmd/perch
+  if ($LASTEXITCODE -ne 0) { throw "构建 cmd/perch 失败（exit $LASTEXITCODE）" }
 }
 finally {
   Pop-Location

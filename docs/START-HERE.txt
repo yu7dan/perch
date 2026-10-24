@@ -3,12 +3,13 @@ Perch 0.1.0 beta — 给朋友的测试包
 
 一、运行
 --------
-1. 把整个压缩包解压到一个普通文件夹，不要在压缩包里直接双击。
-2. 双击 perch.exe。测试包没有签名，Windows SmartScreen 可能提示：
+1. 下载 Perch-<版本>-win-x64.exe，放到一个普通文件夹。
+2. 双击 Perch.exe。测试包没有签名，Windows SmartScreen 可能提示：
    点「更多信息」→「仍要运行」。
-3. 需要 Windows 10/11 x64。WebView2 一般系统已有；缺失时 Windows 会提示安装。
-4. perch-hook.exe 必须和 perch.exe 放在同一目录（解压后本来就在一起），
-   少这个文件时 hook 状态会静默消失。
+3. 需要 Windows 10/11 x64。WebView2 一般系统已有；缺失时 Perch 会弹出提示，
+   并给出下载页和 winget 命令。
+4. 只有这一个文件。hook 接收器已经嵌在 Perch.exe 里，首次启动会释放到
+   %LOCALAPPDATA%\Perch\bin，不需要用户另放文件。
 
 二、第一次打开
 --------------
@@ -27,7 +28,8 @@ Perch 0.1.0 beta — 给朋友的测试包
   Perch 自己的设置、座位记录、hook 事件；日志在 perch.log（8MB 轮转）。
 - %LOCALAPPDATA%\Perch
   Perch 安装的网关引擎、网关的 provider key、agent 配置沙盒。
-- 卸载：退出 Perch，删除本目录即可。要彻底清掉配置，再删上面两个目录。
+- 卸载：退出 Perch，删除下载的 Perch.exe 即可。要彻底清掉配置和释放的
+  hook，再删上面两个目录。
 
 四、隐私与安全
 --------------

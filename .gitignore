@@ -25,6 +25,8 @@
 # ⚠️ 下面两行**不许在行尾写注释**：gitignore 里只有行首的 # 是注释，
 #    行尾的 # 会被当成模式的一部分（那样放行就静默失效）。
 !/cmd/
+# build.ps1 generates this binary for the single-file embed; never commit it.
+/cmd/perch/hookbin/
 !/tools/
 !/scripts/
 !/.github/
