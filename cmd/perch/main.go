@@ -600,20 +600,37 @@ func sanitizeDirName(s string) string {
 //
 // 只做 Perch 自己的配置：模型指向 group/perch-<agent> 这个稳定别名，
 // 引擎里的 group 目标换了，运行中的会话下一轮就生效。绝不写 agent 的
-// 全局配置；拿不到配置就返回 false，让这一格按 agent 自己的方式启动。
-func (a *perchApp) agentWireProfile(id string) (map[string]string, []string, bool) {
+// 全局配置。
+//
+// 这里的错误分两类：
+//   - 用户没给这个 agent 配模型：返回 ok=false，按 agent 自己的配置启动；
+//   - 用户配了模型但组没写进引擎：返回 error。不能静默回退 —— Codex 会拿
+//     旧登录直连 OpenAI，用户看到的是一长串 401，而不是“网关没就绪”。
+func (a *perchApp) agentWireProfile(id string) (map[string]string, []string, bool, error) {
 	if a.profiles == nil || !a.gw.Isolated() || !agent.Injects(id) {
-		return nil, nil, false
+		return nil, nil, false, nil
 	}
 	p, ok := a.profiles.Get(id)
 	if !ok || p.Alias == "" || p.Model == "" {
-		return nil, nil, false
+		return nil, nil, false, nil
 	}
 	// 组已应用时走内存缓存；只有首次/配置变化才写引擎。只改 Perch 引擎的
 	// portable data，不碰桌面 magpie，也不碰 agent 配置。
-	if err := a.gw.EnsureAgentGroup(p.Alias, p.Model, p.Effort); err != nil {
-		log.Printf("[gw] agent %s 的 Perch 模型配置没有生效：%v", id, err)
-		return nil, nil, false
+	//
+	// 重启后网关引擎可能还在起，第一次请求会失败。短重试覆盖这个竞态；
+	// 仍然失败就返回错误，不能悄悄回退到 agent 自己的配置。
+	var groupErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if groupErr = a.gw.EnsureAgentGroup(p.Alias, p.Model, p.Effort); groupErr == nil {
+			break
+		}
+		if attempt < 2 {
+			time.Sleep(300 * time.Millisecond)
+		}
+	}
+	if groupErr != nil {
+		log.Printf("[gw] agent %s 的 Perch 模型配置没有生效：%v", id, groupErr)
+		return nil, nil, false, groupErr
 	}
 	switch id {
 	case "claude":
@@ -639,33 +656,39 @@ func (a *perchApp) agentWireProfile(id string) (map[string]string, []string, boo
 				env["ANTHROPIC_SMALL_FAST_MODEL"] = alias
 			}
 		}
-		return env, nil, true
+		return env, nil, true, nil
 	case "codex":
-		return nil, gateway.CodexProfileArgs(p.Alias), true
+		return nil, gateway.CodexProfileArgs(p.Alias), true, nil
 	case "pi":
 		home, herr := os.UserHomeDir()
-		if herr != nil || home == "" {
-			return nil, nil, false
+		if herr != nil {
+			return nil, nil, false, herr
+		}
+		if home == "" {
+			return nil, nil, false, fmt.Errorf("无法确定用户主目录")
 		}
 		env, err := gateway.PiProfileEnv(home, p.Alias, p.Model, p.Effort)
 		if err != nil {
 			log.Printf("[gw] agent %s 的 Pi 配置没有生成：%v", id, err)
-			return nil, nil, false
+			return nil, nil, false, err
 		}
-		return env, nil, true
+		return env, nil, true, nil
 	case "opencode":
 		home, herr := os.UserHomeDir()
-		if herr != nil || home == "" {
-			return nil, nil, false
+		if herr != nil {
+			return nil, nil, false, herr
+		}
+		if home == "" {
+			return nil, nil, false, fmt.Errorf("无法确定用户主目录")
 		}
 		env, err := gateway.OpenCodeProfileEnv(home, p.Alias, p.Model, p.Effort)
 		if err != nil {
 			log.Printf("[gw] agent %s 的 OpenCode 配置没有生成：%v", id, err)
-			return nil, nil, false
+			return nil, nil, false, err
 		}
-		return env, nil, true
+		return env, nil, true, nil
 	default:
-		return nil, nil, false
+		return nil, nil, false, nil
 	}
 }
 
@@ -807,6 +830,12 @@ func (a *perchApp) handleTab(c *application.StreamConn, host *session.Tab) {
 			case session.StageUnknownAgent:
 				log.Printf("[perch] tab=%d 未知 agent %q", host.ID, se.Agent)
 				_ = c.Send(a.termMsg("Unknown agent", "未知 agent", se.Agent))
+			case session.StageProfile:
+				log.Printf("[perch] tab=%d 网关模型配置未生效: %v", host.ID, se.Err)
+				_ = c.Send(a.termMsg(
+					"Gateway model profile could not be applied",
+					"网关模型配置没有生效，请检查网关和模型",
+					se.Err.Error()))
 			case session.StagePrepare:
 				log.Printf("[perch] tab=%d 启动准备失败: %v", host.ID, se.Err)
 				_ = c.Send(a.termMsg("Start preparation failed", "启动准备失败", se.Err.Error()))

@@ -77,13 +77,16 @@ function gwAgentOf(id) {
 const GW_AGENTS_TTL = 10000;
 const GW_AGENTS_REQ_TIMEOUT = 15000;
 const GW_AGENTS_MAX_FAILS = 3;
+const GW_AGENTS_RETRY_MS = 30000;
 let GW_AGENTS_AT = 0;
 let GW_AGENTS_REQ_AT = 0;
 let GW_AGENTS_FAILS = 0;
+let GW_AGENTS_STOP_AT = 0;
 
 function gwAgentsReset() {
   GW_AGENTS_FAILS = 0;
   GW_AGENTS_REQ_AT = 0;
+  GW_AGENTS_STOP_AT = 0;
 }
 
 /* 选择器/写入/方案命名进行中时不要重画：renderDashAgents 会替换
@@ -103,12 +106,19 @@ function gwAgentsPrefetch(force) {
   if (GW_AGENTS_REQ_AT && now - GW_AGENTS_REQ_AT >= GW_AGENTS_REQ_TIMEOUT) {
     GW_AGENTS_REQ_AT = 0;
     GW_AGENTS_FAILS++;
+    if (GW_AGENTS_FAILS >= GW_AGENTS_MAX_FAILS) GW_AGENTS_STOP_AT = now;
   }
   if (GW_AGENTS_REQ_AT) return;
   // 非首次的 TTL 刷新只在控制面已经连上时做；否则会把用户主动断开的
   // 引擎重新拉起来。首次预取保持不变（后端自己判断 UsedBefore）。
   if (GW_AGENTS && !force && typeof gwOn === "function" && !gwOn()) return;
-  if (!GW_AGENTS && !force && GW_AGENTS_FAILS >= GW_AGENTS_MAX_FAILS) return;
+  // 连续失败后不要永久停手：等 30s 再试。用户最容易踩的路径就是“先装网关、
+  // 后装 agent”，首次请求失败后如果永远不再试，就只能重启 Perch。
+  if (!GW_AGENTS && !force && GW_AGENTS_FAILS >= GW_AGENTS_MAX_FAILS) {
+    if (now - GW_AGENTS_STOP_AT < GW_AGENTS_RETRY_MS) return;
+    GW_AGENTS_FAILS = 0;
+    GW_AGENTS_STOP_AT = 0;
+  }
   GW_AGENTS_REQ_AT = now;
   sendCtrl({ type: "gw.agents.prefetch" });
 }

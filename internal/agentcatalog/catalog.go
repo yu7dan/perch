@@ -58,7 +58,7 @@ type Card struct {
 // 装完不重开、PATH 没刷新的情况太常见了。
 var entries = []Entry{
 	{"claude", "Claude Code", "claudecode-color", "Anthropic", "https://code.claude.com/docs/en/setup", "", true, true,
-		[]string{"~/.claude/settings.json", "~/.local/claude.exe"}, "claude", true},
+		[]string{"~/.claude/settings.json", "~/.local/bin/claude.exe", "~/.local/claude.exe"}, "claude", true},
 	{"codex", "Codex", "codex-color", "OpenAI", "https://chatgpt.com/codex", "", true, false,
 		[]string{"~/.codex/config.toml"}, "codex", true},
 	{"pi", "Pi", "pi", "Earendil Works", "https://github.com/earendil-works/pi", "", true, false,
@@ -144,16 +144,24 @@ func ByID(id string) *Entry {
 	return nil
 }
 
-// ClaudeExe 是 Claude Code 的特殊解析顺序：CLAUDE_EXE → ~/.local/claude.exe → PATH。
-// 不写死任何人的绝对路径。
+// ClaudeExe 是 Claude Code 的特殊解析顺序：
+// CLAUDE_EXE → ~/.local/bin/claude.exe（官方当前落点）→ ~/.local/claude.exe
+// （旧版落点）→ PATH。不写死任何人的绝对路径。
+//
+// 顺序不能反：官方安装器 2.x 把新版本放在 ~/.local/bin；如果先看旧路径，
+// 用户装完新版本后 Perch 仍会启动旧的 .local/claude.exe，看起来像“更新没生效”。
 func ClaudeExe() string {
 	if v := strings.TrimSpace(os.Getenv("CLAUDE_EXE")); v != "" {
 		return v
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		p := filepath.Join(home, ".local", "claude.exe")
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-			return p
+		for _, p := range []string{
+			filepath.Join(home, ".local", "bin", "claude.exe"),
+			filepath.Join(home, ".local", "claude.exe"),
+		} {
+			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+				return p
+			}
 		}
 	}
 	return "claude"

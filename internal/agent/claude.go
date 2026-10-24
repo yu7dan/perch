@@ -6,6 +6,10 @@ package agent
 func ClaudeDef(stateDir, exe string) Def {
 	return Def{
 		Exe: exe,
+		// 每次开格重新解析：官方 2.x 安装器把新版本放在 ~/.local/bin，
+		// 而 Perch 可能在启动时还没看到它。Bin 让 StartTab 走 ResolveExe，
+		// 不再把启动时那个路径钉死。
+		Bin: "claude",
 		Env: map[string]string{"CLAUDE_CONFIG_DIR": stateDir},
 		Args: func(r ResumeIntent, settings string) []string {
 			var args []string

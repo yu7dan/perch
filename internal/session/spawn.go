@@ -20,6 +20,7 @@ type StartError struct {
 
 const (
 	StageUnknownAgent = "unknown_agent"
+	StageProfile      = "profile"
 	StagePrepare      = "prepare"
 	StagePTY          = "pty"
 )
@@ -74,7 +75,11 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 	var profEnv map[string]string
 	var profArgs []string
 	t0 := time.Now()
-	if e, a, ok := m.profileFor(tab.Spec.Agent); ok {
+	e, a, ok, perr := m.profileFor(tab.Spec.Agent)
+	if perr != nil {
+		return nil, &StartError{Stage: StageProfile, Agent: tab.Spec.Agent, Err: perr}
+	}
+	if ok {
 		profEnv, profArgs = e, a
 	}
 	profileTook := time.Since(t0)

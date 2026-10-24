@@ -168,8 +168,10 @@ func (g *Gateway) seedProviderModels(b []byte) []byte {
 		refreshed++
 		log.Printf("[gw] 已刷新供应商 %s 的模型列表", p.ID)
 	}
-	if err := os.WriteFile(marker, []byte("seeded\n"), 0600); err != nil {
-		log.Printf("[gw] 写模型列表标记失败：%v", err)
+	if err := os.MkdirAll(dir, 0700); err == nil {
+		if err := os.WriteFile(marker, []byte("seeded\n"), 0600); err != nil {
+			log.Printf("[gw] 写模型列表标记失败：%v", err)
+		}
 	}
 	if refreshed == 0 {
 		return b

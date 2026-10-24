@@ -38,6 +38,11 @@ if ($Version) {
 if ($Release) {
   $ldflags += "-s"
   $ldflags += "-w"
+  # GUI subsystem: double-clicking the release exe must not create a console
+  # window (and must not look like a script). Logs still go to perch.log via
+  # teeLogToFile. Keep the dev build as a console app for diagnostics.
+  $ldflags += "-H"
+  $ldflags += "windowsgui"
 }
 
 $common = @("build", "-trimpath")

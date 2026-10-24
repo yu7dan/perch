@@ -192,6 +192,16 @@ $("gw-frame").addEventListener("load", () => {
   if (f && !f.hidden) bootFact("网关 内嵌界面已加载");
 });
 
+/* 内嵌 magpie 页面在供应商/路由/模型写入成功后发来一条“配置变了”。
+   只接受当前 iframe 发来的消息；父页面不把 iframe 的内容当指令，只当作
+   刷新信号。没有这条桥时，用户必须重启 Perch 才能看到新模型。 */
+window.addEventListener("message", (e) => {
+  const frame = $("gw-frame");
+  if (!frame || e.source !== frame.contentWindow) return;
+  if (!e.data || e.data.type !== "perch:gateway-changed") return;
+  if (typeof refreshGatewayConfig === "function") refreshGatewayConfig();
+});
+
 /* ===========================================================================
    推送落点（原 87-gw-apply.js）：网关/控制面消息到达后落到 GW / 抽屉 / 总览。
    与上面的网关壳同属一域，所以合在一个文件里，按 section 分开。
@@ -219,10 +229,14 @@ function applyGw(g) {
   }
   // 接上了就把自动接入的尝试次数清零：以后进程真掉了，还有三次自动恢复的机会。
   gwAutoTries = 0;
-  // 刚接上控制面时立刻重读 agent 状态，别等下一次 TTL；也清掉后台预取失败计数。
-  if (!wasOn && NAV_HERE === "dash") {
-    if (typeof gwAgentsReset === "function") gwAgentsReset();
-    if (typeof gwAgentsPrefetch === "function") gwAgentsPrefetch(true);
+  // 刚接上控制面时立刻重读 agent 状态 + 模型目录。模型目录以前只请求一次，
+  // 首次进总览时网关还没起来，拿到的就是空列表；这里必须把它一起重置。
+  if (!wasOn) {
+    if (typeof refreshGatewayConfig === "function") refreshGatewayConfig();
+    else {
+      if (typeof gwAgentsReset === "function") gwAgentsReset();
+      if (typeof gwAgentsPrefetch === "function") gwAgentsPrefetch(true);
+    }
   }
   if (NAV_HERE === "dash" && dashTab === "gateway") renderGateway();
 }
@@ -258,6 +272,8 @@ function applyGwAgents(m) {
     // 后台预取不是用户动作：不能清掉正在进行的接入/写入忙碌态。
     GW_AGENTS_REQ_AT = 0;
     GW_AGENTS_FAILS = m.err ? GW_AGENTS_FAILS + 1 : 0;
+    if (GW_AGENTS_FAILS >= GW_AGENTS_MAX_FAILS) GW_AGENTS_STOP_AT = Date.now();
+    else if (!m.err) GW_AGENTS_STOP_AT = 0;
   } else {
     // 用户动作（读/写/接入/断开/重应用）回来，忙碌态结束。
     AC_BUSY = "";
@@ -277,6 +293,7 @@ function applyGwAgents(m) {
     renderDashAgents();
     renderAgentDrawer();
   }
+  if (typeof maybeRefreshGatewayConfig === "function") maybeRefreshGatewayConfig();
 }
 
 /* 漂移轮询的落点（internal/gateway/agents.go → {type:"gw.agents.drift"}）。

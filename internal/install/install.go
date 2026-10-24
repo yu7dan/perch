@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -32,8 +33,35 @@ import (
 const pathPrelude = `$ErrorActionPreference='Stop'
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
 $ProgressPreference='SilentlyContinue'
-$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + $env:Path
 `
+
+// nodeCheckScript 返回一段 PowerShell：确保 Node 存在且版本够新。
+//
+// 只检查 npm.cmd 是不够的：旧 Node 也能提供 npm.cmd，但 Pi 1.4 要求
+// Node >= 22.19，装完 CLI 会在启动时崩。版本不够时先让 winget 升 LTS，
+// 再从注册表刷新 PATH；仍然不够就抛错，让界面拿到真实原因。
+func nodeCheckScript(min string) string {
+	if strings.TrimSpace(min) == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`$needNode = [version]'` + min + `'` + "\n")
+	b.WriteString(`$nodeOK = $false` + "\n")
+	b.WriteString(`if (Get-Command node.exe -ErrorAction SilentlyContinue) {` + "\n")
+	b.WriteString(`  $nv = (& node.exe -p "process.versions.node" 2>$null).Trim()` + "\n")
+	b.WriteString(`  if ($nv -and ([version]$nv -ge $needNode)) { $nodeOK = $true }` + "\n")
+	b.WriteString(`}` + "\n")
+	b.WriteString(`if (-not $nodeOK) {` + "\n")
+	b.WriteString(`  Write-Host ('== Node.js 低于 ' + $needNode + '，安装 Node.js LTS ==')` + "\n")
+	b.WriteString(`  winget install -e --id OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements --disable-interactivity` + "\n")
+	b.WriteString(`  $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + $env:Path` + "\n")
+	b.WriteString(`  if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) { throw 'Node.js 安装后仍然找不到 node.exe' }` + "\n")
+	b.WriteString(`  $nv = (& node.exe -p "process.versions.node" 2>$null).Trim()` + "\n")
+	b.WriteString(`  if (-not $nv -or ([version]$nv -lt $needNode)) { throw ('Node.js 版本仍低于 ' + $needNode + '（当前 ' + $nv + '）') }` + "\n")
+	b.WriteString(`}` + "\n")
+	return b.String()
+}
 
 // recipeScript 把配方拼成一段 PowerShell。npm 那条先确保 Node.js ——
 // 和 magpie 的做法一致（winget 装 LTS，然后从注册表重新读 PATH）。
@@ -41,10 +69,11 @@ func recipeScript(r agentcatalog.Recipe) string {
 	var b strings.Builder
 	b.WriteString(pathPrelude)
 	if r.NPM {
+		b.WriteString(nodeCheckScript(r.NodeMin))
 		b.WriteString(`if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {` + "\n")
 		b.WriteString(`  Write-Host '== 没有找到 Node.js，先安装 Node.js LTS（winget）=='` + "\n")
 		b.WriteString(`  winget install -e --id OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements --disable-interactivity` + "\n")
-		b.WriteString(`  $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')` + "\n")
+		b.WriteString(`  $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + $env:Path` + "\n")
 		b.WriteString(`}` + "\n")
 		b.WriteString(`if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { throw 'Node.js 安装后仍然找不到 npm.cmd' }` + "\n")
 		if r.Script != "" {
@@ -195,10 +224,16 @@ func (in *Installer) runRecipe(id string, r agentcatalog.Recipe, job *run) {
 		"at": time.Now().UnixMilli(),
 	})
 	in.log(id, "$ "+r.Source)
+	if p := proxyLogLine(); p != "" {
+		in.log(id, p)
+	}
 
 	cmd := exec.CommandContext(ctx, "powershell.exe",
 		"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
 	cmd.Dir = home
+	// 系统代理只被 PowerShell 的 Invoke-WebRequest 使用；官方安装脚本里的
+	// 原生子进程（claude.exe install、npm、winget）需要环境变量才会走它。
+	cmd.Env = systemProxyEnv(os.Environ())
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 	// 进程退出后最多再等 2 秒输出流；孙进程占着管道时，Wait 会关掉它并返回。
 	cmd.WaitDelay = 2 * time.Second

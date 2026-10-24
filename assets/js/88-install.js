@@ -191,9 +191,11 @@ function instDone(m) {
   if (m.ok && m.id === "pi" && typeof showToast === "function") {
     showToast(t("inst.piFirstRunTitle"), t("inst.piFirstRunNote"), "info");
   }
-  // 新装的 agent 可能还没进 /api/state 的旧快照：装完立刻重读一次，
-  // 下一次总览的 TTL 刷新是兜底。
-  if (m.ok && m.id !== "magpie" && typeof gwAgentsPrefetch === "function") {
+  // 新装的 agent 可能还没进 /api/state 的旧快照；magpie 装完也可能刚连上
+  // 控制面。统一刷新 agent 状态和模型目录，不能只刷新其中一半。
+  if (m.ok && typeof refreshGatewayConfig === "function") {
+    refreshGatewayConfig();
+  } else if (m.ok && typeof gwAgentsPrefetch === "function") {
     if (typeof gwAgentsReset === "function") gwAgentsReset();
     gwAgentsPrefetch(true);
   }
@@ -243,6 +245,7 @@ function applyInstall(m) {
       if (m.ok) {
         sendCtrl({ type: "gw.refresh" });
         sendCtrl({ type: "magpie.refresh" });
+        if (typeof refreshGatewayConfig === "function") refreshGatewayConfig();
       }
     }
     if (NAV_HERE === "dash" && dashTab === "gateway") renderGateway();

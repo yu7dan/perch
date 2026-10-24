@@ -274,6 +274,53 @@ try{document.documentElement.dataset.theme="dark";document.title="Perch"}catch(e
   }
   if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",start,{once:true});
   else start();
+
+  // Tell Perch when this console writes provider/group/model/routing config.
+  // The parent only treats this as a refresh signal; no keys or model data are
+  // sent. Without it the parent cannot know that the iframe changed anything.
+  function notifyChanged(){
+    try {
+      if(window.parent && window.parent!==window){
+        window.parent.postMessage({type:"perch:gateway-changed"},"*");
+      }
+    } catch(e) {}
+  }
+  function isConfigWrite(url,method){
+    method=String(method||"GET").toUpperCase();
+    if(method==="GET"||method==="HEAD") return false;
+    return /\/api\/(providers?|groups?|settings|agents?|models?|routing)\b/i.test(String(url||""));
+  }
+  if(window.fetch){
+    var origFetch=window.fetch;
+    window.fetch=function(input,init){
+      var p=origFetch.apply(this,arguments);
+      try{
+        var url=typeof input==="string"?input:(input&&input.url)||"";
+        var method=(init&&init.method)||(input&&input.method)||"GET";
+        if(isConfigWrite(url,method)){
+          p.then(function(r){ if(r&&r.ok) setTimeout(notifyChanged,0); },function(){});
+        }
+      }catch(e){}
+      return p;
+    };
+  }
+  if(window.XMLHttpRequest){
+    var origOpen=window.XMLHttpRequest.prototype.open;
+    var origSend=window.XMLHttpRequest.prototype.send;
+    window.XMLHttpRequest.prototype.open=function(method,url){
+      this.__perchConfigWrite=isConfigWrite(url,method);
+      return origOpen.apply(this,arguments);
+    };
+    window.XMLHttpRequest.prototype.send=function(){
+      var xhr=this;
+      if(xhr.__perchConfigWrite){
+        xhr.addEventListener("load",function(){
+          if(xhr.status>=200&&xhr.status<300) setTimeout(notifyChanged,0);
+        });
+      }
+      return origSend.apply(this,arguments);
+    };
+  }
 })();</script>
 `
 

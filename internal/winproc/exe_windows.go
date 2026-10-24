@@ -82,6 +82,15 @@ func FindExe(bin string) (string, bool) {
 	if bin == "" {
 		return "", false
 	}
+	// Claude 允许用 CLAUDE_EXE 指定一个自定义安装位置；启动和名单探测
+	// 必须和 agentcatalog.ClaudeExe 用同一个优先级。
+	if strings.EqualFold(bin, "claude") {
+		if v := strings.TrimSpace(os.Getenv("CLAUDE_EXE")); v != "" {
+			if fi, err := os.Stat(v); err == nil && !fi.IsDir() {
+				return v, true
+			}
+		}
+	}
 	home, _ := os.UserHomeDir()
 	local := os.Getenv("LOCALAPPDATA")
 	appdata := os.Getenv("APPDATA")
@@ -91,6 +100,14 @@ func FindExe(bin string) (string, bool) {
 	// 前面会被选中，ConPTY 直接报 "%1 is not a valid Win32 application"。
 	names := []string{bin + ".exe", bin + ".cmd", bin}
 	var cands []string
+	// Claude 2.x 的官方安装器把新版本放在 ~/.local/bin；旧版放在 ~/.local。
+	// 候选表必须先看新落点，否则更新后仍会启动旧 exe。
+	if strings.EqualFold(bin, "claude") {
+		cands = append(cands,
+			filepath.Join(home, ".local", "bin", "claude.exe"),
+			filepath.Join(home, ".local", "claude.exe"),
+		)
+	}
 	for _, n := range names {
 		cands = append(cands,
 			filepath.Join(home, ".local", n),

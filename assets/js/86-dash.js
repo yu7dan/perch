@@ -610,6 +610,7 @@ let AGENT_UI_ISOLATED = false;
 let AGENT_PROFILES = Object.create(null);
 let AGENT_MODELS = [];
 let AGENT_PROFILE_ASKED = false;
+let AGENT_PROFILE_AT = 0;
 let AGENT_PROFILE_ERR = "";
 let AGENT_DETAIL_ID = "";
 let GW_AGENT_BUSY = "";
@@ -620,15 +621,53 @@ let AGENT_SETS = [];
 let AGENT_SET_PENDING = "";
 let AGENT_SET_NAMING = false;
 let AGENT_SET_DRAFT = "";
+// 网关/模型/安装状态变了，但用户正开着选择器：先记下来，等空闲再刷。
+let GW_CONFIG_REFRESH_PENDING = false;
+let GW_CONFIG_REFRESH_TIMER = 0;
 // magpie 的 Agents 页默认把未设置/未检测到的收在 "Show N more" 下面。
 let PERCH_FOLD_OPEN = false;
 // 网关 /api/state 已识别、但不在下载名单里的 agent：单独折叠，只配置、不安装/启动。
 let PERCH_EXTRA_FOLD_OPEN = false;
 
-function ensureAgentProfiles() {
-  if (AGENT_PROFILE_ASKED) return;
+/* 模型目录（agent.profiles 里的 models）以前只请求一次。首次进总览时网关
+   还没起来，拿到的就是空数组；之后加供应商也不会再问，于是必须重启。
+   现在：失败后 10s 内不重试，超过就再问；网关连上/安装完成/从网关页切回
+   都用 force 立即再问。 */
+function ensureAgentProfiles(force) {
+  const now = Date.now();
+  if (!force && AGENT_PROFILE_ASKED) {
+    if (!AGENT_PROFILE_ERR || now - AGENT_PROFILE_AT < 10000) return;
+  }
   AGENT_PROFILE_ASKED = true;
+  AGENT_PROFILE_AT = now;
   try { sendCtrl({ type: "agent.profiles" }); } catch (e) { /* 控制通道还没起就等下次 */ }
+}
+
+/* 网关配置统一刷新：profile/models + gw agents 一起重读。
+   如果选择器/写入正在进行，先挂起，避免把用户正在挑的东西冲掉。 */
+function refreshGatewayConfig() {
+  GW_CONFIG_REFRESH_PENDING = true;
+  if (typeof gwAgentsBusyHere === "function" && gwAgentsBusyHere()) {
+    if (!GW_CONFIG_REFRESH_TIMER) {
+      GW_CONFIG_REFRESH_TIMER = setTimeout(() => {
+        GW_CONFIG_REFRESH_TIMER = 0;
+        maybeRefreshGatewayConfig();
+      }, 1000);
+    }
+    return;
+  }
+  GW_CONFIG_REFRESH_PENDING = false;
+  if (GW_CONFIG_REFRESH_TIMER) {
+    clearTimeout(GW_CONFIG_REFRESH_TIMER);
+    GW_CONFIG_REFRESH_TIMER = 0;
+  }
+  if (typeof gwAgentsReset === "function") gwAgentsReset();
+  if (typeof gwAgentsPrefetch === "function") gwAgentsPrefetch(true);
+  ensureAgentProfiles(true);
+}
+
+function maybeRefreshGatewayConfig() {
+  if (GW_CONFIG_REFRESH_PENDING) refreshGatewayConfig();
 }
 
 function applyAgentProfiles(m) {
@@ -643,10 +682,12 @@ function applyAgentProfiles(m) {
   // 不因为一次普通推送关掉正在输入的方案名：只有保存/取消/应用成功才关。
   AGENT_SET_PENDING = "";
   AGENT_PROFILE_ERR = (m && typeof errMsgOf === "function") ? (errMsgOf(m) || "") : "";
+  AGENT_PROFILE_AT = Date.now();
   if (AGENT_MODEL_POP) dashModelClose(false);
   if (AGENT_UI_ISOLATED && typeof AC_ID !== "undefined" && AC_ID &&
       typeof acClose === "function") acClose();
   if (NAV_HERE === "dash") renderDashAgents();
+  maybeRefreshGatewayConfig();
 }
 
 /* 模型标签压缩：网关路由的标签常带引擎前缀（magpie/deepseek/...），
@@ -2374,6 +2415,7 @@ function dashProbe(why, ms) {
 $("dash-tabs").addEventListener("click", (e) => {
   const b = e.target.closest("[data-dtab]");
   if (!b || b.dataset.dtab === dashTab) return;
+  const prevTab = dashTab;
   dashTab = b.dataset.dtab;
   // Agent 配置抽屉挂在总览的名单上；换页就收起（网关页是全幅 iframe）。
   if (typeof acClose === "function") acClose();
@@ -2388,7 +2430,15 @@ $("dash-tabs").addEventListener("click", (e) => {
   // 网关页的自动接入只在它真的可见时才跑（这条守卫在 gwAutoAttach 里），
   // 所以切进来这一下必须立刻画一次，否则要等到下一条 2.5s 推送。
   if (dashTab === "gateway") renderGateway();
-  if (dashTab === "overview" && typeof gwAgentsPrefetch === "function") gwAgentsPrefetch();
+  if (dashTab === "overview") {
+    // 从网关页回来时强制重读：用户可能刚加了供应商/模型，而 iframe 里的
+    // 写入不一定能通过 postMessage 到达（旧 magpie 版本/页面被缓存时）。
+    if (prevTab === "gateway" && typeof refreshGatewayConfig === "function") {
+      refreshGatewayConfig();
+    } else if (typeof gwAgentsPrefetch === "function") {
+      gwAgentsPrefetch();
+    }
+  }
   bootFact(`总览 切页=${dashTab}`);
 });
 

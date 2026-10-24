@@ -53,7 +53,7 @@ type Manager struct {
 	// profileMu：Perch 自己的 per-agent 配置（模型/档位）注入。
 	// 只有隔离网关模式下列表函数才返回内容；旧路径保持 nil。
 	profileMu   sync.RWMutex
-	wireProfile func(id string) (map[string]string, []string, bool)
+	wireProfile func(id string) (map[string]string, []string, bool, error)
 
 	// homeMu：隔离引擎的沙盒用户目录。agy 这类由 Perch 直接启动、
 	// 但配置由引擎管理的 agent 要和引擎读同一份配置。
@@ -103,7 +103,9 @@ func (m *Manager) SetWireLaunch(fn func(id string) (map[string]string, []string,
 
 // SetWireProfile 由组合根注入：返回这一格要用的 Perch 网关配置。
 // Claude 的 env 会合并进 --settings；Codex 的 args 是顶层 -c 覆盖。
-func (m *Manager) SetWireProfile(fn func(id string) (map[string]string, []string, bool)) {
+// error 表示“用户确实配了这个 agent，但配置没生效”：这时绝不能静默回退到
+// agent 自己的配置（Codex 会拿旧登录去直连，出现一长串 401）。
+func (m *Manager) SetWireProfile(fn func(id string) (map[string]string, []string, bool, error)) {
 	m.profileMu.Lock()
 	m.wireProfile = fn
 	m.profileMu.Unlock()
@@ -169,12 +171,12 @@ func (m *Manager) NoteActivity(tabID int, spoke bool) {
 	m.panes.MarkTalked(tabID, "agent 收到提示（hooks 之外的适配器）")
 }
 
-func (m *Manager) profileFor(id string) (map[string]string, []string, bool) {
+func (m *Manager) profileFor(id string) (map[string]string, []string, bool, error) {
 	m.profileMu.RLock()
 	fn := m.wireProfile
 	m.profileMu.RUnlock()
 	if fn == nil {
-		return nil, nil, false
+		return nil, nil, false, nil
 	}
 	return fn(id)
 }

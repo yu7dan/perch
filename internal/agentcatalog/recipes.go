@@ -13,11 +13,14 @@ package agentcatalog
 // Recipe 是一个 agent 的 Windows 安装配方。
 //   - Script：直接交给 PowerShell 的脚本（官方 irm ... | iex）
 //   - NPM：先确保 Node.js，再 npm i -g Pkg
+//   - NodeMin：这个包要求的最低 Node 版本；为空表示不检查。不能只看
+//     npm.cmd 在不在 —— 旧 Node 也能跑 npm，但装完 CLI 起不来。
 type Recipe struct {
-	Source string // 页面里显示给用户的来源（命令或包名）
-	Script string
-	NPM    bool
-	Pkg    string
+	Source  string // 页面里显示给用户的来源（命令或包名）
+	Script  string
+	NPM     bool
+	Pkg     string
+	NodeMin string
 }
 
 // Recipes 只装 CLI：官方 CLI 安装脚本，或 npm 包的 bin。
@@ -33,7 +36,7 @@ var Recipes = map[string]Recipe{
 	},
 	"pi": {
 		Source: `npm install -g @earendil-works/pi-coding-agent`,
-		NPM:    true, Pkg: "@earendil-works/pi-coding-agent",
+		NPM:    true, Pkg: "@earendil-works/pi-coding-agent", NodeMin: "22.19.0",
 	},
 	"opencode": {
 		Source: `npm install -g opencode-ai`,
