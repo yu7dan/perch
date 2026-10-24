@@ -634,9 +634,9 @@ func piSessionRoot(cwd string) string {
 
 // piSessionFileExists：这条 Pi 会话在盘上还有没有。
 //
-// 项目目录名是有损 slug（`C:\a\b` → `--C--a-b--`），不从 cwd 反推 ——
-// 只 glob 一层项目目录。找到的是**文件名以 _<id>.jsonl 结尾**的文件；
-// Pi 默认命名是 <时间戳>_<session-id>.jsonl（实测 1.4.x）。
+// 项目目录名是有损 slug（`C:\a\b` → `--C--a-b--`），不从 cwd 反推。
+// 找到的是**文件名以 _<id>.jsonl 结尾**的文件；Pi 默认命名是
+// <时间戳>_<session-id>.jsonl（实测 1.4.x）。
 func piSessionFileExists(cwd, id string) bool {
 	if !SafeSessionID(id) {
 		return false
@@ -645,10 +645,16 @@ func piSessionFileExists(cwd, id string) bool {
 	if root == "" {
 		return false
 	}
-	m, err := filepath.Glob(filepath.Join(root, "*", "*_"+id+".jsonl"))
+	// 两种布局都要认：
+	//   PI_CODING_AGENT_SESSION_DIR 下是扁平的 <时间戳>_<id>.jsonl；
+	//   默认 <agent-dir>/sessions 下才是 <项目>/<时间戳>_<id>.jsonl。
+	// 以前只 glob 后者，导致 Pi 关格时被判成“盘上没有会话”，记录被摘掉。
+	m, err := filepath.Glob(filepath.Join(root, "*_"+id+".jsonl"))
 	if err != nil {
 		return false
 	}
+	nested, _ := filepath.Glob(filepath.Join(root, "*", "*_"+id+".jsonl"))
+	m = append(m, nested...)
 	// Pi 一启动就会写一条 session 文件，零轮次也有文件 —— 关格/续接不能被
 	// "文件存在"骗过去。只有真的出现过 user/assistant 消息才算一条会话。
 	for _, p := range m {

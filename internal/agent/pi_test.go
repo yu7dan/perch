@@ -124,6 +124,15 @@ func TestPiSessionFileExists(t *testing.T) {
 	if !SessionFileExistsFor("pi", "", "01a15035-3fc0-7204-8817-23e1bf203ddc") {
 		t.Fatal("SessionFileExistsFor 没有分派到 Pi 的判据")
 	}
+	// PI_CODING_AGENT_SESSION_DIR 的扁平布局也必须认（Perch 现在用这一种）。
+	flatID := "01a15036-3fc0-7204-8817-23e1bf203ddc"
+	flat := filepath.Join(root, "2026-10-18T18-10-30-442Z_"+flatID+".jsonl")
+	if err := os.WriteFile(flat, []byte(`{"type":"message","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !piSessionFileExists("", flatID) {
+		t.Fatal("扁平 session 文件存在，却报不存在")
+	}
 	// 形状不对的 id 不去 glob（同 safeSessionID 的白名单）。
 	if piSessionFileExists("", "../01a15035") {
 		t.Fatal("非法 id 不该报存在")
@@ -134,6 +143,9 @@ func TestPiSessionFileExists(t *testing.T) {
 // 决定会话目录；相对路径从工作目录解析（docs/settings.md）。
 func TestPiSessionRootSettings(t *testing.T) {
 	agentDir := t.TempDir()
+	// piDataDir 在 Windows 走 APPDATA；隔离掉真实 Perch 的 pi-sessions，
+	// 否则本机已经产生过 Pi 会话时，稳定目录会遮住这个测试的 settings。
+	t.Setenv("APPDATA", t.TempDir())
 	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
 	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
 	if err := os.WriteFile(filepath.Join(agentDir, "settings.json"),
