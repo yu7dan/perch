@@ -29,10 +29,6 @@ Perch is an agent development environment, not a chat client. It owns the termin
 
 ## A work board, not a tab graveyard
 
-<p>
-  <a href="docs/images/work-board.png"><img src="docs/images/work-board.png" alt="Perch work board with one fixed row per agent" width="960"></a>
-</p>
-
 Collapse the terminal grid and each agent becomes one fixed-height row: what it last said, whether it is idle or waiting, and one click back into its pane. The row is a summary, not a second transcript.
 
 ## Agent setup in one place
