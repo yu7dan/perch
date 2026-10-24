@@ -597,8 +597,8 @@ func (a *perchApp) agentWireProfile(id string) (map[string]string, []string, boo
 	if !ok || p.Alias == "" || p.Model == "" {
 		return nil, nil, false
 	}
-	// 每次开格都确认一次组存在；CLI 只改 Perch 引擎的 portable data，
-	// 不碰桌面 magpie，也不碰 agent 配置。
+	// 组已应用时走内存缓存；只有首次/配置变化才写引擎。只改 Perch 引擎的
+	// portable data，不碰桌面 magpie，也不碰 agent 配置。
 	if err := a.gw.EnsureAgentGroup(p.Alias, p.Model, p.Effort); err != nil {
 		log.Printf("[gw] agent %s 的 Perch 模型配置没有生效：%v", id, err)
 		return nil, nil, false
@@ -659,9 +659,9 @@ func (a *perchApp) agentWireProfile(id string) (map[string]string, []string, boo
 
 // warmAgentProfiles 在后台把已配置的模型组提前写进引擎。
 //
-// 组设置要启动 magpie CLI；以前第一次开格才做，用户就得先等 3–5 秒。
-// 这里只预热“组”，不创建任何 agent 进程，也不碰用户配置；预热失败仍然
-// 由开格时的同一段逻辑重试并报错。
+// 组设置以前每次开格都启动 magpie CLI，用户先等 3–5 秒。现在先走 HTTP
+// 保存并缓存结果，启动时后台预热；这里只预热“组”，不创建任何 agent 进程，
+// 也不碰用户配置。预热失败仍然由开格时的同一段逻辑重试并报错。
 func (a *perchApp) warmAgentProfiles() {
 	if a.profiles == nil || !a.gw.Isolated() {
 		return
