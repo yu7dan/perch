@@ -37,26 +37,13 @@ Collapse the terminal grid and each agent becomes one fixed-height row: what it 
 
 ## Agent setup in one place
 
-<p>
-  <a href="docs/images/agent-wiring.png"><img src="docs/images/agent-wiring.png" alt="Perch agent configuration with model and effort controls" width="960"></a>
-</p>
-
 Install, configure, and open an agent from the same list. Perch detects what is installed, runs the official installer or npm package when you ask, and applies each agent's model and effort settings per pane, where the agent exposes them. The gateway's model lists and provider choices are read from the running engine, not kept as a second copy.
 
 ## A local gateway you can inspect
 
-<p>
-  <a href="docs/images/gateway.png"><img src="docs/images/gateway.png" alt="Perch gateway provider catalog with subscriptions, vendors and relays" width="960"></a>
-</p>
-
 Providers, routing, usage, and plugins use magpie's own console, embedded in Perch. The engine runs locally, its data stays on this machine, and the console keeps magpie's own wording and attribution.
 
-## Also in the box
-
-- **Exact resume, honest fallback.** A pane restores the exact session while its file is still on disk. If the session is gone, the seat is kept and a new conversation starts with a banner that explains why.
-- **Close is not delete.** Closing a pane stops the run but keeps its record; the agent stays available to resume under the same pane ID.
-- **Read-only file rail.** A file tree and preview sit beside the active agent. Perch reads files and never edits them behind your back.
-- **Waiting for you.** The panel and status dots bring the pane that needs an answer forward; selection prompts can be answered there.
+**Also included:** exact session resume with an honest fallback, close-is-not-delete, and a read-only file rail beside the active agent.
 
 ## Supported agents
 
@@ -64,17 +51,17 @@ Perch ships with nine CLI agents. All of them can be installed and launched in a
 
 | Agent | Install | Status | Resume | Notes |
 |---|:---:|:---:|:---:|---|
-| Claude Code | Official installer | Full | Exact | Hooks; reference adapter |
-| Codex | Official installer | Full | Exact | Per-pane app-server |
-| Pi | npm package | Full | Exact | Observer extension |
-| OpenCode | npm package | Full | Exact | Local HTTP API |
-| Qoder | Official installer | Full | Exact | Claude-shaped hooks; sign-in required |
-| DeepSeek Harness | Community TUI | Full | Exact | Official hook bridge; upstream caveat |
-| Antigravity CLI | Official installer | Full | Exact | Transcript-backed status |
-| Cursor | Official installer | Status only | Exact | No tool actions |
-| Copilot CLI | Official installer | Full | Exact | Sign in with `/login` |
+| <img src="docs/images/agents/claudecode-color.svg" width="18" height="18" alt=""> Claude Code | Official installer | Full | Exact | Hooks; reference adapter |
+| <img src="docs/images/agents/codex-color.svg" width="18" height="18" alt=""> Codex | Official installer | Full | Exact | Per-pane app-server |
+| <img src="docs/images/agents/pi.svg" width="18" height="18" alt=""> Pi | npm package | Full | Exact | Observer extension |
+| <img src="docs/images/agents/opencode.svg" width="18" height="18" alt=""> OpenCode | npm package | Full | Exact | Local HTTP API |
+| <img src="docs/images/agents/qoder.svg" width="18" height="18" alt=""> Qoder | Official installer | Full | Exact | Claude-shaped hooks; sign-in required |
+| <img src="docs/images/agents/deepseek-color.svg" width="18" height="18" alt=""> DeepSeek Harness | Community TUI | Full | Exact | Official hook bridge; upstream caveat |
+| <img src="docs/images/agents/antigravity-color.svg" width="18" height="18" alt=""> Antigravity CLI | Official installer | Full | Exact | Transcript-backed status |
+| <img src="docs/images/agents/cursor.svg" width="18" height="18" alt=""> Cursor | Official installer | Status only | Exact | No tool actions |
+| <img src="docs/images/agents/githubcopilot.svg" width="18" height="18" alt=""> Copilot CLI | Official installer | Full | Exact | Sign in with `/login` |
 
-Desktop and web clients are outside this list. Any client that accepts a custom base URL can use the gateway.
+Desktop and web clients are outside this list. Any client that accepts a custom base URL can use the gateway. Agent names and logos belong to their respective owners.
 
 ## Getting started
 
@@ -111,11 +98,9 @@ More detail: [architecture](docs/ARCHITECTURE.md) · [frontend](docs/FRONTEND.md
 ## Beta notes
 
 - Windows 10/11 x64 with the WebView2 Runtime; ConPTY and Job Objects are required.
-- No installer or code signing yet; expect SmartScreen.
-- Qoder, Copilot, and Cursor use their own sign-in.
-- DeepSeek Harness tool execution still depends on the current upstream `dsh-tui` build.
-- Agent installers are downloaded from each vendor and run only after you click Install.
-- The magpie gateway engine is downloaded on first run from its official feed; it is not bundled in the zip.
+- Portable unsigned beta; no installer or code signing yet.
+- Qoder, Copilot, and Cursor use their own sign-in; DeepSeek Harness tool execution is upstream-dependent.
+- Agent installers and the magpie engine are downloaded from their official sources; neither is bundled in the zip. Agent installers run only after you click Install.
 - Perch has no account system and sends no telemetry of its own. Agent CLIs and magpie may have their own policies.
 
 ## Acknowledgements

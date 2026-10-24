@@ -61,9 +61,9 @@ Copy-Item (Join-Path $repo "docs\START-HERE.txt") (Join-Path $stage "docs")
 # Licenses for binaries and fonts must travel with the build.
 New-Item -ItemType Directory -Force (Join-Path $stage "licenses") | Out-Null
 Copy-Item (Join-Path $repo "licenses\*") (Join-Path $stage "licenses") -Recurse
-# README screenshots are linked from README.md.
+# README screenshots and agent logos are linked from README.md.
 New-Item -ItemType Directory -Force (Join-Path $stage "docs\images") | Out-Null
-Copy-Item (Join-Path $repo "docs\images\*.png") (Join-Path $stage "docs\images")
+Copy-Item (Join-Path $repo "docs\images\*") (Join-Path $stage "docs\images") -Recurse
 
 if (Test-Path $zip) { Remove-Item -Force $zip }
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Optimal -ErrorAction Stop
