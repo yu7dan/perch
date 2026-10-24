@@ -31,13 +31,25 @@ Perch is an agent development environment, not a chat client. It owns the termin
 
 Collapse the terminal grid and each agent becomes one fixed-height row: what it last said, whether it is idle or waiting, and one click back into its pane. The row is a summary, not a second transcript.
 
+<p align="center">
+  <a href="docs/images/work-board.png"><img src="docs/images/work-board.png" alt="Perch work board with one fixed row per agent" width="860"></a>
+</p>
+
 ## Agent setup in one place
 
 Install, configure, and open an agent from the same list. Perch detects what is installed, runs the official installer or npm package when you ask, and applies each agent's model and effort settings per pane, where the agent exposes them. The gateway's model lists and provider choices are read from the running engine, not kept as a second copy.
 
+<p align="center">
+  <a href="docs/images/agent-setup.png"><img src="docs/images/agent-setup.png" alt="Perch agent setup with model and effort controls" width="860"></a>
+</p>
+
 ## A local gateway you can inspect
 
 Providers, routing, usage, and plugins use magpie's own console, embedded in Perch. The engine runs locally, its data stays on this machine, and the console keeps magpie's own wording and attribution.
+
+<p align="center">
+  <a href="docs/images/gateway.png"><img src="docs/images/gateway.png" alt="Perch agent panes connected through a local magpie gateway to providers" width="860"></a>
+</p>
 
 **Also included:** exact session resume with an honest fallback, close-is-not-delete, and a read-only file rail beside the active agent.
 
