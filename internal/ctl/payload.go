@@ -38,6 +38,9 @@ type ShellPayload struct {
 	Assign map[string]string `json:"assign"`
 	// Roots 是"去哪儿找项目"的根目录。
 	Roots []string `json:"roots"`
+	// PoolRev 是这份 Projects/Assign 对应的池子版本；前端用它拒绝被
+	// 后台慢扫描的旧快照覆盖刚到的 project.result。
+	PoolRev uint64 `json:"poolRev"`
 	// Activity 是总览热力图的数据：每个有轮次的本地日期一格。
 	// 口径是**用户轮次**（不含压缩摘要、不含命令回显 —— 和「N 轮」同一套判据），
 	// 主会话与子代理都算。只发有活动的日期，前端按 53 周铺格子。
@@ -100,7 +103,7 @@ func (s *Server) ShellPayload() ShellPayload {
 	// Pool 为 nil = 池子没初始化（读盘失败），这时**不发 projects 字段**，
 	// 让前端自己走"池子不可用"那条路，而不是收到一个空池子就以为用户没项目。
 	if s.deps.Pool != nil {
-		projects, roots := s.deps.Pool.Snapshot()
+		projects, roots, rev := s.deps.Pool.SnapshotRev()
 		// 合成的默认工作区并进这份副本，池子本身不动。
 		// 少了这一句，"未归类"里那些落在 Documents\Perch 的会话就永远没有归属。
 		projects = project.WithDefaultWorkspace(projects, s.customCWD)
@@ -108,6 +111,7 @@ func (s *Server) ShellPayload() ShellPayload {
 		p.Projects = project.WireProjects(projects, recent, count)
 		p.Assign = assign
 		p.Roots = roots
+		p.PoolRev = rev
 		// 启动这份载荷就是用户**第一眼**看到的那一屏，它也得过同一条不变量。
 		sum, nUn, nMain, nAll := project.Audit(sessions, assign, p.Projects)
 		log.Printf("[pool] 启动载荷：%d 个项目 / 归属 %d 条（Σ项目 %d + 未归类 %d = %d，主会话共 %d，全部 %d）",
@@ -131,25 +135,13 @@ func (s *Server) customCWD() string {
 // 迟早会漂。池子操作是低频动作，全量重算一次是毫秒级 —— 拿一次重扫换掉
 // 一整类"两边不一致"的毛病。会话数少的时候这笔买卖非常划算。
 func (s *Server) poolReply(err error) {
-	s.poolReplyPicked(err, "")
-}
-
-/*
-poolReplyPicked 多带一个 picked = 这一次系统选择器最终指到哪个目录。
-
-	为什么必须单独带回来：用户完全可能挑一个**已经在池子里**的目录，那时
-	projects 一份都不变，前端靠"快照里多了一条"永远等不到结果 —— 新建工作区
-	卡片会一直停在"正在等系统文件夹选择器…"。选择器那条路没有应答帧，
-	这个字段就是它唯一的应答（见 81-newspace.js 的 newSpacePoolUpdate）。
-*/
-func (s *Server) poolReplyPicked(err error, picked string) {
 	if s.deps.Pool == nil {
 		m := map[string]any{"type": "pool", "projects": []any{}, "assign": map[string]string{}}
 		s.Push(withUIErr(m, uimsg.New("pool.unavailable", "项目池不可用")))
 		return
 	}
 	t0 := time.Now()
-	projects, roots := s.deps.Pool.Snapshot()
+	projects, roots, rev := s.deps.Pool.SnapshotRev()
 	// 合成的默认工作区只并进这一份**内存列表**（归属计算和 wire 都吃它）——
 	// 池子本身照旧，落盘的还是用户自己攒的那些（见 project.WithDefaultWorkspace）。
 	projects = project.WithDefaultWorkspace(projects, s.customCWD)
@@ -161,13 +153,43 @@ func (s *Server) poolReplyPicked(err error, picked string) {
 		"projects": wire,
 		"assign":   assign,
 		"roots":    roots,
+		"rev":      rev,
 		"err":      "",
-		"picked":   picked,
 	}
 	s.Push(withUIErr(m, err))
 	sum, nUn, nMain, nAll := project.Audit(sessions, assign, wire)
-	log.Printf("[pool] 推回前端：%d 个项目 / 归属 %d 条（Σ项目 %d + 未归类 %d = %d，主会话共 %d，全部 %d）；用时 %v",
-		len(wire), len(assign), sum, nUn, sum+nUn, nMain, nAll, time.Since(t0).Round(time.Millisecond))
+	log.Printf("[pool] 推回前端 rev=%d：%d 个项目 / 归属 %d 条（Σ项目 %d + 未归类 %d = %d，主会话共 %d，全部 %d）；用时 %v",
+		rev, len(wire), len(assign), sum, nUn, sum+nUn, nMain, nAll, time.Since(t0).Round(time.Millisecond))
+}
+
+// refreshPoolAsync schedules one full pool recompute without blocking the
+// caller. Writes that happen while a scan is running request one more pass;
+// otherwise the last UI state could describe a pool older than the ack it just
+// received. The scan itself stays off the ctl receive loop.
+func (s *Server) refreshPoolAsync(why string) {
+	s.poolMu.Lock()
+	if s.poolRefreshing {
+		s.poolAgain = true
+		s.poolMu.Unlock()
+		return
+	}
+	s.poolRefreshing = true
+	s.poolMu.Unlock()
+	log.Printf("[pool] 后台刷新开始（%s）", why)
+	go func() {
+		for {
+			s.poolReply(nil)
+			s.poolMu.Lock()
+			if !s.poolAgain {
+				s.poolRefreshing = false
+				s.poolMu.Unlock()
+				return
+			}
+			s.poolAgain = false
+			s.poolMu.Unlock()
+			log.Printf("[pool] 后台刷新补一轮（扫描期间又有写操作）")
+		}
+	}()
 }
 
 // bootAgentCards 是冷恢复应答里附带的本机 Agent 名单。
@@ -252,7 +274,7 @@ func (s *Server) applySettingsPatch(p settings.Patch, why string) {
 	}
 	if next.DefaultCWD != old.DefaultCWD {
 		project.EnsureDefaultWorkspace(s.customCWD)
-		s.poolReply(nil)
+		s.refreshPoolAsync("默认目录改了")
 	}
 }
 

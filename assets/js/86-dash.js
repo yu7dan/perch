@@ -498,7 +498,7 @@ function renderDashLat() {
 /* 顶部是**工作区入口**，不是网关状态条。
    用户 2026-10-17 评审原话："总览页面，你顶部放一个 magpie 的连接显示不合适" ——
    用不用网关是另一件事，不该占据总览的第一行。这一行回答的是"我现在这边怎么样"，
-   并把「进入工作区 / 新建工作区」摆在手边（用户点名要的入口）。 */
+   并把「进入工作区 / 新建 Agent」摆在手边（用户点名要的入口）。 */
 function renderDashStatus() {
   const host = $("dash-status");
   if (!host) return;
@@ -534,15 +534,10 @@ function renderDashStatus() {
   $("dash-ws-proj-unit").textContent = tCount("dash.status.projectsUnit", projs);
 }
 
-/* 「新建工作区」= 打开「文件夹 + Agent」卡片（2026-10-19 用户点名的形态）。
-   卡片里的「选择其他文件夹…」仍然走同一条 project.add；只是新路径先落到卡片里，
-   由用户决定要不要顺手开一个 agent。
-   ⚠️ newWsPending 那套快照判据保留给老的调用点/回退路径：现在没有地方再设置它，
-   所以正常的卡片流程不会把用户从总览拽走。 */
-let newWsPending = null;
-let newWsPendingAt = 0;
-function startNewWorkspace() {
-  openNewSpace({ why: "总览「新建工作区」" });
+/* 总览右上角是「新建 Agent」：项目/无项目 + Agent 是独立的一步。
+   加文件夹走左栏的「添加项目」，总览不再承担项目池的添加。 */
+function startNewAgent() {
+  openNewAgent({ why: "总览「新建 Agent」" });
 }
 
 $("dash-status").addEventListener("click", (e) => {
@@ -551,7 +546,7 @@ $("dash-status").addEventListener("click", (e) => {
   if (b.dataset.wsact === "enter") {
     setNavView("workspace");
   } else if (b.dataset.wsact === "new") {
-    startNewWorkspace();
+    startNewAgent();
   }
 });
 

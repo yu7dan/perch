@@ -61,6 +61,10 @@ type Pool struct {
 	// broken = "文件在、但解析不了"。这种情况下**一次都不许覆盖** ——
 	// 池子是用户一个个手加出来的，一次坏写就全没了，比"报错"难看得多。
 	broken bool
+	// rev 是这份内存池的单调版本号：每次成功写 +1。后台全量统计会扫描十几秒，
+	// 扫描期间的写操作可能让它手里那份快照变旧；wire/回执带上 rev，前端就能
+	// 拒绝用旧快照覆盖刚到的 project.result。
+	rev uint64
 }
 
 func filePath() (string, error) {
@@ -169,13 +173,26 @@ func saveFailed(err error) error {
 
 // Snapshot 返回项目与根的副本。
 func (p *Pool) Snapshot() ([]Project, []string) {
+	projects, roots, _ := p.SnapshotRev()
+	return projects, roots
+}
+
+// SnapshotRev 在**同一把锁**里返回项目/根/版本号，后台全量推送用它。
+func (p *Pool) SnapshotRev() ([]Project, []string, uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	out := make([]Project, len(p.Projects))
 	copy(out, p.Projects)
 	roots := make([]string, len(p.Roots))
 	copy(roots, p.Roots)
-	return out, roots
+	return out, roots, p.rev
+}
+
+// Rev 只读当前版本号；project.result 的轻量回执带它，前端用它做单调合并。
+func (p *Pool) Rev() uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.rev
 }
 
 func (p *Pool) findLocked(path string) int {
@@ -186,6 +203,26 @@ func (p *Pool) findLocked(path string) int {
 		}
 	}
 	return -1
+}
+
+// Get returns a copy of one project by path. The copy is important: callers
+// serialize it to the UI while another goroutine may still mutate the pool.
+func (p *Pool) Get(path string) (Project, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	i := p.findLocked(path)
+	if i < 0 {
+		return Project{}, false
+	}
+	return p.Projects[i], true
+}
+
+// Has reports whether path is one of the user's real projects. Synthetic default
+// workspace entries are not in the pool and therefore return false.
+func (p *Pool) Has(path string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.findLocked(path) >= 0
 }
 
 // Add 把一个目录收进池子。返回 (项目, 是不是新加的, 错误)。
@@ -232,6 +269,7 @@ func (p *Pool) Add(path, name, source string) (Project, bool, error) {
 		p.Projects = p.Projects[:len(p.Projects)-1]
 		return Project{}, false, err
 	}
+	p.rev++
 	return pr, true, nil
 }
 
@@ -252,6 +290,7 @@ func (p *Pool) Remove(path string) (bool, error) {
 		p.Projects[i] = gone
 		return false, err
 	}
+	p.rev++
 	return true, nil
 }
 
@@ -269,6 +308,7 @@ func (p *Pool) SetPinned(path string, on bool) (bool, error) {
 		p.Projects[i].Pinned = prev
 		return false, err
 	}
+	p.rev++
 	return true, nil
 }
 
@@ -291,6 +331,7 @@ func (p *Pool) Rename(path, name string) (bool, error) {
 		p.Projects[i].Name = prev
 		return false, err
 	}
+	p.rev++
 	return true, nil
 }
 

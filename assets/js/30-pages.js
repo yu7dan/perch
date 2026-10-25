@@ -826,13 +826,13 @@ async function opNewAgent() {
       `选择面板 新会话：没有可启动的 Agent（opAgent=${opAgent || "空"}），不发建格` });
     return;
   }
-  /* 默认会话区：发**空 cwd**，让 Go 给这一格分配独立目录
-     （Documents\Perch\sessions\<date>-<agent>-<pane>）。发默认目录本身
-     会让所有会话又挤回同一个文件夹 —— 那正是这次 IA 要修的事。 */
-  const dir = (opWSPath && opWSPath === defaultAreaPath()) ? "" : opWSPath;
+  /* 无项目区：发显式 scratch，Go 侧落到默认工作区**根目录**。
+     项目/其他目录原样发 path + target，绝不把旧选中值当默认。 */
+  const dir = (opWSPath && opWSPath === defaultAreaPath()) ? "" : (opWSPath || "");
+  const target = dir ? targetKindForDir(dir) : "scratch";
   closeAgentPanel("新会话");
-  sendCtrl({ type: "log", msg: `选择面板 新会话 agent=${a.id} cwd=${dir || "(默认)"}` });
-  await newTabIn(dir, "选择面板 新会话", a.id);
+  sendCtrl({ type: "log", msg: `选择面板 新会话 agent=${a.id} cwd=${dir || "(默认)"} target=${target}` });
+  await newTabIn(dir, "选择面板 新会话", a.id, target);
 }
 
 async function opPick(s) {

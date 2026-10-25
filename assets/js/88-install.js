@@ -292,7 +292,8 @@ function applyInstall(m) {
 async function launchAgent(id) {
   const m = mg();
   const a = ((m && m.catalog) || []).find((x) => x.id === id);
-  const t = await createTab({ agent: id, cwd: "", resume: { kind: "new", id: "" } }, { fresh: true });
+  const t = await createTab({ agent: id, cwd: "", target: "scratch",
+    resume: { kind: "new", id: "" } }, { fresh: true });
   if (!t || !t.id) return;
   armFreshCell(t, "总览 Agent 启动");
   setActive(t);

@@ -16,6 +16,17 @@ type SpawnSpec struct {
 	Agent  string       `json:"agent"`
 	CWD    string       `json:"cwd"`
 	Resume ResumeIntent `json:"resume"`
+	// Target 说明这一格的**目标类型**（只在 Resume.Kind=="new" 时有意义）：
+	//
+	//	"project"   项目目录，CWD 必须有值且必须是池子里的项目
+	//	"directory" 明确指定的其他目录（例如未归类的当前目录），CWD 必须有值
+	//	"scratch"   无项目，落在默认工作区根目录；CWD 必须为空
+	//	""          旧调用方，按 CWD 原样启动（不声明的项目目标）
+	//
+	// 它存在的理由：空 cwd 原来同时表示“没指定”和“默认目录”，前端一旦把旧
+	// 选中值带进请求，后端只看到一个合法目录，分不出这是不是用户真正选的目标。
+	// 显式 target 让“项目目标”必须带项目路径，缺了就拒绝，不再静默回落。
+	Target string `json:"target,omitempty"`
 	// PaneID：**冷恢复建出来的那一格**认领登记表里的旧身份时原样回传。
 	// 0 / 缺省 = 这是一格全新的格子，paneId 由 Go 现发（见 panes.Store.NextID）。
 	// 为什么要这个字段而不是"按顺序认领"：冷恢复的建格是**一次 burst**，

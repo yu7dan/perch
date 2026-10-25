@@ -37,8 +37,10 @@ type Msg struct {
 	// Path 是根下面要列/要读的那个路径；Req 是令牌，原样带回。
 	// 护栏见 internal/files —— 只读、包含性检查、大小上限，都在 Go 侧。
 	Root string `json:"root"`
-	// project.* 用：Path 是项目的身份（目录绝对路径）；Name 只在 rename /
-	// add 时给（空 = 恢复目录名 / 取目录名）；Source 只在 add 时给。
+	// project.* 用：Path 是项目的身份（目录绝对路径）。add 时是已有目录；
+	// create 时是**父目录**；pick 不用 Path。Name 只在 rename / add / create
+	// 时给（rename 空 = 恢复目录名；add/create 空 = 取目录名）。Source 只在
+	// add 时给。project.pick 的 Msg 是系统选择器标题（前端已本地化）。
 	Name   string `json:"name"`
 	Source string `json:"source"`
 	// title.set 用：会话 id（= 盘上那份 .jsonl 的文件名）。

@@ -107,6 +107,13 @@ type Server struct {
 	reloading   bool
 	reloadAgain bool
 
+	// 项目池的全量统计（history.Scan + Stats）很重，绝不能挡在“加项目/改名/置顶”
+	// 的应答前面。写操作先回一个轻量 project.result，再用这套单飞 + 尾巴合并
+	// 在后台刷新一次 pool。刷新期间又有写操作，就再补一轮，保证最后一份是新的。
+	poolMu         sync.Mutex
+	poolRefreshing bool
+	poolAgain      bool
+
 	guard CloseGuard
 }
 
@@ -200,7 +207,8 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		s.handleWindow(m)
 
 	// 项目池
-	case "project.add", "project.remove", "project.pin", "project.rename":
+	case "project.pick", "project.add", "project.create",
+		"project.remove", "project.pin", "project.rename":
 		s.handleProjects(m)
 	}
 }

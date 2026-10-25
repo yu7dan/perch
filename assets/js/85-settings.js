@@ -713,8 +713,8 @@ function onLocaleChanged() {
       typeof instPaint === "function") instPaint();
   if (typeof renderFlow === "function") renderFlow("locale");
   if (typeof fvRender === "function" && typeof FV !== "undefined" && FV) fvRender();
-  // 新建工作区卡片开着时，note/预选标签/等待文案都是 JS 现画的。
-  if (typeof NS !== "undefined" && NS && typeof renderNewSpace === "function") renderNewSpace();
+  // 添加项目 / 新建 Agent 卡片开着时，标题、note、预选标签都是 JS 现画的。
+  if (typeof projectDialogsRepaint === "function") projectDialogsRepaint();
   // 「开一个 agent」面板的按钮/提示/会话行同样是现画的。
   const opPanel = $("openpanel");
   if (typeof renderOpPanel === "function" && opPanel && opPanel.classList.contains("on")) {

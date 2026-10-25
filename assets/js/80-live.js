@@ -341,7 +341,12 @@ async function connectSession(s, kind) {
     if (live) { jumpToTab(live, "它已经在跑了"); return; }
   }
   if (soloTab) backToGrid();   // 新格加进的是"并行区"，正看独立页时先回网格
-  const tab = await createTab({ agent: "claude", cwd: s.cwd || "", resume: { kind, id: s.id } });
+  const tab = await createTab({
+    agent: "claude",
+    cwd: s.cwd || "",
+    target: kind === "new" ? targetKindForDir(s.cwd || "") : "legacy",
+    resume: { kind, id: s.id },
+  });
   // Go 拒了：createTab 那条路上已经把占位格撤掉、toast 弹过了（见 tab.ok 的处理）。
   // tab.id === 0 就是"这个标签没有 PTY"，不是一条能用的格子。
   if (!tab || !tab.id) return;
@@ -455,8 +460,10 @@ document.addEventListener("click", (e) => {
       && !e.target.closest("#openpanel") && !e.target.closest("#tab-add")) {
     closeAgentPanel("点了面板外面");
   }
-  /* 铃铛浮层 / 文件预览 / 新建工作区卡片：同一套"点外面 = 关"。
-     触发器（铃铛）和卡片本身要排除，否则捕获阶段先关、随后的 click 又打开。 */
+  /* 铃铛浮层 / 文件预览：同一套"点外面 = 关"。
+     触发器（铃铛）和卡片本身要排除，否则捕获阶段先关、随后的 click 又打开。
+     添加项目 / 新建 Agent 的遮罩和弹层由 81a/81b 自己处理（它们还要区分
+     最上层是谁，不能在这里抢）。 */
   if ($("need-pop") && !$("need-pop").hidden
       && !e.target.closest("#need-pop") && !e.target.closest("#need-bell")) {
     setNeedPop(false, "点了外面");
@@ -464,10 +471,6 @@ document.addEventListener("click", (e) => {
   if (typeof closeFileView === "function"
       && $("fview") && !$("fview").hidden && !e.target.closest(".fv-card")) {
     closeFileView("点了外面");
-  }
-  if (typeof closeNewSpace === "function"
-      && $("newspace") && !$("newspace").hidden && !e.target.closest(".ns-card")) {
-    closeNewSpace("点了外面");
   }
 }, true);
 
@@ -608,8 +611,17 @@ function applyLibrary(p) {
   STATE.sessions = p.sessions;
   // 左栏那一轮起：重扫也带上池子与归属（Go 侧是同一次 buildShellPayload 算的）。
   // 不跟着更新的话，新落盘的会话会归不进它该在的项目里 —— 而那正是"重扫"的用途。
-  if (Array.isArray(p.projects)) STATE.projects = p.projects;
-  if (p.assign && typeof p.assign === "object") STATE.assign = p.assign;
+  // 但整份载荷也会扫十几秒；若它手里的池子版本比刚到的 project.result 旧，
+  // 只更新会话/历史，别把新的项目行覆盖回去。
+  const poolStale = typeof p.poolRev === "number" &&
+    typeof STATE.poolRev === "number" && p.poolRev < STATE.poolRev;
+  if (!poolStale) {
+    if (Array.isArray(p.projects)) STATE.projects = p.projects;
+    if (p.assign && typeof p.assign === "object") STATE.assign = p.assign;
+    if (typeof p.poolRev === "number") STATE.poolRev = p.poolRev;
+  } else {
+    sendCtrl({ type: "log", msg: `整份载荷的旧项目池跳过 rev=${p.poolRev} < ${STATE.poolRev}` });
+  }
   STATE.history = p.history || STATE.history;
   // 标题也要换：用户刚改过的名字走的是 Go 那边 titles.json，不跟着刷新就一直旧着
   STATE.titles = p.titles || STATE.titles;
@@ -1984,11 +1996,12 @@ if ($("need-bell")) {
   window.addEventListener("resize", placeNeedPop);
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
-    // 文件预览/新建卡片是更上层的模态：它们开着时 Esc 归它们，别把下面
-    // 那个铃铛浮层一起关掉。
+    // 文件预览 / 添加项目 / 新建 Agent 是更上层的模态：它们开着时 Esc
+    // 归它们，别把下面那个铃铛浮层一起关掉。
     const over = $("fview") && !$("fview").hidden;
-    const ns = $("newspace") && !$("newspace").hidden;
-    if (!over && !ns) setNeedPop(false, "Esc");
+    const ap = $("add-project") && !$("add-project").hidden;
+    const na = $("newagent") && !$("newagent").hidden;
+    if (!over && !ap && !na) setNeedPop(false, "Esc");
   }, true);
 }
 

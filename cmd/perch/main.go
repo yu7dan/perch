@@ -14,7 +14,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -87,6 +86,29 @@ func teeLogToFile() {
 	// 文件放第一个：双击启动时 os.Stderr 可能是无效句柄，写它会返回错误；
 	// MultiWriter 遇到错误就停，放在后面才能保证文件一定拿到这一行。
 	log.SetOutput(io.MultiWriter(f, os.Stderr))
+}
+
+// isProjectDropTarget accepts both the explicit attribute and the container
+// ids/classes. WebView2 supplies the closest [data-file-drop-target] element,
+// but accepting the ids keeps a drop working if a future Wails build omits
+// the attribute map.
+func isProjectDropTarget(d *application.DropTargetDetails) bool {
+	if d == nil {
+		return false
+	}
+	if d.Attributes["data-file-drop-target"] == "projects" {
+		return true
+	}
+	switch d.ElementID {
+	case "scroll", "proj-list", "un-view":
+		return true
+	}
+	for _, c := range d.ClassList {
+		if c == "proj" || c == "sect-projects" || c == "sect-sessions" {
+			return true
+		}
+	}
+	return false
 }
 
 func main() {
@@ -188,8 +210,6 @@ func main() {
 		// 会话层不反过来认识 agent 名单。
 		Caps: func(id string) agent.Caps { return agent.CapsFor(id, agentcatalog.Has(id)) },
 	})
-	// 默认会话区：每个新格一个独立目录（见 defaultSessionDir）。
-	a.tabs.SetSessionDir(a.defaultSessionDir)
 	// 登记表关格时用它区分“零轮次空壳”和“真跑过、有会话文件”。
 	a.panes.SessionExists = a.tabs.SessionFileExistsFor
 	// 步 8：适配器此后拿到的就是真正的会话表（绑定/状态/推送/Exe 解析）。
@@ -354,7 +374,27 @@ func main() {
 		MinWidth:  1080,
 		MinHeight: 560,
 
+		// 拖放只认左栏项目区（前端在 #proj-list/#un-view 上标了
+		// data-file-drop-target="projects"）。别的区域落文件不会触发添加。
+		EnableFileDrop: true,
+
 		URL: "/",
+	})
+
+	// 原生拖放的路径只有 WebView2 知道；Go 只负责把事件转给前端，真正的
+	// 项目校验/去重仍走 project.add（Pool.Add 会拒绝文件和不存在的目录）。
+	window.OnWindowEvent(events.Common.WindowFilesDropped, func(event *application.WindowEvent) {
+		details := event.Context().DropTargetDetails()
+		files := event.Context().DroppedFiles()
+		if len(files) == 0 || !isProjectDropTarget(details) {
+			log.Printf("[drop] 忽略窗口拖放（%d 项；落点不在项目区）", len(files))
+			return
+		}
+		log.Printf("[drop] 项目区收到 %d 项（x=%d y=%d）", len(files), details.X, details.Y)
+		application.Get().Event.Emit("perch:files-dropped", map[string]any{
+			"files":   files,
+			"details": details,
+		})
 	})
 
 	ui := &systemUI{app: app, win: window}
@@ -556,46 +596,8 @@ func (a *perchApp) defaultCWD() string {
 	return a.fallbackCWD
 }
 
-// defaultSessionDir 给默认会话区里的新格分配一个独立目录：
-//
-//	<默认目录>\sessions\<YYYYMMDD-HHMMSS>-<agent>-<paneID>
-//
-// 用 paneID 当短 id 而不是随机串：座位身份本来就跨重启稳定（见 Tab.PaneID），
-// 同一格冷恢复时不会分叉出第二个目录；agent 名过一遍文件名白名单。
-// 建不出目录返回空串，调用方退回默认目录 —— 不拦启动。
-func (a *perchApp) defaultSessionDir(agentID string, paneID int) string {
-	root := filepath.Join(a.defaultCWD(), "sessions")
-	name := strings.Join([]string{
-		time.Now().Format("20060102-150405"),
-		sanitizeDirName(agentID),
-		strconv.Itoa(paneID),
-	}, "-")
-	dir := filepath.Join(root, name)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		log.Printf("[session] 默认会话目录建不出来 dir=%s err=%v（这一格退回默认目录）", dir, err)
-		return ""
-	}
-	log.Printf("[session] 默认会话目录 pane=%d agent=%s → %s", paneID, agentID, dir)
-	return dir
-}
-
-func sanitizeDirName(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "agent"
-	}
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
-			b.WriteRune(r)
-		default:
-			b.WriteByte('-')
-		}
-	}
-	return strings.Trim(b.String(), "-")
-}
-
+// 无项目 Agent 现在直接使用默认工作区根目录；旧版本建出来的
+// sessions\<...> 目录仍留在盘上，左栏按“旧临时目录”分组。
 // agentWireProfile 是 session.Manager 开格前的注入点。
 //
 // 只做 Perch 自己的配置：模型指向 group/perch-<agent> 这个稳定别名，

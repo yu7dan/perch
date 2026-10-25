@@ -137,7 +137,8 @@ let webglLive = 0;
 const WEBGL_MAX_CELLS = 12;
 
 // 新标签的默认启动意图。cwd 留空 = 交给 Go 侧的默认工作目录。
-const DEFAULT_SPAWN_SPEC = { agent: "claude", cwd: "", resume: { kind: "new", id: "" } };
+const DEFAULT_SPAWN_SPEC = { agent: "claude", cwd: "", target: "scratch",
+  resume: { kind: "new", id: "" } };
 
 /* ===========================================================================
    格内横幅（冷恢复步 6）—— 把"这一格为什么不是上次那条会话"摆在**这一格**里
@@ -652,8 +653,10 @@ installImeAnchor(T);
     bootFact(`接上被拒（收尾）code=${T.resumeRefused.code} → 撤格、不建流`);
     closeTab(T);
     /* 接「已关闭」agent 那条路自己会解释（它知道这条记录还在左栏、还知道用户
-       下一步能做什么，见 resumeClosedPane）—— 这里别再叠一张更含糊的卡。 */
-    if (!(T.spec && T.spec.closedResume)) {
+       下一步能做什么，见 resumeClosedPane）—— 这里别再叠一张更含糊的卡。
+       quietRefusal 只给「新建 Agent」表单：原因要放回表单里，不走 toast。 */
+    const quiet = !!(opts && opts.quietRefusal);
+    if (!(T.spec && T.spec.closedResume) && !quiet) {
       showToast({
         agent_session_conflict: t("term.resume.conflict"),
         unavailable: t("term.resume.unavailable"),

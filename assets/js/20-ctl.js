@@ -112,7 +112,7 @@ function closedRowName(r) {
     if (t) return t;
   }
   /* 冷恢复回来的 closed 记录只有 cwd/sessionId，没有 name（PaneView 不带名字）。
-     默认会话区给每格分的是 `sessions\<日期>-<agent>-<pane>`，这个目录名
+     旧版本的无项目格在 `sessions\<日期>-<agent>-<pane>` 下，这个目录名
      本身就是一条能认出来的身份；再不济也比一排「已关闭的 agent」强。 */
   const dir = String(r.cwd || "").replace(/[\\/]+$/, "");
   const base = dir ? dir.split(/[\\/]/).pop() : "";
@@ -196,10 +196,14 @@ async function awaitRestorePlan() {
    能不能接上"用的是这两个字段，前端要说"为什么没接上"就得拿着同一份事实 ——
    自己再推一遍（比如"文件不在 ⇒ spoke"）就是第二份迟早会漂的规则。 */
 function seatSpecFrom(v) {
+  const resume = v.resume || { kind: "new", id: "" };
   return {
     agent: v.agent,
     cwd: v.cwd || "",
-    resume: v.resume || { kind: "new", id: "" },
+    // 冷恢复的目标就是记录里的 cwd（空则默认工作区）。标 legacy 跳过“项目
+    // 目标必须在池子里”的新建校验 —— 恢复不该依赖项目池扫描的启动顺序。
+    target: "legacy",
+    resume,
     paneId: v.paneId,
     restored: true,
     verdict: v.verdict || "",
@@ -400,7 +404,7 @@ function dispatchCtl(m) {
       t.id = m.tab;
       t.streamName = m.stream;
       if (m.pane) t.paneID = m.pane;
-      // Go 可能把空 cwd 换成了默认会话区的独立目录 —— 左栏归属和标题里的
+      // Go 会把无项目格的空 cwd 换成默认工作区根目录 —— 左栏归属和标题里的
       // 目录提示都要用**生效后**的那个（见 ctl handlers_tabs.go 的 tab.ok）。
       if (typeof m.cwd === "string" && m.cwd) t.spec.cwd = m.cwd;
       t.onSpawned = null;
@@ -562,7 +566,15 @@ function dispatchCtl(m) {
     // 项目池（左栏那一轮）。它和 state 是两回事：state 是"扫出来的会话库"，
     // 这一条是"用户声明的项目池 + 归属"。分开发的理由和三条腿分开是同一条 ——
     // 池子只在动作时变（低频、全量），会话库每关一格就要重扫。
+    // 写操作的轻量回执先到，全量 pool 由后台统计随后补上；选择器则是
+    // project.picked 一条独立应答，不再搭 pool 的车。
     case "pool":  applyPool(m);  return;
+    case "project.picked":
+      if (typeof projectPickedArrived === "function") projectPickedArrived(m);
+      return;
+    case "project.result":
+      if (typeof projectResultArrived === "function") projectResultArrived(m);
+      return;
     // 设置（Perch 自己的偏好）。shell 首帧里也带一份，之后每次改动 Go 都推整份；
     // 默认目录选择器是协程里推的，所以它和 settings.set 的答复走同一条消息。
     case "settings": {

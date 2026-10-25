@@ -183,8 +183,9 @@
            把同一个数再写一遍就是同一句话在同一个屏幕上说两遍。 -->
       <h1 id="list-title" data-i18n="list.title">工作区</h1>
       <div class="list-actions">
-        <button class="icon-btn" id="add-proj" title="添加项目（选一个目录）" data-i18n-title="list.addProject.title">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>
+        <button class="icon-btn" id="add-proj" title="添加项目（选择已有或新建文件夹）" data-i18n-title="list.addProject.title">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><path d="M12 10v6"/><path d="M9 13h6"/></svg>
         </button>
         <!-- C2 那颗「刷新索引」原来写的是 location.reload()（整页重载 —— 它会把
             终端、网格、滚动位置全推倒重来），现在走真的 lib.reload：只重扫会话库。 -->
@@ -200,15 +201,15 @@
       <span class="kbd">Ctrl K</span>
     </label>
     <div id="pool-err-slot"></div>
-    <div class="scroll" id="scroll">
+    <div class="scroll" id="scroll" data-file-drop-target="projects">
       <div id="proj-view">
-        <div id="proj-list"></div>
+        <div id="proj-list" data-file-drop-target="projects"></div>
         <!-- 未归类：cwd 对不上任何项目的 **agent**，按目录分组排在最后。
              ⚠️ 2026-10-17 起左栏的实体是 agent，不再是会话 —— 一个 agent 代表
              一件事的全部，它干过什么在右栏的对话流里看（点它 = 对话流切过去）。
              不变量：Σ各工作区的 agent 行 + 未归类 == TAB_LIST 里有 id 的格数
              （启动读数 viewProbe 会把这两个数一起打出来）。 -->
-        <div id="un-view"></div>
+        <div id="un-view" data-file-drop-target="projects"></div>
       </div>
       <!-- C6a：子代理那一组搬去了右栏（#rsb 的「子代理」模块）——
            它说的是"当前工作衍生出去的会话"，和右栏这一列的语义是一回事，
@@ -938,38 +939,136 @@
   </div>
 </div>
 
-<!-- 新建工作区（文件夹 + Agent，一个卡片里选完）。
-     形态照 Orca 的 NewWorkspaceComposer（Folder / Agent [Optional] / Create），
-     但文件夹用的是我们自己的项目池：选已有工作区，或者开系统选择器加一个新的。
-     Agent 只列**已安装且能启动**的；也可以选「不启动 Agent」（只添加文件夹）。
-     打开入口：标题栏/左栏的 +、项目行的 +、总览的「新建工作区」。 -->
-<div id="newspace" role="dialog" aria-modal="true" aria-labelledby="ns-title" hidden>
-  <div class="ns-card" role="document">
-    <div class="ns-head">
-      <span class="ns-title" id="ns-title" data-i18n="ns.title">新建工作区</span>
-      <button class="ns-x" id="ns-x" title="关闭" aria-label="关闭"
+<!-- 添加项目：只处理文件夹，不启动 Agent。
+     系统选择器只负责“选一个路径”；确认名称后才写项目池，成功回执直接更新左栏，
+     不再等全量会话扫描。新建文件夹也走这里，建的是独立空目录。 -->
+<div id="add-project" role="dialog" aria-modal="true" aria-labelledby="ap-title" hidden>
+  <div class="ap-card" role="document">
+    <div class="ap-head">
+      <span class="ap-title" id="ap-title" data-i18n="ap.title">添加项目</span>
+      <button class="ap-x" id="ap-x" title="关闭" aria-label="关闭"
         data-i18n-title="common.close" data-i18n-aria-label="common.close">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
     </div>
-    <div class="ns-body">
-      <div class="ns-lab" data-i18n="ns.folder">文件夹</div>
-      <select id="ns-folder" aria-label="选择工作区文件夹" data-i18n-aria-label="ns.folderAria"></select>
-      <div class="ns-folder-row">
-        <button type="button" id="ns-pick" data-i18n="ns.pick">选择其他文件夹…</button>
-        <span class="ns-path ell" id="ns-path"></span>
+    <div class="ap-body">
+      <div class="ap-step" id="ap-start">
+        <p class="ap-lead" id="ap-lead" data-i18n="ap.lead">项目就是磁盘上的一个文件夹。加进来之后，在它里面开的 Agent 会自动归到它名下。</p>
+        <div class="ap-actions" id="ap-actions">
+          <button type="button" class="ap-action primary" id="ap-browse">
+            <span class="ap-ico" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+            </span>
+            <span class="ap-tx"><b data-i18n="ap.browse">选择已有文件夹…</b><span data-i18n="ap.browseDesc">从磁盘上选一个已经存在的目录</span></span>
+            <span class="ap-enter" aria-hidden="true">⏎</span>
+          </button>
+          <div class="ap-alt-label" data-i18n="ap.or">或者</div>
+          <button type="button" class="ap-action" id="ap-create">
+            <span class="ap-ico" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><path d="M12 10v6"/><path d="M9 13h6"/></svg>
+            </span>
+            <span class="ap-tx"><b data-i18n="ap.create">新建文件夹…</b><span data-i18n="ap.createDesc">选一个位置，创建一个空文件夹</span></span>
+          </button>
+        </div>
+        <p class="ap-hint" data-i18n="ap.dragHint">也可以把文件夹拖到左栏的项目区。</p>
       </div>
-      <div class="ns-lab"><span data-i18n="ns.agent">Agent</span> <span class="ns-opt" data-i18n="ns.optional">可选</span></div>
-      <div class="ns-agents" id="ns-agents" role="listbox" aria-label="选择 Agent"
-        data-i18n-aria-label="ns.agentsAria"></div>
-      <div class="ns-note" id="ns-note"></div>
+
+      <div class="ap-step" id="ap-existing" hidden>
+        <div class="ap-lab" data-i18n="ap.folder">文件夹</div>
+        <div class="ap-row">
+          <div class="ap-pathbox" id="ap-existing-path"></div>
+          <button type="button" class="ap-change" id="ap-existing-change" data-i18n="common.change">更改</button>
+        </div>
+        <div class="ap-lab" data-i18n="ap.name">名称</div>
+        <input class="ap-input" id="ap-existing-name" type="text" spellcheck="false" autocomplete="off"
+          aria-label="项目显示名称" data-i18n-aria-label="ap.nameAria">
+        <p class="ap-hint" data-i18n="ap.nameHint">只影响 Perch 里的显示，不会改磁盘上的文件夹名。</p>
+      </div>
+
+      <div class="ap-step" id="ap-create-step" hidden>
+        <div class="ap-lab" data-i18n="ap.location">位置</div>
+        <div class="ap-row">
+          <div class="ap-pathbox" id="ap-parent"></div>
+          <button type="button" class="ap-change" id="ap-parent-change" data-i18n="common.change">更改</button>
+        </div>
+        <div class="ap-lab" data-i18n="ap.folderName">文件夹名称</div>
+        <input class="ap-input" id="ap-folder-name" type="text" spellcheck="false" autocomplete="off"
+          aria-label="新文件夹名称" data-i18n-aria-label="ap.folderNameAria">
+        <div class="ap-preview" id="ap-preview"></div>
+      </div>
+
+      <div class="ap-err" id="ap-err" role="alert"></div>
     </div>
-    <div class="ns-foot">
-      <button type="button" id="ns-cancel" data-i18n="common.cancel">取消</button>
-      <button type="button" id="ns-create" class="primary" data-i18n="ns.create">创建</button>
+    <div class="ap-foot">
+      <button type="button" class="ap-use-existing" id="ap-use-existing" hidden
+        data-i18n="ap.useExisting">直接添加已有文件夹</button>
+      <span class="ap-sp"></span>
+      <button type="button" id="ap-back" hidden data-i18n="ap.back">返回</button>
+      <button type="button" id="ap-cancel" data-i18n="common.cancel">取消</button>
+      <button type="button" id="ap-submit" class="primary" hidden data-i18n="ap.add">添加项目</button>
     </div>
   </div>
+</div>
+
+<!-- 新建 Agent：目标（项目 / 无项目）和 Agent 是两件事。
+     只加文件夹请走「添加项目」；这张卡不允许“不启动 Agent”。 -->
+<div id="newagent" role="dialog" aria-modal="true" aria-labelledby="na-title" hidden>
+  <div class="na-card" role="document">
+    <div class="na-head">
+      <span class="na-title" id="na-title" data-i18n="na.title">新建 Agent</span>
+      <button class="na-x" id="na-x" title="关闭" aria-label="关闭"
+        data-i18n-title="common.close" data-i18n-aria-label="common.close">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="na-body">
+      <p class="na-lead" data-i18n="na.lead">选一个项目，再选要启动的 Agent。</p>
+      <div class="na-labrow">
+        <span class="na-lab" data-i18n="na.project">项目</span>
+        <button type="button" class="na-addproj" id="na-addproj" data-i18n="na.addProject">+ 添加项目</button>
+      </div>
+      <button type="button" class="na-proj" id="na-proj" role="combobox" aria-haspopup="listbox"
+        aria-expanded="false" aria-controls="na-projpop" aria-label="选择项目" data-i18n-aria-label="na.projectAria">
+        <span class="na-projico" id="na-proj-ico" aria-hidden="true"></span>
+        <span class="na-projwho">
+          <span class="na-projname" id="na-proj-name"></span>
+          <span class="na-projpath ell" id="na-proj-path"></span>
+        </span>
+        <span class="na-chev" aria-hidden="true">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </span>
+      </button>
+      <div class="na-lab" data-i18n="na.agent">Agent</div>
+      <div class="na-agents" id="na-agents" role="listbox" aria-label="选择 Agent"
+        data-i18n-aria-label="na.agentAria"></div>
+      <div class="na-target" id="na-target"></div>
+      <div class="na-note" id="na-note" role="status" aria-live="polite"></div>
+    </div>
+    <div class="na-foot">
+      <button type="button" id="na-cancel" data-i18n="common.cancel">取消</button>
+      <button type="button" id="na-create" class="primary" data-i18n="na.create">创建 Agent</button>
+    </div>
+  </div>
+</div>
+
+<!-- 项目搜索弹层挂在 body 层：对话框的 overflow 不会把它裁掉。 -->
+<div id="na-projpop" class="na-pop" role="dialog" aria-label="选择项目" data-i18n-aria-label="na.projectAria" hidden>
+  <label class="na-pop-search">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+    <input id="na-proj-search" type="text" spellcheck="false" autocomplete="off"
+      placeholder="搜索项目…" data-i18n-placeholder="na.searchProjects"
+      aria-label="搜索项目" data-i18n-aria-label="na.searchProjects">
+  </label>
+  <div class="na-pop-list" id="na-proj-list" role="listbox" aria-label="项目列表"
+    data-i18n-aria-label="na.projectListAria"></div>
+  <div class="na-pop-foot" id="na-proj-add" role="button" tabindex="0"
+    data-i18n="na.addProjectPinned">+ 添加项目…</div>
 </div>
 
 <!-- 「开一个 agent」选择面板（点标签条 + 打开）。和 #cardmenu 一样静态放在这里：
@@ -1149,9 +1248,10 @@ window.__facts = [];
 <script defer src="/js/60-shell.js"></script>
 <script defer src="/js/70-flow.js"></script>
 <script defer src="/js/80-live.js"></script>
-<!-- 新建工作区卡片（文件夹 + Agent）与右栏文件树/预览。两者都从 80-live 的
-     状态里读数据，但各自是一个独立的面，不往 80-live 里再堆。 -->
-<script defer src="/js/81-newspace.js"></script>
+<!-- 添加项目 / 新建 Agent 两个面，以及右栏文件树/预览。前两者共享项目池的
+     即时回执，但各自只回答一个问题：加文件夹 / 在目标里启动 Agent。 -->
+<script defer src="/js/81a-project-add.js"></script>
+<script defer src="/js/81b-new-agent.js"></script>
 <script defer src="/js/82-file-icons.js"></script>
 <script defer src="/js/83-files.js"></script>
 <script defer src="/js/84-settings-search.js"></script>

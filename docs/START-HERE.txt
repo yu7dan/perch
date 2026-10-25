@@ -19,8 +19,9 @@ Perch 0.1.0 beta — 给朋友的测试包
 3. 供应商页：添加你自己的模型供应商，或按页面提示登录官方 CLI。
 4. 总览 → Agent CLI：安装你要用的 agent（Claude Code / Codex / Pi / …），
    给这一行选一个模型，再点右侧打开。
-5. 新 agent 会在 Documents\Perch\sessions\<日期>-<agent>-<格子> 下拿到
-   独立目录；不同 agent 的会话不会混在同一个文件夹里。
+5. 新建 Agent 时选项目，agent 就在那个项目文件夹里跑；选「无项目」则直接
+   使用默认工作区 Documents\Perch。旧版本留下的 sessions\<日期>-<agent>-<格子>
+   临时目录仍会显示在「旧临时目录」里，不迁移、不删除。
 
 三、数据放在哪
 --------------

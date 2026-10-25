@@ -60,12 +60,6 @@ type Manager struct {
 	homeMu     sync.RWMutex
 	homeEnv    func() map[string]string
 	homeEnvFor func(string) map[string]string
-
-	// sessionDir 给“默认会话区里新开的格子”分配一个独立目录
-	// （Documents\Perch\sessions\<date>-<agent>-<short id>）。只在
-	// Resume.Kind=="new" 且调用方没给 cwd 时用；拿不到就退回默认目录。
-	// 它必须和 defaultCWD 一样是**唯一**答案，所以由组合根注入。
-	sessionDir func(agent string, paneID int) string
 }
 
 // New 构造空的会话表。Defs 在 agent.SetHost 之后由 SetDefs 填 —— 顺序见
@@ -115,13 +109,6 @@ func (m *Manager) SetWireProfile(fn func(id string) (map[string]string, []string
 func (m *Manager) SetEngineHomeEnv(fn func() map[string]string) {
 	m.homeMu.Lock()
 	m.homeEnv = fn
-	m.homeMu.Unlock()
-}
-
-// SetSessionDir 由组合根注入「默认会话区里新格子落在哪个独立目录」。
-func (m *Manager) SetSessionDir(fn func(agent string, paneID int) string) {
-	m.homeMu.Lock()
-	m.sessionDir = fn
 	m.homeMu.Unlock()
 }
 
@@ -239,19 +226,11 @@ func (m *Manager) Create(spec SpawnSpec) *Tab {
 	} else if m.panes != nil {
 		paneID = m.panes.NextID()
 	}
-	/* 默认会话区：新格没给 cwd 时，给它一个**独立目录**，而不是所有会话
-	   挤在 Documents\Perch 一个文件夹里（用户 2026-10-23 定）。
-	   只在 Resume.Kind=="new" 时分配 —— exact/latest 的 cwd 必须沿用记录里
-	   那一个，换了目录会接不上原会话。分配失败就退回默认目录（不拦启动）。 */
-	if strings.TrimSpace(spec.CWD) == "" && spec.Resume.Kind == "new" {
-		m.homeMu.RLock()
-		fn := m.sessionDir
-		m.homeMu.RUnlock()
-		if fn != nil {
-			if dir := strings.TrimSpace(fn(spec.Agent, paneID)); dir != "" {
-				spec.CWD = dir
-			}
-		}
+	/* 没指定 cwd 的格（无项目 Agent）落在**默认工作区根目录**，不再为每一格
+	   造一个 sessions\<...> 子目录。项目里的 Agent 由调用方显式给 cwd；空串
+	   只在“明确选了无项目”时出现（见 ctl 的 target 校验）。 */
+	if strings.TrimSpace(spec.CWD) == "" {
+		spec.CWD = m.EffectiveCWD(spec)
 	}
 	m.mu.Lock()
 	m.next++

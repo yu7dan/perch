@@ -2,7 +2,14 @@ package ctl
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/yu7dan/perch/internal/project"
+	"github.com/yu7dan/perch/internal/session"
 )
 
 // tabNew 建一格：护栏 → 分配 → 注册流 → 应答。
@@ -21,36 +28,16 @@ func (s *Server) tabNew(c Conn, m *Msg, tabReqCache map[int][]byte) {
 			return
 		}
 	}
+	// 新格的目标必须先落定：项目目标必须带真实项目路径，无项目必须显式
+	// scratch。这样后端不会把“上一轮留下的默认目录”当成用户这次选的项目。
+	if ref := targetRefusal(m.Spec, s.deps.Pool); ref != nil {
+		s.replyTabRefusal(c, m, tabReqCache, ref)
+		return
+	}
 	// C2 护栏：判**在建标签之前**。一个没有 PTY 的占位格比"什么都没发生"
 	// 更糟 —— 界面上会多出一格，用户以为它在跑。判据见 session.ResumeRefusal。
 	if ref := s.deps.Tabs.ResumeRefusal(*m.Spec); ref != nil {
-		out := map[string]any{
-			"type": "tab.ok", "tab": 0, "stream": "", "req": m.Req,
-			// 被拒也要把 paneId 带回去：前端要么用它重试同一格
-			// （瞬时冲突那 2 次重试），要么让它显式降级 ——
-			// 少一个身份，降级后的那一格就没法再写进记录里。
-			"pane": m.Spec.PaneID,
-			"err":  ref.Code, "msg": ref.Msg,
-			// 能不能重试由**判的人**给（见 session.Refusal.Retryable）：
-			// 前端不许拿 code 去查表 —— 那是第二份会漂的规则。
-			"retryable": ref.Retryable,
-		}
-		// msg 的稳定身份：前端按当前语言渲染 msg.<msgCode>，带 pid/格子的值
-		// 从 msgParams 拼；字典里没有就回退 msg 原文。
-		if ref.MsgCode != "" {
-			out["msgCode"] = ref.MsgCode
-		}
-		if len(ref.MsgParams) > 0 {
-			out["msgParams"] = ref.MsgParams
-		}
-		reply, _ := json.Marshal(out)
-		_ = s.send(c, reply)
-		if m.Req != 0 {
-			tabReqCache[m.Req] = reply // 拒绝也是应答：重发时重放它，不重新判一次护栏
-		}
-		log.Printf("[ctl] 拒绝接上 agent=%s cwd=%s resume=%s id=%s pane=%d 因=%s：%s",
-			m.Spec.Agent, m.Spec.CWD, m.Spec.Resume.Kind, m.Spec.Resume.ID,
-			m.Spec.PaneID, ref.Code, ref.Msg)
+		s.replyTabRefusal(c, m, tabReqCache, ref)
 		return
 	}
 	host := s.deps.CreateTab(*m.Spec)
@@ -59,18 +46,113 @@ func (s *Server) tabNew(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		// paneId 是这一格**跨重启的身份**：前端拿着它，才能在用户显式
 		// 关格时发 pane.forget（那是唯一一条会删记录的路径）。
 		"pane": host.PaneID,
-		// cwd 是**生效后**的目录：默认会话区的新格会在这里被换成
-		// sessions\<date>-<agent>-<id>（见 session.Manager.Create）。前端
-		// 必须拿它，否则左栏还按空串/默认根归类，新会话会掉进"旧默认目录"。
+		// cwd 是**生效后**的目录：无项目新格在 Manager.Create 里被换成默认
+		// 工作区根目录。前端必须拿它，否则左栏还按空串归类，新会话会掉进
+		// “旧临时目录”。项目目标则原样是项目路径。
 		"cwd": host.Spec.CWD,
 	})
 	_ = s.send(c, reply)
 	if m.Req != 0 {
 		tabReqCache[m.Req] = reply // 重发同一令牌时重放它 —— 绝不建第二个格子
 	}
-	log.Printf("[ctl] 新标签 tab=%d pane=%d stream=%s agent=%s cwd=%s resume=%s id=%s",
-		host.ID, host.PaneID, host.Stream, m.Spec.Agent, m.Spec.CWD,
-		m.Spec.Resume.Kind, m.Spec.Resume.ID)
+	log.Printf("[ctl] 新标签 tab=%d pane=%d stream=%s agent=%s cwd=%s target=%s resume=%s id=%s",
+		host.ID, host.PaneID, host.Stream, host.Spec.Agent, host.Spec.CWD,
+		host.Spec.Target, host.Spec.Resume.Kind, host.Spec.Resume.ID)
+}
+
+// targetRefusal is the server-side half of "no silent fallback".
+//
+// Only new panes carry an intent that can be wrong: a project target with a
+// stale/empty path, or a scratch target with a leftover cwd. Exact/latest
+// resumes deliberately keep their recorded cwd and ignore the target field.
+func targetRefusal(spec *session.SpawnSpec, pool *project.Pool) *session.Refusal {
+	if spec == nil || (spec.Resume.Kind != "" && spec.Resume.Kind != "new") {
+		return nil
+	}
+	switch spec.Target {
+	case "", "legacy":
+		return nil
+	case "scratch":
+		// Scratch is authoritative: even if a caller left a cwd behind, the
+		// projectless pane must land in the default workspace root.
+		spec.CWD = ""
+		return nil
+	case "project", "directory":
+		raw := strings.TrimSpace(spec.CWD)
+		if raw == "" {
+			return &session.Refusal{
+				Code: "project.targetRequired", MsgCode: "project.targetRequired",
+				Msg: "没有指定启动目录，不能开始这个 Agent。",
+			}
+		}
+		abs, err := filepath.Abs(raw)
+		if err != nil {
+			return &session.Refusal{
+				Code: "project.targetInvalid", MsgCode: "project.targetInvalid",
+				MsgParams: map[string]string{"path": raw, "err": err.Error()},
+				Msg:       fmt.Sprintf("启动目录看不懂：%s（%v）", raw, err),
+			}
+		}
+		st, err := os.Stat(abs)
+		if err != nil {
+			return &session.Refusal{
+				Code: "project.targetMissing", MsgCode: "project.targetMissing",
+				MsgParams: map[string]string{"path": abs},
+				Msg:       fmt.Sprintf("启动目录不存在或读不到：%s", abs),
+			}
+		}
+		if !st.IsDir() {
+			return &session.Refusal{
+				Code: "project.targetNotDir", MsgCode: "project.targetNotDir",
+				MsgParams: map[string]string{"path": abs},
+				Msg:       fmt.Sprintf("启动目标不是文件夹：%s", abs),
+			}
+		}
+		if spec.Target == "project" && (pool == nil || !pool.Has(abs)) {
+			return &session.Refusal{
+				Code: "project.targetUnknown", MsgCode: "project.targetUnknown",
+				MsgParams: map[string]string{"path": abs},
+				Msg:       fmt.Sprintf("这个目录已经不在项目里了：%s", abs),
+			}
+		}
+		spec.CWD = abs
+		return nil
+	default:
+		return &session.Refusal{
+			Code: "project.targetInvalid", MsgCode: "project.targetInvalid",
+			MsgParams: map[string]string{"path": spec.CWD, "err": spec.Target},
+			Msg:       fmt.Sprintf("未知的启动目标类型：%s", spec.Target),
+		}
+	}
+}
+
+// replyTabRefusal is shared by target validation and resume guards. Keeping
+// one reply shape means the frontend's refusal path (close the placeholder,
+// show the reason, cache by request token) is identical for both.
+func (s *Server) replyTabRefusal(c Conn, m *Msg, cache map[int][]byte, ref *session.Refusal) {
+	out := map[string]any{
+		"type": "tab.ok", "tab": 0, "stream": "", "req": m.Req,
+		// A refusal keeps the paneId so a retry/restore can still refer to the
+		// seat it was trying to use.
+		"pane": m.Spec.PaneID,
+		"err":  ref.Code, "msg": ref.Msg,
+		// Only the judge decides retryability (see session.Refusal.Retryable).
+		"retryable": ref.Retryable,
+	}
+	if ref.MsgCode != "" {
+		out["msgCode"] = ref.MsgCode
+	}
+	if len(ref.MsgParams) > 0 {
+		out["msgParams"] = ref.MsgParams
+	}
+	reply, _ := json.Marshal(out)
+	_ = s.send(c, reply)
+	if m.Req != 0 {
+		cache[m.Req] = reply // a refusal is a reply too; a resend must not re-judge
+	}
+	log.Printf("[ctl] 拒绝建格 agent=%s cwd=%s target=%s resume=%s id=%s pane=%d 因=%s：%s",
+		m.Spec.Agent, m.Spec.CWD, m.Spec.Target, m.Spec.Resume.Kind, m.Spec.Resume.ID,
+		m.Spec.PaneID, ref.Code, ref.Msg)
 }
 
 // panesQuery 是冷恢复的那一次查询（步 3）：前端在**建任何格子之前**问一次
