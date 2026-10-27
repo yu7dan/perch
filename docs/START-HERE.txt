@@ -15,10 +15,16 @@ Perch 0.1.0 beta — 给朋友的测试包
 --------------
 1. 首屏是 Workspaces。第一次使用先添加或选择一个项目文件夹。
 2. 在项目里点「新建 Agent」。如果这台机器还没有安装、可启动的 agent，
-   首次设置引导会在这里出现：先安装/选择 agent，再接入模型，完成后关闭。
-   引导不会再单独要求选择工作区，也不会自动打开一个 agent。
-3. 也可以先去总览 → Agent CLI 安装 agent、给 agent 选模型；总览 → 网关
-   安装网关引擎并添加供应商。
+   首次设置引导会在这里出现：先安装/选择 agent，再接模型提供商（可选，
+   会打开设置），完成后关闭。引导不会再单独要求选择工作区，也不会自动
+   打开一个 agent。
+3. 也可以先去总览 → Agent CLI 安装 agent；点名单里的一行会跳到
+   设置 › Agents。在设置 › 模型提供商添加提供商（名称、接口地址、key，
+   可以「测试连接」拿到模型列表），再在设置 › Agents 给每个 agent 选
+   提供商和模型。不选的 agent 照常用它自己的登录。
+   顶栏可以在 Workspaces 和 Bot Group 之间切换；Bot Group 目前只是
+   界面预览（示例数据），还不能真正使用。
+   设置里可以选主题：跟随系统 / 深色 / 浅色。
 4. 新建 Agent 必须落在一个真实项目里。默认区不再作为 Workspaces 的新建
    目标；旧版本留下的 sessions\<日期>-<agent>-<格子> 临时目录仍在盘上，
    但不再显示在 Workspaces 列表里。
@@ -28,17 +34,28 @@ Perch 0.1.0 beta — 给朋友的测试包
 三、数据放在哪
 --------------
 - %APPDATA%\Perch
-  Perch 自己的设置、座位记录、hook 事件；日志在 perch.log（8MB 轮转）。
+  Perch 自己的设置、座位记录、hook 事件；模型提供商与每个 agent 的配置
+  在 providers.json（key 用 Windows DPAPI 加密，只有当前 Windows 账户
+  解得开）；日志在 perch.log（8MB 轮转）。
 - %LOCALAPPDATA%\Perch
-  Perch 安装的网关引擎、网关的 provider key、agent 配置沙盒。
+  释放出来的 hook 接收器（bin\perch-hook.exe）。
+- 旧版本（2026-10-28 之前）内嵌过 magpie 网关，可能留下
+  %LOCALAPPDATA%\Perch\magpie、%LOCALAPPDATA%\Perch\gateway，以及
+  %APPDATA%\Perch 下的 magpie-web.key、engine-agents.json、
+  agent-profiles.json。新版本不再使用它们，可以手动删除；之前在网关里
+  配的供应商不会自动迁移，需要在设置 › 模型提供商里重新添加。
 - 卸载：退出 Perch，删除下载的 Perch.exe 即可。要彻底清掉配置和释放的
   hook，再删上面两个目录。
 
 四、隐私与安全
 --------------
 - Perch 本身不需要账号，也不做遥测。
-- 模型请求只发给你在网关里配置的供应商；密钥由本地网关保存，
-  不会写进 Perch 的日志。
+- 模型请求由各个 agent 直接发给你选的提供商，Perch 不在中间转发。
+  key 加密存在本机，界面上只显示末四位，不会写进 Perch 的日志。
+  （例外：Claude Code 只能从启动配置文件读 key，Perch 会给那一格在
+  %TEMP%\perch-claude-settings 下写一份只属于它的临时文件。）
+- 提供商配置只注入 Perch 自己打开的那一格，不改 agent 的全局配置
+  （~/.claude、~/.codex、~/.pi、OpenCode 的配置都不动）。
 - agent CLI 可能有自己的遥测、登录和配置策略，以它们自己的说明为准。
 - 安装 agent 使用官方安装脚本或 npm；请只从 Perch 里的安装按钮，
   或你信任的源安装。
@@ -49,8 +66,9 @@ Perch 0.1.0 beta — 给朋友的测试包
 - 部分 agent 首次使用需要登录（Qoder / Copilot / Cursor 等）。
 - 个别 agent 的工具执行取决于它自身版本；Perch 会如实显示失败，
   不会把失败画成成功。
-- 网关能力来自 magpie（https://usemagpie.ai，MIT）；
-  第三方组件与许可见 THIRD-PARTY.md 和 licenses/。
+- 目前能替它接提供商的 agent 是 Claude Code、Codex、Pi、OpenCode；
+  其他 agent 只能在设置 › Agents 里写环境变量。
+- 第三方组件与许可见 THIRD-PARTY.md 和 licenses/。
 
 六、遇到问题
 ------------

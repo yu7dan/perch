@@ -7,8 +7,7 @@
 
 $("dash-refresh").addEventListener("click", () => {
   sendCtrl({ type: "lib.reload" });
-  sendCtrl({ type: "magpie.refresh" });
-  sendCtrl({ type: "log", msg: "总览 点刷新 → lib.reload + magpie.refresh" });
+  sendCtrl({ type: "log", msg: "总览 点刷新 → lib.reload" });
 });
 
 // 点「运行中」的一行 = 回到工作区 + 跳到那一格（行是左栏同款 .arow）。
@@ -81,8 +80,8 @@ RSB_READY = true;
 /* 打开启动闸，把脚本求值期间到达的消息按原顺序放行（见 20-ctl.js 的 ctlInbox
    与 80-live.js 的 pendingShell）。必须先置 RSB_READY：这些处理器里的重画
    （renderLists / renderProjLive / …）都靠它判断"现在能不能画"。
-   ⚠️ 这一句是本文件**最后一条脚本**才有的特权：到这儿 87-gateway 的
-   applyMagpie / applyGw* 都真的已经求值完了。别把它挪到前面的文件里。 */
+   ⚠️ 这一句是本文件**最后一条脚本**才有的特权：到这儿所有处理器（85b 的
+   applyProviders、88 的 applyInstall……）都真的已经求值完了。别把它挪到前面的文件里。 */
 flushCtlBoot();
 if (pendingShell) {
   const p = pendingShell;

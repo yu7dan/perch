@@ -7,8 +7,8 @@ import (
 	"github.com/yu7dan/perch/internal/agent"
 )
 
-// A configured agent must not fall back to its own config when the gateway
-// profile cannot be applied. The fallback is what made Codex hit OpenAI with a
+// A configured agent must not fall back to its own config when its provider
+// settings cannot be applied. The fallback is what made Codex hit OpenAI with a
 // stale login and print a raw 401 after restart.
 func TestProfileErrorBlocksLaunch(t *testing.T) {
 	m := New(Deps{
@@ -18,7 +18,7 @@ func TestProfileErrorBlocksLaunch(t *testing.T) {
 	m.SetDefs(map[string]agent.Def{
 		"fake": {Exe: "cmd.exe"},
 	})
-	want := errors.New("gateway model profile could not be applied")
+	want := errors.New("model-provider settings could not be applied")
 	m.SetWireProfile(func(string) (map[string]string, []string, bool, error) {
 		return nil, nil, false, want
 	})

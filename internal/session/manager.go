@@ -45,21 +45,10 @@ type Manager struct {
 	defsMu sync.RWMutex
 	defs   map[string]agent.Def
 
-	// 组合根在网关建好之后注入：查 agy 这类 agent 的启动环境。
-	// 唯一调用点是 agent.AgyDef 的 Prepare；没接网关时保持 nil。
-	wireMu     sync.RWMutex
-	wireLaunch func(id string) (map[string]string, []string, bool)
-
-	// profileMu：Perch 自己的 per-agent 配置（模型/档位）注入。
-	// 只有隔离网关模式下列表函数才返回内容；旧路径保持 nil。
+	// profileMu：Perch 自己的 per-agent 配置（模型提供商 / 模型 / 强度）注入。
+	// 没配的 agent 返回 ok=false，按它自己的配置启动。
 	profileMu   sync.RWMutex
 	wireProfile func(id string) (map[string]string, []string, bool, error)
-
-	// homeMu：隔离引擎的沙盒用户目录。agy 这类由 Perch 直接启动、
-	// 但配置由引擎管理的 agent 要和引擎读同一份配置。
-	homeMu     sync.RWMutex
-	homeEnv    func() map[string]string
-	homeEnvFor func(string) map[string]string
 }
 
 // New 构造空的会话表。Defs 在 agent.SetHost 之后由 SetDefs 填 —— 顺序见
@@ -87,16 +76,8 @@ func (m *Manager) SetDefs(defs map[string]agent.Def) {
 	m.defsMu.Unlock()
 }
 
-// SetWireLaunch 由组合根在网关构造完成后调用。设置后每次开格都会现查，
-// 这样在抽屉里改完网关接线不需要重启 Perch。
-func (m *Manager) SetWireLaunch(fn func(id string) (map[string]string, []string, bool)) {
-	m.wireMu.Lock()
-	m.wireLaunch = fn
-	m.wireMu.Unlock()
-}
-
-// SetWireProfile 由组合根注入：返回这一格要用的 Perch 网关配置。
-// Claude 的 env 会合并进 --settings；Codex 的 args 是顶层 -c 覆盖。
+// SetWireProfile 由组合根注入：返回这一格要用的模型提供商配置（每次开格
+// 现查，改完设置不用重启 Perch）。Claude 的 env 会合并进 --settings；Codex 的 args 是顶层 -c 覆盖。
 // error 表示“用户确实配了这个 agent，但配置没生效”：这时绝不能静默回退到
 // agent 自己的配置（Codex 会拿旧登录去直连，出现一长串 401）。
 func (m *Manager) SetWireProfile(fn func(id string) (map[string]string, []string, bool, error)) {
@@ -105,44 +86,10 @@ func (m *Manager) SetWireProfile(fn func(id string) (map[string]string, []string
 	m.profileMu.Unlock()
 }
 
-// SetEngineHomeEnv 由组合根在隔离模式确定后注入。
-func (m *Manager) SetEngineHomeEnv(fn func() map[string]string) {
-	m.homeMu.Lock()
-	m.homeEnv = fn
-	m.homeMu.Unlock()
-}
-
-func (m *Manager) EngineHomeEnv() map[string]string {
-	m.homeMu.RLock()
-	fn := m.homeEnv
-	m.homeMu.RUnlock()
-	if fn == nil {
-		return nil
-	}
-	return fn()
-}
-
 // HookSettings 给 Qoder 这类 Claude 形状但走 --settings 的 agent 用。
 // 事件路径写死成这一格的 tN.jsonl，钩子接收器和 Claude 共用一条轮询腿。
 func (m *Manager) HookSettings(tag string) string {
 	return BuildHookSettings(m.stateDir, tag)
-}
-
-// SetEngineHomeEnvFor 给通用 CLI 用：按 agent id 决定是否换引擎沙盒。
-func (m *Manager) SetEngineHomeEnvFor(fn func(string) map[string]string) {
-	m.homeMu.Lock()
-	m.homeEnvFor = fn
-	m.homeMu.Unlock()
-}
-
-func (m *Manager) EngineHomeEnvFor(id string) map[string]string {
-	m.homeMu.RLock()
-	fn := m.homeEnvFor
-	m.homeMu.RUnlock()
-	if fn == nil {
-		return nil
-	}
-	return fn(id)
 }
 
 // NoteActivity 是没有 Claude 形状 hooks 的适配器（OpenCode/Pi）的“说过话”
@@ -601,15 +548,4 @@ func (m *Manager) ResolveExe(bin string) (string, []string) {
 		return bin, nil
 	}
 	return m.resolveExe(bin)
-}
-
-// WireLaunch 实现 agent.Host：把请求转给组合根注入的网关查询。
-func (m *Manager) WireLaunch(id string) (map[string]string, []string, bool) {
-	m.wireMu.RLock()
-	fn := m.wireLaunch
-	m.wireMu.RUnlock()
-	if fn == nil {
-		return nil, nil, false
-	}
-	return fn(id)
 }

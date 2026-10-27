@@ -14,8 +14,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
-	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -23,14 +23,13 @@ import (
 	perchassets "github.com/yu7dan/perch"
 	"github.com/yu7dan/perch/internal/agent"
 	"github.com/yu7dan/perch/internal/agentcatalog"
-	"github.com/yu7dan/perch/internal/agentprofile"
 	"github.com/yu7dan/perch/internal/appdir"
 	"github.com/yu7dan/perch/internal/ctl"
 	"github.com/yu7dan/perch/internal/dsh"
-	"github.com/yu7dan/perch/internal/gateway"
 	"github.com/yu7dan/perch/internal/install"
 	"github.com/yu7dan/perch/internal/panes"
 	"github.com/yu7dan/perch/internal/project"
+	"github.com/yu7dan/perch/internal/providers"
 	"github.com/yu7dan/perch/internal/session"
 	"github.com/yu7dan/perch/internal/settings"
 	"github.com/yu7dan/perch/internal/stream"
@@ -49,17 +48,15 @@ type perchApp struct {
 	stateDir    string
 	fallbackCWD string
 
-	titles      *session.TitleStore
-	prefs       *settings.Store
-	pool        *project.Pool
-	panes       *panes.Store
-	tabs        *session.Manager
-	profiles    *agentprofile.Store
-	profileSets *agentprofile.SetStore
+	titles    *session.TitleStore
+	prefs     *settings.Store
+	providers *providers.Store
+	pool      *project.Pool
+	panes     *panes.Store
+	tabs      *session.Manager
 
 	defs map[string]agent.Def
 
-	gw        *gateway.Gateway
 	installer *install.Installer
 	follower  *transcript.Follower
 	push      *pushRelay
@@ -125,33 +122,19 @@ func main() {
 	}
 	log.Printf("[perch] 版本 %s（pid %d）", buildVersion, os.Getpid())
 
-	// Perch 自己的 per-agent 配置（模型别名/档位）。和 agent 的全局配置分开，
-	// 由隔离网关在开格时注入；默认路径在 %APPDATA%\Perch\agent-profiles.json。
-	if p, err := appdir.PerchFile("agent-profiles.json"); err == nil {
-		a.profiles = agentprofile.Load(p)
-	} else {
-		a.profiles = agentprofile.Load("")
-	}
-	// 名单精简：删掉已移除 agent 的 Perch 会话配置；不影响会话/转录文件。
-	for _, p := range a.profiles.All() {
-		if p.Agent != "" && !agentcatalog.Exists(p.Agent) {
-			_ = a.profiles.Set(agentprofile.Profile{Agent: p.Agent})
-			log.Printf("[perch] 名单精简：移除已下架 agent 的 Perch 配置 %s", p.Agent)
-		}
-	}
-	// 配置方案（Profiles）：当前 per-agent 配置的快照，存成独立文件。
-	if p, err := appdir.PerchFile("agent-profile-sets.json"); err == nil {
-		a.profileSets = agentprofile.LoadSets(p)
-	} else {
-		a.profileSets = agentprofile.LoadSets("")
-	}
-
 	// 状态根按 Claude Code 自己的规则取：环境里有 CLAUDE_CONFIG_DIR 就用它，
 	// 否则 <用户主目录>\.claude。仓库里不留任何本机绝对路径。
 	a.titles = session.LoadTitleStore(filepath.Join(a.stateDir, "titles.json"))
 	// 设置要在池子**之前**载入：默认工作区路径会读里面的「默认目录」，
 	// 而 EnsureDefaultWorkspace / 合成的默认工作区都走它。
 	a.prefs = settings.Load()
+	// 模型提供商与每个 agent 的配置：%APPDATA%\Perch\providers.json。
+	if pf, err := appdir.PerchFile(providers.FileName); err == nil {
+		a.providers = providers.Load(pf)
+	} else {
+		log.Printf("[providers] 拿不到配置目录，这轮只活在内存里：%v", err)
+		a.providers = providers.Load("")
+	}
 	a.pool = project.Load()
 	// 「安装即存在」：默认工作区那个目录由我们建出来，因为新格没挑项目时会
 	// 落在它里面（claude 起不来一个不存在的 cwd）。它不写进 projects.json ——
@@ -218,46 +201,10 @@ func main() {
 	a.defs = agentcatalog.Defs(a.stateDir)
 	a.tabs.SetDefs(a.defs)
 
-	// 网关与安装器：网关先建（安装完成回调要接它）；两者都只通过 push 出站。
-	a.gw = gateway.New(a.push.Push)
-	// 已接入引擎的 agent 表要跨重启：冷恢复的格子比 /api/state 先起来，
-	// 没这份缓存，Gemini 这类通用 CLI 会拿真实配置启动并弹登录页。
-	if p, err := appdir.PerchFile("engine-agents.json"); err == nil {
-		a.gw.SetEngineAgentsFile(p)
-	}
-	// 2026-10-22：隔离引擎是产品默认路径：只用 Perch 自己安装的 portable
-	// magpie，不碰桌面 magpie/3425，也不写 agent 的全局配置。
-	// 排障时可以显式设 PERCH_ISOLATED_GATEWAY=0 回到旧的桌面 magpie 发现路径。
-	if v := strings.ToLower(strings.TrimSpace(os.Getenv("PERCH_ISOLATED_GATEWAY"))); v != "0" && v != "false" && v != "off" {
-		a.gw.SetIsolated(true)
-		log.Printf("[gw] 使用 Perch 自己的隔离网关引擎")
-	}
-	// agy 这类 agent 的网关地址/密钥只能从环境变量拿；magpie 的 /api/state
-	// 带一条 launch 命令，网关把它解析成 env+args，开格时由 AgyDef 现取。
-	// 没接线时 Launch 返回 false，启动退回通用路径。
-	a.tabs.SetWireLaunch(a.gw.Launch)
-	// Phase 2：Perch 自己的 per-agent 模型注入。只在隔离引擎模式下有内容；
-	// 旧路径（桌面 magpie）保持不注入、行为不变。
+	// 每个 agent 的模型注入：开格前读 Perch 自己的「模型提供商」配置
+	// （见 agentWireProfile）。没配的 agent 按它自己的登录/配置启动；
+	// 所有 agent 都跑在用户真实的主目录里。
 	a.tabs.SetWireProfile(a.agentWireProfile)
-	// 隔离引擎的 USERPROFILE 是沙盒；agy 直接由 Perch 启动，也要用同一份
-	// 用户目录，才能和引擎读到同一份 settings/信任列表。
-	a.tabs.SetEngineHomeEnv(func() map[string]string {
-		if !a.gw.Isolated() {
-			return nil
-		}
-		return gateway.EngineHomeEnv()
-	})
-	// 通用 CLI 只有当前确实由引擎接入网关时才换沙盒；否则继续读用户自己
-	// 的配置（未接入 = 不替用户改运行环境）。
-	a.tabs.SetEngineHomeEnvFor(func(id string) map[string]string {
-		if !a.gw.Isolated() || !a.gw.AgentEngineManaged(id) {
-			return nil
-		}
-		return gateway.EngineHomeEnv()
-	})
-	// 内嵌网关页的语言跟 Perch 的设置走：先记下偏好，控制面连上时再写进
-	// magpie（它自己的 settings.lang），见 internal/gateway/language.go。
-	a.gw.SetLanguage(a.prefs.Snapshot().Language)
 	// dsh 的“状态”不是启动时顺手能做的：它要写用户的 DSH home patch，
 	// 还要把官方 hook 桥和 peer 装进 dsh-tui profile。所以只放在两个
 	// **用户明确点下**的动作里（安装完成 / 名单里的「接入状态」），不静默跑。
@@ -265,23 +212,8 @@ func main() {
 		if id != "dsh" {
 			return nil
 		}
-		// 隔离模式下 Perch 启动的 dsh 读的是引擎沙盒里的 DSH_HOME；hook 桥/
-		// home patch 也必须写进同一份，否则真实 ~/.dsh 装好了、Perch 的格子
-		// 仍然看不到状态。这个函数只在用户点「接入状态钩子」时跑，短暂设置
-		// 环境变量即可。
-		if a.gw.Isolated() {
-			if home := gateway.PerchEngineHomeDir(); home != "" {
-				old, had := os.LookupEnv("DSH_HOME")
-				_ = os.Setenv("DSH_HOME", filepath.Join(home, ".dsh"))
-				defer func() {
-					if had {
-						_ = os.Setenv("DSH_HOME", old)
-					} else {
-						_ = os.Unsetenv("DSH_HOME")
-					}
-				}()
-			}
-		}
+		// Perch 启动的 dsh 读的就是用户真实的 DSH home，hook 桥/home patch
+		// 写进同一份即可。
 		return dsh.EnsureHooks(a.stateDir, session.HookDir(a.stateDir), session.HookExePath(), log)
 	}
 	a.installer = install.New(install.Deps{
@@ -290,17 +222,10 @@ func main() {
 			home, _ := os.UserHomeDir()
 			return agentcatalog.Cards(home)
 		},
-		MergeCalls:   a.mergeCatalogCalls,
 		ReloadPath:   winproc.ReloadPathFromRegistry,
 		ProbeVersion: winproc.ProbeVersion,
 		Home:         os.UserHomeDir,
 		Setup:        setupAgent,
-		OnInstalled: func(id string, ok bool) {
-			// 装完 magpie 自动接入控制面（用户 2026-10-17 定的）。
-			if id == "magpie" && ok {
-				go a.gw.Connect()
-			}
-		},
 	})
 
 	app := application.New(application.Options{
@@ -308,11 +233,7 @@ func main() {
 		Description: "面向 agent 终端的 Windows 桌面工作台",
 		Icon:        appIcon,
 		Assets: application.AssetOptions{
-			// /gwui/ 只做一次跳转：把网关页的 iframe 指到本地反代
-			// （见 internal/gateway/ui.go；真正的 /gwui/* 与 /api/* 在 127.0.0.1 的
-			// 随机端口上，因为 Wails 这一版交给 asset handler 的
-			// POST 请求没有请求体）。其余路径仍由嵌入的 assets 提供。
-			Handler: a.gw.UIHandler(application.BundledAssetFileServer(perchassets.Assets)),
+			Handler: application.BundledAssetFileServer(perchassets.Assets),
 		},
 	})
 
@@ -481,14 +402,11 @@ func main() {
 		Titles:         a.titles,
 		Pool:           a.pool,
 		Prefs:          a.prefs,
-		Gateway:        a.gw,
-		Profiles:       a.profiles,
-		ProfileSets:    a.profileSets,
+		Providers:      a.providers,
 		Installer:      a.installer,
 		Transcript:     a.follower,
 		DefaultCWD:     a.defaultCWD,
 		SessionExists:  a.tabs.SessionFileExistsFor,
-		MergeCalls:     a.mergeCatalogCalls,
 		SetupAgent:     setupAgent,
 		// 顺序是硬约束：**先**注册流、**再**返回 —— ctl 接着就回 tab.ok，
 		// 前端拿到应答会立刻去连那条流（Wails 在连接建立时才按名字查 handler）。
@@ -500,15 +418,6 @@ func main() {
 		UI: ui,
 	})
 	a.push.Set(ctlSrv)
-
-	// 网关读数（只读）：本机那份立刻出，HTTP 那条腿在后台 2.5s 一次。
-	// 它不参与任何 PTY/会话逻辑 —— 网关关着时最坏也只是总览少几张读数。
-	a.gw.StartWatcher()
-	// 控制面只做**被动探测**：接已经存在的那个，不在这里拉起 magpie web ——
-	// 用户没点「连接」之前，Perch 不该多出一个后台进程。
-	go a.gw.Probe()
-	// 把已配置的模型组提前写进引擎；不创建 agent，不阻塞窗口。
-	go a.warmAgentProfiles()
 
 	/* 关窗那一刻**同步**把登记表写一遍（写的是内存里那份，见 panes.Store.FlushSync）。
 	   ⚠️ 为什么挂在**窗口事件**上而不是 app.OnShutdown —— 2026-10-16 实测：
@@ -525,10 +434,6 @@ func main() {
 	   节流负责"平时一直在写"，这一条负责"真到最后一刻也写完"。 */
 	window.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
 		a.panes.FlushSync("窗口正在关闭")
-		// Perch 自己拉起的 magpie web 随窗口一起收掉；外部控制面（桌面 magpie
-		// 或用户自己起的）只断开连接，不动进程。关窗这条路不经过 OnShutdown，
-		// 所以必须挂在这里（见上面那段实测）。
-		a.gw.Stop()
 	})
 	// 兜底（**留着，但它不是关窗那条路**）：App.Quit() / 信号那几条退出路会跑
 	// OnShutdown 那串任务，顺序照注册序 —— 里面最先跑的是 Wails 自己的
@@ -536,13 +441,8 @@ func main() {
 	// `defer tabs.Drop` 都已经执行完了 ⇒ **只许写内存记录，不许从 tabs.Live() 现取**
 	// （那时它是空的，取出来是一张空表，而且不报错）。
 	app.OnShutdown(func() {
-		a.gw.Stop()
 		a.panes.FlushSync("应用收尾（Quit/信号）")
 	})
-
-	// 网关页内嵌 magpie 界面所需的本地反代（127.0.0.1，随机端口 + token）。
-	// 必须在 Run 之前起：页面首帧就可能落到网关页。
-	a.gw.StartUI()
 
 	// Must be before app.Run: Wails exits while making the first window when
 	// WebView2 is absent, and there would be no surface to explain that.
@@ -598,160 +498,43 @@ func (a *perchApp) defaultCWD() string {
 
 // 无项目 Agent 现在直接使用默认工作区根目录；旧版本建出来的
 // sessions\<...> 目录仍留在盘上，左栏按“旧临时目录”分组。
-// agentWireProfile 是 session.Manager 开格前的注入点。
+// agentWireProfile 是 session.Manager 开格前的注入点：读 Perch 自己的
+// 「模型提供商」配置。
 //
-// 只做 Perch 自己的配置：模型指向 group/perch-<agent> 这个稳定别名，
-// 引擎里的 group 目标换了，运行中的会话下一轮就生效。绝不写 agent 的
-// 全局配置。
-//
-// 这里的错误分两类：
-//   - 用户没给这个 agent 配模型：返回 ok=false，按 agent 自己的配置启动；
-//   - 用户配了模型但组没写进引擎：返回 error。不能静默回退 —— Codex 会拿
-//     旧登录直连 OpenAI，用户看到的是一长串 401，而不是“网关没就绪”。
+// 只做 Perch 自己的配置：注入只落在这一格的进程上，绝不写 agent 的全局配置。
+//   - 这个 agent 什么都没配：ok=false，按 agent 自己的登录 / 配置启动；
+//   - 配了但接不上（协议不对、缺模型、key 解不开）：返回 error，这一格不启动，
+//     终端里说清原因 —— 不能静默回退到 agent 自己的登录（那样看到的是 401）。
 func (a *perchApp) agentWireProfile(id string) (map[string]string, []string, bool, error) {
-	if a.profiles == nil || !a.gw.Isolated() || !agent.Injects(id) {
+	if a.providers == nil {
 		return nil, nil, false, nil
 	}
-	p, ok := a.profiles.Get(id)
-	if !ok || p.Alias == "" || p.Model == "" {
+	r, ok, err := a.providers.Resolve(id)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if !ok {
 		return nil, nil, false, nil
 	}
-	// 组已应用时走内存缓存；只有首次/配置变化才写引擎。只改 Perch 引擎的
-	// portable data，不碰桌面 magpie，也不碰 agent 配置。
-	//
-	// 重启后网关引擎可能还在起，第一次请求会失败。短重试覆盖这个竞态；
-	// 仍然失败就返回错误，不能悄悄回退到 agent 自己的配置。
-	var groupErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		if groupErr = a.gw.EnsureAgentGroup(p.Alias, p.Model, p.Effort); groupErr == nil {
-			break
-		}
-		if attempt < 2 {
-			time.Sleep(300 * time.Millisecond)
-		}
+	home, _ := os.UserHomeDir()
+	l, err := providers.Build(id, r, home)
+	if err != nil {
+		log.Printf("[providers] agent %s 的配置接不上：%v", id, err)
+		return nil, nil, false, err
 	}
-	if groupErr != nil {
-		log.Printf("[gw] agent %s 的 Perch 模型配置没有生效：%v", id, groupErr)
-		return nil, nil, false, groupErr
+	pname := "(无)"
+	if r.Provider != nil {
+		pname = r.Provider.Name
 	}
-	switch id {
-	case "claude":
-		env := gateway.ClaudeProfileEnv(p.Alias)
-		// 档位自己的模型：每一档一个稳定组，换这一档只动它。
-		// 组没建起来就退回主模型，不挡整格启动。
-		for tier, tp := range p.Tiers {
-			if tp.Model == "" {
-				continue
-			}
-			key := gateway.ClaudeTierEnvKey(tier)
-			if key == "" {
-				continue
-			}
-			alias := gateway.ClaudeTierAlias(p.Alias, tier)
-			if err := a.gw.EnsureAgentGroup(alias, tp.Model, tp.Effort); err != nil {
-				log.Printf("[gw] agent %s 的 %s 档位没有生效，退回主模型：%v", id, tier, err)
-				continue
-			}
-			env[key] = alias
-			if strings.EqualFold(tier, "haiku") {
-				// Claude Code 的小任务（标题/背景）走 haiku 档。
-				env["ANTHROPIC_SMALL_FAST_MODEL"] = alias
-			}
-		}
-		return env, nil, true, nil
-	case "codex":
-		return nil, gateway.CodexProfileArgs(p.Alias), true, nil
-	case "pi":
-		home, herr := os.UserHomeDir()
-		if herr != nil {
-			return nil, nil, false, herr
-		}
-		if home == "" {
-			return nil, nil, false, fmt.Errorf("无法确定用户主目录")
-		}
-		env, err := gateway.PiProfileEnv(home, p.Alias, p.Model, p.Effort)
-		if err != nil {
-			log.Printf("[gw] agent %s 的 Pi 配置没有生成：%v", id, err)
-			return nil, nil, false, err
-		}
-		return env, nil, true, nil
-	case "opencode":
-		home, herr := os.UserHomeDir()
-		if herr != nil {
-			return nil, nil, false, herr
-		}
-		if home == "" {
-			return nil, nil, false, fmt.Errorf("无法确定用户主目录")
-		}
-		env, err := gateway.OpenCodeProfileEnv(home, p.Alias, p.Model, p.Effort)
-		if err != nil {
-			log.Printf("[gw] agent %s 的 OpenCode 配置没有生成：%v", id, err)
-			return nil, nil, false, err
-		}
-		return env, nil, true, nil
-	default:
-		return nil, nil, false, nil
+	// 只记变量名，不记值（值里有 key）。
+	names := make([]string, 0, len(l.Env))
+	for k := range l.Env {
+		names = append(names, k)
 	}
-}
-
-// warmAgentProfiles 在后台把已配置的模型组提前写进引擎。
-//
-// 组设置以前每次开格都启动 magpie CLI，用户先等 3–5 秒。现在先走 HTTP
-// 保存并缓存结果，启动时后台预热；这里只预热“组”，不创建任何 agent 进程，
-// 也不碰用户配置。预热失败仍然由开格时的同一段逻辑重试并报错。
-func (a *perchApp) warmAgentProfiles() {
-	if a.profiles == nil || !a.gw.Isolated() {
-		return
-	}
-	profiles := a.profiles.All()
-	if len(profiles) == 0 {
-		return
-	}
-	start := time.Now()
-	for _, p := range profiles {
-		if p.Alias == "" || p.Model == "" {
-			continue
-		}
-		var err error
-		for attempt := 0; attempt < 3; attempt++ {
-			if err = a.gw.EnsureAgentGroup(p.Alias, p.Model, p.Effort); err == nil {
-				break
-			}
-			time.Sleep(400 * time.Millisecond)
-		}
-		if err != nil {
-			log.Printf("[gw] 预热 %s 模型组失败：%v", p.Agent, err)
-			continue
-		}
-		if p.Agent == "claude" {
-			for tier, tp := range p.Tiers {
-				if tp.Model == "" {
-					continue
-				}
-				alias := gateway.ClaudeTierAlias(p.Alias, tier)
-				if err := a.gw.EnsureAgentGroup(alias, tp.Model, tp.Effort); err != nil {
-					log.Printf("[gw] 预热 %s/%s 档位失败：%v", p.Agent, tier, err)
-				}
-			}
-		}
-	}
-	log.Printf("[gw] 模型组预热完成（%d 个配置，%s）", len(profiles), time.Since(start).Round(time.Millisecond))
-}
-
-// mergeCatalogCalls 把“今日经过网关”的读数保留下来：刚扫出来的名单没有
-// calls，直接推给前端会让所有 agent 的今日流量闪成 0。
-func (a *perchApp) mergeCatalogCalls(cat []agentcatalog.Card) {
-	s := a.gw.Snapshot()
-	if s == nil {
-		return
-	}
-	byID := map[string]int{}
-	for _, card := range s.Catalog {
-		byID[card.ID] = card.Calls
-	}
-	for i := range cat {
-		cat[i].Calls = byID[cat[i].ID]
-	}
+	sort.Strings(names)
+	log.Printf("[providers] agent %s 注入：提供商=%s 模型=%s 强度=%s env=%v 参数 %d 个",
+		id, pname, pick(r.Model, "(默认)"), pick(r.Effort, "(默认)"), names, len(l.Args))
+	return l.Env, l.Args, true, nil
 }
 
 // openInWindowsTerminal 用 Windows Terminal 打开同一个 cwd 的 claude。
@@ -833,10 +616,10 @@ func (a *perchApp) handleTab(c *application.StreamConn, host *session.Tab) {
 				log.Printf("[perch] tab=%d 未知 agent %q", host.ID, se.Agent)
 				_ = c.Send(a.termMsg("Unknown agent", "未知 agent", se.Agent))
 			case session.StageProfile:
-				log.Printf("[perch] tab=%d 网关模型配置未生效: %v", host.ID, se.Err)
+				log.Printf("[perch] tab=%d 模型提供商配置未生效: %v", host.ID, se.Err)
 				_ = c.Send(a.termMsg(
-					"Gateway model profile could not be applied",
-					"网关模型配置没有生效，请检查网关和模型",
+					"This agent's model-provider settings could not be applied; check Settings > Agents",
+					"这个 agent 的模型提供商配置没有生效，请检查「设置 > Agents」",
 					se.Err.Error()))
 			case session.StagePrepare:
 				log.Printf("[perch] tab=%d 启动准备失败: %v", host.ID, se.Err)
@@ -860,4 +643,11 @@ func (a *perchApp) handleTab(c *application.StreamConn, host *session.Tab) {
 
 	// 进程退出看门狗、PTY→前端、前端→PTY 都在 Serve 里；它返回 = 这条流结束。
 	srv.Serve(running.Session, pending)
+}
+
+func pick(s, alt string) string {
+	if strings.TrimSpace(s) == "" {
+		return alt
+	}
+	return s
 }

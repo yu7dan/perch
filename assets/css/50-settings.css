@@ -196,3 +196,57 @@
 .set-switch:hover{filter:brightness(1.12)}
 .set-switch:focus-visible{outline:2px solid rgba(115,115,115,.62);outline-offset:2px}
 
+
+/* ===== 模型提供商 / Agents（2026-10-28）===== */
+.set-btn.primary{background:var(--fg);color:var(--bg);border-color:transparent;font-weight:500}
+.set-btn.primary:hover{background:var(--fg);color:var(--bg);opacity:.9}
+.set-btn[aria-disabled="true"]{color:var(--faint);background:none}
+.pv-row .settings-lab b{color:var(--fg)}
+.pv-eps{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px}
+.pv-ep{display:inline-flex;align-items:center;gap:6px;font:11px var(--mono);color:var(--fg2)}
+.pv-ep i{font:600 9.5px var(--ui);font-style:normal;letter-spacing:.04em;color:var(--faint);
+  border:1px solid var(--line);border-radius:4px;padding:0 4px}
+.pv-meta{display:flex!important;align-items:center;gap:8px;flex-wrap:wrap}
+.pv-test{font-size:11.5px}
+.pv-test.ok{color:var(--green)}
+.pv-test.bad{color:var(--red)}
+.pv-test.busy{color:var(--muted)}
+.pv-acts{gap:4px}
+.pv-addrow{justify-content:flex-start;padding-top:8px;padding-bottom:8px}
+.pv-edit{padding:16px 18px;display:grid;gap:12px;background:var(--s-2)}
+.settings-row + .pv-edit,.pv-edit + .settings-row{border-top:1px solid var(--line-soft)}
+.pv-edit-h b{font-size:13px;font-weight:600}
+.pv-presets{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:11.5px;color:var(--faint)}
+.pv-chip{height:24px;padding:0 9px;border:1px solid var(--line);border-radius:999px;font-size:11.5px;color:var(--fg2)}
+.pv-chip:hover{border-color:rgb(var(--fx) / .2);color:var(--fg)}
+.pv-f{display:grid;grid-template-columns:132px minmax(0,1fr);align-items:center;gap:4px 12px}
+.pv-f > span{font-size:12px;color:var(--fg2)}
+.pv-f em{grid-column:2;font-style:normal;font-size:11px;color:var(--faint)}
+.pv-in{height:30px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:var(--s-deep);
+  color:var(--fg);font:12.5px var(--ui);outline:none;min-width:0;width:100%;transition:border-color var(--dur-2)}
+.pv-in.mono{font:12px var(--mono)}
+.pv-in:focus{border-color:rgb(var(--fx) / .28)}
+.pv-in::placeholder{color:var(--faint)}
+textarea.pv-in{height:auto;min-height:52px;padding:7px 10px;resize:vertical;line-height:1.5}
+.pv-err{padding:0}
+.pv-edit-acts{display:flex;align-items:center;gap:6px}
+.pv-edit-acts .sp{flex:1}
+.ag-cfg-row{padding:14px 18px;display:grid;gap:10px;transition:background-color .6s var(--ease-out)}
+.ag-cfg-row + .ag-cfg-row{border-top:1px solid var(--line-soft)}
+.ag-cfg-row.flash{background:rgb(var(--accent-rgb) / .10)}
+.ag-cfg-h{display:flex;align-items:center;gap:8px}
+.ag-cfg-h b{font-size:13px;font-weight:600}
+.ag-cfg-h .sp{flex:1}
+.ag-cfg-st{font-size:11px;color:var(--faint);border:1px solid var(--line-soft);border-radius:999px;padding:1px 7px}
+.ag-cfg-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 14px}
+.ag-f{display:grid;gap:5px;min-width:0}
+.ag-f > span{font-size:11px;color:var(--faint)}
+.ag-f.wide{grid-column:1/-1}
+.ag-f .set-select{max-width:none;width:100%}
+.ag-env-saved{display:flex!important;flex-wrap:wrap;gap:5px}
+.ag-env-chip{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 3px 0 8px;border:1px solid var(--line);
+  border-radius:999px;background:var(--s-2)}
+.ag-env-chip code{font:11px var(--mono);color:var(--fg2)}
+.ag-env-chip button{width:16px;height:16px;border-radius:50%;color:var(--faint);font-size:12px;line-height:1}
+.ag-env-chip button:hover{background:rgb(var(--red-rgb) / .12);color:var(--red)}
+.ag-err{padding:0}

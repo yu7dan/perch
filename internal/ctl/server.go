@@ -18,12 +18,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yu7dan/perch/internal/agentcatalog"
-	"github.com/yu7dan/perch/internal/agentprofile"
-	"github.com/yu7dan/perch/internal/gateway"
 	"github.com/yu7dan/perch/internal/install"
 	"github.com/yu7dan/perch/internal/panes"
 	"github.com/yu7dan/perch/internal/project"
+	"github.com/yu7dan/perch/internal/providers"
 	"github.com/yu7dan/perch/internal/session"
 	"github.com/yu7dan/perch/internal/settings"
 	"github.com/yu7dan/perch/internal/transcript"
@@ -62,22 +60,17 @@ type Deps struct {
 	// Version 是构建时注入的版本号（main.buildVersion）；设置页「关于」显示它。
 	Version string
 
-	Tabs        *session.Manager
-	Panes       *panes.Store
-	Titles      *session.TitleStore
-	Pool        *project.Pool
-	Prefs       *settings.Store
-	Gateway     *gateway.Gateway
-	Profiles    *agentprofile.Store
-	ProfileSets *agentprofile.SetStore
-	Installer   *install.Installer
-	Transcript  *transcript.Follower
+	Tabs       *session.Manager
+	Panes      *panes.Store
+	Titles     *session.TitleStore
+	Pool       *project.Pool
+	Prefs      *settings.Store
+	Providers  *providers.Store
+	Installer  *install.Installer
+	Transcript *transcript.Follower
 
 	DefaultCWD    func() string
 	SessionExists func(agentName, cwd, id string) bool
-	// MergeCalls 把 magpie 的今日调用数合并进 agentcatalog.Cards 的结果，
-	// 让“接入状态”成功后推回去的名单和总览使用同一份数据。
-	MergeCalls func([]agentcatalog.Card)
 	// SetupAgent 是“只启动 → 接入状态”的动作（目前只有 dsh）。它是用户
 	// 点下按钮才跑的，不静默；失败由 ctl 折成 install.done(ok=false)。
 	SetupAgent func(id string, log func(string)) error
@@ -181,26 +174,17 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 	case "log", "term.theme", "acts.snapshot", "files.snapshot", "trace.diff", "open.url":
 		s.handleMisc(m)
 
-	// 网关（magpie）
-	case "magpie.refresh", "magpie.update.get", "magpie.update.install",
-		"gw.connect", "gw.disconnect", "gw.refresh",
-		"gw.agents", "gw.agents.prefetch", "gw.agent.set",
-		"gw.agent.connect", "gw.agent.disconnect", "gw.agent.reapply",
-		"gw.agent.keep", "gw.agent.preview", "gw.agents.drift":
-		s.handleGateway(m)
-
-	// Perch 自己的 per-agent 配置（隔离网关；不写 agent 全局配置）
-	case "agent.profiles", "agent.profile.set", "agent.profile.tier", "agent.profile.models",
-		"agent.profile.save", "agent.profile.use", "agent.profile.delete":
-		s.handleAgentProfile(m)
-
 	// 安装器 / “只启动”agent 的状态接入
-	case "install.agent", "install.magpie", "install.cancel", "agent.setup":
+	case "install.agent", "install.cancel", "agent.setup":
 		s.handleInstall(m)
 
 	// 设置
 	case "settings.get", "settings.set", "settings.pickDefaultCWD":
 		s.handleSettings(m)
+
+	// 模型提供商 / 每个 agent 的配置（Perch 自己的）
+	case "providers.get", "provider.save", "provider.delete", "provider.test", "agent.config.set":
+		s.handleProviders(m)
 
 	// 工作区共享 brief（Beta.3）
 	case "workspace.brief.get", "workspace.brief.set":

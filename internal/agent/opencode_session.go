@@ -16,7 +16,7 @@ func openCodeSessionExists(id string) bool {
 	if !SafeSessionID(id) {
 		return false
 	}
-	home := agentHome("opencode")
+	home := agentHome()
 	if home == "" {
 		return false
 	}

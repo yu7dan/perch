@@ -30,12 +30,6 @@ func (s *Server) handleInstall(m *Msg) {
 		}
 		log.Printf("[install] 用户请求安装 agent=%s", id)
 		go s.deps.Installer.Start(id)
-	case "install.magpie":
-		// 网关页的「下载并安装 magpie」。和 agent 安装共用同一条流式通道
-		// （install.start/log/done，id=magpie），装完 finishInstall 会自动
-		// 接网关 —— 用户不需要再点「连接」。
-		log.Printf("[install] 用户请求安装 magpie（官方 release）")
-		go s.deps.Installer.Start("magpie")
 	case "install.cancel":
 		id := trimSpace(m.ID)
 		log.Printf("[install] 用户取消安装 agent=%s", id)
@@ -61,9 +55,6 @@ func (s *Server) setupAgent(id string) {
 	}
 	home, _ := os.UserHomeDir()
 	cat := agentcatalog.Cards(home)
-	if s.deps.MergeCalls != nil {
-		s.deps.MergeCalls(cat)
-	}
 	s.Push(map[string]any{"type": "catalog", "catalog": cat})
 	done := map[string]any{
 		"type": "install.done", "id": id, "ok": err == nil, "code": 0,

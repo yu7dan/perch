@@ -11,8 +11,9 @@ import (
 // 就是在这里 panic 的（旧实现把保留字节的偏移算到了缓冲区外）。
 func TestOpenCodeSessionAcrossReadChunks(t *testing.T) {
 	home := t.TempDir()
-	SetHost(agyTestHost{homeEnv: map[string]string{"USERPROFILE": home, "HOME": home}})
-	defer SetHost(defaultHost{})
+	// agent 都跑在用户真实的主目录里：把主目录指到临时目录。
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOME", home)
 
 	const id = "ses_boundary_check"
 	db := filepath.Join(home, ".local", "share", "opencode", "perch-cli.db")

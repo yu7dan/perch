@@ -1,6 +1,5 @@
 /* First-run welcome card. One surface, no nested cards: the same quiet
-   density as the rest of Perch. The gateway credit for magpie lives here
-   (and in About later), not only in the routing mascot. */
+   density as the rest of Perch. */
 /* Above transient workspace covers: those are transparent overlays used while
    a pane is starting. If one of them sits above the dialog it still paints the
    background but steals every click, which makes the footer look dead. */

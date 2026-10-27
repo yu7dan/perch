@@ -6,6 +6,8 @@ package ctl
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/yu7dan/perch/internal/providers"
 )
 
 func TestMsgWireShape(t *testing.T) {
@@ -24,8 +26,6 @@ func TestMsgWireShape(t *testing.T) {
 		"source": "manual",
 		"id": "abc",
 		"url": "https://example.com",
-		"field": "model",
-		"value": "",
 		"settings": {
 			"defaultCwd": "C:\\work",
 			"termFontSize": 14,
@@ -59,8 +59,9 @@ func TestMsgWireShape(t *testing.T) {
 		t.Fatalf("font size lost: %+v", m.Settings.TermFontSize)
 	}
 
-	// Value 不套 omitempty：空串是"还原成 agent 默认"的有效指令。
-	b, err := json.Marshal(Msg{Type: "gw.agent.set", Field: "model", Value: ""})
+	// agent.config.set 的空串是"还原成 agent 默认"的有效指令：AgentInput 的
+	// 字段不套 omitempty，空的 model 必须留在线上。
+	b, err := json.Marshal(Msg{Type: "agent.config.set", AgentID: "claude", Config: &providers.AgentInput{Model: ""}})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -68,11 +69,15 @@ func TestMsgWireShape(t *testing.T) {
 	if err := json.Unmarshal(b, &out); err != nil {
 		t.Fatalf("unmarshal map: %v", err)
 	}
-	if v, ok := out["value"]; !ok || v != "" {
-		t.Fatalf("empty value must stay on the wire, got %v (present=%v): %s", v, ok, b)
+	if out["agentId"] != "claude" {
+		t.Fatalf("agentId missing: %s", b)
 	}
-	if _, ok := out["field"]; !ok {
-		t.Fatalf("field missing: %s", b)
+	cfg, ok := out["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("config missing: %s", b)
+	}
+	if v, ok := cfg["model"]; !ok || v != "" {
+		t.Fatalf("empty model must stay on the wire, got %v (present=%v): %s", v, ok, b)
 	}
 }
 

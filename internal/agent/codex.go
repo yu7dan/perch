@@ -93,16 +93,16 @@ func codexDef() Def {
 
 // prepareCodex 起这一格的 app-server，握手成功后把 --remote 参数交给 TUI。
 // 任何一步失败都不算启动失败：返回空 env/args，让 TUI 走普通 codex。
-func prepareCodex(tag string, tabID int, cwd string, profileArgs []string) (map[string]string, []string, func(context.Context), error) {
+func prepareCodex(tag string, tabID int, cwd string, profileArgs []string, profileEnv map[string]string) (map[string]string, []string, func(context.Context), error) {
 	token, digest, err := newCodexToken()
 	if err != nil {
 		log.Printf("[codex %s] 生成口令失败，退回普通 codex: %v", tag, err)
 		return nil, nil, nil, nil
 	}
 	// 真正的会话/模型在 app-server 里，不在 TUI。Perch 的 -c 覆盖必须同时
-	// 交给 app-server，否则 TUI 连上的是一个仍用桌面 magpie 配置的服务，
-	// 模型/provider 对不上时 TUI 会立刻退出（空白格子）。
-	cmd, waitCh, port, err := startCodexAppServer(tag, cwd, digest, profileArgs)
+	// 交给 app-server（连同 profileEnv 里的 key），否则 TUI 连上的是一个仍用
+	// 用户自己 ~/.codex 配置的服务，模型/provider 对不上时 TUI 会立刻退出（空白格子）。
+	cmd, waitCh, port, err := startCodexAppServer(tag, cwd, digest, profileArgs, profileEnv)
 	if err != nil {
 		log.Printf("[codex %s] app-server 起不来，退回普通 codex（无状态）: %v", tag, err)
 		return nil, nil, nil, nil
@@ -151,7 +151,7 @@ func newCodexToken() (token, digest string, err error) {
 // 返回的 waitCh 只会收到一次 Wait 的结果；调用方**不要**再 cmd.Wait()。
 // stderr 用自己建的 os.Pipe 接：cmd.Wait 只关它自己那一端的句柄，不会把
 // 还没读完的 banner 截掉（exec.Cmd.StderrPipe 的文档明确警告这个顺序）。
-func startCodexAppServer(tag, cwd, digest string, profileArgs []string) (*exec.Cmd, chan error, int, error) {
+func startCodexAppServer(tag, cwd, digest string, profileArgs []string, profileEnv map[string]string) (*exec.Cmd, chan error, int, error) {
 	exe, prefix := host.ResolveExe("codex")
 	args := append([]string{}, prefix...)
 	// `-c` 是 Codex 的全局选项，必须在 app-server 子命令之前。
@@ -167,7 +167,9 @@ func startCodexAppServer(tag, cwd, digest string, profileArgs []string) (*exec.C
 		cmd.Dir = cwd
 	}
 	// 和 PTY 里那份环境一致：不继承 CLAUDE*、终端身份由我们声明。
-	cmd.Env = BuildEnv(nil)
+	// profileEnv 必须也给它：真正调模型的是 app-server，不是 TUI —— 提供商的 key
+	// 走 env_key 注入时，只给 TUI 等于没给（2026-10-28 拆网关时修的）。
+	cmd.Env = BuildEnv(profileEnv)
 	// 同一个 job：Perch 一退，server 跟着退（见 job_windows.go）。
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 

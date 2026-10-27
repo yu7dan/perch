@@ -1209,7 +1209,7 @@ function stripLeadingAgentTitleDecoration(title) {
    用户看到的是"Codex 的图标 + Claude 的字"。默认名只能由 spec.agent 推。 */
 function defaultTabTitle(tab) {
   const id = (tab && tab.spec && tab.spec.agent) || "";
-  const cat = (typeof mg === "function" && mg() && mg().catalog) || [];
+  const cat = (typeof CATALOG !== "undefined" && Array.isArray(CATALOG)) ? CATALOG : [];
   const a = cat.find((x) => x.id === id);
   if (a && a.name) return a.name;
   return id || t("term.defaultTitle");

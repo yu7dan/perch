@@ -254,7 +254,7 @@ func ensurePiObserver() (string, error) {
 	return path, nil
 }
 
-func preparePi(tag string, tabID int, _ string, _ []string) (map[string]string, []string, func(context.Context), error) {
+func preparePi(tag string, tabID int, _ string, _ []string, _ map[string]string) (map[string]string, []string, func(context.Context), error) {
 	ext, err := ensurePiObserver()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("准备 Pi 观察扩展: %w", err)
@@ -296,7 +296,7 @@ func preparePi(tag string, tabID int, _ string, _ []string) (map[string]string, 
 		env["PI_CODING_AGENT_SESSION_DIR"] = sessionDir
 	}
 	// 工具齐了就关掉 Pi 启动时的自动网络刷新；模型请求不受影响，但少一次
-	// 与网关启动争网络的 catalog refresh。工具缺失时保留原逻辑，让 Pi 自己补。
+	// 和别的启动步骤争网络的 catalog refresh。工具缺失时保留原逻辑，让 Pi 自己补。
 	if toolsReady {
 		env["PI_OFFLINE"] = "1"
 	}
@@ -711,7 +711,7 @@ func agySessionPath(id string) string {
 	if !SafeSessionID(id) {
 		return ""
 	}
-	home := agentHome("agy")
+	home := agentHome()
 	if home == "" {
 		return ""
 	}

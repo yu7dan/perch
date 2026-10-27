@@ -1,8 +1,8 @@
 // Package settings 是 Perch 自己的偏好设置：落盘、归一化、增量修改。
 //
 // 这里只放**Perch 自己**的偏好：默认工作目录、终端外观、关窗/结束 agent 的
-// 确认、启动落点。agent 自己的配置（模型、网关、权限…）一律不进来 ——
-// 那是 magpie / agent 配置抽屉的事，两家的状态不能搅在一起。
+// 确认、启动落点。agent 的模型 / key 不进来 —— 那是 internal/providers 的事
+// （设置 › 模型提供商），两份状态不能搅在一起。
 //
 // 落盘位置和项目池同一层：%APPDATA%\Perch\settings.json。
 // 和 projects.json 一样走「先写 .tmp 再 rename」的原子写，并且**解析失败就
@@ -55,7 +55,7 @@ type Settings struct {
 	// 默认 workspace（先选/建项目再开始干活）；只有用户明确选过 dash 才先到总览。
 	StartView string `json:"startView"`
 	// Language 是界面语言："auto"（跟随系统）| "en" | "zh"。只影响 Perch
-	// 自己的 UI 文案，不碰 agent 输出，也不改 magpie 页面自己的语言。
+	// 自己的 UI 文案，不碰 agent 输出。
 	Language string `json:"language"`
 	// UIMode 是工作区的展示层。当前只有 "classic"（这一版降噪后的外观）；
 	// "clean" 是之后加在终端面板上的皮套，尚未实现。它只换壳，不改

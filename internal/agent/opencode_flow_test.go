@@ -23,12 +23,7 @@ func (h *flowTestHost) Push(v any)                           { h.pushed = append
 func (h *flowTestHost) ResolveExe(bin string) (string, []string) {
 	return bin, nil
 }
-func (h *flowTestHost) WireLaunch(string) (map[string]string, []string, bool) {
-	return nil, nil, false
-}
-func (h *flowTestHost) EngineHomeEnv() map[string]string          { return nil }
-func (h *flowTestHost) EngineHomeEnvFor(string) map[string]string { return nil }
-func (h *flowTestHost) HookSettings(string) string                { return "" }
+func (h *flowTestHost) HookSettings(string) string { return "" }
 func (h *flowTestHost) NoteActivity(_ int, spoke bool) {
 	if spoke {
 		h.spoke = true

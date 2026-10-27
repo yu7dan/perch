@@ -6,14 +6,15 @@
  * and folder have already been chosen in Workspaces, so the guide only covers
  * the two things that are actually missing: an agent and model access.
  *
- * Every status shown here comes from the live app (catalog, gateway, models);
+ * Every status shown here comes from the live app (catalog, model providers);
  * it is not a static checklist that can drift away from reality. Finishing or
  * skipping simply closes the overlay — no forced navigation and no automatic
  * first pane.
  *
- * The flow is resumable. Editing a provider happens in the embedded Gateway
- * page, so "Open Gateway" temporarily hides the overlay and leaves a small
- * "Continue setup" button behind; returning refreshes the same real state.
+ * Model access is optional: an agent with no provider uses its own sign-in.
+ * Adding a provider happens in Settings › Model providers, so "Open settings"
+ * temporarily hides the overlay and leaves a small "Continue setup" button
+ * behind; returning refreshes the same real state.
  */
 (function () {
   const KEY = "perch.onboarded.v2";
@@ -46,9 +47,7 @@
   }
 
   function catalog() {
-    const m = (typeof mg === "function") ? mg() : null;
-    if (m && Array.isArray(m.catalog)) return m.catalog;
-    if (typeof MAGPIE !== "undefined" && MAGPIE && Array.isArray(MAGPIE.catalog)) return MAGPIE.catalog;
+    if (typeof CATALOG !== "undefined" && Array.isArray(CATALOG) && CATALOG.length) return CATALOG;
     return [];
   }
   function agentOf(id) {
@@ -60,7 +59,7 @@
   }
   function launchable(a) {
     if (!a) return false;
-    const c = (typeof perchCaps === "function") ? perchCaps(a) : (a.caps || {});
+    const c = a.caps || {};
     return !!(c.launch);
   }
   function installedAgents() {
@@ -81,28 +80,18 @@
     if (typeof INSTALLS === "undefined" || !INSTALLS[id]) return null;
     return INSTALLS[id];
   }
-  function gatewayInstalled() {
-    if (typeof GW !== "undefined" && GW && (GW.connected || GW.port)) return true;
-    if (typeof MAGPIE !== "undefined" && MAGPIE && MAGPIE.state && MAGPIE.state !== "absent") return true;
-    if (typeof GW_INSTALL !== "undefined" && GW_INSTALL && GW_INSTALL.state === "done") return true;
-    return false;
+  // 模型提供商（设置 › 模型提供商，85b-providers.js 的 PROV）。没配 = agent 用自己的登录。
+  function providerList() {
+    return (typeof PROV !== "undefined" && PROV && PROV.view && Array.isArray(PROV.view.providers))
+      ? PROV.view.providers : [];
   }
-  function gatewayConnected() {
-    return !!(typeof gwOn === "function" && gwOn());
+  function agentProvider(id) {
+    const cfg = (typeof provAgentCfg === "function") ? provAgentCfg(id) : {};
+    const p = cfg.provider ? providerList().find((x) => x.id === cfg.provider) : null;
+    return { cfg, p };
   }
-  function gatewayBusy() {
-    return !!(typeof GW_INSTALL !== "undefined" && GW_INSTALL && GW_INSTALL.state === "running");
-  }
-  function models() {
-    return (typeof AGENT_MODELS !== "undefined" && Array.isArray(AGENT_MODELS)) ? AGENT_MODELS : [];
-  }
-  function providers() {
-    const set = new Set();
-    for (const m of models()) {
-      const p = String((m && (m.providerName || m.provider)) || "").trim();
-      if (p) set.add(p);
-    }
-    return [...set];
+  function providersLoaded() {
+    return !!(typeof PROV !== "undefined" && PROV && PROV.view);
   }
   function settingsValue(key, fallback) {
     return (typeof SETTINGS !== "undefined" && SETTINGS && SETTINGS[key] !== undefined)
@@ -161,44 +150,26 @@
   }
 
   function modelStep() {
-    const nModels = models().length;
-    const nProviders = providers().length;
-    const nAgents = installedAgents().length;
-    const inst = gatewayInstalled();
-    const on = gatewayConnected();
-    const busy = gatewayBusy();
-    const gwValue = busy ? t("onb2.models.installing")
-      : on ? t("onb2.models.connected")
-        : inst ? t("onb2.models.notConnected") : t("onb2.models.notInstalled");
-    const gwCls = on ? "ok" : inst ? "warn" : "";
-    let gwAct = "";
-    if (!inst && !busy) {
-      gwAct = `<button type="button" class="onb-btn sm" data-onb-install-gw>${esc(t("onb2.installGateway"))}</button>`;
-    } else if (!on && !busy) {
-      gwAct = `<button type="button" class="onb-btn sm" data-onb-open-gw>${esc(t("onb2.openGateway"))}</button>`;
-    } else if (on) {
-      gwAct = `<button type="button" class="onb-btn sm" data-onb-refresh>${esc(t("onb2.refresh"))}</button>`;
-    }
-    const provAct = inst ? `<button type="button" class="onb-btn sm" data-onb-open-gw>${esc(t("onb2.openGateway"))}</button>` : "";
-    const gwFailed = !!(typeof GW_INSTALL !== "undefined" && GW_INSTALL && GW_INSTALL.state === "failed");
-    const gwFailure = gwFailed
-      ? `<div class="onb-note">${esc((typeof msgText === "function" && msgText(GW_INSTALL.err)) || t("inst.failed"))}</div>`
-      : "";
+    ensureSelected();
+    const a = agentOf(selected);
+    const list = providerList();
+    const withKey = list.filter((p) => p.hasKey).length;
+    const { cfg, p } = agentProvider(selected);
+    const usesValue = p ? (cfg.model ? `${p.name} · ${cfg.model}` : p.name) : t("onb2.models.ownLogin");
+    const rows = list.slice(0, 4).map((x) =>
+      `<div class="onb-status"><span class="dot ${x.hasKey ? "ok" : "warn"}"></span>` +
+      `<span class="lbl">${esc(x.name)}</span>` +
+      `<span class="val">${esc(x.hasKey ? t("onb2.models.keyOk", { n: (x.models || []).length }) : t("onb2.models.keyMissing"))}</span></div>`).join("");
     return kicker("onb2.kicker.models") + title("onb2.models.title") + lead("onb2.models.lead") +
-      `<div class="onb-stat"><div><b>${nAgents}</b><span>${esc(t("onb2.models.agentsUnit", { n: nAgents }))}</span></div>` +
-      `<div><b>${nProviders}</b><span>${esc(t("onb2.models.providerUnit", { n: nProviders }))}</span></div>` +
-      `<div><b>${nModels}</b><span>${esc(t("onb2.models.modelUnit", { n: nModels }))}</span></div></div>` +
       `<div class="onb-section">` +
-      `<div class="onb-status"><span class="dot ${gwCls}"></span><span class="lbl">${esc(t("onb2.models.gateway"))}</span>` +
-      `<span class="val">${esc(gwValue)}</span><span class="act">${gwAct}</span></div>` +
-      `<div class="onb-status"><span class="dot ${nProviders ? "ok" : ""}"></span><span class="lbl">${esc(t("onb2.models.providers"))}</span>` +
-      `<span class="val">${esc(t("onb2.models.providerUnit", { n: nProviders }))}</span><span class="act">${provAct}</span></div>` +
-      `<div class="onb-status"><span class="dot ${nModels ? "ok" : ""}"></span><span class="lbl">${esc(t("onb2.models.models"))}</span>` +
-      `<span class="val">${esc(t("onb2.models.modelUnit", { n: nModels }))}</span>` +
-      `<span class="act">${inst ? `<button type="button" class="onb-btn sm" data-onb-refresh>${esc(t("onb2.refresh"))}</button>` : ""}</span></div>` +
+      `<div class="onb-status"><span class="dot ${list.length ? "ok" : ""}"></span><span class="lbl">${esc(t("onb2.models.providers"))}</span>` +
+      `<span class="val">${esc(providersLoaded() ? t("onb2.models.providerUnit", { n: list.length }) : t("onb2.models.reading"))}</span>` +
+      `<span class="act"><button type="button" class="onb-btn sm" data-onb-open-prov>${esc(t(list.length ? "onb2.models.manage" : "onb2.models.add"))}</button></span></div>` +
+      rows +
+      (a ? `<div class="onb-status"><span class="dot ok"></span><span class="lbl">${esc(t("onb2.models.uses", { agent: a.name || a.id }))}</span>` +
+        `<span class="val">${esc(usesValue)}</span></div>` : "") +
       `</div>` +
-      (nModels ? "" : `<div class="onb-note">${esc(t("onb2.models.empty"))}</div>`) +
-      (nModels ? "" : `<p class="onb-sub">${esc(t("onb2.models.later"))}</p>`);
+      `<p class="onb-sub">${esc(t(withKey ? "onb2.models.pickLater" : "onb2.models.optional"))}</p>`;
   }
 
   function reviewRow(label, value, ok, jump) {
@@ -213,21 +184,17 @@
   function setupReady() {
     ensureSelected();
     const a = agentOf(selected);
-    return !!(a && a.installed && launchable(a) && gatewayConnected() && models().length > 0);
+    return !!(a && a.installed && launchable(a));
   }
 
   function doneStep() {
     ensureSelected();
     const a = agentOf(selected);
     const aReady = !!(a && a.installed && launchable(a));
-    const gwReady = gatewayConnected();
-    const gwInstalled = gatewayInstalled();
-    const nModels = models().length;
     const allReady = setupReady();
     const agentLabel = a ? (a.name || a.id) : t("onb2.done.notReady");
-    const gwValue = gwReady ? t("onb2.models.connected")
-      : gwInstalled ? t("onb2.models.notConnected") : t("onb2.models.notInstalled");
-    const modelValue = nModels ? t("onb2.models.modelUnit", { n: nModels }) : t("onb2.done.notReady");
+    const { cfg, p } = agentProvider(selected);
+    const provValue = p ? (cfg.model ? `${p.name} · ${cfg.model}` : p.name) : t("onb2.models.ownLogin");
     return kicker("onb2.kicker.done") + title(allReady ? "onb2.done.title" : "onb2.done.titleAlmost") + lead("onb2.done.lead") +
       `<div class="onb-ready ${allReady ? "ok" : "warn"}">` +
       `<span class="onb-seal" aria-hidden="true">${allReady ? "✓" : "!"}</span>` +
@@ -236,12 +203,8 @@
       `</div>` +
       `<div class="onb-review">` +
       reviewRow(t("onb2.done.agent"), aReady ? agentLabel : t("onb2.done.notReady"), aReady, 0) +
-      reviewRow(t("onb2.done.gateway"), gwValue, gwReady, 1) +
-      reviewRow(t("onb2.done.models"), modelValue, nModels > 0, 1) +
-      `</div>` +
-      `<div class="onb-thanks compact"><div class="tx"><b>${esc(t("onb2.done.credit"))}</b>` +
-      `<span>${esc(t("onb2.done.creditBody"))}</span></div>` +
-      `<button type="button" class="onb-link" data-onb-magpie title="usemagpie.ai">usemagpie.ai ↗</button></div>`;
+      reviewRow(t("onb2.done.provider"), provValue, true, 1) +
+      `</div>`;
   }
 
   function progressHTML() {
@@ -309,11 +272,10 @@
     const cat = catalog().map((a) => `${a.id}:${a.installed ? 1 : 0}`).join(",");
     const inst = (typeof INSTALLS !== "undefined")
       ? Object.keys(INSTALLS).map((id) => `${id}:${INSTALLS[id].state}`).join(",") : "";
-    const gwi = (typeof GW_INSTALL !== "undefined" && GW_INSTALL)
-      ? `${GW_INSTALL.state}:${(GW_INSTALL.lines || []).length}` : "";
+    const prov = providerList().map((p) => `${p.id}:${p.hasKey ? 1 : 0}:${(p.models || []).length}`).join(",");
+    const own = JSON.stringify(agentProvider(selected).cfg || {});
     return [
-      step, skipConfirm, selected, cat, inst, gwi,
-      models().length, providers().join(","), gatewayInstalled(), gatewayConnected(),
+      step, skipConfirm, selected, cat, inst, prov, own, providersLoaded(),
       (typeof PERCH_LOCALE !== "undefined" ? PERCH_LOCALE : ""),
     ].join("|");
   }
@@ -338,7 +300,7 @@
     focusKey = "";
     box.hidden = false;
     if (resume) resume.hidden = true;
-    if (step === 1 && typeof refreshGatewayConfig === "function") refreshGatewayConfig();
+    if (step === 1 && typeof provRequest === "function") provRequest();
     render();
     startTicker();
     setTimeout(() => {
@@ -357,22 +319,24 @@
     remember();
   }
 
-  function pauseForGateway() {
+  function pauseForSettings() {
     paused = true;
     box.hidden = true;
     stopTicker();
     if (resume) resume.hidden = false;
-    if (typeof setNavView === "function") setNavView("dash");
-    const tab = document.querySelector('#dash-tabs .opt[data-dtab="gateway"]');
-    if (tab) tab.click();
-    sendCtrl({ type: "log", msg: "首次设置：打开网关配置（返回后继续）" });
+    if (typeof setNavView === "function") setNavView("settings");
+    setTimeout(() => {
+      const sec = document.getElementById("set-sec-providers");
+      if (sec) sec.scrollIntoView({ block: "start", behavior: "smooth" });
+    }, 60);
+    sendCtrl({ type: "log", msg: "首次设置：打开设置 › 模型提供商（返回后继续）" });
   }
 
   function resumeSetup() {
     if (!paused) return;
-    if (typeof refreshGatewayConfig === "function") refreshGatewayConfig();
+    if (typeof provRequest === "function") provRequest();
     showAt(step);
-    sendCtrl({ type: "log", msg: "首次设置：从网关返回，继续" });
+    sendCtrl({ type: "log", msg: "首次设置：从设置返回，继续" });
   }
 
   function commitDefaultAgent() {
@@ -406,16 +370,6 @@
     render();
   }
 
-  function installGateway() {
-    sendCtrl({ type: "install.magpie" });
-    sendCtrl({ type: "log", msg: "首次设置：下载并安装网关" });
-    render();
-  }
-
-  function chooseGateway() {
-    pauseForGateway();
-  }
-
   box.addEventListener("click", (e) => {
     const close = e.target.closest("#onb-skip");
     if (close) { skipConfirm = true; render(); return; }
@@ -427,7 +381,7 @@
       if (Number.isInteger(n) && n <= maxStep) {
         step = n;
         skipConfirm = false;
-        if (step === 1 && typeof refreshGatewayConfig === "function") refreshGatewayConfig();
+        if (step === 1 && typeof provRequest === "function") provRequest();
         render();
       }
       return;
@@ -436,27 +390,16 @@
     if (install) { e.stopPropagation(); installAgent(install.dataset.onbInstall); return; }
     const agent = e.target.closest("[data-onb-agent]");
     if (agent) { selectAgent(agent.dataset.onbAgent); return; }
-    const gwInstall = e.target.closest("[data-onb-install-gw]");
-    if (gwInstall) { installGateway(); return; }
-    const gwOpen = e.target.closest("[data-onb-open-gw]");
-    if (gwOpen) { chooseGateway(); return; }
-    const refresh = e.target.closest("[data-onb-refresh]");
-    if (refresh) {
-      if (typeof refreshGatewayConfig === "function") refreshGatewayConfig();
-      sendCtrl({ type: "gw.refresh" });
-      render();
-      return;
-    }
+    const provOpen = e.target.closest("[data-onb-open-prov]");
+    if (provOpen) { pauseForSettings(); return; }
     const jump = e.target.closest("[data-onb-jump]");
     if (jump) {
       step = clampStep(jump.dataset.onbJump);
       skipConfirm = false;
-      if (step === 1 && typeof refreshGatewayConfig === "function") refreshGatewayConfig();
+      if (step === 1 && typeof provRequest === "function") provRequest();
       render();
       return;
     }
-    const magpie = e.target.closest("[data-onb-magpie]");
-    if (magpie) { sendCtrl({ type: "open.url", url: "https://usemagpie.ai" }); return; }
     const act = e.target.closest("[data-onb-act]");
     if (!act) return;
     const kind = act.dataset.onbAct;
@@ -523,10 +466,6 @@
     }, true);
     sendCtrl({ type: "log", msg: "引导：设置页「重新打开引导」已接线" });
   }
-  const site = document.getElementById("set-magpie-site");
-  if (site) site.addEventListener("click", () => {
-    sendCtrl({ type: "open.url", url: "https://usemagpie.ai" });
-  });
 
   function renderAbout() {
     const v = document.getElementById("set-version");

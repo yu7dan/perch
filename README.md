@@ -6,7 +6,7 @@
 
 **Run your agents side by side. See who needs you.**
 
-Perch is a Windows desktop workspace for agent CLIs: one real terminal per pane, one place to see status, and a local gateway for models.
+Perch is a Windows desktop workspace for agent CLIs: one real terminal per pane, one place to see status, and model providers you choose per agent.
 
 **[Download the beta](https://github.com/yu7dan/perch/releases)** · Windows 10/11 x64 · macOS support is on the way.
 
@@ -22,13 +22,13 @@ Perch is a Windows desktop workspace for agent CLIs: one real terminal per pane,
   <a href="docs/images/overview.png"><img src="docs/images/overview.png" alt="Perch running Claude Code, Codex and OpenCode in one workspace" width="960"></a>
 </p>
 
-Perch is an agent development environment, not a chat client. It owns the terminals and the workspace; each agent runs normally inside its own pane, and the gateway connects models without taking over the agent.
+Perch is an agent development environment, not a chat client. It owns the terminals and the workspace; each agent runs normally inside its own pane, and the provider you pick is injected into that pane without taking over the agent.
 
 ## Why Perch
 
 - **One real terminal per pane.** Every pane is a live ConPTY with its own scrollback and status dot. Switching does not lose output.
 - **Attention first.** Whoever is waiting for you is visible at a glance, in the grid or on the work board.
-- **A gateway with a boundary.** Model profiles are applied per pane. Perch does not rewrite your global agent configuration, and it never stops the desktop magpie.
+- **Providers with a boundary.** Add a provider once and pick it per agent. Keys are encrypted on this machine, settings are applied per pane, and Perch never rewrites your global agent configuration.
 
 ## A work board, not a tab graveyard
 
@@ -40,21 +40,17 @@ Collapse the terminal grid and each agent becomes one fixed-height row: what it 
 
 ## Agent setup in one place
 
-Install, configure, and open an agent from the same list. Perch detects what is installed, runs the official installer or npm package when you ask, and applies each agent's model and effort settings per pane, where the agent exposes them. The gateway's model lists and provider choices are read from the running engine, not kept as a second copy.
+Install, configure, and open an agent from the same list. Perch detects what is installed, runs the official installer or npm package when you ask, and applies each agent's provider, model, effort, and environment variables per pane, where the agent exposes them. Model lists come from a live connection test, not a second hand-kept copy.
 
 <p align="center">
   <a href="docs/images/agent-setup.png"><img src="docs/images/agent-setup.png" alt="Perch agent setup with model and effort controls" width="860"></a>
 </p>
 
-## A local gateway you can inspect
+## Model providers, your way
 
-Providers, routing, usage, and plugins use magpie's own console, embedded in Perch. The engine runs locally, its data stays on this machine, and the console keeps magpie's own wording and attribution.
+Add an official API, a relay, or a local server once in Settings: an Anthropic and/or OpenAI-compatible endpoint plus a key. The key is encrypted with Windows DPAPI and never shown again. Then choose per agent: Claude Code takes Anthropic endpoints, Codex takes OpenAI-compatible ones, Pi and OpenCode take either. Leave it unset and the agent keeps its own sign-in. Raw environment variables cover everything else.
 
-<p align="center">
-  <a href="docs/images/gateway.png"><img src="docs/images/gateway.png" alt="Perch agent panes connected through a local magpie gateway to providers" width="860"></a>
-</p>
-
-**Also included:** exact session resume with an honest fallback, close-is-not-delete, and a read-only file rail beside the active agent.
+**Also included:** a local-data overview (turns, tokens, cache hits, tokens by model), light and dark themes, exact session resume with an honest fallback, close-is-not-delete, and a read-only file rail beside the active agent.
 
 ## Supported agents
 
@@ -72,7 +68,7 @@ Perch ships with nine CLI agents. All of them can be installed and launched in a
 | <img src="docs/images/agents/cursor.svg" width="18" height="18" alt=""> Cursor | Official installer | Status only | Exact | No tool actions |
 | <img src="docs/images/agents/githubcopilot.svg" width="18" height="18" alt=""> Copilot CLI | Official installer | Full | Exact | Sign in with `/login` |
 
-Desktop and web clients are outside this list. Any client that accepts a custom base URL can use the gateway. Agent names and logos belong to their respective owners.
+Desktop and web clients are outside this list. Agent names and logos belong to their respective owners.
 
 ## Getting started
 
@@ -102,7 +98,7 @@ Build the single-file beta package with:
 
 - **ConPTY + xterm.js.** The terminal is the product surface; the grid, tabs, and scrollback are local.
 - **Evidence, not guesswork.** Status is read from the session transcript, agent hooks, and the visible screen. The three corroborate each other; a weak signal is not allowed to conclude alone.
-- **Gateway isolation.** Perch's engine and its per-agent profiles live under Perch's own data directories (`%APPDATA%\Perch` and `%LOCALAPPDATA%\Perch`). The desktop magpie and the agent's global configuration are left alone.
+- **Per-pane injection.** Providers and per-agent settings live in `%APPDATA%\Perch\providers.json` and are applied only to the processes Perch starts: Claude Code through `--settings`, Codex through `-c` and `env_key`, Pi and OpenCode through a per-pane config. The agents' global configuration is left alone.
 
 More detail: [architecture](docs/ARCHITECTURE.md) · [frontend](docs/FRONTEND.md) · [i18n](docs/I18N.md).
 
@@ -111,12 +107,12 @@ More detail: [architecture](docs/ARCHITECTURE.md) · [frontend](docs/FRONTEND.md
 - Windows 10/11 x64 with the WebView2 Runtime; ConPTY and Job Objects are required. macOS support is in development.
 - Portable unsigned beta; no installer or code signing yet.
 - Qoder, Copilot, and Cursor use their own sign-in; DeepSeek Harness tool execution is upstream-dependent.
-- Agent installers and the magpie engine are downloaded from their official sources; neither is bundled in the zip. Agent installers run only after you click Install.
-- Perch has no account system and sends no telemetry of its own. Agent CLIs and magpie may have their own policies.
+- Agent installers are downloaded from their official sources and run only after you click Install; none is bundled.
+- Perch has no account system and sends no telemetry of its own. Model requests go from each agent straight to the provider you configured. Agent CLIs and providers may have their own policies.
 
 ## Acknowledgements
 
-[Magpie](https://github.com/yetone/magpie) (MIT) provides the gateway engine and the information architecture of its console. [Orca](https://github.com/stablyai/orca) (MIT) was the reference for terminal layout and a number of concrete interaction details. Perch also uses [xterm.js](https://github.com/xtermjs/xterm.js), [Wails](https://github.com/wailsapp/wails), [Cascadia Code](https://github.com/microsoft/cascadia-code), [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), and [Geist](https://github.com/vercel/geist-font). See [THIRD-PARTY.md](THIRD-PARTY.md) for licenses.
+[Orca](https://github.com/stablyai/orca) (MIT) was the reference for terminal layout and a number of concrete interaction details. Perch also uses [xterm.js](https://github.com/xtermjs/xterm.js), [Wails](https://github.com/wailsapp/wails), [Cascadia Code](https://github.com/microsoft/cascadia-code), [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), and [Geist](https://github.com/vercel/geist-font). See [THIRD-PARTY.md](THIRD-PARTY.md) for licenses.
 
 ## License
 

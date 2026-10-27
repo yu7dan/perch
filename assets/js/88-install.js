@@ -21,8 +21,7 @@ function instRunning() { return instAll().some((x) => x.state === "running"); }
 
 function instEnsure(id) {
   if (INSTALLS[id]) return INSTALLS[id];
-  const m = mg();
-  const a = ((m && m.catalog) || []).find((x) => x.id === id);
+  const a = CATALOG.find((x) => x.id === id);
   const it = {
     id, name: (a && a.name) || id, state: "running", phase: "preparing",
     source: "", startedAt: Date.now(), lines: [], ahead: 0, active: "",
@@ -175,8 +174,8 @@ function instDone(m) {
   const it = INSTALLS[m.id];
   if (!it) return;
   // done 里带的新名单先应用：行和进度台在同一个事件里翻过来。
-  if (m.catalog && typeof applyMagpie === "function" && MAGPIE) {
-    applyMagpie(Object.assign({}, MAGPIE, { catalog: m.catalog }));
+  if (m.catalog) {
+    setCatalog(m.catalog, "安装完成");
   }
   it.state = m.ok ? "done" : "failed";
   it.phase = it.state;
@@ -190,14 +189,6 @@ function instDone(m) {
   renderDashAgents();
   if (m.ok && m.id === "pi" && typeof showToast === "function") {
     showToast(t("inst.piFirstRunTitle"), t("inst.piFirstRunNote"), "info");
-  }
-  // 新装的 agent 可能还没进 /api/state 的旧快照；magpie 装完也可能刚连上
-  // 控制面。统一刷新 agent 状态和模型目录，不能只刷新其中一半。
-  if (m.ok && typeof refreshGatewayConfig === "function") {
-    refreshGatewayConfig();
-  } else if (m.ok && typeof gwAgentsPrefetch === "function") {
-    if (typeof gwAgentsReset === "function") gwAgentsReset();
-    gwAgentsPrefetch(true);
   }
   if (!m.ok && m.id === INSTALL_AT) {
     const log = $("inst-log");
@@ -228,29 +219,6 @@ function instDrop(id) {
 }
 
 function applyInstall(m) {
-  // magpie 本体：同一个流式通道，id 固定是 "magpie"。装完之后 Go 那边会直接
-  // gwConnect（见 install.go 的 finishInstall），这里只需要把日志和状态画出来。
-  if (m.id === "magpie") {
-    if (!GW_INSTALL) GW_INSTALL = { state: "running", lines: [], err: null };
-    if (m.type === "install.start") {
-      GW_INSTALL.state = "running";
-    } else if (m.type === "install.log") {
-      GW_INSTALL.lines.push(m.line);
-      if (GW_INSTALL.lines.length > 1500) {
-        GW_INSTALL.lines.splice(0, GW_INSTALL.lines.length - 1500);
-      }
-    } else if (m.type === "install.done") {
-      GW_INSTALL.state = m.ok ? "done" : "failed";
-      GW_INSTALL.err = m.ok ? null : errMsgOf(m);
-      if (m.ok) {
-        sendCtrl({ type: "gw.refresh" });
-        sendCtrl({ type: "magpie.refresh" });
-        if (typeof refreshGatewayConfig === "function") refreshGatewayConfig();
-      }
-    }
-    if (NAV_HERE === "dash" && dashTab === "gateway") renderGateway();
-    return;
-  }
   if (m.type === "install.start") {
     const it = instEnsure(m.id);
     it.state = "running";
@@ -290,8 +258,7 @@ function applyInstall(m) {
 }
 
 async function launchAgent(id) {
-  const m = mg();
-  const a = ((m && m.catalog) || []).find((x) => x.id === id);
+  const a = CATALOG.find((x) => x.id === id);
   // Workspaces 不再有默认项目：从总览启动也要先选一个真实 Project。
   // 新建 Agent 卡会预选项目；没有项目时卡里就是"先添加项目"。
   setNavView("workspace");
@@ -310,7 +277,7 @@ $("dash-agent-list").addEventListener("click", (e) => {
     if (fold) fold.classList.toggle("open", agentsFoldOpen);
     const label = $("dash-agent-more-label");
     if (label) {
-      const n = ((mg() && mg().catalog) || []).filter((a) => !a.installed).length;
+      const n = CATALOG.filter((a) => !a.installed).length;
       label.textContent = agentsFoldOpen ? t("dash.agents.foldHide")
         : t("dash.agents.foldShow", { n });
     }
@@ -320,8 +287,7 @@ $("dash-agent-list").addEventListener("click", (e) => {
   if (sb) {
     // “只启动” → “接入状态”：和安装共用同一个流式面板，但不动 CLI 本身。
     const id = sb.dataset.setup;
-    const m = mg();
-    const a = ((m && m.catalog) || []).find((x) => x.id === id) || { id, name: id };
+      const a = CATALOG.find((x) => x.id === id) || { id, name: id };
     instOpen(a);
     sendCtrl({ type: "agent.setup", id });
     bootFact(`Agent 状态接入 → ${id}`);
@@ -330,8 +296,7 @@ $("dash-agent-list").addEventListener("click", (e) => {
   const ib = e.target.closest("[data-install]");
   if (ib) {
     const id = ib.dataset.install;
-    const m = mg();
-    const a = ((m && m.catalog) || []).find((x) => x.id === id) || { id, name: id };
+      const a = CATALOG.find((x) => x.id === id) || { id, name: id };
     instOpen(a);
     sendCtrl({ type: "install.agent", id });
     bootFact(`Agent 安装 → ${id}`);
@@ -340,8 +305,7 @@ $("dash-agent-list").addEventListener("click", (e) => {
   const db = e.target.closest("[data-docs]");
   if (db) {
     const id = db.dataset.docs;
-    const m = mg();
-    const a = ((m && m.catalog) || []).find((x) => x.id === id);
+      const a = CATALOG.find((x) => x.id === id);
     const url = a && a.url;
     // 后端 open.url 还会再拦一次；这里先挡掉空值和别的 scheme。
     if (!url || !/^https?:\/\//i.test(url)) return;
@@ -355,10 +319,10 @@ $("dash-agent-list").addEventListener("click", (e) => {
     bootFact(`Agent 打开 → ${lb.dataset.launch}`);
     return;
   }
-  // 行本身 = 打开右侧配置抽屉（89-agent-cfg.js）。安装/打开按钮在上面已经
-  // 各自处理并 return，所以点按钮不会顺带打开抽屉。
+  // 行本身 = 跳到设置 › Agents 的那一行（2026-10-28 起配置在设置里，见 85b-providers.js）。
+  // 安装/打开按钮在上面已经各自处理并 return，所以点按钮不会顺带跳走。
   const cb = e.target.closest("[data-agentcfg]");
-  if (cb) acOpen(cb.dataset.agentcfg);
+  if (cb) openAgentSettings(cb.dataset.agentcfg);
 });
 
 // 行的 role="button" 也要能用键盘打开（Enter / 空格），和鼠标点击同一条路。
@@ -367,7 +331,7 @@ $("dash-agent-list").addEventListener("keydown", (e) => {
   const cb = e.target.closest("[data-agentcfg]");
   if (!cb) return;
   e.preventDefault();
-  acOpen(cb.dataset.agentcfg);
+  openAgentSettings(cb.dataset.agentcfg);
 });
 
 // 任务条：点名字切换面板；点 × 收起一个已完成的任务。

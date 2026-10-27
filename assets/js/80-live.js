@@ -571,8 +571,8 @@ const shell = Stream("shell");
 /* 启动闸（和 20-ctl.js 的 ctlInbox 是同一条理由）：
    这条流在**本文件求值时就建好了**，而 handleShell 是"连上就同步扫一遍、
    马上 Send"（main.go:1601）—— 会话库很小的时候（比如验收用的沙盒），
-   载荷几毫秒就回来，落在 85-settings / 87-gateway 还没求值的那条缝里。
-   处理函数 applyMagpie 在 87，于是就是红条 `applyMagpie is not defined`。
+   载荷几毫秒就回来，落在后面的文件还没求值的那条缝里（当年的红条就是
+   `applyMagpie is not defined`，网关已于 2026-10-28 拿掉）。
    启动期间先收住这一帧，99-boot 打开 ctl 启动闸时按同一顺序补画。 */
 let pendingShell = null;
 function applyShell(p) {
@@ -586,9 +586,8 @@ function applyShell(p) {
   if (STATE.settings) {
     applySettings(STATE.settings, { fromGo: true, effectiveCwd: STATE.cwd });
   }
-  // 网关首份读数随壳层一起到（watcher 在 main 里先扫了本机那份）。
-  // 之后的更新走 ctl 的 "magpie" 消息 —— 两条路都进 applyMagpie。
-  if (STATE.magpie) applyMagpie(STATE.magpie);
+  // 本机 Agent 名单随壳层一起到；安装 / 接入状态之后由 catalog 推送更新。
+  if (Array.isArray(STATE.catalog)) setCatalog(STATE.catalog, "shell 载荷");
   renderShell();
   /* ⚠️ 播种必须在**这条**流上也做一次（不只是 hook 绑上会话那一次）：
      启动的顺序是"先按冷恢复摆座位、再收到这份壳层数据"—— 也就是说 hook 绑上会话时
@@ -647,7 +646,7 @@ function applyLibrary(p) {
   // 设置也在这份载荷里（同一次 buildShellPayload）。重扫不该改设置，但
   // 手改过 settings.json 的人点一次「重扫」就能看到盘上的值 —— 顺手对齐。
   if (p.settings) applySettings(p.settings, { fromGo: true, effectiveCwd: p.cwd });
-  if (p.magpie) applyMagpie(p.magpie);
+  if (Array.isArray(p.catalog)) setCatalog(p.catalog, "lib.reload");
   // 名字表变了，正在跑的那几格的格子头也得跟着换（谁后到都得对得上，见 seedTabTitles）
   seedTabTitles();
   // 左栏那张卡的对象是**上一次 payload 里的那个**了 —— 按 id 重新指到新的，

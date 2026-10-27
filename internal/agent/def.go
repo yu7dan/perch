@@ -36,7 +36,7 @@ type Def struct {
 	// Prepare 在每次开格前调用，用来做“这一格才有的”准备：分配端口、生成口令、
 	// 决定事件文件路径。返回的 env/args 只作用于这一次启动；observe 在 PTY
 	// 起来之后跑，ctx 一取消就退出。
-	Prepare func(tag string, tabID int, cwd string, profileArgs []string) (env map[string]string, args []string, observe func(context.Context), err error)
+	Prepare func(tag string, tabID int, cwd string, profileArgs []string, profileEnv map[string]string) (env map[string]string, args []string, observe func(context.Context), err error)
 }
 
 // GenericDef 是最小适配：能开一格新会话，没有续接和状态。
@@ -52,19 +52,14 @@ func GenericDef(bin string) Def {
 	}
 }
 
-// EngineDef 给 magpie 的通用 agent 用：已接入引擎网关时，启动进程也换到
-// 引擎沙盒，这样它读到的是 /api/set 写进去的模型/供应商；没接入时照旧读
-// 用户自己的配置。agy/dsh 有自己的深度适配，不经过这里。
-func EngineDef(id, bin string) Def {
+// PathDef 是通用 CLI 的启动适配：和 GenericDef 一样没有续接和状态，只多
+// 补一次 PATH —— npm 全局装出来的 CLI 是 .cmd shim，shim 里还要找 node，
+// 而 GUI 进程的 PATH 往往比终端短。agent 跑在用户真实的主目录里，模型
+// 配置由「模型提供商」按格注入（见 session.Manager.SetWireProfile）。
+func PathDef(bin string) Def {
 	d := GenericDef(bin)
-	d.Prepare = func(string, int, string, []string) (map[string]string, []string, func(context.Context), error) {
-		// npm 全局装出来的 CLI 是 .cmd shim，shim 里还要找 node；GUI 的
-		// PATH 往往比终端短。PATH 始终补上，沙盒 home 只在已接入时加。
-		env := map[string]string{"PATH": dshChildPath()}
-		for k, v := range host.EngineHomeEnvFor(id) {
-			env[k] = v
-		}
-		return env, nil, nil, nil
+	d.Prepare = func(string, int, string, []string, map[string]string) (map[string]string, []string, func(context.Context), error) {
+		return launchEnv(""), nil, nil, nil
 	}
 	return d
 }
@@ -78,18 +73,10 @@ func OpenCodeDef() Def { return openCodeDef() }
 // PiDef 是每格一个观察扩展 + JSONL tail 的适配器。
 func PiDef() Def { return piDef() }
 
-// AgyDef 是 Antigravity CLI 的启动适配。
+// AgyDef 是 Antigravity CLI 的启动适配：续接参数 + 跟转录的状态。
 //
-// agy 接进 magpie 之后，modelProvider="gemini" 写在 settings.json 里，但
-// 网关地址和密钥只认环境变量（GOOGLE_GEMINI_BASE_URL / GEMINI_API_KEY），
-// 配置文件里没有它们的位置。magpie 的 /api/state 会为这种 agent 给一条
-// launch 命令；组合根把它解析成 env+args 交给这里，每次开格现取。
-//
-// 没接线时 WireLaunch 返回 ok=false，退回 GenericDef 的普通启动。
-//
-// 隔离引擎模式下还要把 agy 的用户目录换到引擎沙盒：引擎已经 seed 了一份
-// agy settings，且之后 magpie 的通用接入只写沙盒；如果 agy 仍读桌面配置，
-// 两边就会看到不同的模型/信任列表，还会把会话写回桌面。
+// 模型提供商的地址/密钥（agy 只认环境变量）由 session.Manager 按格注入的
+// profile env 带上，这里不用再管；agy 跑在用户真实的主目录里。
 func AgyDef() Def {
 	d := GenericDef("agy")
 	// agy 的续接参数（实测 --help）：--continue / --conversation <id>。
@@ -104,29 +91,12 @@ func AgyDef() Def {
 		}
 		return nil
 	}
-	d.Prepare = func(_ string, tabID int, cwd string, _ []string) (map[string]string, []string, func(context.Context), error) {
+	d.Prepare = func(_ string, tabID int, cwd string, _ []string, _ map[string]string) (map[string]string, []string, func(context.Context), error) {
 		started := time.Now()
-		env, args, ok := host.WireLaunch("agy")
-		// 沙盒 home 不依赖 WireLaunch 成不成功：冷恢复的 agy 可能在引擎
-		// /api/state 到达之前就起来，那一刻拿不到 launch；如果这时退回
-		// 真实 home，agy 会读写桌面 settings（实测会改掉真实文件）。
-		if homeEnv := host.EngineHomeEnv(); len(homeEnv) > 0 {
-			if env == nil {
-				env = map[string]string{}
-			}
-			for k, v := range homeEnv {
-				if _, exists := env[k]; !exists {
-					env[k] = v
-				}
-			}
-		}
 		observe := func(ctx context.Context) {
 			observeTranscriptStatus(ctx, tabID, "agy", cwd, "", started, emitAgentStatus)
 		}
-		if !ok {
-			return env, nil, observe, nil
-		}
-		return env, args, observe, nil
+		return nil, nil, observe, nil
 	}
 	return d
 }
@@ -150,12 +120,12 @@ func CursorDef() Def {
 		}
 		return nil
 	}
-	d.Prepare = func(_ string, tabID int, cwd string, _ []string) (map[string]string, []string, func(context.Context), error) {
+	d.Prepare = func(_ string, tabID int, cwd string, _ []string, _ map[string]string) (map[string]string, []string, func(context.Context), error) {
 		started := time.Now()
 		observe := func(ctx context.Context) {
 			observeTranscriptStatus(ctx, tabID, "cursor", cwd, "", started, emitAgentStatus)
 		}
-		return launchEnvFor("cursor", cursorBinDir()), nil, observe, nil
+		return launchEnv(cursorBinDir()), nil, observe, nil
 	}
 	return d
 }
@@ -179,12 +149,12 @@ func CopilotDef() Def {
 		}
 		return nil
 	}
-	d.Prepare = func(_ string, tabID int, cwd string, _ []string) (map[string]string, []string, func(context.Context), error) {
+	d.Prepare = func(_ string, tabID int, cwd string, _ []string, _ map[string]string) (map[string]string, []string, func(context.Context), error) {
 		started := time.Now()
 		observe := func(ctx context.Context) {
 			observeTranscriptStatus(ctx, tabID, "copilot", cwd, "", started, emitAgentStatus)
 		}
-		return launchEnvFor("copilot", ""), nil, observe, nil
+		return launchEnv(""), nil, observe, nil
 	}
 	return d
 }
@@ -213,9 +183,9 @@ func QoderDef() Def {
 		}
 		return nil
 	}
-	d.Prepare = func(tag string, tabID int, cwd string, _ []string) (map[string]string, []string, func(context.Context), error) {
+	d.Prepare = func(tag string, tabID int, cwd string, _ []string, _ map[string]string) (map[string]string, []string, func(context.Context), error) {
 		started := time.Now()
-		env := launchEnvFor("qoder", "")
+		env := launchEnv("")
 		settings := host.HookSettings(tag)
 		if settings != "" {
 			if p := writeAgentSettings("qoder", tag, settings); p != "" {
@@ -231,14 +201,10 @@ func QoderDef() Def {
 	return d
 }
 
-// launchEnvFor 给“由 Perch 直接起、但配置由引擎管理”的 agent 拼环境。
-// 沙盒 home 只在已接入引擎时加；PATH 始终补 —— GUI 进程的 PATH 比终端短。
-func launchEnvFor(id, extraPath string) map[string]string {
-	env := map[string]string{"PATH": childPathWith(extraPath)}
-	for k, v := range host.EngineHomeEnvFor(id) {
-		env[k] = v
-	}
-	return env
+// launchEnv 给由 Perch 直接起的 CLI 补 PATH —— GUI 进程的 PATH 比终端短。
+// extraPath 非空时排在最前面。
+func launchEnv(extraPath string) map[string]string {
+	return map[string]string{"PATH": childPathWith(extraPath)}
 }
 
 func cursorBinDir() string {
@@ -284,7 +250,7 @@ func writeAgentSettings(agentID, tag, body string) string {
 func DshDef() Def {
 	d := GenericDef("dsh-tui")
 	d.Args = func(intent ResumeIntent, _ string) []string { return dshArgs(intent) }
-	d.Prepare = func(tag string, _ int, _ string, _ []string) (map[string]string, []string, func(context.Context), error) {
+	d.Prepare = func(tag string, _ int, _ string, _ []string, _ map[string]string) (map[string]string, []string, func(context.Context), error) {
 		env := map[string]string{
 			// dsh 的 shell executor 会剥掉名字里含 KEY/TOKEN/SECRET/PASSWORD 的
 			// 环境变量（Orca 在 dsh-hook.cmd 里实测过）。这个变量名必须继续
@@ -293,13 +259,6 @@ func DshDef() Def {
 			// dsh-tui 的启动器用 `dsh --version` 探测官方 CLI；npm 的 shim 又要
 			// 找 node。GUI 进程的 PATH 常常比终端短，这里按事实补齐。
 			"PATH": dshChildPath(),
-		}
-		// 隔离引擎把 magpie 的 dsh 字段写进 Perch 的 DSH_HOME；Perch 直接
-		// 启动 dsh-tui 时也必须读同一个 home，否则「已接入」只写不进运行。
-		for k, v := range host.EngineHomeEnv() {
-			if _, exists := env[k]; !exists {
-				env[k] = v
-			}
 		}
 		return env, nil, nil, nil
 	}

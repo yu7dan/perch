@@ -726,6 +726,9 @@ function onLocaleChanged() {
   if (typeof renderFiles === "function") renderFiles(true);
   if (typeof renderNeed === "function") renderNeed();
   if (typeof renderSideLive === "function") renderSideLive();
+  // 设置 › 模型提供商 / Agents 与 Bot Group 页也是 JS 现画的。
+  if (typeof renderProviderSettings === "function" && NAV_HERE === "settings") renderProviderSettings();
+  if (typeof renderBotGroup === "function" && document.body.classList.contains("botgroup")) renderBotGroup();
   // 安装进度台：标题/阶段/日志开关/任务条都是现画的。
   if (typeof INSTALLS !== "undefined" && Object.keys(INSTALLS).length &&
       typeof instPaint === "function") instPaint();

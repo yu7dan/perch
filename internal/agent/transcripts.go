@@ -118,18 +118,9 @@ func findNewest(tabID int, startedAt time.Time, paths []string, format string) F
 	return Found{}
 }
 
-// agentHome 是“这个 agent 实际写文件的那个 home”。隔离引擎模式下 agy/dsh/
-// qoder/copilot 都跑在沙盒里；这里必须和启动时用的是同一份。
-func agentHome(id string) string {
-	env := host.EngineHomeEnvFor(id)
-	if len(env) == 0 && (id == "agy" || id == "dsh") {
-		env = host.EngineHomeEnv()
-	}
-	for _, k := range []string{"USERPROFILE", "HOME"} {
-		if v := strings.TrimSpace(env[k]); v != "" {
-			return v
-		}
-	}
+// agentHome 是 agent 写会话/转录文件的那个 home：所有 agent 都跑在用户
+// 真实的主目录里，和启动时是同一份。
+func agentHome() string {
 	home, _ := os.UserHomeDir()
 	return home
 }
@@ -186,7 +177,7 @@ func piSessionPath(cwd, id string) string {
 }
 
 func qoderCandidates(cwd, id string) []string {
-	home := agentHome("qoder")
+	home := agentHome()
 	if home == "" {
 		return nil
 	}
@@ -206,7 +197,7 @@ func qoderCandidates(cwd, id string) []string {
 }
 
 func copilotCandidates(cwd, id string) []string {
-	home := agentHome("copilot")
+	home := agentHome()
 	if home == "" {
 		return nil
 	}
@@ -221,7 +212,7 @@ func dshSessionPath(cwd, id string) string {
 	if !SafeSessionID(id) {
 		return ""
 	}
-	home := agentHome("dsh")
+	home := agentHome()
 	if home == "" {
 		return ""
 	}
@@ -233,7 +224,7 @@ func dshSessionPath(cwd, id string) string {
 }
 
 func agyCandidates() []string {
-	home := agentHome("agy")
+	home := agentHome()
 	if home == "" {
 		return nil
 	}
@@ -246,7 +237,7 @@ func agyCandidates() []string {
 }
 
 func cursorCandidates(cwd, id string) []string {
-	homes := []string{agentHome("cursor")}
+	homes := []string{agentHome()}
 	if real, err := os.UserHomeDir(); err == nil && real != homes[0] {
 		homes = append(homes, real)
 	}

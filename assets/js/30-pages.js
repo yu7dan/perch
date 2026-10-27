@@ -490,13 +490,28 @@ const OP_FALLBACK_AGENT = {
           mechanism: "hook" },
 };
 let OP_CATALOG_MISSING = false;
+/* 本机 Agent 名单（Go 的 agentcatalog 探测结果）。来路有三条，都进 setCatalog：
+   shell 载荷 / lib.reload 的 catalog 字段、安装器与「接入状态」完成后的 catalog 推送、
+   冷恢复应答里的 agents（BOOT_AGENTS，最早到）。2026-10-28 以前它搭在网关快照
+   （MAGPIE.catalog）上 —— 网关拿掉之后它必须自己有一条路。
+   ⚠️ 用 var：10-term.js 在本文件求值之前就会建第一个标签（那时只能 typeof 判它）。 */
+var CATALOG = [];
+let CATALOG_SIG = "";
+function setCatalog(list, why) {
+  if (!Array.isArray(list)) return;
+  const sig = JSON.stringify(list.map((a) => [
+    a.id, !!a.installed, a.icon, a.name, a.path, !!a.install, a.url,
+    !!(a.caps && a.caps.launch), !!(a.caps && a.caps.inject),
+  ]));
+  CATALOG = list;
+  if (sig === CATALOG_SIG) return;
+  CATALOG_SIG = sig;
+  if (typeof naCatalogChanged === "function") naCatalogChanged(why || "Agent 名单更新");
+  if (typeof NAV_HERE !== "undefined" && NAV_HERE === "dash" && typeof renderDashAgents === "function") renderDashAgents();
+  if (typeof onbCatalogChanged === "function") onbCatalogChanged();
+}
 function opCatalog() {
-  let list = [];
-  try {
-    // MAGPIE 是 86-dash 里的 let；这个函数只在启动闸之后调用（面板打开/建格），
-    // 那时它已经初始化。try 兜住"有人把调用挪到求值期"的情况（TDZ 里 typeof 也会抛）。
-    if (MAGPIE && Array.isArray(MAGPIE.catalog)) list = MAGPIE.catalog;
-  } catch (_) { list = []; }
+  let list = Array.isArray(CATALOG) ? CATALOG : [];
   if (!list.length && Array.isArray(BOOT_AGENTS)) list = BOOT_AGENTS;
   if (!Array.isArray(list)) list = [];
   OP_CATALOG_MISSING = !list.length;

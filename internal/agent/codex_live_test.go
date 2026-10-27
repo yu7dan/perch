@@ -89,7 +89,7 @@ func TestCodexLiveAppServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd, waitCh, port, err := startCodexAppServer("live", cwd, digest, nil)
+	cmd, waitCh, port, err := startCodexAppServer("live", cwd, digest, nil, nil)
 	if err != nil {
 		t.Fatalf("app-server 起不来: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestCodexLiveShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd, waitCh, _, err := startCodexAppServer("live-shutdown", cwd, digest, nil)
+	cmd, waitCh, _, err := startCodexAppServer("live-shutdown", cwd, digest, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

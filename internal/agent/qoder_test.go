@@ -10,7 +10,7 @@ func TestQoderDefInjectsPerPaneHookSettings(t *testing.T) {
 	SetHost(agyTestHost{hookSettings: `{"hooks":{"Stop":[]}}`})
 	defer SetHost(defaultHost{})
 
-	env, args, obs, err := QoderDef().Prepare("t9", 9, `C:\work`, nil)
+	env, args, obs, err := QoderDef().Prepare("t9", 9, `C:\work`, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestQoderDefFallsBackToTranscriptStatus(t *testing.T) {
 	SetHost(agyTestHost{}) // HookSettings 返回空 = 接收器不在/造不出来
 	defer SetHost(defaultHost{})
 
-	_, args, obs, err := QoderDef().Prepare("t9", 9, `C:\work`, nil)
+	_, args, obs, err := QoderDef().Prepare("t9", 9, `C:\work`, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

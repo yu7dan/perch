@@ -70,10 +70,10 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 	// 2026-10-16 起是默认工作区，不是 fallbackCWD。这也正是记进登记表的那个值。
 	// Prepare 也要它：Codex 的 app-server 必须和 TUI 在同一个目录里起来。
 	cwd := m.EffectiveCWD(tab.Spec)
-	// Perch 自己的 per-agent 配置：模型别名/档位。只在隔离网关模式下有；
-	// 拿不到就按旧路径启动。Claude 的 env 会合并进 --settings，Codex 用 -c.
+	// Perch 自己的 per-agent 配置（模型提供商 / 模型 / 强度）。没配就按
+	// agent 自己的配置启动。Claude 的 env 会合并进 --settings，Codex 用 -c.
 	// **必须在 Prepare 之前拿到**：Codex 的 app-server 才是真正跑模型的进程，
-	// 它也要拿到同一组 -c 覆盖，否则 TUI 连上的还是桌面 magpie 的配置。
+	// 它也要拿到同一组 -c 覆盖，否则 TUI 连上的还是用户全局配置里的模型。
 	var profEnv map[string]string
 	var profArgs []string
 	t0 := time.Now()
@@ -93,7 +93,7 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 	t1 := time.Now()
 	if def.Prepare != nil {
 		var perr error
-		prepEnv, prepArgs, observe, perr = def.Prepare(tag, tab.ID, cwd, profArgs)
+		prepEnv, prepArgs, observe, perr = def.Prepare(tag, tab.ID, cwd, profArgs, profEnv)
 		if perr != nil {
 			return nil, &StartError{Stage: StagePrepare, Agent: tab.Spec.Agent, Err: perr}
 		}
@@ -141,7 +141,7 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 	for k, v := range prepEnv {
 		env[k] = v
 	}
-	// Claude 的网关变量已经进 --settings 的 env 块（优先级高于用户 settings）；
+	// Claude 的提供商变量已经进 --settings 的 env 块（优先级高于用户 settings）；
 	// 别的 agent 没有 settings 通道，按进程环境注入。
 	if tab.Spec.Agent != "claude" {
 		for k, v := range profEnv {

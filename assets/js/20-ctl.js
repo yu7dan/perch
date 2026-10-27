@@ -29,8 +29,8 @@ let spawnTabCalls = 0;        // 临时探针：spawnTab 被调了几次
 const RESTORE = { state: "init", panes: [], err: "", asked: false };
 /* 冷恢复应答里顺带来的本机 Agent 名单 + 设置里的默认 agent。
    为什么必须跟着 panes.list 走：建第一格发生在 shell 载荷**之前**（见上面那段），
-   而“默认用哪个 agent”不能等 shell。名单的权威探测在 Go（magpie.go 的
-   scanAgentCatalog），前端只读，不自己再探一遍。 */
+   而“默认用哪个 agent”不能等 shell。名单的权威探测在 Go（internal/agentcatalog），
+   前端只读，不自己再探一遍。 */
 let BOOT_AGENTS = [];
 let BOOT_DEFAULT_AGENT = "";
 let restoreTimer = 0;
@@ -330,25 +330,24 @@ ctl.onopen = () => {
 /* ---------------------------------------------------------------------------
    启动闸：ctl 消息在"整段脚本跑到底"之前**只收不发**（2026-10-19）
    ---------------------------------------------------------------------------
-   红条 `applyMagpie is not defined` 的根因就在这里。两条事实拼在一起：
+   当年红条 `applyMagpie is not defined`（网关已于 2026-10-28 拿掉）的根因就在这里。
+   两条事实拼在一起：
 
      ① index.html 里那一串 defer 脚本是**按文档顺序、一块一块求值**的，而浏览器
         在块与块之间可以让出事件循环 —— 网络消息会落在"后面的脚本还没求值"的缝里；
      ② 这条 ctl 流在 20-ctl 求值时就建好了（`const ctl = JSONStream("ctl")`），
         而分发要用到的处理函数散在后面的文件里：applyHook/applyAgent/applyActs/
-        applyFiles/applyLibrary 在 80-live，MAGPIE 在 86-dash，applyInstall 在
-        88-install，applyMagpie/applyGw* 在 87-gateway。
+        applyFiles/applyLibrary 在 80-live，applyInstall 在 88-install，
+        applyProviders 在 85b-providers。
 
-   哪一条消息会先到不由我们决定：magpie watcher 每 2.5s 推整份读数（Go 的
-   `startMagpieWatcher` 在开窗之前就起了），沙盒里会话库很小的时候 shell 首帧
-   也会在几十毫秒内回来。于是一条 `magpie` 落在 87 求值之前，就是一条红条；
-   一条 `hook` 落在 80 之前，就是 `applyHook is not defined` —— 同一类病。
+   哪一条消息会先到不由我们决定：沙盒里会话库很小的时候 shell 首帧会在几十
+   毫秒内回来；一条 `hook` 落在 80 之前，就是 `applyHook is not defined`。
 
    ⚠️ 修法**不是**在每个 case 里加 `typeof` 守卫：
-     · `MAGPIE` 是 86 才声明的 `let`，TDZ 里连 `typeof MAGPIE` 都会抛
-       （60-shell.js:462 那条注释记的就是这个教训）；
+     · 后面文件里的 `let` 在 TDZ 里连 `typeof` 都会抛
+       （60-shell.js 那条注释记的就是这个教训）；
      · 守卫会把消息**当场丢掉** —— 丢一条 `panes.list` 等于这一轮冷恢复不恢复，
-       丢一条 `magpie` 就要等下一次推送才画得出来。
+       丢一条 `catalog` 就要等下一次推送才画得出名单。
    所以按到达顺序攒着，等 99-boot（最后一条脚本）把闸打开，再原顺序分发。
 
    ⚠️ 闸变量必须声明在**这条脚本**里：消息可能落在 40-chrome 求值之前，那时
@@ -466,6 +465,7 @@ function dispatchCtl(m) {
          defaultAgentId）。它和总览的 catalog 是同一份 Go 探测结果。 */
       BOOT_AGENTS = Array.isArray(m.agents) ? m.agents : [];
       BOOT_DEFAULT_AGENT = typeof m.defaultAgent === "string" ? m.defaultAgent : "";
+      if (!CATALOG.length && BOOT_AGENTS.length) setCatalog(BOOT_AGENTS, "冷恢复应答");
       const installed = BOOT_AGENTS.filter((a) => a && a.installed).length;
       const launchable = BOOT_AGENTS.filter((a) => a && a.installed &&
         a.caps && a.caps.launch).length;
@@ -533,36 +533,18 @@ function dispatchCtl(m) {
     // 文件预览「改动」页：按需取这一格记到的 diff 正文（见 transcript.go 的 trace.diff）。
     case "diff":    applyTraceDiff(m); return;
     case "state": applyLibrary(m.state); return;
-    // 网关读数：shell 首帧里也带一份，之后由 Go 的 watcher 每 2.5s 推整份。
-    case "magpie": applyMagpie(m.magpie); return;
-    // 控制面：整份原生读数（网关页的 iframe 直接用 magpie 自己的界面，
-    // 用量/账本/插件市场不再经过 Perch 中转）。
-    case "gw": applyGw(m.gw); return;
-    // 后端把 Perch 的语言写进了 magpie 自己的 settings.lang（gateway/language.go）；
-    // 内嵌页重载一次，让它用新的 lang 走 bootPrefs 重画。
-    case "gw.lang": applyGwLang(m); return;
     // 安装器：start / log / phase / done 四条；done 里也带一份重扫过的 catalog。
     case "install.start":
     case "install.log":
     case "install.phase":
     case "install.done": applyInstall(m); return;
+    // 设置 › 模型提供商 / Agents（85b-providers.js）。视图里没有任何密钥。
+    case "providers": applyProviders(m); return;
+    case "provider.result": provResult(m); return;
+    case "provider.test": provTestResult(m); return;
     case "catalog":
-      if (m.catalog) {
-        if (MAGPIE) applyMagpie(Object.assign({}, MAGPIE, { catalog: m.catalog }));
-        else {
-          // 首帧快照还没到也别把安装结果丢掉：先画名单，整份快照到了再覆盖。
-          MAGPIE = { catalog: m.catalog };
-          if (NAV_HERE === "dash") renderDashAgents();
-        }
-      }
+      if (m.catalog) setCatalog(m.catalog, "catalog 推送");
       return;
-    // Agent 接线（internal/gateway/agents.go）：整份 /api/state 的 agents 快照；预览是
-    // 断开前那次 dry run 的答案。两类都只落进状态，由 89-agent-cfg.js 画。
-    case "gw.agents": applyGwAgents(m); return;
-    case "gw.agents.drift": applyGwAgentsDrift(m); return;
-    case "gw.agent.preview": applyGwPreview(m); return;
-    // Perch 自己的 per-agent 配置（隔离网关，不写 agent 全局配置）。
-    case "agent.profiles": applyAgentProfiles(m); return;
     // 项目池（左栏那一轮）。它和 state 是两回事：state 是"扫出来的会话库"，
     // 这一条是"用户声明的项目池 + 归属"。分开发的理由和三条腿分开是同一条 ——
     // 池子只在动作时变（低频、全量），会话库每关一格就要重扫。

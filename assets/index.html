@@ -24,7 +24,6 @@
 <link rel="stylesheet" href="/css/40-sidebar.css">
 <link rel="stylesheet" href="/css/50-settings.css">
 <link rel="stylesheet" href="/css/60-pages.css">
-<link rel="stylesheet" href="/css/70-gateway.css">
 <link rel="stylesheet" href="/css/80-classic.css">
 <link rel="stylesheet" href="/css/85-feel.css">
 <link rel="stylesheet" href="/css/90-botgroup.css">
@@ -470,10 +469,8 @@
   <!-- 5. 总览（Dashboard）。
        `#app.dash` 时它从第 2 列铺到最后一列，会话列表 / 终端 / 右栏一起退场 ——
        "除了左侧栏之外，其他部分就是整个 dashboard"（用户 2026-10-17 定的形态）。
-       顶栏那排模块切换照 magpie 的 .seg：没有灰底轨道，只有一枚滑动的白片。
-
-       ⚠️ 网关那一页**不手写**：它内嵌 magpie 自己的界面（同源反代）。
-       同一个设置做两份必然漂 —— 这是用户 2026-10-18 明确否掉手写实现后的结论。 -->
+       2026-10-28 起只有一页：本机读数的仪表盘 + Agent CLI 安装入口（网关页随内嵌
+       网关一起拿掉，模型 / key 的配置在设置 › 模型提供商）。 -->
   <main id="dash">
     <!-- 总览 ↔ 左栏的缝（可拖，改 --rail-w）。抓取带落在总览这一侧，
          可见线画在缝上 —— 和 #list-divider 同一套几何。 -->
@@ -540,10 +537,9 @@
             </div>
 
             <!-- Agent CLI 接线表：只列本机能在终端里跑的 CLI agent（已接入 /
-                 未接入两组）；未检测到的收进 magpie 式折叠栏，点「安装」在 Perch
-                 里跑官方 CLI 命令。桌面端不在这里 —— 用户自己下载，在网关层配置。
-                 点一行 = 右侧配置抽屉（89-agent-cfg.js）：接入网关、模型、
-                 推理强度、分档、子代理、登录方式。 -->
+                 未接入两组）；未检测到的收进折叠栏，点「安装」在 Perch
+                 里跑官方 CLI 命令。点一行 = 跳到设置 › Agents 的那一行
+                 （提供商、模型、推理强度、环境变量，见 85b-providers.js）。 -->
             <section class="console-foot" id="dash-agent-card">
               <div class="mod-head">
                 <div><b data-i18n="dash.agents.title">Agent CLI</b><span class="sub" id="dash-agent-sub"></span></div>
@@ -552,22 +548,7 @@
               <div class="roster" id="dash-agent-list"></div>
             </section>
           </section>
-        </section>
-
-        <!-- 网关：magpie 自己的界面（用户 2026-10-18 定的方向：不手写第二份）。
-             网关的那几页（供应商的陈列/添加/订阅/配置页、路由、网关、用量、
-             插件）由 magpie 的前端渲染；Go 侧在同源路径下反代（internal/gateway/ui.go），
-             并把 magpie 自己的 Agents/Sessions/Library 与左侧栏从内嵌页里
-             拿掉 —— 那些和 Perch 的总览/Agent 重复，导航按顶部标签摆。
-             iframe 地址里没有 key —— 鉴权 cookie 由服务端注入。
-             控制面没接上时 iframe 不设 src，盖一张安装/接入卡。 -->
-        <section class="dash-pane gw-pane" id="dash-gateway" hidden>
-          <!-- 网关子页：控制面接上后内嵌网关控制台；没接上时显示 Perch
-               自己的安装/接入卡。它不再有 magpie 的版本/更新条。 -->
-          <div class="gw-cover" id="gw-cover"></div>
-          <iframe id="gw-frame" title="网关" hidden></iframe>
-        </section>
-      </div>
+        </section>      </div>
     </div>
 
     <!-- 安装进度台：固定在总览底部（#dash 的 flex 子项），不随 Agent 名单滚动。
@@ -626,7 +607,7 @@
       <div class="settings-wrap">
         <header class="settings-head">
           <h1 data-i18n="settings.title">设置</h1>
-          <p data-i18n="settings.intro">这些选项属于 Perch 自己，不影响 agent 的模型、网关或权限配置。改动即时生效，并保存在本机。</p>
+          <p data-i18n="settings.intro">这些选项属于 Perch 自己。agent 的模型和 key 在下面的「模型提供商」里配置，只注入 Perch 启动的进程。改动即时生效，并保存在本机。</p>
         </header>
 
         <div class="settings-empty" id="set-empty" hidden>
@@ -665,6 +646,24 @@
             <div class="set-note" id="set-cwd-note" hidden></div>
             <div class="set-err" id="set-cwd-err" role="alert" hidden></div>
           </div>
+        </section>
+
+        <!-- 模型提供商 / Agents（2026-10-28，取代内嵌网关）。内容由 85b-providers.js 现填。 -->
+        <section class="settings-sec" id="set-sec-providers"
+                 data-search="模型 提供商 中转 密钥 key api provider model relay anthropic openai 网关">
+          <div class="settings-sec-head">
+            <h2 data-i18n="settings.section.providers">模型提供商</h2>
+            <p data-i18n="settings.providers.note">加一次提供商（官方 API、中转站、本地服务都行），再在下面给每个 agent 选用。Key 加密存在本机，存过之后不再显示。</p>
+          </div>
+          <div class="settings-card" id="set-providers"></div>
+        </section>
+        <section class="settings-sec" id="set-sec-agents"
+                 data-search="agent 模型 环境变量 推理强度 env environment effort claude codex pi opencode">
+          <div class="settings-sec-head">
+            <h2 data-i18n="settings.section.agents">Agents</h2>
+            <p data-i18n="settings.agents.note">只注入 Perch 启动的那个进程，不改任何 agent 的全局配置。不选提供商 = 用 agent 自己的登录和配置。</p>
+          </div>
+          <div class="settings-card" id="set-agents"></div>
         </section>
 
         <section class="settings-sec" data-search="外观 显示 语言 language locale appearance look display">
@@ -854,7 +853,7 @@
           </div>
         </section>
 
-        <section class="settings-sec" data-search="关于 版本 鸣谢 引导 about version credits onboarding magpie">
+        <section class="settings-sec" data-search="关于 版本 引导 about version onboarding">
           <div class="settings-sec-head">
             <h2 data-i18n="settings.section.about">关于</h2>
             <p data-i18n="settings.section.about.note">版本、鸣谢，以及重新打开首次使用引导。</p>
@@ -873,15 +872,6 @@
               </div>
               <div class="settings-ctl">
                 <button type="button" class="set-btn" id="set-onboard-again" data-i18n="settings.about.onboardingOpen">重新打开引导</button>
-              </div>
-            </div>
-            <div class="settings-row" data-search="鸣谢 网关 magpie credits thanks">
-              <div class="settings-lab">
-                <b data-i18n="settings.about.credits">鸣谢</b>
-                <span data-i18n="settings.about.creditsNote">Perch 的网关能力来自 magpie 的开源工作。</span>
-              </div>
-              <div class="settings-ctl">
-                <button type="button" class="set-btn quiet" id="set-magpie-site" data-i18n="settings.about.magpieSite">打开 magpie 官网</button>
               </div>
             </div>
           </div>
@@ -1195,27 +1185,6 @@
     <div id="op-list"></div>
   </div>
 </div>
-<!-- Agent 配置抽屉（总览 → Agent 名单 → 点一行）。数据与写操作都走 magpie
-     控制面（internal/gateway/agents.go / 89-agent-cfg.js）；这里只放壳，内容打开时现填。
-     fixed 在右沿、标题栏之下、状态栏之上；点外面、Esc、× 都收起。 -->
-<aside id="agentcfg" role="dialog" aria-label="Agent 配置" aria-hidden="true"
-  data-i18n-aria-label="ac.title">
-  <div class="ac-head">
-    <span class="ac-ico" id="ac-ico"></span>
-    <div class="ac-id">
-      <b id="ac-name">Agent</b>
-      <span class="ac-path" id="ac-path"></span>
-    </div>
-    <span class="ac-chip" title="Perch 的使用层只安装/运行 CLI agent"
-      data-i18n-title="ac.cliHint" data-i18n="ac.cli">CLI</span>
-    <button type="button" class="ac-x" id="ac-x" title="关闭" aria-label="关闭"
-      data-i18n-title="common.close" data-i18n-aria-label="common.close">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-        stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
-    </button>
-  </div>
-  <div class="ac-body" id="ac-body"></div>
-</aside>
 <!-- 确认框（单例）。关窗确认、结束 agent 确认都走它 —— 一处语义、一处键盘行为。
      盖住整个窗口（包括自绘标题栏）：确认没答复之前，点 × 也只会把焦点送回卡片，
      不会在背后偷偷把窗口关掉。内容由 85-settings.js 的 askConfirm 填。 -->
@@ -1237,8 +1206,7 @@
 </div>
 
 <!-- First-run setup flow. The content is rendered by 90-onboarding.js from real
-     state (installed agents, gateway, models), not a static marketing card.
-     The magpie credit stays in the final step and in About. -->
+     state (installed agents, model providers), not a static marketing card. -->
 <div id="onb" class="onb" hidden>
   <div class="onb-scrim"></div>
   <section class="onb-card onb-flow" role="dialog" aria-modal="true" aria-labelledby="onb-title">
@@ -1339,10 +1307,9 @@ window.__facts = [];
 <script defer src="/js/83-files.js"></script>
 <script defer src="/js/84-settings-search.js"></script>
 <script defer src="/js/85-settings.js"></script>
+<script defer src="/js/85b-providers.js"></script>
 <script defer src="/js/86-dash.js"></script>
-<script defer src="/js/87-gateway.js"></script>
 <script defer src="/js/88-install.js"></script>
-<script defer src="/js/89-agent-cfg.js"></script>
 <script defer src="/js/90-onboarding.js"></script>
 <script defer src="/js/91-botgroup.js"></script>
 <script defer src="/js/99-boot.js"></script>

@@ -334,4 +334,4 @@ svg{display:block;flex:none}
 
 
 /* 浅色下产品标：原图是米白的鸟，在浅底上几乎看不见 —— 压成深色剪影（形状不动）。 */
-html.theme-light .tb-rail .mark img{filter:brightness(0);opacity:.78}
+html.theme-light img[src*="perch-logo"]{filter:brightness(0);opacity:.78}

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/yu7dan/perch/internal/agentcatalog"
-	"github.com/yu7dan/perch/internal/gateway"
 	"github.com/yu7dan/perch/internal/history"
 	"github.com/yu7dan/perch/internal/project"
 	"github.com/yu7dan/perch/internal/settings"
@@ -16,7 +15,7 @@ import (
 )
 
 // ShellPayload 是界面骨架的第一份全量载荷：会话库、历史流、项目池、偏好、
-// 网关快照拼成一份。扫描与聚合分别在 history / project；这里只剩组合。
+// Agent 名单拼成一份。扫描与聚合分别在 history / project；这里只剩组合。
 type ShellPayload struct {
 	Sessions []history.Session                `json:"sessions"`
 	History  map[string][]history.HistoryItem `json:"history"` // key = sessionId
@@ -45,10 +44,9 @@ type ShellPayload struct {
 	// 口径是**用户轮次**（不含压缩摘要、不含命令回显 —— 和「N 轮」同一套判据），
 	// 主会话与子代理都算。只发有活动的日期，前端按 53 周铺格子。
 	Activity []history.DayActivity `json:"activity"`
-	// Magpie 是本地 magpie 网关的只读读数。它**不在这次扫描里现算** ——
-	// watcher 在后台每 2.5s 更新一份快照，这里只是把最新那份带上，
-	// 否则 lib.reload 会被网关请求拖住。nil = watcher 还没起来（正常只在测试/首帧）。
-	Magpie *gateway.Snapshot `json:"magpie,omitempty"`
+	// Catalog 是本机 Agent 名单（agentcatalog 的探测结果）：总览 / 引导 /
+	// 新建卡都读它。
+	Catalog []agentcatalog.Card `json:"catalog"`
 	// Settings 是 Perch 自己的偏好。跟着首份载荷一起下来，
 	// 前端就不用为了"终端用什么字号"再发一次请求；之后的改动走 ctl 的 settings 消息。
 	Settings settings.Settings `json:"settings"`
@@ -74,9 +72,7 @@ func (s *Server) ShellPayload() ShellPayload {
 		Titles:   titles,
 		History:  make(map[string][]history.HistoryItem, len(sessions)),
 		Activity: activity,
-	}
-	if s.deps.Gateway != nil {
-		p.Magpie = s.deps.Gateway.Snapshot()
+		Catalog:  s.bootAgentCards(),
 	}
 	// Prefs 在组合根里先于第一次载荷初始化；万一某条测试路径没初始化，
 	// 给默认值而不是零值（零值会让确认默认变成关）。
@@ -198,11 +194,6 @@ func (s *Server) refreshPoolAsync(why string) {
 // （它要扫会话库）；panes.query 是唯一更早的往返，所以名单跟着它走。
 // 和总览用的是同一份 agentcatalog.Cards —— 两份探测规则迟早会漂。
 func (s *Server) bootAgentCards() []agentcatalog.Card {
-	if s.deps.Gateway != nil {
-		if snap := s.deps.Gateway.Snapshot(); snap != nil && len(snap.Catalog) > 0 {
-			return snap.Catalog
-		}
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return []agentcatalog.Card{}
@@ -268,11 +259,6 @@ func (s *Server) applySettingsPatch(p settings.Patch, why string) {
 		pick(next.DefaultAgent, "(自动)"), pick(next.NewAgentShortcut, "(关闭)"),
 		next.ConfirmClose, next.ConfirmEndAgent)
 	s.pushSettings(nil)
-	// Perch 的语言选择也是 magpie 的：内嵌网关页跟随同一份设置（尽力而为，
-	// 失败只落日志；见 internal/gateway/language.go）。
-	if s.deps.Gateway != nil {
-		s.deps.Gateway.SetLanguage(next.Language)
-	}
 	if next.DefaultCWD != old.DefaultCWD {
 		project.EnsureDefaultWorkspace(s.customCWD)
 		s.refreshPoolAsync("默认目录改了")

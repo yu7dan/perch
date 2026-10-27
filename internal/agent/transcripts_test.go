@@ -11,8 +11,9 @@ import (
 // 于是“明明有对话”的已关闭 agent 会被说成接不上。
 func TestSessionFileExistsForEachAgent(t *testing.T) {
 	home := t.TempDir()
-	SetHost(agyTestHost{homeEnv: map[string]string{"USERPROFILE": home, "HOME": home}})
-	defer SetHost(defaultHost{})
+	// agent 都跑在用户真实的主目录里：把主目录指到临时目录。
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOME", home)
 
 	write := func(rel string) {
 		t.Helper()

@@ -9,7 +9,7 @@ import (
 	"github.com/yu7dan/perch/internal/uimsg"
 )
 
-// 页面级事实、快照补发与系统打开地址。它们不归标签/文件/网关任何一域，
+// 页面级事实、快照补发与系统打开地址。它们不归标签/文件/设置任何一域，
 // 但都必须走同一条 ctl 推送。
 
 func (s *Server) handleMisc(m *Msg) {

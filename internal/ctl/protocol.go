@@ -1,6 +1,7 @@
 package ctl
 
 import (
+	"github.com/yu7dan/perch/internal/providers"
 	"github.com/yu7dan/perch/internal/session"
 	"github.com/yu7dan/perch/internal/settings"
 )
@@ -58,44 +59,10 @@ type Msg struct {
 	// settings.set 用：只带用户真的改了的字段（指针 = 这条请求提没提到它）。
 	// false / 0 / 空串都是合法值，所以不能用零值判断缺省。
 	Settings *settings.Patch `json:"settings,omitempty"`
-	// gw.* 用：控制面的读写参数。
-	//   Period  today / 7d / 30d / all
-	//   Preset  供应商预设 id
-	//   Key     供应商 API key —— **只在内存里过一次**，不落日志、不回显
-	//   From    分组改名前的 id
-	//   Members 分组成员（provider/model）
-	//   Plugin  插件 npm 包名；Op 是 add/remove/update/upgrade/off
-	//   User    额度卡片的账号
-	Period  string   `json:"period,omitempty"`
-	Preset  string   `json:"preset,omitempty"`
-	Key     string   `json:"key,omitempty"`
-	From    string   `json:"from,omitempty"`
-	Members []string `json:"members,omitempty"`
-	Plugin  string   `json:"plugin,omitempty"`
-	Op      string   `json:"op,omitempty"`
-	User    string   `json:"user,omitempty"`
-	Offset  int      `json:"offset,omitempty"`
-	// 供应商编辑（gw.provider.save 且带 id、不带 preset）：三个接入点。
-	// 用指针是为了把「没发」和「发来空串（清空这个接入点）」分开 ——
-	// 值类型 + omitempty 会让"清空"变成静默无效。
-	Chat      *string `json:"chat,omitempty"`
-	Responses *string `json:"responses,omitempty"`
-	Anthropic *string `json:"anthropic,omitempty"`
-	// gw.provider.arrange：开关着的供应商的新顺序（id 列表，靠上的先用）。
-	Order []string `json:"order,omitempty"`
-	// gw.agent.set 用：Field 是 /api/state 里字段的 key，Value 是选项值。
-	// 空串是**有效值** —— magpie 用它把字段还原成 agent 自己的默认，所以
-	// Value 不套 omitempty：别让"清空"在编码这一层变成静默无效。
-	Field string `json:"field,omitempty"`
-	Value string `json:"value"`
-	// agent.profile.set 用：effort 是网关路由组固定的档位（high/xhigh/...），
-	// 空串 = 不固定，用模型自己的默认。Value 仍然是模型 id。
-	Effort string `json:"effort,omitempty"`
-	// agent.profile.save/use/delete 用：配置方案的名字。
-	// （不能用 Name：那是 project.rename 的字段。）
-	SetName string `json:"setName,omitempty"`
-	// agent.profile.tier 用：Claude 的 opus/sonnet/haiku/fable。
-	Tier string `json:"tier,omitempty"`
-	// agent.profile.models 用：这个 agent 的模型选择器里要收起的模型 id。
-	Hidden []string `json:"hidden,omitempty"`
+	// provider.save 用：一条提供商（key 只在这里过一次内存，不落日志、不回显）。
+	// provider.delete / provider.test 用 ID。
+	Provider *providers.ProviderInput `json:"provider,omitempty"`
+	// agent.config.set 用：哪个 agent、它的配置（环境变量值同样只写不读）。
+	AgentID string                `json:"agentId,omitempty"`
+	Config  *providers.AgentInput `json:"config,omitempty"`
 }

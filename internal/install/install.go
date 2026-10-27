@@ -1,7 +1,7 @@
 // Package install 是 Agent 安装器的执行层。
 //
 // 用户 2026-10-17 的评审：点「下载」跳浏览器不算安装 —— 要真的下载、真的装，
-// 装完能直接在 Perch 里开一格。magpie 自己只把命令显示给用户复制；我们在
+// 装完能直接在 Perch 里开一格。不只是把命令显示给用户复制，而是在
 // **用户明确点下「安装」之后**替他把同一条官方命令跑完，并把输出原样摊在
 // 页面里（不藏进度、不假装成功）。
 //
@@ -10,7 +10,7 @@
 //  2. 每个动作都由用户点一次触发，不静默、不后台安装；
 //  3. 输出里不打印任何凭据（安装脚本本身也不接受凭据）。
 //
-// 这个包不 import gateway：装完要不要接网关由 OnInstalled 回调决定。
+// 装完的收尾只做“重读 PATH + 重扫名单 + 版本证据”，不碰任何模型配置。
 package install
 
 import (
@@ -102,16 +102,14 @@ type run struct {
 	cancelled bool
 }
 
-// Deps 是安装器需要的外部能力。Cards/MergeCalls 让"安装完重扫名单"与
-// 总览使用同一份探测规则；OnInstalled 让"装完接网关"留在组合根。
+// Deps 是安装器需要的外部能力。Cards 让"安装完重扫名单"与
+// 总览使用同一份探测规则。
 type Deps struct {
 	Push         func(any)
 	Cards        func() []agentcatalog.Card
-	MergeCalls   func([]agentcatalog.Card)
 	ReloadPath   func()
 	ProbeVersion func(bin string) string
 	Home         func() (string, error)
-	OnInstalled  func(id string, ok bool)
 	// Setup 在官方 CLI 安装成功后、收尾扫描前跑一次“接入状态”的准备工作
 	// （目前只有 dsh：写官方 hook 桥 / profile peer / home patch）。
 	// 失败只记日志，不把 CLI 安装判成失败 —— 终端仍然能开。
@@ -378,19 +376,6 @@ func (in *Installer) finish(id string, ok bool, code int, err error, wasCancelle
 	}
 
 	if ok {
-		if id == "magpie" {
-			// 装完就**自动接入**控制面（用户 2026-10-17 定的：不再有「连接 magpie」
-			// 这个手动动作）。OnInstalled 会自己找到刚装好的那个 exe。
-			in.emit(map[string]any{
-				"type": "install.done", "id": id, "ok": true, "code": code,
-				"elapsedMs": elapsed.Milliseconds(),
-			})
-			if in.deps.OnInstalled != nil {
-				in.deps.OnInstalled(id, true)
-			}
-			return
-		}
-
 		// 重读 PATH 可能要几秒；先告诉界面进入「重新检测」阶段，
 		// 别让行一直显示「安装中」。
 		in.emit(map[string]any{"type": "install.phase", "id": id, "phase": "scanning"})
@@ -457,11 +442,7 @@ func (in *Installer) cards() []agentcatalog.Card {
 	if in.deps.Cards == nil {
 		return nil
 	}
-	cat := in.deps.Cards()
-	if in.deps.MergeCalls != nil {
-		in.deps.MergeCalls(cat)
-	}
-	return cat
+	return in.deps.Cards()
 }
 
 // catalogAgentState 从刚扫出来的名单里取一个 agent 的检测结果。

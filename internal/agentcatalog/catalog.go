@@ -51,8 +51,7 @@ type Card struct {
 // 不再安装、探测或出现在 UI 里；加回时要同时补 recipes 和图标。
 //
 // 这份清单是**使用层**：只收能在终端里跑的 CLI agent，不收桌面应用。
-// 桌面客户端属于 magpie 的**网关层**，可以出现在 /api/state 里，但不从这里
-// 安装、启动或展示。
+// 桌面客户端不从这里安装、启动或展示。
 //
 // 探测规则抄 magpie 的 reference.md：**看配置文件**，不看 PATH —— Windows 上
 // 装完不重开、PATH 没刷新的情况太常见了。
@@ -86,7 +85,7 @@ var entries = []Entry{
 	{"copilot", "Copilot CLI", "githubcopilot", "GitHub", "https://github.com/github/copilot-cli", "", true, false,
 		[]string{"~/.copilot/settings.json"}, "copilot", true},
 	// Qoder 的官方安装脚本放的是原生 qodercli；CLI 首次运行要登录 Qoder，
-	// 自定义供应商（包括 Perch 网关）只对 BYOK 计划开放。
+	// 自定义供应商（包括 Perch 的模型提供商）只对 BYOK 计划开放。
 	{"qoder", "Qoder", "qoder", "Qoder", "https://docs.qoder.com/cli/installation", "首次运行需登录 Qoder；BYOK 计划可用自定义供应商", true, false,
 		[]string{"~/.qoder/settings.json"}, "qodercli", true},
 }
@@ -179,16 +178,15 @@ func Defs(stateDir string) map[string]agent.Def {
 		if e.ID == "claude" || !e.Launch || e.Bin == "" {
 			continue
 		}
-		// 通用 CLI 在「已接入引擎网关」时也要读引擎沙盒；没接入时
-		// EngineDef 返回 nil，行为与 GenericDef 完全一样。
-		defs[e.ID] = agent.EngineDef(e.ID, e.Bin)
+		// 通用 CLI：GenericDef + 补 PATH（npm shim 要找 node）。
+		defs[e.ID] = agent.PathDef(e.Bin)
 	}
 	// 深度适配器覆盖通用那条。
 	defs["opencode"] = agent.OpenCodeDef()
 	defs["pi"] = agent.PiDef()
 	defs["codex"] = agent.CodexDef()
-	// agy 只有「启动」是深度适配：网关地址/密钥必须按 magpie 的 launch
-	// 命令在每次开格时注入（见 internal/agent/def.go 的 AgyDef）。
+	// agy 的深度适配：续接参数 + 跟转录的状态
+	// （见 internal/agent/def.go 的 AgyDef）。
 	defs["agy"] = agent.AgyDef()
 	// 三个 launch 级 agent 的续接/状态：cursor 只跟转录，copilot 跟 events，
 	// qoder 走每格 --settings 注入的 Claude 形状 hooks。

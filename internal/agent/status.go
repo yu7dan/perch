@@ -332,7 +332,7 @@ func openCodeDef() Def {
 }
 
 // prepareOpenCode 在 PTY 起来之前分配端口/口令，并返回 PTY 起来后要跑的观察者。
-func prepareOpenCode(tag string, tabID int, cwd string, _ []string) (map[string]string, []string, func(context.Context), error) {
+func prepareOpenCode(tag string, tabID int, cwd string, _ []string, _ map[string]string) (map[string]string, []string, func(context.Context), error) {
 	port, err := freeLoopbackPort()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("找空闲端口: %w", err)

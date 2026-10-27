@@ -57,7 +57,7 @@ func proxyFromRegistry() map[string]string {
 	if httpProxy == "" && httpsProxy == "" {
 		return nil
 	}
-	// 本机网关/回环永远直连；否则 Claude/Codex 访问 Perch 网关也可能被代理带走。
+	// 回环地址永远直连：本机服务（OpenCode / Codex 的 app-server 端口）不能被代理带走。
 	noProxy := "localhost,127.0.0.1,::1"
 	if override, _, err := k.GetStringValue("ProxyOverride"); err == nil {
 		if v := normalizeNoProxy(override); v != "" {
