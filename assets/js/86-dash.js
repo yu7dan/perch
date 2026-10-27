@@ -260,7 +260,6 @@ function renderDashTabs() {
 function renderDashKpis() {
   const host = $("dash-kpi");
   if (!host) return;
-  const sess = STATE?.sessions || [];
   const act = STATE?.activity || [];
   const byDay = new Map(act.map((a) => [a.day, a]));
   const today = new Date();
@@ -275,7 +274,7 @@ function renderDashKpis() {
   const need = needModel();
 
   const m = mg(), on = mgLive();
-  const mt = (m && m.today) || {}; // magpie 的今日读数；别叫 today，上面有日期
+  const mt = (m && m.today) || {};
   const ctx = (m && m.context) || {};
   const cache = on ? mgCacheRate(mt) : null;
   const ctxPct = ctx.window ? Math.round((100 * ctx.prompt) / ctx.window) : null;
@@ -296,20 +295,29 @@ function renderDashKpis() {
         prompt: mgCompact(mgPromptOf(mt)),
       })
     : t("dash.kpi.gatewayDown");
-
+  let dateLabel = "";
+  try {
+    dateLabel = new Intl.DateTimeFormat(PERCH_LOCALE === "zh" ? "zh-CN" : "en",
+      { month: "short", day: "numeric" }).format(today);
+  } catch (_) {}
   const kpi = (n, label, sub, bad) =>
-    `<div class="ck"><b>${n}</b><span>${label}</span>` +
+    `<div class="ck"><b>${esc(n)}</b><span>${esc(label)}</span>` +
     `<small${bad ? ' class="bad"' : ""}>${esc(sub)}</small></div>`;
   host.innerHTML =
-    kpi(tCount("dash.kpi.panes", running), t("dash.kpi.running"),
-      tCount("dash.kpi.runningSub", live.length, { panes: live.length, need: need.wait.length })) +
-    kpi(dashNum(todayN), t("dash.kpi.turnsToday"),
-      t("dash.kpi.turnsSub", { week: dashNum(week), days: act.length })) +
-    kpi(on ? mgCompact(mt.calls || 0) : "—", t("dash.kpi.requestsToday"), failSub, on && mt.errors > 0) +
-    kpi(cache == null ? "—" : cache + "%", t("dash.kpi.cacheHit"), cacheSub) +
-    kpi(ctxPct == null ? "—" : ctxPct + "%", t("dash.kpi.context"), ctxSub) +
-    kpi(on ? mgSpeed(mt) : "—", t("dash.kpi.outputSpeed"),
-      on ? t("dash.kpi.avgFirstToken", { ttft: mgTTFT(mt) }) : t("dash.kpi.gatewayDown"));
+    `<div class="today-head"><span class="today-kicker">${esc(t("dash.today"))}</span>` +
+      `${dateLabel ? `<span class="today-date">${esc(dateLabel)}</span>` : ""}</div>` +
+    `<div class="kpi-strip">` +
+      kpi(tCount("dash.kpi.panes", running), t("dash.kpi.running"),
+        tCount("dash.kpi.runningSub", live.length, { panes: live.length, need: need.wait.length })) +
+      kpi(dashNum(todayN), t("dash.kpi.turnsToday"),
+        t("dash.kpi.turnsSub", { week: dashNum(week), days: act.length })) +
+      kpi(on ? mgCompact(mt.calls || 0) : "—", t("dash.kpi.requestsToday"), failSub,
+        on && mt.errors > 0) +
+      kpi(cache == null ? "—" : cache + "%", t("dash.kpi.cacheHit"), cacheSub) +
+      kpi(ctxPct == null ? "—" : ctxPct + "%", t("dash.kpi.context"), ctxSub) +
+      kpi(on ? mgSpeed(mt) : "—", t("dash.kpi.outputSpeed"),
+        on ? t("dash.kpi.avgFirstToken", { ttft: mgTTFT(mt) }) : t("dash.kpi.gatewayDown")) +
+    `</div>`;
 }
 
 /* 53 周 × 7 天。周一在最上、月份在顶行 —— 和 magpie 的 Usage 热力图同一副骨架。
@@ -327,6 +335,8 @@ function heatPoints() {
     day: a.day, v: a.turns | 0, extra: a.sessions | 0,
   }));
 }
+const HEAT_WEEKS = 53;
+
 function renderHeat() {
   const grid = $("dash-heat");
   if (!grid) return;
@@ -335,7 +345,7 @@ function renderHeat() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const dow = (today.getDay() + 6) % 7;               // 周一 = 0
-  const start = dashAddDays(today, -(52 * 7 + dow));  // 53 周前那个周一
+  const start = dashAddDays(today, -((HEAT_WEEKS - 1) * 7 + dow)); // 53 周前那个周一
   // 分位数分档：p50 / p75 / p90，0 是没活动。
   const vals = pts.map((a) => a.v).filter((v) => v > 0).sort((a, b) => a - b);
   const q = (p) => vals.length ? vals[Math.min(vals.length - 1, Math.floor(p * vals.length))] : 0;
@@ -349,7 +359,7 @@ function renderHeat() {
   // 语言切换要重建骨架：月份/星期的标签是画在骨架上的一次性文本。
   const canPatch = grid.dataset.day === todayKey &&
     grid.dataset.locale === PERCH_LOCALE &&
-    grid.querySelectorAll("i").length === 371;
+    grid.querySelectorAll("i").length === HEAT_WEEKS * 7;
   if (canPatch) {
     for (const el of grid.querySelectorAll("i[data-day]")) {
       const k = el.dataset.day;
@@ -366,20 +376,20 @@ function renderHeat() {
     const monthFmt = new Intl.DateTimeFormat(PERCH_LOCALE === "zh" ? "zh-CN" : "en", { month: "short" });
     let html = `<span class="mo" style="grid-column:1;grid-row:1"></span>`;
     let lastMonth = -1;
-    for (let c = 0; c < 53; c++) {
+    for (let c = 0; c < HEAT_WEEKS; c++) {
       const monday = dashAddDays(start, c * 7);
       if (monday.getMonth() !== lastMonth) {
         lastMonth = monday.getMonth();
         // 「11月」这种三个字，两格（~26px）放不下会被裁成「1月」——
         // 给三格；月份最短也有 4 周，下一枚标签从 c+6 起，不会撞上。
-        const span = (c + 4 <= 54) ? 3 : 2;
+        const span = (c + 3 <= HEAT_WEEKS + 1) ? 3 : 2;
         html += `<span class="mo" style="grid-column:${c + 2} / span ${span};grid-row:1">` +
           `${esc(monthFmt.format(monday))}</span>`;
       }
     }
     for (let r = 0; r < 7; r++) {
       html += `<span class="wd" style="grid-row:${r + 2}">${WD[r]}</span>`;
-      for (let c = 0; c < 53; c++) {
+      for (let c = 0; c < HEAT_WEEKS; c++) {
         const d = dashAddDays(start, c * 7 + r);
         const st = `grid-column:${c + 2};grid-row:${r + 2}`;
         if (d > today) { html += `<i class="fut" style="${st}"></i>`; continue; }

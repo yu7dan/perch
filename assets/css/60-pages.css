@@ -66,7 +66,11 @@
   flex:none;border-bottom:1px solid var(--line-soft);box-sizing:border-box}
 #files-bar .icon-btn{width:22px;height:22px;margin-left:2px;flex:none;
   color:var(--faint)}
+/* .icon-btn 的 display:grid 会盖掉 UA 的 [hidden]，显式补一条（同 30-workspace）。 */
+#files-bar .icon-btn[hidden]{display:none}
 #files-bar .icon-btn:hover{color:var(--fg)}
+#files-bar .icon-btn.na{color:#4a4a52;cursor:default}
+#files-bar .icon-btn.na:hover{color:#4a4a52}
 .fsegs{display:flex;align-items:center;gap:2px;flex:none}
 .fseg{height:22px;padding:0 9px;border:0;border-radius:5px;background:transparent;
   color:var(--muted);font-size:11px;cursor:pointer;
@@ -104,6 +108,20 @@
 .ficoslot{color:var(--muted)}
 .fnm{flex:1;min-width:0}
 .fcount{margin-left:auto;flex:none;font:9.5px/1 var(--mono);color:var(--faint)}
+/* 「碰过的」是工作清单，不是文件系统树：一行一个文件，父目录只做暗色提示。
+   文件名优先保住，父路径先省略；绝对路径不进入行文本。 */
+.fflat{padding-left:6px}
+.fwho{display:flex;align-items:baseline;gap:5px;flex:1;min-width:0;overflow:hidden}
+.fwho .fnm{flex:0 1 auto;min-width:0}
+.fparent{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;color:var(--faint);font:9.5px/1 var(--mono)}
+.frow.fflat.ext-file .fnm{color:var(--muted)}
+/* 多项目 / 工作区外的分隔条。只在碰过列表里出现，不参与树缩进。 */
+.fgroup{display:flex;align-items:center;gap:6px;min-height:22px;
+  padding:7px 6px 2px;color:var(--faint);font:9.5px/1 var(--mono);
+  letter-spacing:.03em}
+.fgroup:first-child{padding-top:2px}
+.fgroup-nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 右端三列固定宽度：A/M/R → +N −N → 拒/错/缺。
    固定宽度是为了**跨行对齐**：没有改动行数的文件也占住那一列，名字不会被
    相邻行的 +N 推来推去。只在「碰过的」视图出现（全部树没有这些数据）。 */
@@ -170,7 +188,7 @@
 .fv-sum{font:10.5px/1 var(--mono);color:var(--muted);white-space:nowrap;
   font-variant-numeric:tabular-nums}
 .fv-sum .fv-nchg{color:var(--faint);margin-left:7px}
-.fv-body{flex:1;overflow:auto;padding:10px 0 14px;font:12px/1.55 var(--mono);
+.fv-body{flex:1;overflow:auto;padding:0 0 14px;font:12px/1.55 var(--mono);
   tab-size:2;background:#141416}
 .fv-body .fl{display:flex;min-width:max-content}
 .fv-body .fl:hover{background:rgba(255,255,255,.035)}
@@ -192,10 +210,13 @@
 .fv-body .df.meta .dc{color:var(--faint);font-style:italic}
 .fv-body .dfh{min-width:max-content;padding:4px 16px;margin-top:4px;
   color:#8b8b98;background:rgba(255,255,255,.035);font:11.5px/1.55 var(--mono)}
-.fv-body .dfchg + .dfchg{margin-top:8px;border-top:1px solid var(--line-soft)}
+.fv-body .dfchg + .dfchg{margin-top:0;border-top:1px solid var(--line-soft)}
+/* Write/时间这条是**贴顶的满宽条**：向上滚时始终压在 .fv-body 顶边，
+   不在 padding/段间距里露一条缝。滚动容器顶部不留 padding，间距交给
+   段落自身；下一段开始时，它的头会把上一段的头顶走。 */
 .fv-body .dfhead{display:flex;align-items:center;gap:8px;padding:7px 14px 6px;
   font:11px/1.4 var(--ui);color:var(--muted);position:sticky;top:0;
-  background:#141416;z-index:1}
+  background:#141416;z-index:2;box-shadow:0 1px 0 var(--line-soft)}
 .fv-body .dftool{font-weight:600;color:var(--fg2)}
 .fv-body .dfwhen{color:var(--faint);font-family:var(--mono)}
 .fv-body .dfsp{flex:1;min-width:8px}

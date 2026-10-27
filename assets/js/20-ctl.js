@@ -591,6 +591,10 @@ function dispatchCtl(m) {
       }
       return;
     }
+    // 工作区共享 brief：get/set 的应答走同一条；编辑卡在 81c-workspace-brief.js。
+    case "workspace.brief":
+      if (typeof briefMessage === "function") briefMessage(m);
+      return;
   }
 }
 ctl.onerror = () => { ctlReady = false; };
@@ -722,6 +726,15 @@ function renderTermEmpty() {
   const empty = TAB_LIST.length === 0;
   box.hidden = !empty;
   if (!empty) return;
+  const hasProject = (STATE?.projects || []).some((p) => p && p.path && !p.synthetic);
+  const kicker = box.querySelector(".te-kicker");
+  const h1 = box.querySelector("h1");
+  const lead = box.querySelector(".te-lead");
+  const cta = box.querySelector("#te-new > span");
+  if (kicker) kicker.textContent = t(hasProject ? "term.empty.kicker" : "term.empty.projectKicker");
+  if (h1) h1.textContent = t(hasProject ? "term.empty.title" : "term.empty.projectTitle");
+  if (lead) lead.textContent = t(hasProject ? "term.empty.lead" : "term.empty.projectLead");
+  if (cta) cta.textContent = t(hasProject ? "term.empty.cta" : "term.empty.addProject");
   const host = $("te-closed");
   if (!host) return;
   const rows = (typeof closedList === "function" ? closedList() : [])
@@ -742,7 +755,11 @@ function renderTermEmpty() {
     : "";
 }
 
-$("te-new").addEventListener("click", () => openAgentPanel("空态新开"));
+$("te-new").addEventListener("click", () => {
+  const hasProject = (STATE?.projects || []).some((p) => p && p.path && !p.synthetic);
+  if (hasProject) openNewAgent({ why: "空态新开" });
+  else openAddProject({ why: "空态先添加项目" });
+});
 $("te-closed").addEventListener("click", (e) => {
   const b = e.target.closest("[data-pane]");
   if (!b) return;

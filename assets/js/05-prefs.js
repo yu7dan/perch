@@ -17,8 +17,10 @@ const SETTINGS_DEFAULTS = Object.freeze({
   defaultCwd: "",              // 空 = 内置 <用户主目录>\Documents\Perch
   termFontSize: 14,
   termFontFamily: "cascadia",  // "cascadia" | "jetbrains"
-  startView: "dash",           // "dash" | "workspace"
+  startView: "workspace",      // "workspace" | "dash"
   language: "auto",            // "auto"（跟随系统）| "en" | "zh"
+  uiMode: "classic",           // 当前只有 Classic；Clean 是之后加在终端面板上的皮套
+  topMode: "workspaces",       // "workspaces" | "chat"（Chat 1.0 才启用）
   defaultAgent: "",            // 空 = 自动（优先有状态能力的已安装 agent）
   // 新建格快捷键：**应用内**、有焦点时生效。Ctrl/Alt 至少带一个，主键只认
   // A-Z / 0-9 / F1-F12；空串 = 关闭。这里存的是规范形状（Ctrl+Alt+N），
@@ -106,11 +108,17 @@ function normalizeSettings(raw) {
   s.termFontFamily = String(s.termFontFamily || "").toLowerCase() === "jetbrains"
     ? "jetbrains"
     : "cascadia";
-  s.startView = String(s.startView || "").toLowerCase() === "workspace"
-    ? "workspace"
-    : "dash";
+  // 启动落点默认工作区。只有用户明确存过 "dash" 才先画总览；
+  // 空/旧缓存/手改坏的值都回到工作区，不再默认落在总览。
+  s.startView = String(s.startView || "").toLowerCase() === "dash"
+    ? "dash"
+    : "workspace";
   const lang = String(s.language || "").toLowerCase();
   s.language = (lang === "en" || lang === "zh") ? lang : "auto";
+  // Beta.3 当前这套降噪外观就是 Classic。旧缓存把它叫 clean 的也归到 classic；
+  // 真正的 Clean（终端面板皮套）等这一轮验收后再讨论。
+  s.uiMode = "classic";
+  s.topMode = String(s.topMode || "").toLowerCase() === "chat" ? "chat" : "workspaces";
   // agent id 只做去空白；能不能用由 30-pages 的 defaultAgentId() 对着
   // **当前探测到的名单**判（设置里写着、但这台机器没装 = 回落到自动）。
   s.defaultAgent = typeof s.defaultAgent === "string" ? s.defaultAgent.trim().toLowerCase() : "";
@@ -146,6 +154,19 @@ function termFontStack() {
   return SETTINGS.termFontFamily === "jetbrains" ? TERM_FONT_JETBRAINS : TERM_FONT_CASCADIA;
 }
 
+/* Beta.3 只有 Classic 这一层外观；真正的 Clean 是之后加在终端面板上的皮套，
+   不在这里冒充。类名放在 #app/body 上，首帧内联脚本也会先加一次。 */
+function applyUIMode() {
+  const app = document.getElementById("app");
+  if (!app) return;
+  app.classList.add("ui-classic");
+  app.classList.remove("ui-clean");
+  if (document.body) {
+    document.body.classList.add("ui-classic");
+    document.body.classList.remove("ui-clean");
+  }
+}
+
 /* 应用一份设置。
    meta.fromGo = true：Go 发来的权威整份（缺的字段用默认补，不继承本地旧值）。
    meta.effectiveCwd / builtinCwd / defaultCwdMissing：Go 现算的三样。 */
@@ -155,6 +176,8 @@ function applySettings(next, meta) {
   SETTINGS = normalizeSettings(Object.assign({}, base, next || {}));
   saveSettingsCache();
   if (typeof setLocale === "function") setLocale(SETTINGS.language);
+  applyUIMode();
+  if (typeof renderTopMode === "function") renderTopMode();
 
   if (typeof m.effectiveCwd === "string" && m.effectiveCwd) {
     SETTINGS_EFFECTIVE_CWD = m.effectiveCwd;

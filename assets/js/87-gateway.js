@@ -339,6 +339,13 @@ function applyMagpie(s) {
   MG_SIG = sig;
   MG_CAT_SIG = catSig;
 
+  // The new-agent card can be open while the first catalog arrives (or while
+  // an install finishes). It lives in Workspaces, so this must run before the
+  // dashboard-only early return below.
+  if (catChanged && typeof naCatalogChanged === "function") {
+    naCatalogChanged("网关 Agent 名单更新");
+  }
+
   if (NAV_HERE !== "dash") return;
   renderDashStatus();
   renderDashKpis();

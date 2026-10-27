@@ -51,11 +51,19 @@ type Settings struct {
 	// TermFontSize 是终端字号；TermFontFamily 是 "cascadia" | "jetbrains"。
 	TermFontSize   int    `json:"termFontSize"`
 	TermFontFamily string `json:"termFontFamily"`
-	// StartView 是下次启动先落在哪："dash" | "workspace"。
+	// StartView 是下次启动先落在哪："workspace" | "dash"。
+	// 默认 workspace（先选/建项目再开始干活）；只有用户明确选过 dash 才先到总览。
 	StartView string `json:"startView"`
 	// Language 是界面语言："auto"（跟随系统）| "en" | "zh"。只影响 Perch
 	// 自己的 UI 文案，不碰 agent 输出，也不改 magpie 页面自己的语言。
 	Language string `json:"language"`
+	// UIMode 是工作区的展示层。当前只有 "classic"（这一版降噪后的外观）；
+	// "clean" 是之后加在终端面板上的皮套，尚未实现。它只换壳，不改
+	// Project/agent 的信息架构。
+	UIMode string `json:"uiMode"`
+	// TopMode 是顶层模式："workspaces"（默认）| "chat"。Beta.3 只落盘，
+	// Chat 的完整读写要到 1.0；现在的切换按钮仍是灰态。
+	TopMode string `json:"topMode"`
 	// DefaultAgent 是「新开一格」默认用谁；空 = 自动（优先有状态能力的已安装
 	// agent）。存的是 agent id，不是名字 —— 名字会变，id 不会。
 	DefaultAgent string `json:"defaultAgent"`
@@ -75,8 +83,10 @@ func Defaults() Settings {
 	return Settings{
 		TermFontSize:     14,
 		TermFontFamily:   "cascadia",
-		StartView:        "dash",
+		StartView:        "workspace",
 		Language:         "auto",
+		UIMode:           "classic",
+		TopMode:          "workspaces",
 		NewAgentShortcut: "Ctrl+Alt+N",
 		ConfirmClose:     true,
 		ConfirmEndAgent:  true,
@@ -120,6 +130,23 @@ func (s Settings) Normalize() Settings {
 		s.Language = "zh"
 	default:
 		s.Language = d.Language
+	}
+	// Beta.3 只有 Classic 这一层外观。旧版本把它叫 "clean"，所以把
+	// clean/classic 都归到 classic；真正的 Clean（终端面板皮套）等验收后
+	// 再讨论，不在这里偷偷冒充。
+	switch strings.ToLower(strings.TrimSpace(s.UIMode)) {
+	case "clean", "classic":
+		s.UIMode = "classic"
+	default:
+		s.UIMode = d.UIMode
+	}
+	switch strings.ToLower(strings.TrimSpace(s.TopMode)) {
+	case "workspaces":
+		s.TopMode = "workspaces"
+	case "chat":
+		s.TopMode = "chat"
+	default:
+		s.TopMode = d.TopMode
 	}
 	// 只认能启动的 agent id。空串是合法值 = 自动；认不出的（手改配置/卸载了）
 	// 落回自动 —— 别把一个不存在的 agent 当成“设置过”。
@@ -198,6 +225,8 @@ type Patch struct {
 	TermFontFamily   *string `json:"termFontFamily,omitempty"`
 	StartView        *string `json:"startView,omitempty"`
 	Language         *string `json:"language,omitempty"`
+	UIMode           *string `json:"uiMode,omitempty"`
+	TopMode          *string `json:"topMode,omitempty"`
 	DefaultAgent     *string `json:"defaultAgent,omitempty"`
 	NewAgentShortcut *string `json:"newAgentShortcut,omitempty"`
 	ConfirmClose     *bool   `json:"confirmClose,omitempty"`
@@ -207,8 +236,8 @@ type Patch struct {
 // Empty 表示这条请求什么都没提。
 func (p Patch) Empty() bool {
 	return p.DefaultCWD == nil && p.TermFontSize == nil && p.TermFontFamily == nil &&
-		p.StartView == nil && p.Language == nil && p.DefaultAgent == nil &&
-		p.NewAgentShortcut == nil && p.ConfirmClose == nil && p.ConfirmEndAgent == nil
+		p.StartView == nil && p.Language == nil && p.UIMode == nil && p.TopMode == nil &&
+		p.DefaultAgent == nil && p.NewAgentShortcut == nil && p.ConfirmClose == nil && p.ConfirmEndAgent == nil
 }
 
 // Store 是设置文件的持有者。零值不可用；用 Load 构造。
@@ -249,9 +278,10 @@ func Load() *Store {
 	}
 	cur = cur.Normalize()
 	s.cur = cur
-	log.Printf("[settings] 载入：默认目录=%s 字号=%d 字体=%s 启动=%s 默认 agent=%s 快捷键=%s 关窗确认=%v 结束确认=%v（%s）",
+	log.Printf("[settings] 载入：默认目录=%s 字号=%d 字体=%s 启动=%s 语言=%s UI=%s 模式=%s 默认 agent=%s 快捷键=%s 关窗确认=%v 结束确认=%v（%s）",
 		pick(cur.DefaultCWD, "(内置)"), cur.TermFontSize, cur.TermFontFamily,
-		cur.StartView, pick(cur.DefaultAgent, "(自动)"), pick(cur.NewAgentShortcut, "(关闭)"),
+		cur.StartView, cur.Language, cur.UIMode, cur.TopMode,
+		pick(cur.DefaultAgent, "(自动)"), pick(cur.NewAgentShortcut, "(关闭)"),
 		cur.ConfirmClose, cur.ConfirmEndAgent, f)
 	return s
 }
@@ -312,6 +342,12 @@ func (s *Store) Patch(p Patch) (Settings, error) {
 	}
 	if p.Language != nil {
 		next.Language = *p.Language
+	}
+	if p.UIMode != nil {
+		next.UIMode = *p.UIMode
+	}
+	if p.TopMode != nil {
+		next.TopMode = *p.TopMode
 	}
 	if p.DefaultAgent != nil {
 		v := strings.ToLower(strings.TrimSpace(*p.DefaultAgent))

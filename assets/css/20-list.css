@@ -352,6 +352,27 @@
 #openpanel .op-agempty{padding:12px 4px;color:var(--faint);font-size:11px;line-height:1.6;
   text-align:center}
 
+/* ---------- 工作区共享 brief（Beta.3）----------
+   和「添加项目」同一张卡的语言，但正文是纯文本域：brief 是给 agent 读的
+   约定，不是富文本。高度固定一屏，避免长文把对话框撑出窗口。 */
+#brief{position:fixed;inset:0;z-index:122;display:grid;place-items:center;
+  padding:24px;background:rgba(0,0,0,.58);backdrop-filter:blur(2px)}
+#brief[hidden]{display:none}
+#brief .brief-card{width:min(620px, calc(100vw - 32px))}
+#brief .brief-body{display:flex;flex-direction:column;gap:8px}
+#brief .brief-path{font:10.5px/1.5 var(--mono);color:var(--faint);
+  word-break:break-all;min-height:15px}
+#brief .brief-text{width:100%;height:240px;box-sizing:border-box;resize:vertical;
+  padding:9px 10px;border:1px solid var(--line);border-radius:7px;
+  background:var(--bg);color:var(--fg);font:12px/1.65 var(--mono);
+  outline:none;tab-size:2}
+#brief .brief-text:focus{border-color:var(--ring)}
+#brief .brief-text::placeholder{color:var(--faint)}
+#brief .brief-note{min-height:16px;font-size:11px;line-height:1.55;color:var(--faint)}
+#brief .brief-note.err{color:var(--red)}
+#brief .brief-hint{min-width:0;font-size:10.5px;line-height:1.5;color:var(--faint);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 /* ---------- 提示卡（右上角；2026-10-17 第二版）----------
    拒绝、结束、复制路径这类**事实**要有地方落地；而对话流是"会话的内容"，
    往里塞一条系统消息等于伪造内容 —— 所以另起一个。
@@ -364,7 +385,7 @@
    · 表面照 #cardmenu —— 同一套浮层语言（深一档的底、1px 边、8px 圆角、深投影）；
    · 已知代价：它压住右栏顶部。这比压终端好 —— 右栏是记录，终端才是干活的地方。
    行为：新的在上、最多同时 3 条；悬停停表；点卡片或 × 关闭。 */
-#toasts{position:fixed;top:calc(var(--titlebar-h) + 8px);right:12px;z-index:70;
+#toasts{position:fixed;top:calc(var(--titlebar-h) + 8px);right:12px;left:auto;z-index:100;
   width:330px;max-width:calc(100vw - 24px);display:flex;flex-direction:column;gap:10px;
   pointer-events:none}
 /* 暗底上"浮起来"全靠三件事：顶面比周围亮一档的渐变、一条 1px 的亮边、

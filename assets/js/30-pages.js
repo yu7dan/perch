@@ -444,29 +444,11 @@ $("termbody").addEventListener("focusin", (e) => {
 // 仍然直接起格；两处各写一遍，"回网格"和"切到新格"里漏一句的后果是看着点了
 // 没反应（新格子藏在别的视图里），而这种漏很难在截图里看出来。
 async function newParallelTab(why) {
-  // C5：正在看某张独立页时点「+」—— 视图先回网格。新 agent 是加进**并行**里的
-  // （这就是这个按钮的标题："新开一个并行 agent"），留在页面上会让人点了没反应
-  // （新格子藏在 display:none 里）。回网格那一下顺手把主区宽度按新 N 折回来。
+  // Workspaces 不再有默认项目。群组那排 + 也先走新建 Agent 卡：
+  // 当前格属于哪个 Project 就预选它；没有项目就在卡里提示先添加。
   if (soloTab) backToGrid();
-  // 群组那排 +（收起时没有地方挂选择面板）：用设置里的默认 agent，和左栏一键新开一致。
-  const spec = defaultSpawnSpec();
-  const t = await createTab(spec, { fresh: true });
-  // 建格失败那条路（护栏拒绝）里 createTab 已经把这一格撤了（closeTab）——
-  // 它照样返回了 T，别拿着一个不在 TAB_LIST 里的格去 setActive。
-  if (!TAB_LIST.includes(t)) return;
-  // 和 newTabIn 同一条：新开的格子先挂着"可以换 Agent"的入口。
-  armFreshCell(t, why || "新开并行格");
-  renderGroup();
-  sendCtrl({ type: "log", msg: `新开并行 agent tab=${t.id} agent=${spec.agent} ` +
-    `（${why || "点 +"}）现在 ${TAB_LIST.length} 格` });
-  /* ⚠️ 从**群组**里点 + （此时是收起的）必须**进去**那一格，不能只 setActive：
-     新格的 PTY 还没起 —— 前端的首帧尺寸就是 PTY 的启动闸（Go 侧 awaitInitialSize），
-     而收起的群组里那一格是 0×0，报不出尺寸（实测：点完 + 过了 45s 日志里都没有
-     `已启动`，展开的那一下 PTY 才起来）。不进去的话，屏上会出现一个"有行、没有
-     PTY"的 agent，而用户点 + 本来就是要接着给它派活 —— 那必须有终端。
-     展开着的格子（标签条那个 +）本来就有尺寸，照旧 setActive，不闪、不夺焦点。 */
-  if (collapsed) goToTab(t, why || "群组那排 +");
-  else setActive(t);
+  const cwd = (typeof activeTab !== "undefined" && activeTab) ? effCwd(activeTab) : "";
+  openNewAgent({ cwd, why: why || "群组 +" });
 }
 /* ---------------------------------------------------------------------------
    「开一个 agent」选择面板（2026-10-17）
@@ -553,9 +535,9 @@ function defaultSpawnSpec() {
    正确的首屏是空态 + 安装入口，而不是一个报错的幽灵格。
    名单还没到（cat 为空）时保持旧行为 —— 那是旧载荷/探测失败，不是“没装”。 */
 function defaultBootSpec() {
-  const cat = opCatalog();
-  if (cat.length && !cat.some(opLaunchable)) return null;
-  return defaultSpawnSpec();
+  // Workspaces 的默认区已删除；启动时没有历史座位就不自动起 agent。
+  // 首屏应该是 Workspaces 空态 + 添加项目，而不是一个落在默认目录里的 agent。
+  return null;
 }
 function opCapsText(a) {
   const c = (a && a.caps) || {};
@@ -696,7 +678,9 @@ function opSetDefaultAgent() {
 }
 
 function currentWorkspacePath() {
-  const projs = STATE?.projects || [];
+  // Workspaces 只认真实 Project。没有项目、或者当前格不在项目里，就返回空，
+  // 由新建 Agent 卡要求用户先选择/添加项目；默认区留给 Chat。
+  const projs = (STATE?.projects || []).filter((p) => p && p.path && !p.synthetic);
   if (!projs.length) return "";
   const t = (activeTab && activeTab.id > 0) ? activeTab
     : (TAB_LIST || []).find((x) => x.id > 0);
@@ -709,19 +693,20 @@ function currentWorkspacePath() {
     }
     if (best) return best.path;
   }
-  return (projs.find((p) => p.synthetic) || projs[0]).path || "";
+  return "";
 }
 
 function renderOpWs() {
-  const projs = STATE?.projects || [];
-  if (opWSPath && projs.length && !projs.some((p) => p.path === opWSPath)) {
+  const projs = (STATE?.projects || []).filter((p) => p && p.path && !p.synthetic);
+  if (projs.length && (!opWSPath || !projs.some((p) => p.path === opWSPath))) {
     opWSPath = projs[0].path;
   }
+  if (!projs.length) opWSPath = "";
   $("op-ws").innerHTML = projs.map((p) =>
     `<option value="${esc(p.path)}">${esc(projectName(p))}</option>`).join("");
   $("op-ws").value = opWSPath;
-  $("op-ws").disabled = opAllWs;
-  $("op-newpath").textContent = opWSPath || t("pages.defaultWorkdir");
+  $("op-ws").disabled = opAllWs || !projs.length;
+  $("op-newpath").textContent = opWSPath || t("op.noProjectHint");
 }
 
 function opSessionCount() {
@@ -789,6 +774,18 @@ function openAgentPanel(why, opts) {
   opTab = "new";
   opAllWs = false;
   opWSPath = (opts && opts.folder) || currentWorkspacePath();
+  /* The tab-strip "+" is another "new agent" entry point. When the catalog is
+     known and has nothing launchable, send it through the same new-agent card
+     path so the first-run guide can start at the moment the user is trying to
+     add an agent (not when a project is created). A missing catalog is not an
+     empty catalog: leave the old panel's retry/fallback in place. */
+  const opCat = opCatalog();
+  if (!OP_CATALOG_MISSING && !opCat.filter(opLaunchable).length &&
+      window.perchOnboarding && window.perchOnboarding.needed &&
+      window.perchOnboarding.needed()) {
+    openNewAgent({ cwd: opWSPath, why: (why || "标签条 +") + "（没有可用 Agent）" });
+    return;
+  }
   // 默认预选（用户定的形态）：每次打开都回到默认，不记上一次选过谁。
   opAgent = defaultAgentId();
   $("op-search").value = "";
@@ -826,13 +823,20 @@ async function opNewAgent() {
       `选择面板 新会话：没有可启动的 Agent（opAgent=${opAgent || "空"}），不发建格` });
     return;
   }
-  /* 无项目区：发显式 scratch，Go 侧落到默认工作区**根目录**。
-     项目/其他目录原样发 path + target，绝不把旧选中值当默认。 */
-  const dir = (opWSPath && opWSPath === defaultAreaPath()) ? "" : (opWSPath || "");
-  const target = dir ? targetKindForDir(dir) : "scratch";
+  // 新 Agent 必须有真实 Project；没有项目时先把添加项目卡打开，
+  // 不再发 scratch/默认目录。
+  const dir = opWSPath || "";
+  const target = targetKindForDir(dir);
+  if (target !== "project") {
+    closeAgentPanel("新会话：没有项目");
+    showToast(t("na.toast.stepTitle"), t("na.pickTargetFirst"), "err");
+    sendCtrl({ type: "log", msg: "选择面板 新会话：没有真实项目 → 打开添加项目" });
+    openAddProject({ origin: "newagent", why: "选择面板需要项目" });
+    return;
+  }
   closeAgentPanel("新会话");
-  sendCtrl({ type: "log", msg: `选择面板 新会话 agent=${a.id} cwd=${dir || "(默认)"} target=${target}` });
-  await newTabIn(dir, "选择面板 新会话", a.id, target);
+  sendCtrl({ type: "log", msg: `选择面板 新会话 agent=${a.id} cwd=${dir} target=project` });
+  await newTabIn(dir, "选择面板 新会话", a.id, "project");
 }
 
 async function opPick(s) {

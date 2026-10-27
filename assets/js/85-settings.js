@@ -77,6 +77,7 @@ function settingsCwdPaintReset() {
 function settingsDefaultLabel(key) {
   const v = SETTINGS_DEFAULTS[key];
   if (key === "termFontFamily") return v === "jetbrains" ? "JetBrains Mono" : "Cascadia Code";
+  if (key === "uiMode") return v === "classic" ? t("settings.uiMode.classic") : t("settings.uiMode.clean");
   if (key === "startView") return v === "workspace" ? t("settings.startView.workspace") : t("settings.startView.dash");
   if (key === "defaultAgent") return t("settings.defaultAgent.autoShort");
   if (key === "newAgentShortcut") return v || t("settings.shortcut.unset");
@@ -239,6 +240,16 @@ function syncSettingsUI() {
     const on = b.dataset.setFont === SETTINGS.termFontFamily;
     b.classList.toggle("on", on);
     b.setAttribute("aria-checked", String(on));
+  }
+  for (const b of document.querySelectorAll("#settings [data-set-ui]")) {
+    const on = b.dataset.setUi === SETTINGS.uiMode;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-checked", String(on));
+    // Clean 是之后的终端面板皮套；现在只做灰态说明，不做假切换。
+    if (b.dataset.setUi === "clean") {
+      b.classList.add("na");
+      b.setAttribute("aria-disabled", "true");
+    }
   }
   for (const b of document.querySelectorAll("#settings [data-set-start]")) {
     const on = b.dataset.setStart === SETTINGS.startView;
@@ -634,6 +645,16 @@ $("settings").addEventListener("click", (e) => {
     settingsSend({ termFontFamily: b.dataset.setFont }, "终端字体");
     return;
   }
+  if (b.dataset.setUi !== undefined) {
+    if (b.dataset.setUi === "clean") {
+      showToast(t("settings.uiMode.cleanToastTitle"), t("settings.uiMode.cleanToastNote"), "info");
+      sendCtrl({ type: "log", msg: "设置：点了 Clean（终端面板皮套，1.0 再讨论）" });
+      return;
+    }
+    if (b.dataset.setUi === SETTINGS.uiMode) return;
+    settingsSend({ uiMode: b.dataset.setUi }, `界面风格 → ${b.dataset.setUi}`);
+    return;
+  }
   if (b.dataset.setTheme !== undefined) {
     if (b.dataset.setTheme === "light") {
       // 界面主题不是终端主题：应用里还有一百多处写死的深色值，
@@ -673,11 +694,13 @@ $("set-language").addEventListener("change", (e) => {
    静态节点已经由 applyStaticI18n 处理；这里只补 JS 生成的文字。 */
 function onLocaleChanged() {
   if (typeof renderNav === "function") renderNav();
+  if (typeof renderTopMode === "function") renderTopMode();
   if (typeof renderDashTabs === "function") renderDashTabs();
   // 左栏（项目行、agent 行、已关闭行）是整表现画的：状态词、计数、菜单标题都随语言变。
   if (typeof renderLists === "function") renderLists();
   // 池子错误横幅的文字来自后端 code（60-shell.js 的 poolErrText）。
   if (typeof syncPoolBanner === "function") syncPoolBanner();
+  if (typeof renderTermEmpty === "function") renderTermEmpty();
   // 格子头：默认标题、关闭键 title、换 Agent 的 aria/title、状态点 aria-label。
   if (typeof TAB_LIST !== "undefined") {
     for (const tab of TAB_LIST) {
@@ -705,13 +728,13 @@ function onLocaleChanged() {
   }
   // 右栏与文件预览里的文字多是 JS 现画的；切语言时就地重画一次。
   if (typeof renderFiles === "function") renderFiles(true);
-  if (typeof renderFeed === "function") renderFeed();
   if (typeof renderNeed === "function") renderNeed();
   if (typeof renderSideLive === "function") renderSideLive();
   // 安装进度台：标题/阶段/日志开关/任务条都是现画的。
   if (typeof INSTALLS !== "undefined" && Object.keys(INSTALLS).length &&
       typeof instPaint === "function") instPaint();
   if (typeof renderFlow === "function") renderFlow("locale");
+  if (typeof briefRepaint === "function") briefRepaint();
   if (typeof fvRender === "function" && typeof FV !== "undefined" && FV) fvRender();
   // 添加项目 / 新建 Agent 卡片开着时，标题、note、预选标签都是 JS 现画的。
   if (typeof projectDialogsRepaint === "function") projectDialogsRepaint();
@@ -726,7 +749,7 @@ function onLocaleChanged() {
   if (typeof STATE !== "undefined" && STATE && $("s-index")) {
     $("s-index").textContent = t("status.index", {
       sessions: STATE.sessions?.length ?? 0,
-      projects: (STATE.projects || []).length,
+      projects: (STATE.projects || []).filter((p) => p && !p.synthetic).length,
     });
   }
   if (typeof syncSettingsUI === "function" && typeof NAV_HERE !== "undefined" &&

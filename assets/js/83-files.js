@@ -6,9 +6,11 @@
 
    两种视图，回答的是两个不同的问题：
      · 碰过的 —— "这一格刚刚动了什么？" 数据来自转录（LIVE.files），
-       不经过后端，agent 一动手就能看见。默认停在这里。
+       不经过后端，agent 一动手就能看见。它是**平铺工作清单**，不是文件树：
+       一行一个文件，父目录只做暗色提示；默认停在这里。
      · 全部   —— "这个工作区里有什么？" 懒加载目录树，走 Go 的
        fs.list（护栏、包含性、上限都在 files.go，前端不是安全边界）。
+       默认只露出根层，子目录按项目记住本次会话的展开状态。
 
    点击文件 = 就地弹只读预览（#fview）。**不写文件、不把内容送回终端** ——
    这个模块只负责看；写入权在 agent 手里。
@@ -31,11 +33,11 @@ function saveFilesUi() {
    子目录用上一层的 entry.path）；Go 回的 path 已经规范化过 —— 两边只在
    根这一层可能差一个大小写，拿请求键缓存最稳。 */
 const FS = {
-  open: new Set(),        // 全部视图里展开的目录
+  open: new Set(),        // 当前根展开的目录（按项目存在 openByRoot 里）
+  openByRoot: new Map(),  // root -> Set；切项目不串展开状态
   children: new Map(),    // dir -> { entries, truncated, at }
   loading: new Set(),     // 正在请求的 dir
   err: new Map(),         // dir -> 错误文本
-  touchedClosed: new Set(), // 碰过的视图里收起的虚拟目录（默认全开）
   reqSeq: 1,
   reqs: new Map(),        // req -> { op, dir, root, path, why }
   timeouts: new Map(),    // req -> timer（ctl 断了也不能让 loading 永远卡住）
@@ -61,6 +63,15 @@ function filesRootPath() {
   if (FU.root && filesProjects().some((p) => p.path === FU.root)) return FU.root;
   return filesDefaultRoot();
 }
+/* 展开状态按项目分开：从 A 项目切到 B 再切回来，A 的展开层还在；
+   这也是 Orca 的 expandedDirs[worktreeId] 那条边界。 */
+function filesOpenSet(root) {
+  if (!root) return FS.open;
+  let set = FS.openByRoot.get(normPath(root));
+  if (!set) { set = new Set(); FS.openByRoot.set(normPath(root), set); }
+  FS.open = set;
+  return set;
+}
 /* 一个文件属于哪个允许根（最长前缀）。touched 里的文件可能是别的项目的，
    读的时候要用它自己的根；找不到 = 不在任何工作区里，前端先拒绝，
    省得发一条注定被 Go 拒的请求。 */
@@ -81,6 +92,55 @@ function filesRelUnder(path, root) {
   const r = String(root).replace(/\//g, "\\").replace(/\\+$/, "");
   if (normPath(a) === normPath(r)) return "";
   return a.slice(r.length + 1).replace(/\\/g, "/");
+}
+
+/* 文件树的排序照 Orca：目录在前，同组按自然序（9 < 99 < 100）。
+   `localeCompare` 默认会把 100 排在 99 前面，看起来像路径乱了。 */
+const FILES_COLLATOR = (() => {
+  try { return new Intl.Collator(undefined, { numeric: true, sensitivity: "base" }); }
+  catch (_) { return null; }
+})();
+function filesNameCompare(a, b) {
+  const x = String(a || ""), y = String(b || "");
+  return FILES_COLLATOR ? FILES_COLLATOR.compare(x, y) : x.localeCompare(y);
+}
+function filesSortEntries(list) {
+  return list.slice().sort((a, b) => {
+    const ad = a && a.dir ? 1 : 0, bd = b && b.dir ? 1 : 0;
+    if (ad !== bd) return bd - ad;
+    return filesNameCompare(a && a.name, b && b.name);
+  });
+}
+function filesBaseName(path) {
+  const s = String(path || "").replace(/[\\/]+$/, "");
+  const i = Math.max(s.lastIndexOf("\\"), s.lastIndexOf("/"));
+  return i >= 0 ? s.slice(i + 1) : s;
+}
+function filesDirHint(path, root) {
+  const rel = root ? filesRelUnder(path, root) : null;
+  if (rel != null) {
+    const i = rel.lastIndexOf("/");
+    return i > 0 ? rel.slice(0, i) : "";
+  }
+  // 工作区外的文件只留**一级父目录**，不把盘符和整条绝对路径拆成
+  // 一串假目录。完整路径留在 tooltip / 预览的 title 里。
+  const s = String(path || "").replace(/[\\/]+$/, "");
+  const parts = s.split(/[\\/]/).filter(Boolean);
+  return parts.length > 1 ? `…/${parts[parts.length - 2]}` : "";
+}
+function filesRootLabel(root) {
+  if (!root) return t("files.groupOutside");
+  const p = filesProjects().find((x) => x && x.path && normPath(x.path) === normPath(root));
+  return p ? projectName(p) : filesBaseName(root);
+}
+function filesAlwaysHidden(name) {
+  const n = String(name || "").toLowerCase();
+  // 和 Orca 的 FileExplorer 一样，不把 .git / node_modules 当成可浏览树的一部分。
+  return n === ".git" || n === "node_modules";
+}
+function filesTitlePath(path, root) {
+  const rel = root ? filesRelUnder(path, root) : null;
+  return rel != null && rel !== "" ? rel : path;
 }
 
 function fmtSize(n) {
@@ -115,17 +175,28 @@ function filesModeBtn() {
     dot.classList.toggle("on", FU.dot);
     dot.setAttribute("aria-pressed", FU.dot ? "true" : "false");
   }
+  const collapse = $("files-collapse");
+  if (collapse) {
+    collapse.hidden = FU.mode !== "all";
+    const na = FU.mode !== "all" || FS.open.size === 0;
+    collapse.classList.toggle("na", na);
+    collapse.setAttribute("aria-disabled", na ? "true" : "false");
+    collapse.title = t("files.collapseAll");
+  }
 }
 
 function filesRootOptions(root) {
   const projs = filesProjects();
-  // 显示名算进签名：切语言后「默认工作区」要重画（Phase 3 的签名规则）。
-  const sig = projs.map((p) => `${p.path}\u0000${projectName(p)}`).join("\u0001") + "\u0002" + FU.root;
+  const cur = projs.find((p) => p && p.path && normPath(p.path) === normPath(root));
+  // 显示名算进签名：切语言/切项目后「跟随当前格」要重画（Phase 3 的签名规则）。
+  const sig = projs.map((p) => `${p.path}\u0000${projectName(p)}`).join("\u0001") +
+    "\u0002" + FU.root + "\u0003" + normPath(root);
   const sel = $("files-root");
   if (!sel) return;
   if (sig !== FS.rootOptSig) {
     FS.rootOptSig = sig;
-    sel.innerHTML = `<option value="">${esc(t("files.rootFollow"))}</option>` + projs.map((p) =>
+    const follow = t("files.rootFollow") + (cur ? ` · ${projectName(cur)}` : "");
+    sel.innerHTML = `<option value="">${esc(follow)}</option>` + projs.map((p) =>
       `<option value="${esc(p.path)}">${esc(projectName(p))}</option>`).join("");
   }
   // 固定的根已经不在池子里时，FU.root 会在 filesRootPath 里被忽略；
@@ -172,6 +243,7 @@ function filesList(root, dir, why) {
 function filesRefresh(why) {
   if (FU.mode !== "all") { renderFiles(true); return; }
   const root = filesRootPath();
+  filesOpenSet(root);
   FS.children.clear();
   FS.err.clear();
   filesEnsureRoot(root);
@@ -199,44 +271,46 @@ function filesTouchedHtml(tab, v) { // 参数别叫 t：会遮住 i18n 的 t()
   const files = (v && v.files) || [];
   if (!tab) return `<div class="empty">${esc(t("files.empty.noTab"))}</div>`;
   if (!files.length) return `<div class="empty">${esc(t("files.empty.noFiles"))}</div>`;
-  const root = filesRootPath();
-  const rootNode = { dirs: new Map(), files: [] };
+  const currentRoot = filesRootPath();
+  const groups = new Map();
   for (const f of files) {
     const abs = f.path || "";
-    let p = f.rel || abs;
-    const rel = filesRelUnder(abs, root);
-    if (rel != null) p = rel;
-    p = String(p || "").replace(/\\/g, "/").replace(/^\/+/, "");
-    const segs = p.split("/").filter(Boolean);
-    if (!segs.length) continue;
-    let node = rootNode;
-    for (let i = 0; i < segs.length - 1; i++) {
-      const s = segs[i];
-      if (!node.dirs.has(s)) node.dirs.set(s, { dirs: new Map(), files: [] });
-      node = node.dirs.get(s);
+    const ownRoot = filesRootForPath(abs);
+    const rel = ownRoot ? filesRelUnder(abs, ownRoot) : null;
+    const key = ownRoot ? normPath(ownRoot) : "__outside__";
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        root: ownRoot || "",
+        outside: !ownRoot,
+        current: !!ownRoot && !!currentRoot && normPath(ownRoot) === normPath(currentRoot),
+        label: filesRootLabel(ownRoot),
+        rows: [],
+      };
+      groups.set(key, g);
     }
-    node.files.push({ name: segs[segs.length - 1], f });
+    const name = filesBaseName(rel || abs || f.rel || "");
+    const parent = filesDirHint(abs, ownRoot);
+    const sortKey = rel || abs || name;
+    g.rows.push({ f, name, parent, rel, abs, sortKey });
   }
-  const countFiles = (n) => n.files.length + [...n.dirs.values()].reduce((a, c) => a + countFiles(c), 0);
+  const gs = [...groups.values()];
+  gs.sort((a, b) => {
+    if (a.current !== b.current) return a.current ? -1 : 1;
+    if (a.outside !== b.outside) return a.outside ? 1 : -1;
+    return filesNameCompare(a.label, b.label);
+  });
   const rows = [];
-  const walk = (node, prefix, depth) => {
-    const dirNames = [...node.dirs.keys()].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-    for (const name of dirNames) {
-      const child = node.dirs.get(name);
-      const key = prefix ? `${prefix}/${name}` : name;
-      const closed = FS.touchedClosed.has(key);
-      rows.push(`<button type="button" class="frow fdir" data-ftdir="${esc(key)}" `
-        + `aria-expanded="${closed ? "false" : "true"}" title="${esc(key)}" `
-        + `style="padding-left:${filesPad(depth)}px">`
-        + `<span class="fchev">${filesChev()}</span>`
-        + `<span class="fico">${fileDirIconSvg(!closed, 14)}</span>`
-        + `<span class="fnm ell">${esc(name)}</span>`
-        + `<span class="fcount">${countFiles(child)}</span></button>`);
-      if (!closed) walk(child, key, depth + 1);
+  const multi = gs.length > 1;
+  for (const g of gs) {
+    g.rows.sort((a, b) => filesNameCompare(a.sortKey, b.sortKey));
+    if (multi || !g.current) {
+      rows.push(`<div class="fgroup" role="presentation">` +
+        `<span class="fgroup-nm">${esc(g.label)}</span>` +
+        `<span class="fcount">${g.rows.length}</span></div>`);
     }
-    const fs = node.files.slice().sort((a, b) =>
-      a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
-    for (const { name, f } of fs) {
+    for (const r of g.rows) {
+      const f = r.f;
       const op = opOf(f);
       const ops = (f.ops || []).map((o) => opName(o) || o).join(" + ");
       const d = (f.add || f.del)
@@ -254,18 +328,22 @@ function filesTouchedHtml(tab, v) { // 参数别叫 t：会遮住 i18n 的 t()
       const badWord = f.state === "rejected" ? t("files.badWord.rejected")
         : f.state === "failed" ? t("files.badWord.failed")
           : f.state === "missing" ? t("files.badWord.missing") : "";
-      const tip = [f.path, ops, badWord, f.at].filter(Boolean).join("\n");
-      rows.push(`<button type="button" class="frow ffile" data-fpath="${esc(f.path || "")}" `
-        + `data-froot="${esc(filesRootForPath(f.path || ""))}" data-fname="${esc(name)}" `
-        + `title="${esc(tip)}" style="padding-left:${filesPad(depth)}px">`
-        + `<span class="fchev"></span>`
-        + `<span class="ficoslot">${fileIconSvg(f.path || name, 14)}</span>`
-        + `<span class="fnm ell">${esc(name)}</span>`
+      // 行里只显示 Project 相对路径的父级；工作区外才保留完整路径，且只进
+      // tooltip。绝对路径不再拆成 C: 这样的假目录行。
+      const tipPath = r.rel != null && r.rel !== "" ? r.rel : r.abs;
+      const tip = [tipPath, ops, badWord, f.at].filter(Boolean).join("\n");
+      const ext = g.outside ? " ext-file" : "";
+      rows.push(`<button type="button" class="frow fflat${ext}" data-fpath="${esc(r.abs)}" `
+        + `data-froot="${esc(g.root)}" data-fname="${esc(r.name)}" `
+        + `title="${esc(tip)}">`
+        + `<span class="ficoslot">${fileIconSvg(r.abs || r.name, 14)}</span>`
+        + `<span class="fwho"><span class="fnm ell">${esc(r.name)}</span>` +
+          (r.parent ? `<span class="fparent ell">${esc(r.parent)}</span>` : "") +
+        `</span>`
         + `<span class="fop ${OP_LETTER[op]}">${OP_LETTER[op]}</span>${d}`
         + `<span class="fbad-slot">${bad}</span></button>`);
     }
-  };
-  walk(rootNode, "", 0);
+  }
   return rows.join("") || `<div class="empty">${esc(t("files.empty.touched"))}</div>`;
 }
 
@@ -280,7 +358,8 @@ function filesEntryHtml(root, dir, depth) {
       + `<button type="button" class="flink" data-fretry="${esc(dir)}">${esc(t("files.retry"))}</button></div>`;
   }
   if (!rec) return html;
-  const list = rec.entries.filter((e) => FU.dot || !e.hidden);
+  const list = filesSortEntries(rec.entries.filter((e) =>
+    (FU.dot || !e.hidden) && !filesAlwaysHidden(e.name)));
   if (!list.length && !loading) {
     return html + `<div class="frow fstate">${esc(t("files.empty.dir"))}</div>`;
   }
@@ -291,7 +370,7 @@ function filesEntryHtml(root, dir, depth) {
       const ext = e.external ? t("files.externalSuffix") : "";
       html += `<button type="button" class="frow fdir${e.external ? " ext" : ""}" `
         + `data-fdir="${esc(e.path)}" aria-expanded="${open ? "true" : "false"}" `
-        + `title="${esc(e.path + ext)}" style="padding-left:${pad}px">`
+        + `title="${esc(filesTitlePath(e.path, root) + ext)}" style="padding-left:${pad}px">`
         + `<span class="fchev">${filesChev()}</span>`
         + `<span class="fico">${fileDirIconSvg(open, 14)}</span>`
         + `<span class="fnm ell">${esc(e.name)}</span>`
@@ -303,7 +382,7 @@ function filesEntryHtml(root, dir, depth) {
       html += `<button type="button" class="frow ffile${e.link ? " link" : ""}${e.external ? " ext" : ""}" `
         + `data-fpath="${esc(e.path)}" data-froot="${esc(root)}" data-fname="${esc(e.name)}" `
         + (e.external ? `data-fext="1" ` : "")
-        + `title="${esc(e.path + (e.link ? t("files.linkTitle") : "") + (e.external ? t("files.externalTitle") : ""))}" `
+        + `title="${esc(filesTitlePath(e.path, root) + (e.link ? t("files.linkTitle") : "") + (e.external ? t("files.externalTitle") : ""))}" `
         + `style="padding-left:${pad}px">`
         + `<span class="fchev"></span>`
         + `<span class="ficoslot">${fileIconSvg(e.path, 14)}</span>`
@@ -342,6 +421,7 @@ function renderFiles(force) {
   const v = tab ? LIVE.get(tab.id) : null;
   const files = (v && v.files) || [];
   const root = filesRootPath();
+  filesOpenSet(root);
   const touchSig = files.map((f) =>
     `${f.path}|${(f.ops || []).join(",")}|${f.add || 0}|${f.del || 0}|` +
     `${f.hasDiff ? 1 : 0}|${f.state || ""}`).join("\n");
@@ -392,13 +472,10 @@ function renderFiles(force) {
     }
   } else {
     html = filesAllHtml(root);
-    const rec = FS.children.get(root);
     const cnt = $("files-cnt");
-    if (cnt) {
-      const n = rec ? rec.entries.filter((e) => FU.dot || !e.hidden).length : 0;
-      cnt.textContent = rec ? tCount("files.count", n) : "";
-      cnt.title = "";
-    }
+    // 「全部」是懒加载树，工具栏里的 N 只能数到已加载的根层，容易被读成
+    // 整个工作区的文件数；这里不报一个会骗人的数，把空间留给树和操作键。
+    if (cnt) { cnt.textContent = ""; cnt.title = ""; }
   }
   host.innerHTML = html;
 
@@ -421,6 +498,15 @@ function setFilesMode(mode) {
 $("files-bar").addEventListener("click", (e) => {
   const seg = e.target.closest("[data-fmode]");
   if (seg) { setFilesMode(seg.dataset.fmode); return; }
+  if (e.target.closest("#files-collapse")) {
+    if (FU.mode !== "all" || !FS.open.size) return;
+    const n = FS.open.size;
+    FS.open.clear();
+    FS.sig = "";
+    renderFiles(true);
+    sendCtrl({ type: "log", msg: `文件 折叠全部（${n} 个目录）` });
+    return;
+  }
   if (e.target.closest("#files-dot")) {
     FU.dot = !FU.dot;
     saveFilesUi();
@@ -435,7 +521,6 @@ $("files-refresh").addEventListener("click", () => filesRefresh("按钮"));
 $("files-root").addEventListener("change", () => {
   FU.root = $("files-root").value || "";
   saveFilesUi();
-  FS.open.clear();
   FS.children.clear();
   FS.err.clear();
   FS.sig = "";
@@ -451,14 +536,6 @@ $("files-tree").addEventListener("click", (e) => {
     FS.err.delete(dir);
     FS.children.delete(dir);
     filesList(filesRootPath(), dir, "重试");
-    renderFiles(true);
-    return;
-  }
-  const td = e.target.closest("[data-ftdir]");
-  if (td) {
-    const key = td.dataset.ftdir || "";
-    if (FS.touchedClosed.has(key)) FS.touchedClosed.delete(key);
-    else FS.touchedClosed.add(key);
     renderFiles(true);
     return;
   }
@@ -600,7 +677,10 @@ function openFileView(path, root, name) {
     read: null, readLoading: true, readErr: null, readNotes: [], readNoteKind: "",
   };
   $("fv-name").textContent = FV.name;
-  $("fv-path").textContent = path;
+  const rel = filesRelUnder(path, FV.root);
+  $("fv-path").textContent = rel != null && rel !== ""
+    ? rel
+    : (FV.root ? FV.name : t("files.pathOutside", { name: FV.name }));
   $("fv-path").title = path;
   $("fv-meta").textContent = "";
   fvSetNote("", "");

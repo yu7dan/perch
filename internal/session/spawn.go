@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/yu7dan/perch/internal/agent"
 	"github.com/yu7dan/perch/internal/term"
+	"github.com/yu7dan/perch/internal/workspacebrief"
 )
 
 // StartError 标出启动是在哪一步失败的。调用方按 Stage 选对用户说的那句话，
@@ -120,6 +122,17 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 	args = append(args, profArgs...)
 	args = append(args, def.Args(tab.Spec.Resume, settings)...)
 	args = append(args, prepArgs...)
+	// Shared workspace brief. Eight agents read AGENTS.md natively; Claude is
+	// the exception, so point it at the canonical file explicitly. This stays
+	// per-launch: no global ~/.claude or project CLAUDE.md is rewritten.
+	if tab.Spec.Agent == "claude" {
+		if p, ok := workspacebrief.Find(cwd); ok {
+			if b, err := os.ReadFile(p); err == nil && workspacebrief.HasVisibleContent(string(b)) {
+				args = append(args, "--append-system-prompt", workspacebrief.ClaudePrompt(p))
+				log.Printf("[startup t%d] workspace brief injected: %s", tab.ID, p)
+			}
+		}
+	}
 
 	env := make(map[string]string, len(def.Env)+len(prepEnv)+len(profEnv))
 	for k, v := range def.Env {

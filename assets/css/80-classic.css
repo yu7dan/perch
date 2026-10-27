@@ -1,0 +1,98 @@
+/* ===========================================================================
+   Classic shell（80-classic.css）
+   ---------------------------------------------------------------------------
+   Classic 是当前产品的外观：把应用层的 masthead、吉祥物、大 logo、卡片式装饰
+   压掉，留下终端本身和右栏该有的文件/对话流。**真正的 Clean 是之后加在
+   终端面板上的皮套**，不在这份文件里；这一轮先把它命名清楚。
+
+   ⚠️ 不改 .termhost 的 4px 内缩：boxOk() 断言的是“宿主 = 父容器内缩 4px”，
+   动它会让 PTY 的列行算错。这里只动外壳层和网格 gap。
+   =========================================================================== */
+
+#app.ui-classic #titlebar,
+#app.ui-classic #rail,
+#app.ui-classic #list,
+#app.ui-classic #rsb{background:var(--bg)}
+#app.ui-classic #titlebar{border-bottom-color:var(--line-soft)}
+#app.ui-classic .tb-rail{background:transparent;border-right-color:var(--line-soft);padding-left:12px}
+/* 品牌 mark 保留；产品名收成一个小号字标，不把左边 132px 变成一块空白。 */
+#app.ui-classic .tb-rail .tb-name{font-size:10.5px;font-weight:600;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--faint)}
+#app.ui-classic .tb-list{background:transparent;border-right-color:var(--line-soft);padding:0 8px}
+#app.ui-classic .mode-trigger{height:24px;padding:0 4px;color:var(--fg2);font-size:11.5px}
+#app.ui-classic .mode-trigger:hover{background:rgba(255,255,255,.05)}
+
+/* 左栏：去掉卡片式的“抬起来”感，只留行和一条细缩进线。 */
+#app.ui-classic #rail{border-right:1px solid var(--line-soft);padding-top:8px}
+#app.ui-classic #rail .nav{border-radius:3px;color:var(--muted)}
+#app.ui-classic #rail .nav.on{background:rgba(255,255,255,.055);color:var(--fg);font-weight:500}
+#app.ui-classic #list{border-right:1px solid var(--line-soft)}
+#app.ui-classic .list-head{padding:14px 12px 6px}
+#app.ui-classic .list-head h1{font-size:10.5px;font-weight:600;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--muted)}
+#app.ui-classic .search{margin:0 10px 10px;background:transparent;border-color:var(--line-soft);
+  border-radius:4px}
+#app.ui-classic .search .kbd{opacity:.65}
+#app.ui-classic .proj{border-radius:3px;padding:5px 6px 5px 4px}
+#app.ui-classic .proj .ricon{color:var(--faint)}
+#app.ui-classic .proj .nm{font-size:12px}
+#app.ui-classic .proj .path{color:var(--faint)}
+#app.ui-classic .arow{margin-left:18px;padding-left:8px;border-left:1px solid var(--line-soft);
+  border-radius:0 3px 3px 0}
+#app.ui-classic .arow .nm{font-size:11.5px;color:var(--fg2)}
+#app.ui-classic .arow.sel{background:rgba(255,255,255,.055)}
+#app.ui-classic .arow .tm{opacity:.6}
+#app.ui-classic .arow .sw{color:var(--faint)}
+/* 品牌 logo 是 agent 行唯一的彩色装饰；状态点还挂在它右下角。 */
+#app.ui-classic .arow .ricon .ico-img,
+#app.ui-classic .arow .ricon .ico-mask{width:14px;height:14px}
+
+/* 主区：终端是主体，格子头默认退到背景里，hover/当前格才完整出现。 */
+#app.ui-classic #panes{background:var(--bg)}
+#app.ui-classic #termbody{gap:1px;background:var(--line-soft)}
+#app.ui-classic .cell{background:var(--bg)}
+#app.ui-classic .cellhead{background:transparent;border-bottom-color:transparent;opacity:.48;
+  transition:opacity 140ms ease,background-color 140ms ease}
+#app.ui-classic .cell:hover .cellhead,
+#app.ui-classic .cell.cur .cellhead,
+#app.ui-classic .cell.unread .cellhead,
+#app.ui-classic .cell.fresh .cellhead{opacity:1;background:transparent}
+#app.ui-classic .cell.cur .cellhead::after{background:var(--fg2);opacity:.55}
+/* 格子头里不再重复 agent 品牌 logo（品牌只出现在左侧 Project 列表）。 */
+#app.ui-classic .cellhead .tab-ico{display:none}
+#app.ui-classic .cellhead .aswap{opacity:0;transition:opacity 120ms ease}
+#app.ui-classic .cellhead .x{opacity:0;transition:opacity 120ms ease}
+#app.ui-classic .cell:hover .cellhead .aswap,
+#app.ui-classic .cell:focus-within .cellhead .aswap,
+#app.ui-classic .cell:hover .cellhead .x,
+#app.ui-classic .cell:focus-within .cellhead .x,
+#app.ui-classic .cell.fresh .cellhead .aswap{opacity:1}
+#app.ui-classic .phead{--pane-title-bg:var(--bg)}
+/* 零格空态：不要 44px 大 logo，留标题、说明和主按钮。 */
+#app.ui-classic #term-empty{background:var(--bg)}
+#app.ui-classic .te-mark{display:none}
+#app.ui-classic .te-wrap h1{font-size:18px}
+#app.ui-classic .te-kicker{color:var(--faint)}
+
+/* 右栏照常呈现文件和对话流；只把“另一块色板”的边界收掉。 */
+#app.ui-classic #rsb{background:var(--bg);border-left:1px solid var(--line-soft)}
+/* 标题栏右栏切片必须和右栏同色、同一条左边界；否则右栏上方会留下一块
+   36px 的 --side 色块，和下面的 --bg 断开。 */
+#app.ui-classic .tb-rsb{background:var(--bg);border-left:1px solid var(--line-soft)}
+#app.ui-classic #rsb-head,
+#app.ui-classic #rsb-mods,
+#app.ui-classic #rsb-hist{background:var(--bg)}
+#app.ui-classic .rsb-mod{background:var(--bg)}
+
+/* 状态栏：只留有决策价值的读数（连接、索引、工作目录、用量）。
+   Store/字体/尺寸是诊断信息，Clean 默认收掉。 */
+body.ui-classic #status{background:var(--bg);border-top-color:var(--line-soft);gap:12px}
+body.ui-classic #status .storeit,
+body.ui-classic #status .fontit,
+body.ui-classic #status #s-grid,
+body.ui-classic #status #s-dims{display:none}
+body.ui-classic #status .cwd{max-width:44vw}
+
+/* 总览和设置页也属于同一个应用壳；这里只统一底色，不动它们的布局。 */
+#app.ui-classic #dash,
+#app.ui-classic #settings{background:var(--bg)}

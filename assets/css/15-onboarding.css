@@ -118,17 +118,6 @@
 .onb-stat span{display:block;margin-top:2px;color:var(--faint);font-size:10.5px}
 .onb-note{margin:12px 0 0;padding:10px 12px;border-left:2px solid var(--accent);
           background:rgba(77,107,254,.07);color:var(--muted);font-size:11.5px;line-height:1.55}
-.onb-field{display:flex;align-items:center;gap:8px;margin-top:8px}
-.onb-path{min-width:0;flex:1;height:34px;padding:0 10px;border:1px solid var(--line);
-          border-radius:7px;background:var(--bg);color:var(--fg2);
-          /* line-height must match the box: 11.5px/1 clipped CJK glyphs at the
-             top/bottom, which made "内置工作区" look swallowed. */
-          font:12px/34px var(--mono);overflow:hidden;text-overflow:ellipsis;
-          white-space:nowrap}
-.onb-lang{display:flex;gap:6px;flex-wrap:wrap}
-.onb-lang button{height:30px;padding:0 11px;border:1px solid var(--line);border-radius:7px;
-                 background:transparent;color:var(--muted);font-size:11.5px;cursor:pointer}
-.onb-lang button.sel{border-color:var(--accent);background:var(--accent-soft);color:var(--fg)}
 .onb-check-list{margin-top:12px;border-top:1px solid var(--line-soft)}
 .onb-check{display:flex;align-items:center;gap:10px;padding:10px 0;
            border-bottom:1px solid var(--line-soft);font-size:12px;color:var(--fg2)}
@@ -158,8 +147,6 @@
 .onb-review-row .k{color:var(--faint);font-size:10.5px;letter-spacing:.02em;white-space:nowrap}
 .onb-review-row .v{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
                    color:var(--fg2);font-size:11.5px}
-.onb-review-row .v.path{white-space:normal;overflow:visible;text-overflow:clip;
-                        overflow-wrap:anywhere;font:10.5px/1.45 var(--mono);color:var(--muted)}
 .onb-review-row .s{font-size:10px;letter-spacing:.04em;white-space:nowrap;color:var(--faint)}
 .onb-review-row .s.ok{color:var(--green)}
 .onb-review-row .s.warn{color:var(--amber)}

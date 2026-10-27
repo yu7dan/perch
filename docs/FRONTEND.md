@@ -50,9 +50,9 @@ Wails 的运行时是 ESM，而业务代码共享一份全局状态。拆文件�
 | `70-flow.js` | 会话卡片 HTML、右下对话流（live/历史）、跟随与折叠 | 对话流渲染 |
 | `80-live.js` | 复接/分叉动作、shell 推送应用、右栏「需要你/改动/流水/子代理」、实时读数 | shell 推送落点 |
 | `81a-project-add.js` | 添加项目：选择已有 / 新建文件夹、确认名称、`project.pick`/`add`/`create` 回执、项目区拖放 | 项目池的添加表单、校验与拖放手势 |
-| `81b-new-agent.js` | 新建 Agent：项目 combobox（含「无项目」）、Agent 选择、目标路径、嵌套添加项目 | 新建 Agent 的表单与项目搜索 |
+| `81b-new-agent.js` | 新建 Agent：真实 Project 选择、Agent 选择、目标路径、嵌套添加项目 | 新建 Agent 的表单与项目搜索 |
 | `82-file-icons.js` | 文件类型图标表：后缀 / 文件名 / 复合后缀 → 图标（Lucide） | 文件图标选型规则 |
-| `83-files.js` | 右栏「文件」：改动视图、目录树（`fs.list`）、只读预览（`fs.read`） | 文件模块的呈现与浏览 |
+| `83-files.js` | 右栏「文件」：碰过的平铺清单、全部目录树（`fs.list`）、折叠全部/按项目展开、只读预览（`fs.read`） | 文件模块的呈现与浏览 |
 | `84-settings-search.js` | 设置搜索的纯评分函数（节/标题/描述/关键词四档，不碰 DOM） | 搜索匹配规则、评分权重 |
 | `85-settings.js` | 设置页交互（搜索显隐、行、默认目录草稿、单选组方向键 / 漫游 tabindex）、确认框单例 `askConfirm`、关窗确认 | 设置页的行与手势、通用确认框 |
 | `86-dash.js` | 总览（读数、热力图、实时、在等你、Agent 名单）与图标 resolver | 总览页的任何 UI |

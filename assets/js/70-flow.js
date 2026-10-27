@@ -142,8 +142,10 @@ let flowLeaveTimer = 0;          // 那次"停稳了再记"的定时器
    ⚠️ 这类"多长算长"的数**必须用真实读数标定**（见 [[threshold-defaults-need-calibration]]）：
    "该收的没收"在界面上看不出来（行高不同而已），所以判据和阈值都要进日志。
    ⚠️ 预算只有这一个来源：CSS 变量从它写出去，CSS 里不许再写第二个数。 */
-const FLOW_CLAMP_PX = 80;
-document.documentElement.style.setProperty("--flow-clamp", FLOW_CLAMP_PX + "px");
+const FLOW_CLAMP_PX = 80;        // 最小预算：4 行（12.5px × 1.6 = 20px 一行）
+const FLOW_CLAMP_MAX = 640;     // 上限：32 行；再长就滚动
+let flowClampPx = FLOW_CLAMP_PX; // 当前预算，由面板高度/消息条数现算
+document.documentElement.style.setProperty("--flow-clamp", flowClampPx + "px");
 const flowOpen = new Set();      // **用户亲手摊开**的那几条（按 id）
 const flowFit = new Map();       // id -> {t, fold}：这条在这个宽度下收没收 + 量的是哪一版正文
 let flowFoldSig = "";            // 上一次那条读数（变了才回日志，不刷屏）
@@ -303,6 +305,20 @@ function flowMoreLabel(el, open, overPx) {
   b.title = open ? t("flow.collapseTitle") : t("flow.expandTitle");
   b.setAttribute("aria-expanded", String(!!open));
 }
+/* 预算不是固定的 4 行：右栏下段被拉高之后，固定 4 行会在底部留下
+   一大块空白。按"可用高度 ÷ 需要分摊的消息数"现算，最多 32 行；
+   消息很多时仍保底 4 行，避免一条长报告吃满整栏。
+   `flowFit` 是按正文缓存的 —— 预算一变必须清掉，否则旧测量结果会
+   让「其余 N 行」一直停在旧数字。 */
+function flowBudgetPx(host) {
+  if (!host || !host.clientHeight) return FLOW_CLAMP_PX;
+  const rows = [...host.children].filter((el) =>
+    el.dataset.fid && !el.classList.contains("compact")).length || 1;
+  const usable = Math.max(120, host.clientHeight - 32);
+  const per = Math.floor(usable / Math.min(rows, 3));
+  return Math.max(FLOW_CLAMP_PX, Math.min(FLOW_CLAMP_MAX, per));
+}
+
 /* 量一遍"哪几条正文超出了预算"，把结论写进类名（`.fold`）。
    ⚠️ 三个读数是这一块唯一的证据：收着几条 / 面板多大多小 / 最多的溢出多少。
    界面上"该收的没收"和"不该收的收了"长得一模一样（都只是行高不同），
@@ -312,6 +328,12 @@ function flowFoldPass(why) {
   // ⚠️ 下段折叠着（0 高）的时候**一条都别量**：那时没有可视高度，
   // 量出来全是"溢出"，一展开就是满屏收着态的错样子。
   if (!host || !host.clientHeight) return;
+  const nextClamp = flowBudgetPx(host);
+  if (nextClamp !== flowClampPx) {
+    flowClampPx = nextClamp;
+    document.documentElement.style.setProperty("--flow-clamp", flowClampPx + "px");
+    flowFit.clear();                       // 预算变了，旧测量结果作废
+  }
   let folded = 0, opened = 0, seen = 0, maxOver = 0, compacts = 0;
   for (const el of host.children) {
     const id = el.dataset.fid || "";
@@ -338,13 +360,13 @@ function flowFoldPass(why) {
     flowFit.set(id, { t: t, fold: fold });
     if (fold) { folded++; if (over > maxOver) maxOver = over; }
   }
-  const sig = [host.clientWidth, host.clientHeight, host.children.length, folded, opened, compacts, FLOW_CLAMP_PX, Math.round(maxOver)].join("|");
+  const sig = [host.clientWidth, host.clientHeight, host.children.length, folded, opened, compacts, flowClampPx, Math.round(maxOver)].join("|");
   if (sig !== flowFoldSig) {
     flowFoldSig = sig;
     sendCtrl({
       type: "log",
-      msg: `对话流 收着=${folded} 摊开=${opened} 压缩点=${compacts} /共${host.children.length} 条（预算=${FLOW_CLAMP_PX}px≈${Math.round(FLOW_CLAMP_PX / 20)}行` +
-           ` 面板=${host.clientWidth}x${host.clientHeight} 本轮量=${seen} 最多少=${Math.round(maxOver)}px，${why}）`,
+      msg: `对话流 收着=${folded} 摊开=${opened} 压缩点=${compacts} /共${host.children.length} 条` +
+           ` 预算=${flowClampPx}px≈${Math.round(flowClampPx / 20)}行 面板=${host.clientWidth}x${host.clientHeight} 本轮量=${seen} 最多少=${Math.round(maxOver)}px，${why}`,
     });
   }
 }

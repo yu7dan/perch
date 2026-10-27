@@ -52,6 +52,48 @@ func TestSettingsLanguageNormalize(t *testing.T) {
 	}
 }
 
+func TestSettingsStartViewNormalize(t *testing.T) {
+	if got := Defaults().StartView; got != "workspace" {
+		t.Fatalf("default startView should be workspace, got %q", got)
+	}
+	for _, tc := range []struct{ in, want string }{
+		{"workspace", "workspace"},
+		{" WORKSPACE ", "workspace"},
+		{"dash", "dash"}, // explicit user choice survives
+		{" DASH ", "dash"},
+		{"", "workspace"},
+		{"overview", "workspace"},
+	} {
+		s := Defaults()
+		s.StartView = tc.in
+		if got := s.Normalize().StartView; got != tc.want {
+			t.Errorf("StartView %q normalized to %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestSettingsUIModeNormalize(t *testing.T) {
+	if got := Defaults().UIMode; got != "classic" {
+		t.Fatalf("default uiMode should be classic, got %q", got)
+	}
+	for _, tc := range []struct{ in, want string }{
+		{" classic ", "classic"},
+		{"clean", "classic"}, // old beta called this shell clean
+		{"CLEAN", "classic"},
+		{"", "classic"},
+		{"fancy", "classic"},
+	} {
+		s := Defaults()
+		s.UIMode = tc.in
+		if got := s.Normalize().UIMode; got != tc.want {
+			t.Errorf("UIMode %q normalized to %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	if got := Defaults().TopMode; got != "workspaces" {
+		t.Fatalf("default topMode should be workspaces, got %q", got)
+	}
+}
+
 func TestNormalizeShortcut(t *testing.T) {
 	tests := []struct {
 		in   string

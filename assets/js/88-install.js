@@ -292,13 +292,11 @@ function applyInstall(m) {
 async function launchAgent(id) {
   const m = mg();
   const a = ((m && m.catalog) || []).find((x) => x.id === id);
-  const t = await createTab({ agent: id, cwd: "", target: "scratch",
-    resume: { kind: "new", id: "" } }, { fresh: true });
-  if (!t || !t.id) return;
-  armFreshCell(t, "总览 Agent 启动");
-  setActive(t);
+  // Workspaces 不再有默认项目：从总览启动也要先选一个真实 Project。
+  // 新建 Agent 卡会预选项目；没有项目时卡里就是"先添加项目"。
   setNavView("workspace");
-  sendCtrl({ type: "log", msg: `从 Agent 接线台打开 ${a ? a.name : id} → tab=${t.id}` });
+  openNewAgent({ agent: id, why: "总览 Agent 启动" });
+  sendCtrl({ type: "log", msg: `从 Agent 接线台打开 ${a ? a.name : id} → 新建 Agent 卡（项目必选）` });
 }
 
 $("dash-agent-list").addEventListener("click", (e) => {

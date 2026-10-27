@@ -1,11 +1,15 @@
 "use strict";
 /* First-run setup flow.
  *
- * The old card only explained the product. This one walks the same path a new
- * user actually needs: pick a CLI agent, get a model through the local gateway,
- * choose where work starts, then open the first pane. Every status shown here
- * comes from the live app (catalog, gateway, models, settings); it is not a
- * static checklist that can drift away from reality.
+ * This is not a launch splash. It starts only when the user tries to add an
+ * agent and the agent picker has no installed/launchable options. The project
+ * and folder have already been chosen in Workspaces, so the guide only covers
+ * the two things that are actually missing: an agent and model access.
+ *
+ * Every status shown here comes from the live app (catalog, gateway, models);
+ * it is not a static checklist that can drift away from reality. Finishing or
+ * skipping simply closes the overlay — no forced navigation and no automatic
+ * first pane.
  *
  * The flow is resumable. Editing a provider happens in the embedded Gateway
  * page, so "Open Gateway" temporarily hides the overlay and leaves a small
@@ -13,8 +17,7 @@
  */
 (function () {
   const KEY = "perch.onboarded.v2";
-  const STEP_KEY = "perch.onboard.step.v1";
-  const STEPS = ["agent", "models", "workspace", "done"];
+  const STEPS = ["agent", "models", "done"];
   const box = document.getElementById("onb");
   const progress = document.getElementById("onb-progress");
   const body = document.getElementById("onb-body");
@@ -36,16 +39,7 @@
     try { return localStorage.getItem(KEY) === "1"; } catch (_) { return false; }
   }
   function remember() {
-    try { localStorage.setItem(KEY, "1"); localStorage.removeItem(STEP_KEY); } catch (_) {}
-  }
-  function persistStep() {
-    try { localStorage.setItem(STEP_KEY, String(step)); } catch (_) {}
-  }
-  function savedStep() {
-    try {
-      const n = Number(localStorage.getItem(STEP_KEY));
-      return Number.isInteger(n) && n >= 0 && n < STEPS.length ? n : 0;
-    } catch (_) { return 0; }
+    try { localStorage.setItem(KEY, "1"); } catch (_) {}
   }
   function clampStep(n) {
     return Math.max(0, Math.min(STEPS.length - 1, Number(n) || 0));
@@ -114,13 +108,6 @@
     return (typeof SETTINGS !== "undefined" && SETTINGS && SETTINGS[key] !== undefined)
       ? SETTINGS[key] : fallback;
   }
-  function workspacePath() {
-    const custom = settingsValue("defaultCwd", "");
-    if (custom) return custom;
-    if (typeof SETTINGS_BUILTIN_CWD !== "undefined" && SETTINGS_BUILTIN_CWD) return SETTINGS_BUILTIN_CWD;
-    if (typeof SETTINGS_EFFECTIVE_CWD !== "undefined" && SETTINGS_EFFECTIVE_CWD) return SETTINGS_EFFECTIVE_CWD;
-    return "";
-  }
 
   function kicker(key) { return `<div class="onb-kicker">${esc(t(key))}</div>`; }
   function title(key) { return `<h1 class="onb-title" id="onb-title">${esc(t(key))}</h1>`; }
@@ -164,8 +151,9 @@
       const err = (typeof msgText === "function" && msgText(failed.st.err)) || t("inst.failed");
       failure = `<div class="onb-note">${esc(failed.a.name || failed.a.id)}: ${esc(err)}</div>`;
     }
-    return kicker("onb2.kicker.agent") + title("onb2.agent.title") + lead("onb2.agent.lead") +
-      `<div class="onb-sec-label"><span>${esc(t("onb2.agent.choose"))}</span>` +
+    return kicker("onb2.kicker.agent") + title("onb2.agent.title") +
+      lead(n ? "onb2.agent.lead" : "onb2.agent.leadNone") +
+      `<div class="onb-sec-label"><span>${esc(t(n ? "onb2.agent.choose" : "onb2.agent.chooseAll"))}</span>` +
       `<span class="r">${esc(t("onb2.agent.count", { n }))}</span></div>` +
       `<div class="onb-agent-grid">${cards}</div>` +
       failure +
@@ -213,29 +201,10 @@
       (nModels ? "" : `<p class="onb-sub">${esc(t("onb2.models.later"))}</p>`);
   }
 
-  function workspaceStep() {
-    const path = workspacePath();
-    const custom = !!settingsValue("defaultCwd", "");
-    const lang = String(settingsValue("language", "auto") || "auto");
-    const langBtn = (v, label) =>
-      `<button type="button" class="${lang === v ? "sel" : ""}" data-onb-lang="${v}">${esc(label)}</button>`;
-    return kicker("onb2.kicker.workspace") + title("onb2.workspace.title") + lead("onb2.workspace.lead") +
-      `<div class="onb-section"><div class="onb-sec-label"><span>${esc(t("onb2.workspace.dir"))}</span></div>` +
-      `<div class="onb-field"><div class="onb-path" title="${esc(path)}">` +
-      `${esc(custom ? path : t("onb2.workspace.builtin"))}</div>` +
-      `<button type="button" class="onb-btn sm" data-onb-pick-cwd>${esc(t("onb2.workspace.pick"))}</button>` +
-      (custom ? `<button type="button" class="onb-btn sm quiet" data-onb-use-default>${esc(t("onb2.workspace.useDefault"))}</button>` : "") +
-      `</div><p class="onb-sub">${esc(path || t("onb2.workspace.builtin"))}</p></div>` +
-      `<div class="onb-section"><div class="onb-sec-label"><span>${esc(t("onb2.workspace.language"))}</span></div>` +
-      `<div class="onb-lang">${langBtn("auto", t("settings.language.auto"))}` +
-      `${langBtn("zh", t("settings.language.zh"))}${langBtn("en", t("settings.language.en"))}</div>` +
-      `<p class="onb-sub">${esc(t("onb2.workspace.languageNote"))}</p></div>`;
-  }
-
-  function reviewRow(label, value, ok, jump, pathValue) {
+  function reviewRow(label, value, ok, jump) {
     return `<div class="onb-review-row">` +
       `<span class="k">${esc(label)}</span>` +
-      `<span class="v${pathValue ? " path" : ""}" title="${esc(value)}">${esc(value)}</span>` +
+      `<span class="v" title="${esc(value)}">${esc(value)}</span>` +
       `<span class="s ${ok ? "ok" : "warn"}">${esc(t(ok ? "onb2.done.ready" : "onb2.done.notReady"))}</span>` +
       (jump === undefined ? "" : `<button type="button" class="go" data-onb-jump="${jump}">${esc(t("onb2.edit"))}</button>`) +
       `</div>`;
@@ -254,7 +223,6 @@
     const gwReady = gatewayConnected();
     const gwInstalled = gatewayInstalled();
     const nModels = models().length;
-    const path = workspacePath();
     const allReady = setupReady();
     const agentLabel = a ? (a.name || a.id) : t("onb2.done.notReady");
     const gwValue = gwReady ? t("onb2.models.connected")
@@ -270,7 +238,6 @@
       reviewRow(t("onb2.done.agent"), aReady ? agentLabel : t("onb2.done.notReady"), aReady, 0) +
       reviewRow(t("onb2.done.gateway"), gwValue, gwReady, 1) +
       reviewRow(t("onb2.done.models"), modelValue, nModels > 0, 1) +
-      reviewRow(t("onb2.done.workspace"), path || t("onb2.workspace.builtin"), true, 2, true) +
       `</div>` +
       `<div class="onb-thanks compact"><div class="tx"><b>${esc(t("onb2.done.credit"))}</b>` +
       `<span>${esc(t("onb2.done.creditBody"))}</span></div>` +
@@ -298,9 +265,10 @@
       : `<button type="button" class="onb-btn quiet" data-onb-act="skip">${esc(t("onb2.skip"))}</button>`;
     let primary;
     if (step === STEPS.length - 1) {
-      const canOpen = setupReady();
-      primary = `<button type="button" class="onb-btn primary" data-onb-act="${canOpen ? "finish-open" : "finish"}">` +
-        `${esc(t(canOpen ? "onb2.done.open" : "onb2.finish"))}</button>`;
+      // Completion is deliberately not a launch action: no first pane, no
+      // forced route. The user came from Workspaces; closing returns there.
+      primary = `<button type="button" class="onb-btn primary" data-onb-act="finish">` +
+        `${esc(t("onb2.finish"))}</button>`;
     } else {
       primary = `<button type="button" class="onb-btn primary" data-onb-act="next">` +
         `${esc(t(step === 0 ? "onb2.start" : "onb2.next"))}</button>`;
@@ -322,7 +290,6 @@
     } else {
       if (step === 0) body.innerHTML = agentStep();
       else if (step === 1) body.innerHTML = modelStep();
-      else if (step === 2) body.innerHTML = workspaceStep();
       else body.innerHTML = doneStep();
     }
     actions.innerHTML = actionsHTML();
@@ -347,8 +314,7 @@
     return [
       step, skipConfirm, selected, cat, inst, gwi,
       models().length, providers().join(","), gatewayInstalled(), gatewayConnected(),
-      settingsValue("defaultCwd", ""), settingsValue("language", "auto"),
-      workspacePath(), (typeof PERCH_LOCALE !== "undefined" ? PERCH_LOCALE : ""),
+      (typeof PERCH_LOCALE !== "undefined" ? PERCH_LOCALE : ""),
     ].join("|");
   }
 
@@ -392,7 +358,6 @@
   }
 
   function pauseForGateway() {
-    persistStep();
     paused = true;
     box.hidden = true;
     stopTicker();
@@ -418,17 +383,10 @@
     settingsSend({ defaultAgent: selected }, `首次设置：默认 agent → ${selected}`);
   }
 
-  function finish(openFirst) {
+  function finish() {
     commitDefaultAgent();
-    const id = selected;
-    const a = agentOf(id);
-    const canOpen = !!(a && a.installed && launchable(a));
     hideAndRemember();
-    if (openFirst && canOpen && typeof launchAgent === "function") {
-      launchAgent(id);
-    } else if (typeof setNavView === "function") {
-      setNavView("dash");
-    }
+    sendCtrl({ type: "log", msg: "首次设置：完成（只关闭，不跳页、不自动建格）" });
   }
 
   function selectAgent(id) {
@@ -489,27 +447,6 @@
       render();
       return;
     }
-    const pick = e.target.closest("[data-onb-pick-cwd]");
-    if (pick) {
-      sendCtrl({ type: "settings.pickDefaultCWD" });
-      sendCtrl({ type: "log", msg: "首次设置：选择工作区目录" });
-      return;
-    }
-    const useDefault = e.target.closest("[data-onb-use-default]");
-    if (useDefault) {
-      if (typeof settingsSend === "function") settingsSend({ defaultCwd: "" }, "首次设置：使用内置工作区");
-      else sendCtrl({ type: "settings.set", settings: { defaultCwd: "" } });
-      render();
-      return;
-    }
-    const lang = e.target.closest("[data-onb-lang]");
-    if (lang) {
-      const v = lang.dataset.onbLang;
-      if (typeof settingsSend === "function") settingsSend({ language: v }, `首次设置：界面语言 → ${v}`);
-      else sendCtrl({ type: "settings.set", settings: { language: v } });
-      render();
-      return;
-    }
     const jump = e.target.closest("[data-onb-jump]");
     if (jump) {
       step = clampStep(jump.dataset.onbJump);
@@ -531,13 +468,11 @@
       if (step === 0) commitDefaultAgent();
       step = clampStep(step + 1);
       maxStep = Math.max(maxStep, step);
-      persistStep();
       skipConfirm = false;
       render();
       return;
     }
-    if (kind === "finish") { finish(false); return; }
-    if (kind === "finish-open") { finish(true); return; }
+    if (kind === "finish") { finish(); return; }
   });
 
   box.addEventListener("keydown", (e) => {
@@ -551,8 +486,8 @@
       const tgt = e.target;
       if (tgt && (tgt.tagName === "BUTTON" || tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA")) return;
       e.preventDefault();
-      if (step === STEPS.length - 1) finish(false);
-      else { step = clampStep(step + 1); maxStep = Math.max(maxStep, step); persistStep(); render(); }
+      if (step === STEPS.length - 1) finish();
+      else { step = clampStep(step + 1); maxStep = Math.max(maxStep, step); render(); }
     }
   });
 
@@ -570,7 +505,7 @@
   }
 
   function showOnboarding() {
-    try { localStorage.removeItem(KEY); localStorage.removeItem(STEP_KEY); } catch (_) {}
+    try { localStorage.removeItem(KEY); } catch (_) {}
     maxStep = 0;
     step = 0;
     selected = "";
@@ -599,11 +534,24 @@
   }
   window.renderAbout = renderAbout;
 
-  if (!seen()) {
-    const start = savedStep();
-    setTimeout(() => {
-      if (seen() || !box.hidden) return;
-      showAt(start);
-    }, 900);
+  /* Triggered by the new-agent picker when its launchable list is empty.
+     Keep the overlay over the current Workspaces surface: the project is
+     already chosen, and finishing must not choose another destination. */
+  function startAgentSetup(why) {
+    if (seen()) return false;
+    if (!box.hidden) return true;
+    step = 0;
+    maxStep = 0;
+    selected = "";
+    skipConfirm = false;
+    paused = false;
+    focusKey = "";
+    showAt(0);
+    sendCtrl({ type: "log", msg: `首次设置：新建 Agent 没有可用选项（${why || ""}）` });
+    return true;
   }
+  window.perchOnboarding = {
+    needed: () => !seen(),
+    start: startAgentSetup,
+  };
 })();

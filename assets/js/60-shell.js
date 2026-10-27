@@ -96,19 +96,20 @@ const ICON_PLUS = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" s
 const ICON_PIN = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17v5"/><path d="M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.7l-1.8-.9A2 2 0 0 1 15 10.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>`;
 const ICON_PENCIL = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>`;
 const ICON_TRASH = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>`;
-/* 行图标（工作区行 / 会话行用）。字形在 LUCIDE_FOLDER_TREE / LUCIDE_SQUARE_TERMINAL
+const ICON_BRIEF = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>`;
+/* 行图标（工作区行 / 会话行用）。字形在 LUCIDE_FOLDER / LUCIDE_SQUARE_TERMINAL
    那两行（来源和理由都写在它们的注释里 —— 一句话：抄现成的，不手画）。
    分开命名是为了让"这一枚画在哪儿"在代码里看得见：行里的图标是**缩进层级的锚点**，
    栏里的图标是**区**的标记。 */
 const LIST_ICON = {
-  folder: LUCIDE_FOLDER_TREE,
+  folder: LUCIDE_FOLDER,
   chat: LUCIDE_SQUARE_TERMINAL,
   // 2026-10-17：左栏的缩进行从「会话」换成了「agent」，名字跟着换（`chat` 这个名字
   // 留着给导航栏那两处用；字形本来就是方形终端，不是对话气泡）。
   term: LUCIDE_SQUARE_TERMINAL,
 };
 const NAV_ICON = {
-  folder: LUCIDE_FOLDER_TREE,
+  folder: LUCIDE_FOLDER,
   chat: LUCIDE_SQUARE_TERMINAL,
   // Lucide 的 layout-dashboard 原始 path（抄现成的，不手画）：
   // 四块面板，正好是"总览 = 多块读数拼成一页"的字形。
@@ -124,12 +125,12 @@ const NAV_ICON = {
    「设置」曾经是灰项；2026-10-18 设置页落地后，三项都是真区。以后再有
    没做完的项，仍按「做灰不做隐」处理：灰态 + title 说原因。 */
 const NAV_ITEMS = [
-  /* 2026-10-17 用户定的：左栏 = **总览 / 工作区 / 设置**。
-     总览置顶、最显眼，而且默认启动就落在它上面 —— 用户要的是"一进来先看全局状态"。
+  /* 2026-10-27 用户定的：左栏 = **工作区 / 总览 / 设置**。
+     产品第一次打开先落到工作区，先选/建项目再开始干活；总览排在第二位。
      总览**不是一个格子**，是一整块主区视图（见 CSS 1b 段）。
      2026-10-18：设置页有了（默认目录 / 外观 / 行为），不再是灰项。 */
-  { view: "dash", labelKey: "nav.overview", icon: "dash" },
   { view: "workspace", labelKey: "nav.workspace", icon: "folder", cnt: "nav-cnt-ws" },
+  { view: "dash", labelKey: "nav.overview", icon: "dash" },
   { view: "settings", labelKey: "nav.settings", icon: "gear", bottom: true },
 ];
 
@@ -137,9 +138,15 @@ const NAV_ITEMS = [
    所以它不再是常量，而是 setNavView 写的当前值。
    初始值读设置里的启动落点（05-prefs.js 的缓存；Go 的权威值到了也不会
    把人从当前视图拽走 —— "启动落点"只对下一次启动生效）。
-   ⚠️ HTML 那个提前跑的脚本已经把 #app.dash 摘掉了（startView=workspace 时），
-   这里只负责让导航高亮和类名一致。 */
-let NAV_HERE = SETTINGS.startView === "workspace" ? "workspace" : "dash";
+   ⚠️ HTML 那个提前跑的脚本已经把 #app.dash 摘掉了（workspace / 缓存缺失 /
+   引导未完成时），这里只负责让导航高亮和类名一致。 */
+function startViewNow() {
+  let onboarded = false;
+  try { onboarded = localStorage.getItem("perch.onboarded.v2") === "1"; } catch (_) {}
+  if (!onboarded) return "workspace";
+  return SETTINGS.startView === "dash" ? "dash" : "workspace";
+}
+let NAV_HERE = startViewNow();
 // 设置页按 Esc 要回到"来之前那个视图"；只在离开非设置视图时记录。
 let NAV_PREV = NAV_HERE;
 $("app").classList.toggle("dash", NAV_HERE === "dash");
@@ -160,6 +167,132 @@ function renderNav() {
     `<div class="rail-spacer"></div>` +
     NAV_ITEMS.filter((n) => n.bottom).map(one).join("");
   syncCounts();
+}
+
+/* 顶层模式 = 一个触发器 + 下拉（形态照 Codex 桌面端的 Chat/Codex 切换）。
+   Beta.3 只有 Workspaces 真的可用；Chat 在菜单里灰着，点它会用右侧提示卡
+   说明 1.0 才到。真正的 Clean 不是这里，它是之后加在终端面板上的皮套。 */
+const MODE_ITEMS = [
+  { mode: "workspaces", icon: LUCIDE_FOLDER, titleKey: "chrome.mode.workspaces",
+    descKey: "chrome.mode.workspacesSub", soon: false },
+  { mode: "chat", icon: LUCIDE_MESSAGE_SQUARE, titleKey: "chrome.mode.chat",
+    descKey: "chrome.mode.chatSoon", soon: true },
+];
+function modeCurrent() {
+  // Beta.3 不真正切到 Chat；旧缓存/手改配置写着 chat 也只显示 Workspaces。
+  return "workspaces";
+}
+function modeLabel(mode) {
+  return t(mode === "chat" ? "chrome.mode.chat" : "chrome.mode.workspaces");
+}
+function renderModeMenu() {
+  const pop = $("mode-pop");
+  if (!pop) return;
+  const cur = modeCurrent();
+  pop.innerHTML = MODE_ITEMS.map((it) => {
+    const on = it.mode === cur;
+    return `<button type="button" class="mi${on ? " on" : ""}${it.soon ? " soon" : ""}" `
+      + `data-topmode="${it.mode}" role="menuitemradio" aria-checked="${on}" `
+      + `${it.soon ? 'aria-disabled="true" ' : ""}tabindex="-1">`
+      + `<span class="mi-ico">${lucide(it.icon, 14)}</span>`
+      + `<span class="mi-main"><span class="mi-title"><b>${esc(t(it.titleKey))}</b>`
+      + `${it.soon ? '<span class="mi-tag">1.0</span>' : ""}</span>`
+      + `<span class="mi-sub">${esc(t(it.descKey))}</span></span>`
+      + `<span class="mi-ck">${on ? "✓" : ""}</span></button>`;
+  }).join("");
+}
+function renderTopMode() {
+  const trigger = $("top-mode");
+  if (!trigger) return;
+  const mode = modeCurrent();
+  const ico = $("top-mode-ico");
+  if (ico) ico.innerHTML = lucide(mode === "chat" ? LUCIDE_MESSAGE_SQUARE : LUCIDE_FOLDER, 14);
+  const label = $("top-mode-label");
+  if (label) label.textContent = modeLabel(mode);
+  trigger.dataset.mode = mode;
+  trigger.setAttribute("aria-label", `${t("chrome.mode.aria")} · ${modeLabel(mode)}`);
+  renderModeMenu();
+}
+function placeModePop() {
+  const trigger = $("top-mode"), pop = $("mode-pop");
+  if (!trigger || !pop) return;
+  const r = trigger.getBoundingClientRect();
+  const w = pop.offsetWidth || 216;
+  const h = pop.offsetHeight || 120;
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+  let top = r.bottom + 4;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 4);
+  pop.style.left = Math.round(left) + "px";
+  pop.style.top = Math.round(top) + "px";
+}
+function setModePop(open, focus) {
+  const trigger = $("top-mode"), pop = $("mode-pop");
+  if (!trigger || !pop) return;
+  if (!open) {
+    pop.hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+    return;
+  }
+  renderModeMenu();
+  pop.hidden = false;
+  trigger.setAttribute("aria-expanded", "true");
+  placeModePop();
+  if (focus) {
+    const target = pop.querySelector(".mi.on") || pop.querySelector(".mi");
+    if (target) target.focus({ preventScroll: true });
+  }
+}
+function topModePick(mode) {
+  setModePop(false);
+  if (mode === "chat") {
+    showToast(t("chrome.mode.chatTitle"), t("chrome.mode.chatNote"), "info");
+    sendCtrl({ type: "log", msg: "顶层模式：点了 Chat（1.0 才启用）" });
+    return;
+  }
+  if (SETTINGS.topMode === "workspaces") return;
+  SETTINGS.topMode = "workspaces";
+  saveSettingsCache();
+  renderTopMode();
+  sendCtrl({ type: "settings.set", settings: { topMode: "workspaces" } });
+}
+{
+  const trigger = $("top-mode"), pop = $("mode-pop");
+  if (trigger && pop && !trigger.dataset.bound) {
+    trigger.dataset.bound = "1";
+    trigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setModePop(pop.hidden, true);
+    });
+    pop.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-topmode]");
+      if (b) topModePick(b.dataset.topmode);
+    });
+    document.addEventListener("mousedown", (e) => {
+      if (pop.hidden) return;
+      if (e.target.closest("#top-mode") || e.target.closest("#mode-pop")) return;
+      setModePop(false);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (pop.hidden) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setModePop(false);
+        trigger.focus({ preventScroll: true });
+        return;
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const items = [...pop.querySelectorAll(".mi")];
+        if (!items.length) return;
+        let i = items.indexOf(document.activeElement);
+        if (i < 0) i = items.findIndex((x) => x.classList.contains("on"));
+        i = (i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+        items[i].focus({ preventScroll: true });
+      }
+    });
+    window.addEventListener("resize", () => { if (!pop.hidden) placeModePop(); });
+  }
+  renderTopMode();
 }
 
 /* 左栏的计数只有这一处：导航栏「工作区」那一项右边那枚数（池子里有几个工作区）。
@@ -534,7 +667,8 @@ function closedRowHTML(r) {
     + (dead ? "\n" + closedWhy(r) : t("shell.closed.tipResume"));
   return `<div class="arow closed${dead ? " dead" : ""}" data-pane="${r.paneId | 0}"`
     + ` data-sid="${esc(r.sessionId || "")}" role="button" tabindex="0" title="${esc(tip)}">`
-    + `<span class="ricon">${lucide(AGENT_GLYPH[typ] || LIST_ICON.term, 14)}</span>`
+    + `<span class="ricon">${agentMarkHTML(typ)}`
+    + `<span class="adot-slot"></span></span>`
     + `<span class="nm ell">${esc(nm)}</span>`
     + `<span class="sw">${esc(stateWord)}</span>`
     + (at ? `<span class="tm" data-at="${esc(at)}" title="${esc(absTime(at))}">${esc(rel(at))}</span>` : "")
@@ -623,6 +757,14 @@ const AGENT_GLYPH = {
 function agentGlyph(t) {
   return AGENT_GLYPH[(t.spec && t.spec.agent) || "claude"] || LIST_ICON.term;
 }
+/* agent 行的品牌 logo。图标 resolver 在 86-dash（和名单/格子头共用一套规则）；
+   运行期已求值。认不出 agent / 没有 icon 时退回方形终端，不猜品牌。 */
+function agentMarkHTML(typ) {
+  const id = String(typ || "").trim().toLowerCase();
+  const a = id && typeof opAgentById === "function" ? opAgentById(id) : null;
+  if (a && a.icon && typeof iconHTML === "function") return iconHTML(a.icon, "sm");
+  return lucide(AGENT_GLYPH[id] || LIST_ICON.term, 14);
+}
 function agentRowHTML(tab) { // 参数别叫 t：会遮住 i18n 的 t()
   const st = cellState(tab);
   const stopped = st === "off";
@@ -636,7 +778,7 @@ function agentRowHTML(tab) { // 参数别叫 t：会遮住 i18n 的 t()
   return `<div class="arow${tab === activeTab ? " sel" : ""}" data-tab="${tab.id}"`
     + ` data-sid="${esc(tab.sessionID || "")}" data-stopped="${stopped ? 1 : 0}"`
     + ` role="button" tabindex="0" title="${esc(tip)}">`
-    + `<span class="ricon">${lucide(agentGlyph(t), 14)}`
+    + `<span class="ricon">${agentMarkHTML(typ)}`
     + `<span class="adot-slot">${dotHTML(st)}</span></span>`
     + `<span class="nm ell">${esc(nm)}</span>`
     + `<span class="sw">${esc(w)}</span>`
@@ -716,32 +858,14 @@ function sessionSectionHTML(defPath, tabs, closed, total) {
    （见上面"行的 HTML"那一大段）。归属判定只有 `tabsInProject` 一处，
    Go 那边数的是会话库 —— 两条不再是同一条不变量，别再拿它们往一起对。 */
 function renderWorkspaceView(key) {
-  const projs = STATE?.projects || [];
+  // 合成默认区不在这里出现：它留给未来的 Chat。Workspaces 只列真实 Project。
+  const projs = (STATE?.projects || []).filter((p) => p && p.path && !p.synthetic);
   const defPath = defaultAreaPath();
-  const realProjs = projs.filter((p) => !p.synthetic);
   const used = new Set();
   const usedClosed = new Set();
   let html = "";
-
-  /* ① 无项目区（非文件夹）—— 默认落点。新 Agent 直接用默认根目录，
-     旧版本的 sessions\<...> 临时目录单列。 */
-  if (defPath) {
-    const mine = tabsInProject(defPath);
-    const cmine = closedInProject(defPath);
-    mine.forEach((t) => used.add(t.id));
-    cmine.forEach((r) => usedClosed.add(r.paneId));
-    const selfHit = !key || `${t("list.sessions")} ${t("list.sessions.sub")} ${defPath}`
-      .toLowerCase().includes(key);
-    const shown = (key && !selfHit) ? mine.filter((t) => tabMatch(t, key)) : mine;
-    const shownClosed = (key && !selfHit) ? cmine.filter((r) => closedMatch(r, key)) : cmine;
-    if (!key || selfHit || shown.length || shownClosed.length) {
-      html += sessionSectionHTML(defPath, shown, shownClosed, mine.length + cmine.length);
-    }
-  }
-
-  /* ② 项目（用户自己的文件夹）。这一层才是"文件夹行"，带 + / ⋯。 */
   const rows = [];
-  for (const p of realProjs) {
+  for (const p of projs) {
     const mine = tabsInProject(p.path);
     const cmine = closedInProject(p.path);
     // `used` 收的是**归属已定**的格（哪怕搜索把它藏起来了）—— 否则搜索时
@@ -758,21 +882,30 @@ function renderWorkspaceView(key) {
     // 已关闭的 agent 也算（关格 ≠ 删，它们仍然是这个工作区的 agent）。
     rows.push(projRowHTML(p, shown, "proj", mine.length + cmine.length, shownClosed, !!key));
   }
-  if (realProjs.length && (rows.length || !key)) {
-    html += `<div class="sect sect-projects"><span class="sect-ic">${lucide(LIST_ICON.folder, 15)}</span>`
-      + `<span class="sect-nm">${esc(t("list.projects"))}</span>`
-      + `<span class="sect-sum">${realProjs.length}</span></div>`;
-  }
-  /* ⚠️ 空态判据是"有没有用户自己的项目"，不是"行数 == 0"：默认会话区
-     永远在，拿行数判会让「添加项目」再也不出现。 */
-  if (!realProjs.length) html += poolEmptyHTML(key);
-  html += rows.join("");
-  $("proj-list").innerHTML = html;
+  // 旧默认区（含旧 sessions\... 临时目录）**不再出现在 Workspaces 列表里**：
+  // 它留给未来的 Chat。数据仍留在盘上，这里只把归属标掉，防止它们掉进
+  // 下面的"未归类"adopt 行又冒出来。已有 agent 不会因此被删除。
+  const hiddenDefaultTabs = defPath
+    ? TAB_LIST.filter((t) => t.id > 0 && !used.has(t.id) && insidePath(effCwd(t), defPath))
+    : [];
+  const hiddenDefaultClosed = defPath
+    ? closedList().filter((r) => !usedClosed.has(r.paneId) &&
+        insidePath(r.cwd || defaultWorkspacePath(), defPath))
+    : [];
+  hiddenDefaultTabs.forEach((t) => used.add(t.id));
+  hiddenDefaultClosed.forEach((r) => usedClosed.add(r.paneId));
 
-  // 未归类：**不在任何项目目录里的 agent**，按生效 cwd 分组（和 tabsInProject
-  // 同一套判据：空串 = 默认工作区，那里已经归过一遍了）。
+  // 没有 Sessions / Projects 分段头：一份 Project 列表就是这一列的全部。
+  // 未归类行也算列表内容：搜到未归类目录时不能再叠一句「没有匹配的项目」。
   const unAll = TAB_LIST.filter((t) => t.id > 0 && !used.has(t.id));
   const unClosed = closedList().filter((r) => !usedClosed.has(r.paneId));
+  /* 空态只在池子和未归类都真的没有东西时出现。 */
+  html = rows.length ? rows.join("")
+    : (unAll.length || unClosed.length ? "" : poolEmptyHTML(key));
+  $("proj-list").innerHTML = html;
+
+  // 未归类：不在任何 Project 目录里的 agent，按生效 cwd 分组。没有分组头，
+  // 直接作为 adopt 行接在同一列后面 —— 用户看到的仍是一条 Project 列表。
   const groups = new Map();   // 生效 cwd → {tabs:[], closed:[]}
   const bucket = (c) => {
     if (!groups.has(c)) groups.set(c, { tabs: [], closed: [] });
@@ -793,7 +926,7 @@ function renderWorkspaceView(key) {
     .filter((g) => !key || g.shown.length || g.shownClosed.length)
     .sort((a, b) => b.total - a.total);
   if (!ug.length) { $("un-view").innerHTML = ""; return; }
-  let uh = `<div class="grp">${esc(t("shell.projects.unclassified"))}<span class="b">${unAll.length + unClosed.length}</span></div>`;
+  let uh = "";
   for (const { cwd, shown, shownClosed, total } of ug) {
     if (!cwd) {
       // 连生效 cwd 都没有（项目池还没到）：池子里放的是目录，它没有可收编的东西 ——
@@ -876,8 +1009,18 @@ function renderProjLive() {
   for (const el of document.querySelectorAll("#proj-list .proj, #un-view .proj")) {
     const kind = el.dataset.kind || "proj";
     const path = el.dataset.path || "";
-    // "bare"（连生效 cwd 都没有）那一组不数东西；其余照 tabsInProject 那**一处**归属
-    const tabs = kind === "bare" ? [] : tabsInProject(path);
+    // "bare"（连生效 cwd 都没有）那一组不数东西；adopt 是未归类目录，
+    // 不能走 tabsInProject（它按 ownerProjectPath 归属，未归类会被算成空）。
+    let tabs = [], closed = [];
+    if (kind === "proj" || kind === "sessions" || kind === "sessions-legacy") {
+      tabs = tabsInProject(path);
+      closed = closedInProject(path);
+    } else if (kind === "adopt") {
+      tabs = TAB_LIST.filter((t) =>
+        t.id > 0 && normPath(effCwd(t)) === normPath(path));
+      closed = closedList().filter((r) =>
+        normPath(r.cwd || defaultWorkspacePath()) === normPath(path));
+    }
     const st = projDotState(tabs);
     const slot = el.querySelector(".adot-slot");
     if (slot) {
@@ -886,20 +1029,11 @@ function renderProjLive() {
       else if (!st && cur) slot.innerHTML = "";
       else if (st && cur) paintDot(cur, st);
     }
-    // "bare"（连生效 cwd 都没有）那一组的行是**渲染时点出来的**，没有可现算的
-    // 目录 → 数它当初写下的那个数（`data-n`），别把它写成 0。
-    // 「已关闭」的 agent 也算这个工作区的东西（关格 ≠ 删）。
+    // "bare" 那一组的行是**渲染时点出来的**，没有可现算的目录 → 数它当初写下的数。
+    // 「已关闭」的 agent 也算这个 Project 的东西（关格 ≠ 删）。
     const n = kind === "bare" ? Number(el.dataset.n || 0)
-      : tabs.length + closedInProject(path).length;
+      : tabs.length + closed.length;
     const sum = el.querySelector(".sum");
-    if (sum) sum.textContent = `${n} agent`;
-    el.dataset.n = String(n);
-  }
-  // ①b 会话区头：它不是 .proj（没有文件夹语义），但 agent 数要跟着活数据走。
-  for (const el of document.querySelectorAll("#proj-list .sect-sessions")) {
-    const path = el.dataset.path || "";
-    const n = tabsInProject(path).length + closedInProject(path).length;
-    const sum = el.querySelector(".sect-sum");
     if (sum) sum.textContent = tCount("shell.proj.sum", n);
     el.dataset.n = String(n);
   }
@@ -947,17 +1081,14 @@ function renderProjLive() {
 
 function poolSend(obj) { sendCtrl(obj); }
 
-// 给没有显式 target 的旧调用点补一个：项目根/默认根/其他目录。
-// 新面（新建 Agent）总是显式传 target；这条只服务快捷键、旧菜单等路径。
+// 给没有显式 target 的旧调用点补一个：只有真实 Project 算目标。
+// 不属于任何项目的目录不再落到默认区，而是返回空串，由调用方先要求添加项目。
 function targetKindForDir(dir) {
   const d = String(dir || "").trim();
-  if (!d) return "scratch";
+  if (!d) return "";
   const real = (STATE?.projects || []).find((p) =>
     p && !p.synthetic && p.path && normPath(p.path) === normPath(d));
-  if (real) return "project";
-  const def = defaultAreaPath();
-  if (def && normPath(d) === normPath(def)) return "scratch";
-  return "directory";
+  return real ? "project" : "";
 }
 
 // 「在这个目录新开一格」。走的是**同一条**建格路（createTab + 默认启动意图）——
@@ -972,9 +1103,22 @@ async function newTabIn(dir, why, agent, target, opts) {
   // 第三参是选择面板选中的 agent；左栏/项目的一键入口不传，走设置里的默认。
   const pick = agent || defaultAgentId();
   const kind = target || targetKindForDir(dir);
+  // Workspaces 的新 Agent 必须有真实 Project。默认区留给 Chat；这里绝不
+  // 再把空 cwd/scratch 当成"默认项目"偷偷建格。
+  if (kind !== "project") {
+    return {
+      ok: false,
+      refusal: {
+        code: "project.targetRequired",
+        msgCode: "project.targetRequired",
+        msg: t("na.pickTargetFirst"),
+        retryable: false,
+      },
+    };
+  }
   const spec = {
     agent: pick,
-    cwd: kind === "scratch" ? "" : (dir || ""),
+    cwd: dir || "",
     target: kind,
     resume: { kind: "new", id: "" },
   };
@@ -1099,6 +1243,12 @@ function shortcutTargetFolder() {
 }
 function runNewAgentShortcut() {
   const cwd = shortcutTargetFolder();
+  if (!cwd) {
+    sendCtrl({ type: "log", msg: "快捷键：当前不在任何 Project 里 → 打开新建 Agent 卡（项目必选）" });
+    showToast(t("na.toast.stepTitle"), t("na.pickTargetFirst"), "err");
+    openNewAgent({ why: "快捷键（先选择项目）" });
+    return;
+  }
   const remembered = lastAgentFor(cwd);
   const cat = opCatalog();
   const avail = cat.filter(opLaunchable);
@@ -1401,6 +1551,8 @@ function projMenuItems(p, inPool) {
   if (p && p.synthetic) {
     return [
       newHere(),
+      { act: "brief", icon: ICON_BRIEF, label: t("shell.menu.brief"),
+        hint: t("shell.menu.briefHint", { path: p.path || "" }) },
       { sep: true },
       { act: "opendir", icon: ICON_DIR, label: t("shell.menu.openDir"), hint: p.path },
       { act: "reveal", icon: ICON_DIR, label: t("shell.menu.reveal"), hint: p.path },
@@ -1430,6 +1582,8 @@ function projMenuItems(p, inPool) {
       hint: t("shell.menu.renameDirHint", { path: p.path || "" }) },
     { sep: true },
     newHere(),
+    { act: "brief", icon: ICON_BRIEF, label: t("shell.menu.brief"),
+      hint: t("shell.menu.briefHint", { path: p.path || "" }) },
     { sep: true },
     { act: "opendir", icon: ICON_DIR, label: t("shell.menu.openDir"), hint: p.path },
     { act: "reveal", icon: ICON_DIR, label: t("shell.menu.reveal"), hint: p.path },
@@ -1663,6 +1817,7 @@ function doProjAct(act, el, p) {
     case "rename":  beginProjRename(p.path); break;
     case "adopt":   adoptDir(p.path); break;
     case "new":     openNewAgent({ projectPath: p.path, why: "项目菜单「新建 agent」" }); break;
+    case "brief":   openWorkspaceBrief(p); break;
     case "opendir": sendCtrl({ type: "open", mode: "open", path: p.path }); break;
     case "reveal":  sendCtrl({ type: "open", mode: "reveal", path: p.path }); break;
     case "copy":    copyText(p.path).then((ok) => {

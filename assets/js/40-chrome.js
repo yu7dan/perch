@@ -219,7 +219,7 @@ function saveRsbW(px) {
    （点文件先看改动、再切全文），所以这里也把它拿掉；旧 localStorage 里存着
    "need"/"hist"/"diff" 的由 showRsbMod 那条兜底降级到第一个模块（= 文件），
    不会白屏，也自动完成迁移。 */
-const RSB_MODS = ["files", "side", "flow"];
+const RSB_MODS = ["files"];
 const RSB_MOD_KEY = "rsbMod";
 let rsbMod = RSB_MODS[0];
 
@@ -465,12 +465,13 @@ if (railDiv) {
 // 表现是拖上去那段反而缩、像在躲指针。宽度那条的 x0-clientX 是同一件事
 // （它也是"边界跟着指针、被改的量朝反方向长"），两处别写岔。
 // ---------------------------------------------------------------------------
-const RSB_HIST_KEY = "rsbHistH";
-const RSB_HIST_OPEN_KEY = "rsbHistOpen";
+const RSB_HIST_KEY = "rsbHistH.v2";
+const RSB_HIST_OPEN_KEY = "rsbHistOpen.v2";
 const RSB_HIST_MIN = 120;      // 展开后的下限：够看到 3~4 行
 const RSB_HIST_MIN_TOP = 180;  // 上段至少留这么多，否则上段就没法用了
-let rsbHistOpen = false;       // 默认折叠（理由见 CSS 里 Orca 那段原话）
-let rsbHistH = 0;              // 展开后的高度；0 = 还没定过 ⇒ 取窗口的 35%
+const RSB_HIST_DEFAULT_RATIO = 0.40; // 默认展开时下段占窗口高；用户可拖
+let rsbHistOpen = true;        // 默认展开；用户收起后由 v2 键记住
+let rsbHistH = 0;              // 展开后的高度；0 = 还没定过 ⇒ 取窗口的 40%
 
 /* 折叠时的高 = **量出来的**头部高，不是一个写死的数：头部高是设计令牌
    （--pane-title-height，现在是 24px），将来它变了这里跟着变 ——
@@ -501,7 +502,7 @@ function clampHistH(h) {
 // 高度写在 documentElement 上（--rsb-hist-h），和 --rsb-w 同一个路子：
 // CSS 只管读数，JS 只管写数，"折叠该是多高"这件事不散在两处。
 function applyHistH() {
-  const h = rsbHistOpen ? clampHistH(rsbHistH || window.innerHeight * 0.35) : histHeadH();
+  const h = rsbHistOpen ? clampHistH(rsbHistH || window.innerHeight * RSB_HIST_DEFAULT_RATIO) : histHeadH();
   document.documentElement.style.setProperty("--rsb-hist-h", h + "px");
   $("rsb-hist").classList.toggle("open", rsbHistOpen);
   const f = $("h-fold");
@@ -524,7 +525,8 @@ function setHistOpen(open, why) {
 function loadHist() {
   const n = parseInt(localStorage.getItem(RSB_HIST_KEY) || "", 10);
   if (Number.isFinite(n) && n > 0) rsbHistH = n;
-  rsbHistOpen = localStorage.getItem(RSB_HIST_OPEN_KEY) === "1";
+  // 新键没有值时默认展开；只有用户亲手收起过（"0"）才保持折叠。
+  rsbHistOpen = localStorage.getItem(RSB_HIST_OPEN_KEY) !== "0";
 }
 
 $("h-fold").addEventListener("click", () => setHistOpen(!rsbHistOpen, "点箭头"));
@@ -654,7 +656,7 @@ applyRailW(railW);
 rsbMod = localStorage.getItem(RSB_MOD_KEY) || RSB_MODS[0];
 if (!RSB_MODS.includes(rsbMod)) rsbMod = RSB_MODS[0];
 loadHist();
-if (!rsbHistH) rsbHistH = Math.round(window.innerHeight * 0.35);
+if (!rsbHistH) rsbHistH = Math.round(window.innerHeight * RSB_HIST_DEFAULT_RATIO);
 applyHistH();
 setRsbOpen(true, "启动");
 renderRsbMods();
@@ -762,6 +764,13 @@ const LUCIDE_PANEL_LEFT_OPEN =
    尺寸/描边走现成的 lucide() 包装（官方 stroke-width=2，24 网格）。 */
 const LUCIDE_FOLDER_TREE =
   '<path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/><path d="M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/><path d="M3 5a2 2 0 0 0 2 2h3"/><path d="M3 3v13a2 2 0 0 0 2 2h3"/>';
+// Lucide folder（上游 folder.svg 的原始 path）：项目行要的是“一个文件夹”，
+// 不是 folder-tree 的分叉线。分叉线在 15px 行里和状态点叠在一起会显得碎。
+const LUCIDE_FOLDER =
+  '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>';
+// Lucide message-square（上游原文 path）：模式菜单里的 Chat 选项。
+const LUCIDE_MESSAGE_SQUARE =
+  '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>';
 const LUCIDE_SQUARE_TERMINAL =
   '<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>';
 function lucide(paths, size) {

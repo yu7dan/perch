@@ -40,31 +40,29 @@ function naProjectOwning(path) {
 
 function naDefaultPath() { return defaultAreaPath() || defaultWorkspacePath(); }
 
+function naNoneTarget() {
+  return { kind: "none", path: "", name: "" };
+}
+
 function naTargetFromCwd(cwd) {
   const p = naProjectOwning(cwd);
   if (p) return { kind: "project", path: p.path, name: projectName(p) };
-  if (!cwd) return { kind: "scratch", path: naDefaultPath(), name: t("na.noProject") };
-  if (naDefaultPath() && normPath(cwd) === normPath(naDefaultPath())) {
-    return { kind: "scratch", path: naDefaultPath(), name: t("na.noProject") };
-  }
-  return { kind: "directory", path: cwd, name: t("na.currentDir") };
+  // Workspaces 的新 Agent 必须落在一个真实 Project 里。默认区留给 Chat；
+  // 这里不再提供 "默认项目/未归类目录" 的新建旁路。
+  return naNoneTarget();
 }
 
 function naTargetFromProjectPath(path) {
   const p = naRealProjectByPath(path);
   if (p) return { kind: "project", path: p.path, name: projectName(p) };
-  const syn = (STATE?.projects || []).find((x) =>
-    x && x.synthetic && normPath(x.path) === normPath(path));
-  if (syn) return { kind: "scratch", path: syn.path || naDefaultPath(), name: t("na.noProject") };
-  if (String(path || "").trim()) return { kind: "directory", path: path, name: t("na.currentDir") };
-  return { kind: "scratch", path: naDefaultPath(), name: t("na.noProject") };
+  return naNoneTarget();
 }
 
 function naDefaultTarget() {
   const tab = (typeof activeTab !== "undefined" && activeTab && activeTab.id > 0)
     ? activeTab : (TAB_LIST || []).find((x) => x.id > 0);
   if (tab) return naTargetFromCwd(effCwd(tab));
-  return { kind: "scratch", path: naDefaultPath(), name: t("na.noProject") };
+  return naNoneTarget();
 }
 
 function naAgentList(path) {
@@ -93,18 +91,51 @@ function naPickAgentForPath(path) {
 }
 
 function naTargetPathDisplay() {
-  if (!NA) return "";
-  return NA.targetKind === "scratch" ? naDefaultPath() : (NA.targetPath || "");
+  if (!NA || NA.targetKind !== "project") return "";
+  return NA.targetPath || "";
 }
 
 function naIsOpen() { return !!(NA && $("newagent") && !$("newagent").hidden); }
 function naPopOpen() { return !!(NA && NA.popOpen); }
 
+/* The first-run guide belongs to this moment: the user has a real Project and
+   opened "new agent", but the picker has nothing installable/launchable to
+   offer. It must not fire on project creation or while the catalog is still
+   missing/loading. */
+function naAgentSetupNeeded() {
+  if (!NA || NA.busy) return false;
+  if (NA.targetKind !== "project" || !NA.targetPath) return false;
+  const list = naAgentList(NA.targetPath);
+  if (list.length) return false;
+  if (OP_CATALOG_MISSING) return false;
+  return !!(window.perchOnboarding && window.perchOnboarding.needed &&
+    window.perchOnboarding.needed());
+}
+
+function naMaybeStartAgentSetup(why) {
+  if (!naAgentSetupNeeded()) return false;
+  const onb = window.perchOnboarding;
+  closeNewAgent(why || "没有可用 Agent → 首次设置", true);
+  onb.start(why || "");
+  return true;
+}
+
+/* Catalog pushes arrive while the picker may already be open. Re-evaluate the
+   empty list here so a slow first catalog doesn't miss the guide. */
+function naCatalogChanged(why) {
+  if (!naIsOpen()) return;
+  renderNewAgent();
+  naMaybeStartAgentSetup(why || "Agent 名单更新");
+}
+
 function openNewAgent(opts) {
   opts = opts || {};
   let target;
   if (opts.targetKind && opts.targetKind !== "auto") {
-    target = { kind: opts.targetKind, path: opts.targetPath || "", name: opts.targetName || "" };
+    // old callers may still say scratch/directory; Workspaces no longer has that lane.
+    target = opts.targetKind === "project" && opts.targetPath
+      ? { kind: "project", path: opts.targetPath, name: opts.targetName || "" }
+      : naNoneTarget();
   } else if (opts.projectPath) {
     target = naTargetFromProjectPath(opts.projectPath);
   } else if (opts.cwd) {
@@ -132,6 +163,7 @@ function openNewAgent(opts) {
   };
   $("newagent").hidden = false;
   renderNewAgent();
+  if (naMaybeStartAgentSetup(opts.why || "打开新建 Agent")) return;
   const row = $("na-agents").querySelector(".na-agent.on") || $("na-agents").querySelector(".na-agent");
   if (row) row.focus({ preventScroll: true });
   sendCtrl({ type: "log", msg: `新建 Agent 打开（${NA.why}）` +
@@ -139,8 +171,7 @@ function openNewAgent(opts) {
 }
 
 function naTargetPathFor(target) {
-  if (!target) return naDefaultPath();
-  if (target.kind === "scratch") return target.path || naDefaultPath();
+  if (!target || target.kind !== "project") return "";
   return target.path || "";
 }
 
@@ -191,11 +222,8 @@ function naTargetNote() {
     return t("na.noteStale", { name: opAgentById(NA.staleAgent)?.name || NA.staleAgent });
   }
   if (!a) return t("na.noteNoAgent");
-  if (NA.targetKind === "scratch") {
-    return t("na.noteScratch", { name, path: naDefaultPath() });
-  }
-  if (NA.targetKind === "directory") {
-    return t("na.noteDirectory", { name, path: NA.targetPath });
+  if (NA.targetKind !== "project" || !NA.targetPath) {
+    return t("na.noteNeedProject", { name });
   }
   return t("na.noteProject", { name, path: NA.targetPath });
 }
@@ -205,13 +233,9 @@ function naPaintProjectField() {
   const pathEl = $("na-proj-path");
   const iconEl = $("na-proj-ico");
   if (!nameEl || !pathEl || !iconEl) return;
-  if (NA.targetKind === "scratch") {
-    nameEl.textContent = t("na.noProject");
-    pathEl.textContent = t("na.defaultDir", { path: naDefaultPath() });
-    iconEl.innerHTML = NA_ICON_TERM;
-  } else if (NA.targetKind === "directory") {
-    nameEl.textContent = t("na.currentDir");
-    pathEl.textContent = NA.targetPath || "";
+  if (NA.targetKind !== "project" || !NA.targetPath) {
+    nameEl.textContent = t("na.chooseProject");
+    pathEl.textContent = t("na.needProjectHint");
     iconEl.innerHTML = NA_ICON_FOLDER;
   } else {
     nameEl.textContent = NA.targetName || baseName(NA.targetPath);
@@ -225,19 +249,17 @@ function renderNewAgent() {
   naPaintProjectField();
   const projBtn = $("na-proj");
   if (projBtn) {
-    projBtn.title = NA.targetKind === "scratch"
-      ? `${t("na.noProject")} · ${naDefaultPath()}`
-      : (NA.targetPath || "");
+    projBtn.title = NA.targetKind === "project" ? (NA.targetPath || "") : t("na.chooseProject");
   }
   $("na-agents").innerHTML = naAgentRowsHtml();
   const note = $("na-note");
   note.textContent = NA.error || naTargetNote();
   note.classList.toggle("err", !!NA.error);
   const path = naTargetPathDisplay();
-  $("na-target").innerHTML = NA.targetKind === "scratch"
-    ? `<span class="k">${esc(t("na.targetLabel"))}</span> ${esc(t("na.targetScratch", { path }))}`
-    : `<span class="k">${esc(t("na.targetLabel"))}</span> ${esc(path)}`;
-  const can = !!NA.agent && (NA.targetKind === "scratch" || !!NA.targetPath);
+  $("na-target").innerHTML = NA.targetKind === "project"
+    ? `<span class="k">${esc(t("na.targetLabel"))}</span> ${esc(path)}`
+    : `<span class="k">${esc(t("na.targetLabel"))}</span> ${esc(t("na.chooseProject"))}`;
+  const can = !!NA.agent && NA.targetKind === "project" && !!NA.targetPath;
   const go = $("na-create");
   go.textContent = NA.busy ? t("na.starting") : t("na.create");
   go.classList.toggle("na", !NA.busy && !can);
@@ -275,22 +297,11 @@ function naPlaceProjPop() {
 function naOptions() {
   const q = String(NA.query || "").trim().toLowerCase();
   const out = [];
-  if (NA.targetKind === "directory" &&
-      !naRealProjectByPath(NA.targetPath) &&
-      normPath(NA.targetPath) !== normPath(naDefaultPath()) &&
-      (!q || `${t("na.currentDir")} ${NA.targetPath}`.toLowerCase().includes(q))) {
-    out.push({ kind: "directory", path: NA.targetPath, name: t("na.currentDir"), detail: NA.targetPath });
-  }
+  // 目标只有真实 Project；默认目录留给 Chat，不再出现在 Workspaces 的新建目标里。
   for (const p of naRealProjects()) {
     const name = projectName(p);
     if (q && !(`${name} ${p.name || ""} ${p.path}`.toLowerCase().includes(q))) continue;
     out.push({ kind: "project", path: p.path, name, detail: p.path, pinned: !!p.pinned });
-  }
-  const scratchName = t("na.noProject");
-  if (!q || `${scratchName} ${t("na.defaultDir", { path: naDefaultPath() })}`
-      .toLowerCase().includes(q)) {
-    out.push({ kind: "scratch", path: naDefaultPath(), name: scratchName,
-      detail: t("na.defaultDir", { path: naDefaultPath() }) });
   }
   return out;
 }
@@ -303,7 +314,7 @@ function naRenderProjectPop() {
   if (input && document.activeElement !== input) input.value = NA.query;
   let html = "";
   if (!NA_OPTS.length) {
-    html = `<div class="na-empty">${esc(t("na.noMatch"))}</div>`;
+    html = `<div class="na-empty">${esc(t(NA.query ? "na.noMatch" : "na.noProjects"))}</div>`;
   } else {
     let lastKind = "";
     NA_OPTS.forEach((opt, i) => {
@@ -312,8 +323,8 @@ function naRenderProjectPop() {
       if (sep) html += `<div class="na-div"></div>`;
       lastKind = opt.kind;
       const on = opt.kind === NA.targetKind &&
-        (opt.kind === "scratch" || normPath(opt.path) === normPath(NA.targetPath));
-      const icon = opt.kind === "scratch" ? NA_ICON_TERM : NA_ICON_FOLDER;
+        normPath(opt.path) === normPath(NA.targetPath);
+      const icon = NA_ICON_FOLDER;
       html += `<button type="button" class="na-opt${on ? " on" : ""}${i === NA.active ? " active" : ""}" `
         + `data-naopt="${i}" id="na-opt-${i}" role="option" aria-selected="${on ? "true" : "false"}">`
         + `<span class="ico">${icon}</span>`
@@ -352,7 +363,7 @@ function naOpenProjPop() {
   $("na-proj").setAttribute("aria-expanded", "true");
   naRenderProjectPop();
   const selectedIdx = NA_OPTS.findIndex((opt) => opt.kind === NA.targetKind &&
-    (opt.kind === "scratch" || normPath(opt.path) === normPath(NA.targetPath)));
+    normPath(opt.path) === normPath(NA.targetPath));
   if (selectedIdx >= 0) naSetActive(selectedIdx);
   const input = $("na-proj-search");
   if (input) {
@@ -364,7 +375,7 @@ function naOpenProjPop() {
 function naSelectTarget(opt, manual) {
   if (!NA || !opt) return;
   NA.targetKind = opt.kind;
-  NA.targetPath = opt.path || (opt.kind === "scratch" ? naDefaultPath() : "");
+  NA.targetPath = opt.path || "";
   NA.targetName = opt.name || "";
   NA.error = "";
   if (manual) {
@@ -375,6 +386,7 @@ function naSelectTarget(opt, manual) {
   }
   naCloseProjPop(false);
   renderNewAgent();
+  if (naMaybeStartAgentSetup("选择项目后没有可用 Agent")) return;
   const row = $("na-agents").querySelector(".na-agent.on") || $("na-agents").querySelector(".na-agent");
   if (row) row.focus({ preventScroll: true });
   sendCtrl({ type: "log", msg: `新建 Agent 目标=${NA.targetKind}:${naTargetPathDisplay()} agent=${NA.agent || "(无)"}` });
@@ -386,9 +398,9 @@ function naAddProject() {
   const directAdd = NA.targetKind === "directory" &&
     !naRealProjectByPath(NA.targetPath) &&
     normPath(NA.targetPath) !== normPath(naDefaultPath());
-  const parent = NA.targetKind === "scratch"
-    ? naDefaultPath()
-    : (parentPath(NA.targetPath) || naDefaultPath());
+  const parent = NA.targetKind === "project"
+    ? (parentPath(NA.targetPath) || naDefaultPath())
+    : naDefaultPath();
   openAddProject({
     origin: "newagent",
     step: directAdd ? "existing" : "start",
@@ -415,6 +427,7 @@ function naProjectAdded(pr) {
     NA.staleAgent = "";
   }
   renderNewAgent();
+  if (naMaybeStartAgentSetup("添加项目后没有可用 Agent")) return;
   const row = $("na-agents").querySelector(".na-agent.on") || $("na-agents").querySelector(".na-agent");
   if (row) row.focus({ preventScroll: true });
   sendCtrl({ type: "log", msg: `新建 Agent 已选中新项目 path=${pr.path} agent=${NA.agent || "(无)"}` });
@@ -422,11 +435,11 @@ function naProjectAdded(pr) {
 
 function naProjectRemoved(path) {
   if (!NA || NA.targetKind !== "project" || normPath(NA.targetPath) !== normPath(path)) return;
-  NA.targetKind = "scratch";
-  NA.targetPath = naDefaultPath();
-  NA.targetName = t("na.noProject");
+  NA.targetKind = "none";
+  NA.targetPath = "";
+  NA.targetName = "";
   NA.error = t("na.projectGone");
-  const pick = naPickAgentForPath(NA.targetPath);
+  const pick = naPickAgentForPath(naDefaultPath());
   NA.agent = pick.agent;
   NA.staleAgent = pick.stale;
   renderNewAgent();
@@ -440,8 +453,8 @@ function naCreate() {
     showToast(t("na.toast.stepTitle"), t("na.toast.pickAgent"), "err");
     return;
   }
-  const spawnPath = NA.targetKind === "scratch" ? "" : NA.targetPath;
-  if (NA.targetKind !== "scratch" && !spawnPath) {
+  const spawnPath = NA.targetPath;
+  if (NA.targetKind !== "project" || !spawnPath) {
     NA.error = t("na.pickTargetFirst");
     renderNewAgent();
     showToast(t("na.toast.stepTitle"), t("na.pickTargetFirst"), "err");
@@ -454,7 +467,7 @@ function naCreate() {
   sendCtrl({ type: "log", msg: `新建 Agent 提交 target=${NA.targetKind}:${spawnPath || "(默认)"} ` +
     `agent=${NA.agent}` });
   Promise.resolve()
-    .then(() => newTabIn(spawnPath, "新建 Agent 卡片", NA.agent, NA.targetKind, { quiet: true }))
+    .then(() => newTabIn(spawnPath, "新建 Agent 卡片", NA.agent, "project", { quiet: true }))
     .then((res) => {
       if (res && res.ok) {
         closeNewAgent("创建", true);

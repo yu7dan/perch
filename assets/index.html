@@ -15,22 +15,34 @@
 <link rel="stylesheet" href="/css/50-settings.css">
 <link rel="stylesheet" href="/css/60-pages.css">
 <link rel="stylesheet" href="/css/70-gateway.css">
+<link rel="stylesheet" href="/css/80-classic.css">
 </head>
 <body>
 
-<!-- 默认启动即总览：dash 类在 HTML 里就带上，第一帧就是总览（理由与 PTY 尺寸的
-     关系见 CSS「#app.dash」那段 —— 主区是 visibility:hidden，不是 display:none）。
-     设置里把启动落点改成「工作区」时，下面这段**解析期**的内联脚本会在首帧之前
-     把 dash 摘掉 —— 晚到 defer 脚本里再摘会先闪一下总览。 -->
+<!-- 首帧默认工作区：dash 类在 HTML 里先带上（总览需要它来保留主区尺寸，理由见
+     CSS「#app.dash」那段 —— 主区是 visibility:hidden，不是 display:none），
+     下面这段**解析期**的内联脚本会在首帧之前把 dash 摘掉。只有已完成首次设置、
+     且明确存过 startView=dash 的用户才保留总览首帧；空/旧缓存和还没完成引导的
+     首启一律先落工作区。 -->
 <div id="app" class="dash">
 <script>
   // 必须在 #app 的起始标签之后、首帧之前跑。只读 localStorage 缓存（见
   // 05-prefs.js）；Go 的 settings.json 要到 shell 载荷才下来，等不到首帧。
   try {
-    var __perchPref = JSON.parse(localStorage.getItem("perch.settings.v1") || "{}");
-    if (__perchPref && __perchPref.startView === "workspace") {
+    var __perchPref = null;
+    try {
+      __perchPref = JSON.parse(localStorage.getItem("perch.settings.v1") || "null");
+    } catch (_) {}
+    var __onboarded = false;
+    try { __onboarded = localStorage.getItem("perch.onboarded.v2") === "1"; } catch (_) {}
+    if (!__onboarded || !__perchPref || __perchPref.startView !== "dash") {
       document.getElementById("app").classList.remove("dash");
     }
+    // Beta.3 当前这层外观就是 Classic。真正的 Clean 是之后加在终端面板上的
+    // 皮套，还没有实现；旧的 "clean" 缓存也先落到 Classic。
+    var __ui = "ui-classic";
+    document.getElementById("app").classList.add(__ui);
+    document.body.classList.add(__ui);
   } catch (_) {}
 </script>
 
@@ -49,7 +61,20 @@
       <span class="mark"><img src="/icons/perch-logo.png" alt="" draggable="false"></span>
       <span class="tb-name" title="Perch（栖枝）" data-i18n-title="app.nameTitle">Perch</span>
     </div>
-    <div class="tb-list"></div>
+    <div class="tb-list">
+      <!-- 顶层模式：单触发器 + 下拉。形态照 Codex 桌面端的 Chat/Codex 切换：
+           先看到当前模式，点开才出现两个选项；不再把两个按钮常驻在顶上。 -->
+      <button type="button" class="mode-trigger" id="top-mode"
+              aria-haspopup="menu" aria-controls="mode-pop" aria-expanded="false"
+              title="切换工作区与聊天" data-i18n-title="chrome.mode.aria">
+        <span class="mt-ico" id="top-mode-ico" aria-hidden="true"></span>
+        <span class="mt-label" id="top-mode-label" data-i18n="chrome.mode.workspaces">Workspaces</span>
+        <span class="mt-chev" aria-hidden="true">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </span>
+      </button>
+    </div>
 
     <div id="tabs">
       <!-- 标签条的语义（C4 起）= **页面**，不是 agent。
@@ -114,7 +139,7 @@
              位置放在 .tabs-right 的最右（= 紧挨右栏那条边），和 Orca 把
              RightSidebarToggle 钉在 `right: var(--window-controls-width)` 是同一个位置。 -->
         <button class="icon-btn" id="rsb-open" title="展开右栏 (Ctrl+Shift+B)" data-i18n-title="chrome.expandRight.title" hidden>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m17 17-5-5 5-5"/><path d="m11 17-5-5 5-5"/></svg>
         </button>
       </div>
     </div>
@@ -122,7 +147,13 @@
          收起时它跟着归零，标签条右端**始终**对齐中栏右沿 —— 不是两处各写一份。
          它自己是空的（这格在 Orca 里是 right-sidebar-header-drag 的拖动区，
          我们这边窗口按钮正压在上面，正好）。 -->
-    <div class="tb-rsb"></div>
+    <div class="tb-rsb">
+      <!-- 收起右栏放在标题栏右栏切片的左上角：在分割线**上方**，不和窗口按钮
+           抢右边，也不压在下方的文件树/分割线上。双箭头向右 = 收向右边缘。 -->
+      <button class="rsb-title-toggle" id="rsb-close" title="收起右栏 (Ctrl+Shift+B)" data-i18n-title="chrome.collapseRight.title" data-i18n-aria-label="chrome.collapseRight.title" aria-label="收起右栏">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/></svg>
+      </button>
+    </div>
     <div class="window-controls-titlebar-spacer"></div>
 
     <!-- 三个窗口按钮（3 × 46px = 138px，与 Orca 的 WINDOW_CONTROLS_WIDTH 一致）。
@@ -319,19 +350,10 @@
         <button class="arbtn on" data-mod="files" title="文件" data-i18n-title="rail.files" data-i18n-aria-label="rail.files">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2h-4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8"/><path d="M16.706 2.706A2.4 2.4 0 0 0 15 2v5a1 1 0 0 0 1 1h5a2.4 2.4 0 0 0-.706-1.706z"/><path d="M5 7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 1.732-1"/></svg>
         </button>
-        <button class="arbtn" data-mod="side" title="子代理" data-i18n-title="rail.side" data-i18n-aria-label="rail.side">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg>
-        </button>
-        <button class="arbtn" data-mod="flow" title="流水" data-i18n-title="rail.flow" data-i18n-aria-label="rail.flow">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></svg>
-        </button>
+        <!-- 2026-10-26 Beta.3：子代理模块先隐藏（1.0 重做），
+             它的入口和下面那块面板都先不占位置。 -->
         <!-- 对话流原来在这里占第 5 个按钮位，现在它是下段常驻的那一块（见本文件
              #rsb-hist）。撤掉按钮不是删功能 —— 它从"要点一下才存在"变成"一直在"。 -->
-      </div>
-      <div class="rt">
-        <button class="icon-btn" id="rsb-close" title="收起右栏 (Ctrl+Shift+B)" data-i18n-title="chrome.collapseRight.title" data-i18n-aria-label="chrome.collapseRight.title">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg>
-        </button>
       </div>
     </div>
 
@@ -360,6 +382,11 @@
         </div>
         <span class="fsp"></span>
         <span class="files-cnt" id="files-cnt"></span>
+        <button class="icon-btn" id="files-collapse" hidden
+          title="折叠全部目录" data-i18n-title="files.collapseAll"
+          data-i18n-aria-label="files.collapseAll" aria-label="折叠全部目录">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5h11"/><path d="M10 12h11"/><path d="M10 19h11"/><path d="m3 10 3-3-3-3"/><path d="m3 20 3-3-3-3"/></svg>
+        </button>
         <button type="button" class="fdot" id="files-dot" aria-pressed="false"
           title="显示/隐藏 . 开头的文件" data-i18n-title="files.dotTitle">.env</button>
         <button class="icon-btn" id="files-refresh" title="刷新文件树" data-i18n-title="files.refresh" data-i18n-aria-label="files.refresh">
@@ -390,20 +417,9 @@
       </div>
     </section>
 
-    <!-- ③ 流水 —— 当前这一格的**实时**活动（转录里每一条 tool_use / 文本 / 你的话）。
-         和「对话流」的分工要说清楚，否则这两栏看着像重复：
-           流水   = 当前格、**现在**、结构化到"哪一步在动哪个文件"、跟着转录增量进来
-           对话流 = 左栏选中的**那个会话**、全文、来自索引器（是会话库的读物）
-         一条是"活着的那一格的脉搏"，一条是"翻旧账"。 -->
-    <section class="rsb-mod" data-mod="flow" hidden>
-      <!-- 24px 上下文行：主语（当前格）+ 条数。没有模块图标/名字 ——
-           活动条上已经有「流水」，这里只补这条流**讲的是谁**。 -->
-      <div class="rmod-bar">
-        <span class="sub ell" id="feed-who" data-i18n="flow.noAgent">没有当前格</span>
-        <span class="pill" id="feed-cnt">0</span>
-      </div>
-      <div class="scroll"><div class="vlist" id="feed-list"></div></div>
-    </section>
+    <!-- ③ 流水已退出 Beta.3：它和「对话流」是同一份实时活动的两种呈现，
+         留下更啰嗦的一份只是和对话流抢同一段高度。LIVE.acts 不动 ——
+         对话流、状态点、需要你、子代理判据都还在读它。 -->
     </div><!-- /#rsb-mods 上段到此为止 -->
 
     <!-- 上段/下段之间那条可拖的边界（拖 = 改下段高度）。 -->
@@ -480,10 +496,7 @@
                   <span data-i18n="dash.heat.more">多</span>
                 </div>
 
-                <!-- 热力图下面的两条读数：token 构成和最近请求的耗时形状。
-                     它们不是另开卡片，而是在同一块操作台上用头发丝分开 ——
-                     左边这一列因此和右边的实时流一样高，不会留一大片空。 -->
-                <section class="console-sub" id="dash-mix-card">
+    <section class="console-sub" id="dash-mix-card">
                   <div class="mod-head">
                     <div><b data-i18n="dash.mix.title">今日 token</b><span class="sub" id="dash-mix-sub"></span></div>
                     <span class="note" id="dash-mix-cost"></span>
@@ -500,18 +513,19 @@
                 </section>
               </div>
               <aside class="console-side">
-                <section class="side-block">
-                  <div class="mod-head">
-                    <div><b data-i18n="dash.live.title">实时</b><span class="sub" id="dash-live-sub"></span></div>
-                  </div>
-                  <div id="dash-live"></div>
-                </section>
                 <section class="side-block" id="dash-need-card">
                   <div class="mod-head">
                     <b data-i18n="dash.need.title">在等你</b><span class="pill" id="dash-need-cnt">0</span>
                   </div>
                   <div class="vlist" id="dash-need"></div>
                 </section>
+                <section class="side-block">
+                  <div class="mod-head">
+                    <div><b data-i18n="dash.live.title">实时</b><span class="sub" id="dash-live-sub"></span></div>
+                  </div>
+                  <div id="dash-live"></div>
+                </section>
+
               </aside>
             </div>
 
@@ -664,6 +678,26 @@
                 </select>
               </div>
             </div>
+            <div class="settings-row" data-set-row="uiMode"
+                 data-search="界面 风格 外观 clean classic 简洁 经典 interface shell ui mode">
+              <div class="settings-lab">
+                <b data-i18n="settings.uiMode.label">界面风格</b>
+                <span data-i18n-text="settings.uiMode.note">当前这一层就是 Classic：统一的工作区外观。真正的 Clean 是之后加在终端面板上的皮套，等这一轮验收后再讨论。<em class="set-def"
+                      data-set-default-hint="uiMode"></em></span>
+              </div>
+              <div class="settings-ctl">
+                <div class="set-seg" role="radiogroup" aria-label="界面风格" data-i18n-aria-label="settings.uiMode.label">
+                  <button type="button" role="radio" data-set-ui="classic" aria-checked="true"
+                          data-i18n="settings.uiMode.classic">Classic</button>
+                  <button type="button" role="radio" data-set-ui="clean" aria-checked="false"
+                          class="na" aria-disabled="true"
+                          title="Clean 是之后加在终端面板上的皮套，1.0 再讨论"
+                          data-i18n-title="settings.uiMode.cleanTitle"
+                          data-i18n="settings.uiMode.clean">Clean · 1.0</button>
+                </div>
+                <button type="button" class="set-reset" data-set-reset="uiMode" hidden data-i18n="settings.resetDefault">恢复默认</button>
+              </div>
+            </div>
             <div class="settings-row" data-set-row="theme"
                  data-search="主题 外观 深色 浅色 明暗 theme dark light appearance">
               <div class="settings-lab">
@@ -804,8 +838,8 @@
               </div>
               <div class="settings-ctl">
                 <div class="set-seg" role="radiogroup" aria-label="启动时打开" data-i18n-aria-label="settings.startView.label">
-                  <button type="button" role="radio" data-set-start="dash" aria-checked="true" data-i18n="settings.startView.dash">总览</button>
-                  <button type="button" role="radio" data-set-start="workspace" aria-checked="false" data-i18n="settings.startView.workspace">工作区</button>
+                  <button type="button" role="radio" data-set-start="workspace" aria-checked="true" data-i18n="settings.startView.workspace">工作区</button>
+                  <button type="button" role="radio" data-set-start="dash" aria-checked="false" data-i18n="settings.startView.dash">总览</button>
                 </div>
                 <button type="button" class="set-reset" data-set-reset="startView" hidden data-i18n="settings.resetDefault">恢复默认</button>
               </div>
@@ -861,11 +895,11 @@
 <div id="status">
   <span class="it"><span class="dot" id="s-dot"></span><span id="s-st" data-i18n="status.initializing">初始化</span></span>
   <span class="it" id="s-index" data-i18n="status.indexPending">索引：—</span>
-  <span class="it pathit"><span class="lbl" data-i18n="status.store">会话库</span><span class="ell cwd" id="s-store">—</span></span>
+  <span class="it pathit storeit"><span class="lbl" data-i18n="status.store">会话库</span><span class="ell cwd" id="s-store">—</span></span>
   <span class="it pathit"><span class="lbl" data-i18n="status.cwd">工作目录</span><span class="ell cwd" id="s-cwd">—</span></span>
   <span class="it" id="s-grid" title="并行格数 × 每格可用列数" data-i18n-title="status.gridTitle"></span>
   <span class="it" id="s-dims" title="终端的列 × 行" data-i18n-title="status.dimsTitle">—</span>
-  <span class="it">
+  <span class="it fontit">
     <span id="s-font"></span><span id="s-lig"></span><span id="s-render"></span>
   </span>
   <span class="sp"></span>
@@ -1056,6 +1090,37 @@
   </div>
 </div>
 
+<!-- 项目共享 brief：所有 agent 启动时共读。canonical 在
+     <project>\.perch\workspace.md，同时维护 AGENTS.md 的标记段；
+     Claude 由启动参数指向 canonical 文件，其余 agent 读 AGENTS.md。 -->
+<div id="brief" role="dialog" aria-modal="true" aria-labelledby="brief-title" hidden>
+  <div class="ap-card brief-card" role="document">
+    <div class="ap-head">
+      <span class="ap-title" id="brief-title" data-i18n="brief.title">Workspace brief</span>
+      <button class="ap-x" id="brief-x" title="关闭" aria-label="关闭"
+        data-i18n-title="common.close" data-i18n-aria-label="common.close">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="ap-body brief-body">
+      <p class="ap-lead" data-i18n="brief.lead">这一份说明由这个 Project 里的所有 agent 共享：约定、目录结构、不要碰的东西。</p>
+      <div class="brief-path" id="brief-path"></div>
+      <textarea id="brief-text" class="brief-text" spellcheck="false"
+        aria-label="Workspace brief" data-i18n-aria-label="brief.title"
+        placeholder="例如：这个项目用 pnpm；测试先跑 go test ./...；不要改 docs/legacy。"
+        data-i18n-placeholder="brief.placeholder"></textarea>
+      <div class="brief-note" id="brief-note" role="status" aria-live="polite"></div>
+    </div>
+    <div class="ap-foot">
+      <span class="brief-hint" data-i18n="brief.nextLaunch">新启动的 agent 会读到它；正在跑的 agent 不保证热加载。</span>
+      <span class="ap-sp"></span>
+      <button type="button" id="brief-cancel" data-i18n="common.cancel">取消</button>
+      <button type="button" id="brief-save" class="primary" data-i18n="brief.save">保存</button>
+    </div>
+  </div>
+</div>
+
 <!-- 项目搜索弹层挂在 body 层：对话框的 overflow 不会把它裁掉。 -->
 <div id="na-projpop" class="na-pop" role="dialog" aria-label="选择项目" data-i18n-aria-label="na.projectAria" hidden>
   <label class="na-pop-search">
@@ -1181,6 +1246,11 @@
 
 <div id="toasts" role="status" aria-live="polite"></div>
 
+<!-- 顶层模式下拉。内容由 60-shell 现填，静态外壳只保证它挂在 body 层：
+     不被标题栏的拖拽区和 overflow 裁掉。 -->
+<div id="mode-pop" class="mode-pop" role="menu" aria-label="工作区与聊天"
+     data-i18n-aria-label="chrome.mode.aria" hidden></div>
+
 <!-- 第三方终端库保持原样分发（见 assets/vendor/ 与 THIRD-PARTY.md）。 -->
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/addon-fit.js"></script>
@@ -1252,6 +1322,7 @@ window.__facts = [];
      即时回执，但各自只回答一个问题：加文件夹 / 在目标里启动 Agent。 -->
 <script defer src="/js/81a-project-add.js"></script>
 <script defer src="/js/81b-new-agent.js"></script>
+<script defer src="/js/81c-workspace-brief.js"></script>
 <script defer src="/js/82-file-icons.js"></script>
 <script defer src="/js/83-files.js"></script>
 <script defer src="/js/84-settings-search.js"></script>

@@ -61,8 +61,8 @@ const LUCIDE_X = '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>';
    签名：showToast(标题, 正文, 种类, 等宽?)。
    兼容老的两参写法（第二参是 kind）：漏改的调用不会把 "err" 印成正文。 */
 const TOAST_MAX = 3;
-const TOAST_MS = 5000;      // 读一行标题 + 一行正文的时间
-const TOAST_MS_ERR = 8000;  // 失败那条有原因，多留三秒
+const TOAST_MS = 10000;     // 标题 + 正文要能读完；用户点 Chat 也要看清解释
+const TOAST_MS_ERR = 14000; // 失败那条有原因，再多留四秒
 function showToast(title, body, kind, mono) {
   if (kind === undefined && (body === "err" || body === "ok" || body === "info")) {
     kind = body; body = "";
@@ -112,8 +112,18 @@ function showToast(title, body, kind, mono) {
   const arm = (ms) => { clearTimeout(timer); timer = setTimeout(() => kill(true), ms); };
   el.addEventListener("click", () => kill(true));
   el.addEventListener("mouseenter", () => clearTimeout(timer));
-  el.addEventListener("mouseleave", () => arm(1600));
+  el.addEventListener("mouseleave", () => arm(2500));
   arm(k === "err" ? TOAST_MS_ERR : TOAST_MS);
+  // 几何读数：同一张卡在真实窗口里是不是右侧 330px、有没有被右栏压住，
+  // 这两个数只靠 CSS 看不出来（提示卡曾经在日志里存在、屏幕上却看不见）。
+  requestAnimationFrame(() => {
+    try {
+      const r = el.getBoundingClientRect(), h = host.getBoundingClientRect();
+      uiFact("toast", `提示卡 ${k} rect=${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}` +
+        ` 宿主=${Math.round(h.left)},${Math.round(h.top)} ${Math.round(h.width)}x${Math.round(h.height)}` +
+        ` z=${getComputedStyle(host).zIndex} 视口=${window.innerWidth}x${window.innerHeight}`);
+    } catch (e) {}
+  });
   sendCtrl({ type: "log", msg: `提示卡 ${k}：${title}${body ? " —— " + body : ""}` });
 }
 
@@ -569,7 +579,7 @@ function applyShell(p) {
   STATE = p;
   $("s-index").textContent = t("status.index", {
     sessions: STATE.sessions?.length ?? 0,
-    projects: (STATE.projects || []).length,
+    projects: (STATE.projects || []).filter((p) => p && !p.synthetic).length,
   });
   // 设置随首份载荷一起到（settings.go）。权威值一到就覆盖 localStorage 那份缓存；
   // 终端已经按缓存里的字体/字号建好了，这里再把它们校正到盘上的值。
@@ -648,7 +658,7 @@ function applyLibrary(p) {
   // 否则用户点完「重扫会话库」，列表变了而底下那个数还是旧的（同一屏两句话）。
   $("s-index").textContent = t("status.index", {
     sessions: p.sessions.length,
-    projects: (STATE.projects || []).length,
+    projects: (STATE.projects || []).filter((p) => p && !p.synthetic).length,
   });
   sendCtrl({ type: "log", msg: `会话库已刷新 会话=${p.sessions.length} 子代理=${p.sessions.filter((s) => s.sidechain).length}` });
 }
@@ -1945,7 +1955,8 @@ function renderLive() {
   // 总览开着时，「在跑 / 在等你 / 今日轮次」跟着同一拍更新。
   // 热力图**不在这里重画** —— 它读的是会话库重扫的结果，不是 700ms 的推送。
   renderDashLive();
-  renderFeed();
+  // Beta.3：流水模块退出；LIVE.acts 仍然由上面的 hook/转录写入，
+  // 对话流、状态点、需要你、子代理判据都读它。不要连同 acts 一起删。
   renderSideLive();
   // 任务栏闪烁跟未读一起重算（它只在"未读存在 + 窗口不在前台"这两个条件
   // 同时成立时开着，见 paintAttention）。

@@ -202,6 +202,10 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 	case "settings.get", "settings.set", "settings.pickDefaultCWD":
 		s.handleSettings(m)
 
+	// 工作区共享 brief（Beta.3）
+	case "workspace.brief.get", "workspace.brief.set":
+		s.handleWorkspaceBrief(m)
+
 	// 窗口 / 任务栏
 	case "attention", "window.close", "window.close.cancel":
 		s.handleWindow(m)

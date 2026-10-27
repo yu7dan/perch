@@ -33,6 +33,10 @@ type Msg struct {
 	// Go 侧仍然要复核（绝对路径 + 存在），见 winproc.OpenPath。
 	Mode string `json:"mode"`
 	Path string `json:"path"`
+	// workspace.brief.set 用：canonical brief 的正文。Path 是项目根。
+	// get 不需要 Content；set 的空串是合法值 = 清空 brief（会删掉 AGENTS.md
+	// 里的标记段，但保留用户自己的内容）。
+	Content string `json:"content,omitempty"`
 	// fs.list / fs.read 用：Root 是**文件树根**（必须是项目池里的目录）。
 	// Path 是根下面要列/要读的那个路径；Req 是令牌，原样带回。
 	// 护栏见 internal/files —— 只读、包含性检查、大小上限，都在 Go 侧。
