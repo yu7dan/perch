@@ -2116,6 +2116,11 @@ function applyPool(m) {
   // 旧版的“靠池子差集猜选择器结果”已退役（见 81a-project-add.js / project.pick）。
   syncPoolBanner();
   renderLists(searchKey());
+  // 碰过文件的分组（当前项目 / 其他项目 / 工作区外）按项目池算；池子晚于第一份
+  // files 到达时，不在这里重画就会把项目内的文件一直显示成「工作区外」。
+  if (typeof renderFiles === "function") {
+    try { renderFiles(true); } catch (e) { console.error("[perch] 文件栏重画失败:", e); }
+  }
   viewProbe("项目池变了");
   sendCtrl({ type: "log", msg: `项目池已更新 项目=${(STATE.projects || []).length}` +
     ` 归属=${Object.keys(STATE.assign || {}).length} err=${m.err || "无"}` });

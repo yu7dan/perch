@@ -597,6 +597,12 @@ function applyShell(p) {
      就永远停在 agent 自己写的标题上，而左栏（读同一份 STATE.titles）已经是你起的名字。 */
   seedTabTitles();
   if (typeof renderAbout === "function") renderAbout();
+  // 文件台账的分组依赖项目池，而壳层可能晚于第一份 files 到达（冷恢复 / 页面
+  // 重载）。不在这里强制重画，第一帧会把项目内的文件缓存成「工作区外」，
+  // 直到下一次文件变化或用户点刷新才恢复。83-files.js 可能还没求值完，先看函数。
+  if (typeof renderFiles === "function") {
+    try { renderFiles(true); } catch (e) { console.error("[perch] 文件栏重画失败:", e); }
+  }
 }
 shell.onmessage = (ev) => {
   let p;
