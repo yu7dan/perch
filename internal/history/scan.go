@@ -112,6 +112,21 @@ func Scan(stateDir string, systemTurn func(string) (string, bool)) ([]Session, [
 			a.Turns += n
 			a.Sessions++
 		}
+		for day, d := range s.tokens {
+			a := byDay[day]
+			if a == nil {
+				a = &DayActivity{Day: day}
+				byDay[day] = a
+			}
+			a.Tokens.add(d.use)
+			a.Replies += d.replies
+			for m, n := range d.models {
+				if a.Models == nil {
+					a.Models = map[string]int64{}
+				}
+				a.Models[m] += n
+			}
+		}
 	}
 	activity := make([]DayActivity, 0, len(byDay))
 	for _, a := range byDay {
@@ -151,6 +166,12 @@ func indexSession(path, project string, sidechain bool, systemTurn func(string) 
 	var lastEventTS string
 	var lastKind string
 	var lastTool bool
+	// 回复用量：message.id → 那次回复（同一个 id 会按内容块写好几行，取最后一次）。
+	type reply struct {
+		day, model string
+		use        TokenUse
+	}
+	replies := map[string]reply{}
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1<<20), maxLine)
@@ -212,6 +233,11 @@ func indexSession(path, project string, sidechain bool, systemTurn func(string) 
 						firstUser = extractText(line)
 					}
 				}
+			}
+		}
+		if bytes.Contains(line, []byte(`"usage":{`)) && bytes.Contains(line, []byte(`"type":"assistant"`)) {
+			if id, model, u, ok := assistantUsage(line); ok {
+				replies[id] = reply{day: localDay(lineTS), model: model, use: u}
 			}
 		}
 		// C7：记下**最后一条**事件是什么（只认 assistant/user 两种 —— 其余
@@ -282,6 +308,24 @@ func indexSession(path, project string, sidechain bool, systemTurn func(string) 
 	}
 	if sidechain {
 		s.LastKind, s.LastTool = lastKind, lastTool
+	}
+	for _, r := range replies {
+		if r.day == "" {
+			continue
+		}
+		if s.tokens == nil {
+			s.tokens = make(map[string]*dayTokens, 8)
+		}
+		d := s.tokens[r.day]
+		if d == nil {
+			d = &dayTokens{models: map[string]int64{}}
+			s.tokens[r.day] = d
+		}
+		d.use.add(r.use)
+		d.replies++
+		if r.model != "" {
+			d.models[r.model] += r.use.Total()
+		}
 	}
 
 	// 五级标题降级。空字符串一路往下掉，不会出现「有 slug 没标题」的卡。

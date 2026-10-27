@@ -77,14 +77,28 @@ type Session struct {
 	// 那一份聚合。放在 Session 上只是为了**同一次扫描**里顺手算掉：为了日活再把
 	// 这些 jsonl 读一遍是纯浪费（总量 140MB+）。
 	days map[string]int
+	// tokens 同理：每个本地日期这份文件里的回复用量（按 message.id 去重后），
+	// 只为聚合进 DayActivity。
+	tokens map[string]*dayTokens
 }
 
-// DayActivity 是总览热力图的一格：本地日期 + 当天的轮次 + 当天有几个会话写过东西。
-// 只包含**有轮次**的日期；前端按 53 周铺格子，查不到就是 0。
+type dayTokens struct {
+	use     TokenUse
+	replies int
+	models  map[string]int64
+}
+
+// DayActivity 是总览热力图的一格：本地日期 + 当天的轮次 + 当天有几个会话写过东西，
+// 以及当天回复的 token 用量（2026-10-28 起从会话文件里数，不再问网关）。
+// 只包含**有轮次或有回复**的日期；前端按 53 周铺格子，查不到就是 0。
 type DayActivity struct {
-	Day      string `json:"day"`      // 本地日期 YYYY-MM-DD
-	Turns    int    `json:"turns"`    // 主会话 + 子代理的用户轮次
-	Sessions int    `json:"sessions"` // 当天有轮次的会话/子代理文件数
+	Day      string   `json:"day"`      // 本地日期 YYYY-MM-DD
+	Turns    int      `json:"turns"`    // 主会话 + 子代理的用户轮次
+	Sessions int      `json:"sessions"` // 当天有轮次的会话/子代理文件数
+	Replies  int      `json:"replies"`  // 当天的回复数（按 message.id 去重）
+	Tokens   TokenUse `json:"tokens"`
+	// Models 是当天每个模型经手的 token 总量（输入 + 输出 + 缓存读写）。
+	Models map[string]int64 `json:"models,omitempty"`
 }
 
 type HistoryItem struct {

@@ -80,7 +80,7 @@
              pointer-events:none}
 .segs .thumb.still{transition:none}
 /* 刷新按钮退到页头右端，不再贴着窗口按钮。 */
-.dash-head #dash-refresh{display:grid;margin-left:auto}
+.dash-head #dash-refresh{display:grid}
 @media (prefers-reduced-motion:reduce){
   .segs .opt{transition:none}
 }
@@ -814,3 +814,38 @@
   #dash .kpi-strip .ck:nth-child(2n){border-left:1px solid var(--line-soft)}
   #dash .kpi-strip .ck:nth-child(odd){padding-left:0;border-left:0}
 }
+
+/* ===== 总览 2026-10-28：读数全部来自本机（会话文件 / 格子状态），不再问网关 ===== */
+.dash-h1{margin:0 4px;font-size:13px;font-weight:600;letter-spacing:.01em;color:var(--fg)}
+#dash .kpi-strip{grid-template-columns:repeat(5,minmax(0,1fr))}
+#dash .kpi-strip .ck.ask b{color:var(--ask)}
+/* 近 14 天 token · 按模型：每天一根堆叠柱。柱宽 = 列宽的 56%，段与段之间 2px 画布色缝，
+   顶端 4px 圆角（只在最上面那一段）；悬停整列提亮。配色是 dataviz 参考调色板前四槽，
+   深浅两档各自一套（都跑过校验），「其他」是中性灰。 */
+#dash{--mx-1:#3987e5;--mx-2:#d95926;--mx-3:#199e70;--mx-4:#c98500;--mx-o:#52525b}
+html.theme-light #dash{--mx-1:#2a78d6;--mx-2:#eb6834;--mx-3:#1baf7a;--mx-4:#eda100;--mx-o:#a1a1aa}
+#dash-tabs[hidden]{display:none}
+.dash-acts{margin-left:auto;display:flex;align-items:center;gap:6px}
+.mx-chart{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:2px;height:128px;
+  align-items:stretch;margin-top:6px}
+.mx-col{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:0;cursor:default;
+  border-radius:4px;padding-top:4px;transition:background-color var(--dur-2) var(--ease-out)}
+.mx-col:hover{background:rgb(var(--fx) / .045)}
+.mx-track{flex:1;width:56%;display:flex;align-items:flex-end;min-height:0;
+  border-bottom:1px solid var(--line)}
+.mx-bar{width:100%;display:flex;flex-direction:column-reverse;gap:2px;min-height:0}
+.mx-bar i{display:block;min-height:1px}
+.mx-bar i:last-child{border-radius:4px 4px 0 0}
+.mx-bar i.s1,.mix-legend i.s1{background:var(--mx-1)}
+.mx-bar i.s2,.mix-legend i.s2{background:var(--mx-2)}
+.mx-bar i.s3,.mix-legend i.s3{background:var(--mx-3)}
+.mx-bar i.s4,.mix-legend i.s4{background:var(--mx-4)}
+.mx-bar i.so,.mix-legend i.so{background:var(--mx-o)}
+.mx-day{font:9.5px var(--mono);color:var(--faint);white-space:nowrap}
+.mx-chart .mix-empty{grid-column:1/-1;align-self:center;text-align:center;color:var(--faint);font-size:12px}
+/* 「运行中」借用左栏的 agent 行；行内的操作（接上 / ⋯）属于左栏，这里不出。 */
+#dash-live .arow{margin:0;padding-left:4px;cursor:pointer}
+#dash-live .arow .sacts{display:none}
+/* 页头右侧：「新建 Agent」是这一页唯一的主动作 —— 实心，其余是描边。 */
+#dash .dash-acts .ws-act.primary{background:var(--fg);color:var(--bg);border-color:transparent;font-weight:500}
+#dash .dash-acts .ws-act.primary:hover{background:var(--fg);color:var(--bg);opacity:.9}

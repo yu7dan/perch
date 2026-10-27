@@ -481,7 +481,9 @@
     <!-- 总览页内部的子切换：面板（现有总览内容）/ 网关（完整网关控制台）。
          它住在页面里，不再占窗口标题栏 —— 层级只有「左栏 总览 → 页内子页」。 -->
     <div class="dash-head">
-      <div class="segs" id="dash-tabs" role="tablist" aria-label="总览分区" data-i18n-aria-label="dash.tabs.aria"></div>
+      <h1 class="dash-h1" data-i18n="nav.overview">总览</h1>
+      <div class="segs" id="dash-tabs" role="tablist" aria-label="总览分区" data-i18n-aria-label="dash.tabs.aria" hidden></div>
+      <div class="dash-acts" id="dash-status"></div>
       <button class="icon-btn" id="dash-refresh" title="重扫会话库（轮次、活跃天数随之刷新）" data-i18n-title="dash.refresh.title">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></svg>
       </button>
@@ -494,7 +496,6 @@
                中间左边是三个月的活动、右边是**正在发生的事**（请求 + 在等你），
                底部是 Agent 接线表。 -->
           <section class="console" id="dash-console">
-            <div class="console-bar" id="dash-status"></div>
             <div class="console-kpis" id="dash-kpi"></div>
             <div class="console-cols">
               <div class="console-main">
@@ -502,7 +503,7 @@
                   <div><b data-i18n="dash.heat.title">每日活动</b><span class="sub" id="dash-heat-sub"></span></div>
                   <div class="mini-segs" id="heat-metric" role="tablist" aria-label="热力图口径" data-i18n-aria-label="dash.heat.metricAria">
                     <button type="button" class="mini on" data-hm="turns" role="tab" data-i18n="dash.heat.turns">轮次</button>
-                    <button type="button" class="mini" data-hm="calls" role="tab" data-i18n="dash.heat.calls">请求</button>
+                    <button type="button" class="mini" data-hm="tokens" role="tab" data-i18n="dash.heat.tokens">token</button>
                   </div>
                 </div>
                 <div class="heat-scroll"><div class="heat-grid" id="dash-heat"></div></div>
@@ -515,18 +516,10 @@
 
     <section class="console-sub" id="dash-mix-card">
                   <div class="mod-head">
-                    <div><b data-i18n="dash.mix.title">今日 token</b><span class="sub" id="dash-mix-sub"></span></div>
-                    <span class="note" id="dash-mix-cost"></span>
+                    <div><b data-i18n="dash.mix.title14">近 14 天 token · 按模型</b><span class="sub" id="dash-mix-sub"></span></div>
                   </div>
-                  <div class="mix-bar" id="dash-mix-bar"></div>
+                  <div class="mx-chart" id="dash-mix-bar" role="img" aria-label="近 14 天 token · 按模型" data-i18n-aria-label="dash.mix.title14"></div>
                   <div class="mix-legend" id="dash-mix-legend"></div>
-                </section>
-                <section class="console-sub" id="dash-lat-card">
-                  <div class="mod-head">
-                    <div><b data-i18n="dash.lat.title">最近请求耗时</b><span class="sub" id="dash-lat-sub"></span></div>
-                    <span class="note" data-i18n="dash.lat.note">柱高 = 耗时</span>
-                  </div>
-                  <div class="lat-bars" id="dash-lat-bars"></div>
                 </section>
               </div>
               <aside class="console-side">
@@ -538,7 +531,7 @@
                 </section>
                 <section class="side-block">
                   <div class="mod-head">
-                    <div><b data-i18n="dash.live.title">实时</b><span class="sub" id="dash-live-sub"></span></div>
+                    <div><b data-i18n="dash.run.title">运行中</b><span class="sub" id="dash-live-sub"></span></div>
                   </div>
                   <div id="dash-live"></div>
                 </section>
@@ -554,7 +547,7 @@
             <section class="console-foot" id="dash-agent-card">
               <div class="mod-head">
                 <div><b data-i18n="dash.agents.title">Agent CLI</b><span class="sub" id="dash-agent-sub"></span></div>
-                <span class="note" data-i18n="dash.agents.note">只列本机 CLI agent · 点一行配置网关 · 图标来自 magpie / lobe-icons</span>
+                <span class="note" data-i18n="dash.agents.note">本机的 CLI agent · 安装、打开、接入状态 · 图标来自 lobe-icons</span>
               </div>
               <div class="roster" id="dash-agent-list"></div>
             </section>

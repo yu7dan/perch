@@ -11,6 +11,16 @@ $("dash-refresh").addEventListener("click", () => {
   sendCtrl({ type: "log", msg: "总览 点刷新 → lib.reload + magpie.refresh" });
 });
 
+// 点「运行中」的一行 = 回到工作区 + 跳到那一格（行是左栏同款 .arow）。
+$("dash-live").addEventListener("click", (e) => {
+  const row = e.target.closest(".arow");
+  if (!row) return;
+  const t = liveTab(row.dataset.tab | 0);
+  if (!t) return;
+  setNavView("workspace");
+  jumpToTab(t, "点总览「运行中」");
+});
+
 // 点「在等你」的一行 = 回到工作区 + 跳到那一格。
 $("dash-need").addEventListener("click", (e) => {
   const row = e.target.closest(".need");
@@ -31,10 +41,9 @@ $("dash-heat").addEventListener("mouseover", (e) => {
   const extra = +cell.dataset.x || 0;
   const metric = cell.dataset.metric;
   tip.innerHTML = `<b>${cell.dataset.day}</b><span>` +
-    (metric === "calls"
-      ? (v ? tCount("dash.heat.tip.calls", v, { n: dashNum(v) }) +
-          (extra ? t("dash.heat.tip.failed", { n: dashNum(extra) }) : "")
-        : esc(t("dash.heat.tip.noCalls")))
+    (metric === "tokens"
+      ? (v ? esc(t("dash.heat.tip.tokens", { n: mgCompact(v), replies: dashNum(extra) }))
+        : esc(t("dash.heat.tip.noActivity")))
       : (v ? tCount("dash.heat.tip.turns", v,
         { n: dashNum(v), sessions: dashNum(extra) }) :
         esc(t("dash.heat.tip.noActivity")))) + `</span>`;

@@ -8,7 +8,8 @@
 
 /* 顶栏只剩两枚：Agent 的内容 2026-10-17 并进了总览（用户要求）。
    存过 "agents" 的旧 localStorage 会被下面的校验挡掉、回落到总览，不用迁移。 */
-const DASH_TABS = [["overview", "dash.tab.overview"], ["gateway", "dash.tab.gateway"]];
+// 2026-10-28：网关子页从总览拿掉（Perch 不再内嵌 magpie）。只剩一页时页头不画切换条。
+const DASH_TABS = [["overview", "dash.tab.overview"]];
 let dashTab = "overview";
 try {
   const k = localStorage.getItem("perch.dashTab");
@@ -21,7 +22,7 @@ try {
 let heatMetric = "turns";
 try {
   const k = localStorage.getItem("perch.heatMetric");
-  if (k === "turns" || k === "calls") heatMetric = k;
+  if (k === "turns" || k === "tokens") heatMetric = k;
 } catch { /* 存不了就用默认 */ }
 
 /* MAGPIE：最近一次网关快照（见 magpie.go）。null = 后端还没交付，
@@ -260,6 +261,16 @@ function renderDashTabs() {
 /* 六个读数：左边两格是 Perch 自己的（在跑 / 轮次），右边四格是网关的
    （请求 / 缓存 / 上下文 / 速度）。没有数据时写 "—" —— 0 是一个读数，
    "网关没开"是另一件事，两者不能长成一个零。 */
+/* 一天的 token 合计（输入 + 输出 + 缓存读写）。数据来自会话文件（internal/history/tokens.go），
+   不再问网关 —— 总览的每一个读数都必须在没有网关的机器上成立。 */
+function tokTotal(u) {
+  return u ? (u.in || 0) + (u.out || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0) : 0;
+}
+function tokCacheRate(u) {
+  const prompt = u ? (u.in || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0) : 0;
+  return prompt ? Math.round((100 * (u.cacheRead || 0)) / prompt) : null;
+}
+
 function renderDashKpis() {
   const host = $("dash-kpi");
   if (!host) return;
@@ -267,59 +278,46 @@ function renderDashKpis() {
   const byDay = new Map(act.map((a) => [a.day, a]));
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const todayN = (byDay.get(dashDay(today)) || {}).turns || 0;
-  let week = 0;
+  const td = byDay.get(dashDay(today)) || {};
+  const todayN = td.turns || 0;
+  let week = 0, weekTok = 0, weekDays = 0;
   for (let i = 0; i < 7; i++) {
-    week += (byDay.get(dashDay(dashAddDays(today, -i))) || {}).turns || 0;
+    const a = byDay.get(dashDay(dashAddDays(today, -i))) || {};
+    week += a.turns || 0;
+    weekTok += tokTotal(a.tokens);
+    if ((a.turns || 0) > 0) weekDays++;
   }
   const live = TAB_LIST.filter((t) => t.id > 0);
   const running = live.filter((t) => !t.connDown).length;
   const need = needModel();
-
-  const m = mg(), on = mgLive();
-  const mt = (m && m.today) || {};
-  const ctx = (m && m.context) || {};
-  const cache = on ? mgCacheRate(mt) : null;
-  const ctxPct = ctx.window ? Math.round((100 * ctx.prompt) / ctx.window) : null;
-  const ctxSub = ctx.window
-    ? `${mgCompact(ctx.prompt)} / ${mgCompact(ctx.window)} · ${ctx.model || ""}`
-    : on ? (ctx.model
-        ? t("dash.kpi.windowUnknown", { model: ctx.model })
-        : t("dash.kpi.noRequests"))
-      : t("dash.kpi.gatewayDown");
-  const failSub = on
-    ? (mt.retried
-        ? t("dash.kpi.failedRetried", { n: dashNum(mt.errors || 0), retried: dashNum(mt.retried) })
-        : t("dash.kpi.failed", { n: dashNum(mt.errors || 0) }))
-    : t("dash.kpi.gatewayDown");
-  const cacheSub = on
-    ? t("dash.kpi.cacheSub", {
-        read: mgCompact(mt.cache_read || 0),
-        prompt: mgCompact(mgPromptOf(mt)),
-      })
-    : t("dash.kpi.gatewayDown");
+  const tok = td.tokens || null;
+  const cache = tokCacheRate(tok);
+  const projs = (STATE?.projects || []).filter((p) => !p.synthetic).length;
   let dateLabel = "";
   try {
     dateLabel = new Intl.DateTimeFormat(PERCH_LOCALE === "zh" ? "zh-CN" : "en",
       { month: "short", day: "numeric" }).format(today);
   } catch (_) {}
-  const kpi = (n, label, sub, bad) =>
-    `<div class="ck"><b>${esc(n)}</b><span>${esc(label)}</span>` +
-    `<small${bad ? ' class="bad"' : ""}>${esc(sub)}</small></div>`;
+  const kpi = (n, label, sub, cls) =>
+    `<div class="ck${cls ? " " + cls : ""}"><b>${esc(n)}</b><span>${esc(label)}</span>` +
+    `<small>${esc(sub)}</small></div>`;
+  const inp = tok ? (tok.in || 0) + (tok.cacheRead || 0) + (tok.cacheWrite || 0) : 0;
   host.innerHTML =
     `<div class="today-head"><span class="today-kicker">${esc(t("dash.today"))}</span>` +
       `${dateLabel ? `<span class="today-date">${esc(dateLabel)}</span>` : ""}</div>` +
     `<div class="kpi-strip">` +
       kpi(tCount("dash.kpi.panes", running), t("dash.kpi.running"),
-        tCount("dash.kpi.runningSub", live.length, { panes: live.length, need: need.wait.length })) +
+        tCount("dash.kpi.runningSub", live.length, { panes: live.length, need: need.wait.length }),
+        need.wait.length ? "ask" : "") +
       kpi(dashNum(todayN), t("dash.kpi.turnsToday"),
-        t("dash.kpi.turnsSub", { week: dashNum(week), days: act.length })) +
-      kpi(on ? mgCompact(mt.calls || 0) : "—", t("dash.kpi.requestsToday"), failSub,
-        on && mt.errors > 0) +
-      kpi(cache == null ? "—" : cache + "%", t("dash.kpi.cacheHit"), cacheSub) +
-      kpi(ctxPct == null ? "—" : ctxPct + "%", t("dash.kpi.context"), ctxSub) +
-      kpi(on ? mgSpeed(mt) : "—", t("dash.kpi.outputSpeed"),
-        on ? t("dash.kpi.avgFirstToken", { ttft: mgTTFT(mt) }) : t("dash.kpi.gatewayDown")) +
+        t("dash.kpi.turnsSub", { week: dashNum(week), days: weekDays })) +
+      kpi(tok ? mgCompact(tokTotal(tok)) : "0", t("dash.kpi.tokensToday"),
+        tok ? t("dash.kpi.tokensSub", { inp: mgCompact(inp), out: mgCompact(tok.out || 0) })
+          : t("dash.kpi.tokensNone")) +
+      kpi(cache == null ? "—" : cache + "%", t("dash.kpi.cacheHit"),
+        cache == null ? t("dash.kpi.tokensNone") : t("dash.kpi.cacheLocal", { read: mgCompact(tok.cacheRead || 0) })) +
+      kpi(dashNum(projs), t("dash.kpi.projects"),
+        t("dash.kpi.weekTokens", { n: mgCompact(weekTok) })) +
     `</div>`;
 }
 
@@ -328,10 +326,9 @@ function renderDashKpis() {
    靠自动排布会把它们挤到同一行。
    两种口径（轮次 / 请求）共用这一张骨架：切 tab 只换数据，不换版式。 */
 function heatPoints() {
-  if (heatMetric === "calls") {
-    const m = mg();
-    return (m?.series || []).map((x) => ({
-      day: x.day, v: x.calls | 0, extra: (x.errors | 0),
+  if (heatMetric === "tokens") {
+    return (STATE?.activity || []).map((a) => ({
+      day: a.day, v: tokTotal(a.tokens), extra: a.replies | 0,
     }));
   }
   return (STATE?.activity || []).map((a) => ({
@@ -412,19 +409,11 @@ function renderHeat() {
 
   const sub = $("dash-heat-sub");
   if (sub) {
-    if (heatMetric === "calls") {
-      const m = mg();
-      const calls = pts.reduce((n, p) => n + p.v, 0);
-      sub.textContent = !m
-        ? t("dash.heat.pending")
-        : m.state !== "running"
-          ? t("dash.heat.down")
-          : pts.some((p) => p.v > 0)
-            ? tCount("dash.heat.callsSub", calls, {
-                total: dashNum(calls),
-                days: pts.filter((p) => p.v > 0).length,
-              })
-            : t("dash.heat.noCalls");
+    if (heatMetric === "tokens") {
+      const total = pts.reduce((n, p) => n + p.v, 0);
+      sub.textContent = total
+        ? t("dash.heat.tokensSub", { total: mgCompact(total), days: pts.filter((p) => p.v > 0).length })
+        : t("dash.heat.noTokens");
     } else {
       const total = (STATE?.sessions || []).reduce((n, s) => n + (s.turns | 0), 0);
       sub.textContent = pts.length
@@ -437,41 +426,80 @@ function renderHeat() {
   }
 }
 
-/* 今日 token 构成：缓存读 / 输入 / 输出 / 缓存写，四段一条。
-   缓存读占绝大多数是常态（agent 每轮都复用前缀），分开一色才看得出用量花在哪。 */
-function renderDashMix() {
-  const bar = $("dash-mix-bar"), leg = $("dash-mix-legend");
-  if (!bar || !leg) return;
-  const m = mg(), on = mgLive();
-  const today = on ? (m?.today || {}) : {};
-  const segs = [
-    { k: "cache", label: t("dash.mix.cache"), v: today.cache_read || 0 },
-    { k: "input", label: t("dash.mix.input"), v: today.input || 0 },
-    { k: "output", label: t("dash.mix.output"), v: today.output || 0 },
-    { k: "write", label: t("dash.mix.write"), v: today.cache_write || 0 },
-  ];
-  const total = segs.reduce((n, s) => n + s.v, 0);
-  const sub = $("dash-mix-sub"), cost = $("dash-mix-cost");
-  if (sub) {
-    sub.textContent = !m ? t("dash.mix.pending")
-      : !on ? t("dash.kpi.gatewayDown")
-      : total ? t("dash.mix.total", { n: mgCompact(total) }) : t("dash.mix.noUsage");
+/* 近 14 天 token · 按模型：每天一根堆叠柱，前 4 个模型各占一色、其余并成「其他」。
+   配色走 dataviz 参考调色板的前四个分类槽（已跑校验：深浅两档相邻对 CVD ΔE ≥ 8.4），
+   「其他」用中性灰。**颜色跟着模型走，不跟名次走**：一个模型第一次领到槽之后，
+   整段会话都用它（MIX_SLOT），数据变化不会把已有的柱子重新上色。
+   浅色下黄 / 青两槽对白底不足 3:1 —— 图例带数值、每根柱有悬停明细，满足"可读替代"。 */
+const MIX_DAYS = 14, MIX_SLOTS = 4;
+const MIX_SLOT = new Map();
+function mixSlotOf(model) {
+  if (!MIX_SLOT.has(model)) {
+    const used = new Set(MIX_SLOT.values());
+    for (let i = 1; i <= MIX_SLOTS; i++) if (!used.has(i)) { MIX_SLOT.set(model, i); break; }
   }
-  if (cost) cost.textContent = on && (today.cost || 0) > 0
-    ? t("dash.mix.cost", { n: today.cost.toFixed(2) })
-    : "";
-  bar.innerHTML = total
-    ? segs.filter((s) => s.v > 0).map((s) =>
-        `<i class="${s.k}" style="flex:${s.v} 0 0" title="${s.label} ${mgCompact(s.v)}"></i>`).join("")
-    : `<i class="input" style="flex:1"></i>`;
-  // 输出通常只占零点几个百分点；四舍五入成「0%」会像是在说"没有输出"。
-  const share = (v) => !total || v === 0 ? "0%"
-    : (100 * v / total) >= 10 ? Math.round(100 * v / total) + "%"
-    : (100 * v / total).toFixed(1) + "%";
-  leg.innerHTML = total
-    ? segs.map((s) => `<span><i class="${s.k}"></i>${s.label} <b>${mgCompact(s.v)}</b>` +
-        `<em>${share(s.v)}</em></span>`).join("")
-    : `<span>${esc(t("dash.mix.empty"))}</span>`;
+  return MIX_SLOT.get(model) || 0;
+}
+function renderDashMix() {
+  const host = $("dash-mix-bar"), leg = $("dash-mix-legend");
+  if (!host || !leg) return;
+  const act = STATE?.activity || [];
+  const byDay = new Map(act.map((a) => [a.day, a]));
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = [];
+  for (let i = MIX_DAYS - 1; i >= 0; i--) {
+    const d = dashAddDays(today, -i);
+    const a = byDay.get(dashDay(d)) || {};
+    days.push({ day: dashDay(d), models: a.models || {} });
+  }
+  // <synthetic> 是本地合成的占位回复（不经过任何模型），不进图。
+  const real = (m) => m && !m.startsWith("<");
+  const totals = new Map();
+  for (const d of days) for (const [m, n] of Object.entries(d.models)) {
+    if (real(m)) totals.set(m, (totals.get(m) || 0) + n);
+  }
+  const ranked = [...totals.entries()].filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+  // 窗口里排前四的模型各占一槽；已经领过槽的模型保持原色。
+  const series = [];
+  for (const [m] of ranked) {
+    if (series.length >= MIX_SLOTS) break;
+    if (mixSlotOf(m)) series.push(m);
+  }
+  const inSeries = new Set(series);
+  const otherSum = ranked.filter(([m]) => !inSeries.has(m)).reduce((n, [, v]) => n + v, 0);
+  const sum = ranked.reduce((n, [, v]) => n + v, 0);
+  const sub = $("dash-mix-sub");
+  if (sub) sub.textContent = sum ? t("dash.mix.sub14", { n: mgCompact(sum) }) : t("dash.mix.empty14");
+  if (!sum) {
+    host.innerHTML = `<div class="mix-empty">${esc(t("dash.mix.empty14"))}</div>`;
+    leg.innerHTML = "";
+    return;
+  }
+  const dayTotal = (d) => Object.entries(d.models).filter(([m]) => real(m)).reduce((n, [, v]) => n + v, 0);
+  const max = Math.max(1, ...days.map(dayTotal));
+  host.innerHTML = days.map((d) => {
+    const parts = new Map();
+    for (const [m, n] of Object.entries(d.models)) {
+      if (!real(m) || !n) continue;
+      const k = inSeries.has(m) ? m : "__other";
+      parts.set(k, (parts.get(k) || 0) + n);
+    }
+    const tot = dayTotal(d);
+    const order = series.filter((m) => parts.has(m)).concat(parts.has("__other") ? ["__other"] : []);
+    const tip = [`${d.day} · ${mgCompact(tot)}`]
+      .concat(order.map((k) => `${k === "__other" ? t("dash.mix.other") : k}  ${mgCompact(parts.get(k))}`))
+      .join("\n");
+    // 堆叠从底往上：第一个系列贴着基线（column-reverse 在 CSS 里）。
+    const segs = order.map((k) =>
+      `<i class="s${k === "__other" ? "o" : MIX_SLOT.get(k)}" style="flex:${parts.get(k)} 0 0"></i>`).join("");
+    const h = tot ? Math.max(3, Math.round((100 * tot) / max)) : 0;
+    return `<div class="mx-col" title="${esc(tip)}"><div class="mx-track"><div class="mx-bar" style="height:${h}%">${segs}</div></div>` +
+      `<span class="mx-day">${esc(d.day.slice(5).replace("-", "/"))}</span></div>`;
+  }).join("");
+  leg.innerHTML = series.map((m) =>
+      `<span><i class="s${MIX_SLOT.get(m)}"></i>${esc(m)} <b>${mgCompact(totals.get(m))}</b></span>`).join("") +
+    (otherSum ? `<span><i class="so"></i>${esc(t("dash.mix.other"))} <b>${mgCompact(otherSum)}</b></span>` : "");
 }
 
 /* 最近请求的耗时形状：旧 → 新，一根一根柱；红柱是失败。
@@ -515,36 +543,14 @@ function renderDashLat() {
 function renderDashStatus() {
   const host = $("dash-status");
   if (!host) return;
-  const live = TAB_LIST.filter((t) => t.id > 0);
-  const running = live.filter((t) => !t.connDown).length;
-  const need = needModel();
-  // 默认会话区是合成条目，不是“项目”；和左栏导航的计数用同一条口径。
-  const projs = (STATE?.projects || []).filter((p) => !p.synthetic).length;
-  // ⚠️ 结构只建一次，之后只改数字 —— 这一行每 700ms 跟着 renderDashLive 重画，
-  // 整块 innerHTML 会把按钮换掉；mousedown 与 mouseup 落在两个不同元素上，
-  // 那次点击就静默丢了（和 seg 的 thumb 是同一类毛病）。
-  // 语言切换时也要重建：这一行的文字只在建骨架时写一次，之后只改数字。
-  if (!host.querySelector("[data-wsact]") || host.dataset.locale !== PERCH_LOCALE) {
-    host.dataset.locale = PERCH_LOCALE;
-    // 数词和单位分开：0/1 的单复数只换单位那一段，骨架不必重建
-    // （重建会把按钮换掉，mousedown/mouseup 落在两颗元素上就丢点击）。
-    host.innerHTML =
-      `<span class="brand"><b>${esc(t("dash.status.workspace"))}</b></span>` +
-      `<span class="ws-stat">${esc(t("dash.status.runningLabel"))} <b id="dash-ws-run">0</b> ` +
-        `<span id="dash-ws-run-unit">${esc(tCount("dash.status.panesUnit", running))}</span></span><span class="sep">·</span>` +
-      `<span class="ws-stat">${t("dash.status.need", { n: '<b id="dash-ws-need">0</b>' })}</span><span class="sep">·</span>` +
-      `<span class="ws-stat"><b id="dash-ws-proj">0</b> ` +
-        `<span id="dash-ws-proj-unit">${esc(tCount("dash.status.projectsUnit", projs))}</span></span>` +
-      `<span class="right">` +
-      `<button type="button" class="ws-act" data-wsact="enter">${esc(t("dash.status.enter"))}</button>` +
-      `<button type="button" class="ws-act primary" data-wsact="new">${esc(t("dash.status.new"))}</button>` +
-      `</span>`;
-  }
-  $("dash-ws-run").textContent = dashNum(running);
-  $("dash-ws-need").textContent = dashNum(need.wait.length);
-  $("dash-ws-proj").textContent = dashNum(projs);
-  $("dash-ws-run-unit").textContent = tCount("dash.status.panesUnit", running);
-  $("dash-ws-proj-unit").textContent = tCount("dash.status.projectsUnit", projs);
+  // 2026-10-28：在跑 / 在等你 / 项目数并进了下面的读数条（同一屏不说两遍），
+  // 页头只留两个入口。⚠️ 结构只建一次（换语言才重建）：700ms 一次的重画如果
+  // 把按钮换掉，mousedown / mouseup 落在两颗元素上，那次点击就静默丢了。
+  if (host.querySelector("[data-wsact]") && host.dataset.locale === PERCH_LOCALE) return;
+  host.dataset.locale = PERCH_LOCALE;
+  host.innerHTML =
+    `<button type="button" class="ws-act" data-wsact="enter">${esc(t("dash.status.enter"))}</button>` +
+    `<button type="button" class="ws-act primary" data-wsact="new">${esc(t("dash.status.new"))}</button>`;
 }
 
 /* 总览右上角是「新建 Agent」：项目/无项目 + Agent 是独立的一步。
@@ -2347,52 +2353,21 @@ function syncHeatMetric() {
   }
 }
 
-/* 「实时」那一块：网关正在处理多少、最近几条请求落在哪。
-   网关空闲时它不是空白 —— 最近请求仍然说明"你刚才干了什么"。
-   ⚠️ 这一块只画 usage 接口的**请求元数据**（agent / provider / model / ms /
-   status），没有 prompt，也没有回复内容。 */
+/* 「运行中」：Perch 里开着的 agent 格（和左栏同一种行）。点一行 = 回工作区并切到那一格。
+   等你的排最前，其次在干活的，最后是空闲 / 已停。 */
+const DASH_RUN_ORDER = { ask: 0, unread: 1, working: 2, failed: 3, idle: 4, done: 5, interrupted: 6, off: 7 };
 function renderDashLiveFeed() {
   const host = $("dash-live");
   if (!host) return;
-  const m = mg(), on = mgLive();
+  const live = TAB_LIST.filter((t) => t.id > 0);
   const sub = $("dash-live-sub");
-  if (sub) {
-    sub.textContent = !m ? t("dash.live.pending")
-      : !on ? t("dash.kpi.gatewayDown")
-      : (m.conc?.requests
-          ? tCount("dash.live.processing", m.conc.requests, { n: m.conc.requests })
-          : t("dash.live.idleRecent", { n: (m.recent || []).length }));
-  }
-  if (!m) {
-    host.innerHTML = `<div class="live-now idle">${esc(t("dash.live.reading"))}</div>`;
+  if (sub) sub.textContent = live.length ? t("dash.run.sub", { n: live.length }) : "";
+  if (!live.length) {
+    host.innerHTML = `<div class="live-now idle">${esc(t("dash.run.empty"))}</div>`;
     return;
   }
-  if (!on) {
-    host.innerHTML = `<div class="live-now idle">${esc(m.state === "stopped"
-      ? t("dash.live.downStopped") : t("dash.live.downMissing"))}</div>`;
-    return;
-  }
-  const c = m.conc || {};
-  const head = c.requests
-    ? `<div class="live-now"><span class="spin"></span>${tCount("dash.live.headProcessing", c.requests, { n: dashNum(c.requests) })}` +
-      (c.waiting ? esc(t("dash.live.queued", { n: dashNum(c.waiting) })) : "") +
-      (c.tools ? esc(tCount("dash.live.tools", c.tools, { n: dashNum(c.tools) })) : "") + `</div>`
-    : `<div class="live-now idle"><span class="dot on"></span>${esc(t("dash.live.headIdle", { n: (m.recent || []).length }))}</div>`;
-  const rows = (m.recent || []).slice(0, 6);
-  host.innerHTML = head + (rows.length
-    ? rows.map((r) => {
-        const bad = (r.status | 0) >= 400;
-        const at = (r.t || "").slice(11, 19);
-        return `<div class="live-row" title="${esc(at)} · ${esc(r.providerName || r.provider || "")}` +
-          ` · ${esc(r.served || r.model || "")}${r.effort ? " · effort " + esc(r.effort) : ""}` +
-          `${r.ttft_ms ? esc(t("dash.live.firstToken", { ms: dashNum(r.ttft_ms) })) : ""}">` +
-          `<span class="st${bad ? " bad" : ""}"></span>` +
-          `<span class="who">${iconHTML(r.icon, "sm")}<span class="nm">${esc(r.agentName || r.agent || "?")}</span></span>` +
-          `<span class="to">${esc(r.model || r.served || "")}</span>` +
-          `<span class="ms${bad ? " bad" : ""}">${bad ? "HTTP " + (r.status | 0) : dashNum(r.ms) + "ms"}</span>` +
-          `</div>`;
-      }).join("")
-    : `<div class="live-now idle">${esc(t("dash.live.empty"))}</div>`);
+  const rank = (tab) => DASH_RUN_ORDER[cellState(tab)] ?? 9;
+  host.innerHTML = live.slice().sort((a, b) => rank(a) - rank(b)).slice(0, 8).map(agentRowHTML).join("");
 }
 
 /* 总览的自证读数：盒子多大、哪一页、几格、几个活跃日、多少轮。
