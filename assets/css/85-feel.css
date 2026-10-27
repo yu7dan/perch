@@ -1,0 +1,94 @@
+/* ===========================================================================
+   交互质感（2026-10-28）
+   手法参考 open-claude-ui（MIT；它自称还原自 Claude Desktop）：按压回弹、浮层双环
+   阴影、滚动边缘渐隐、状态呼吸、展开进场。**只借手法和分档，不搬它的配色和整段
+   CSS** —— 它的陶土橙是某一家 agent 的品牌色，Perch 不绑定任何一家。
+   时长 / 曲线都走 00-base.css 的 --dur-* / --ease-* 令牌。
+   全部选择器用 :where() 包住：特异度为 0，各组件自己写过的 transition / transform
+   一律优先，这里只给"没写过的"补上默认质感。
+   =========================================================================== */
+:root{
+  /* 回弹：先冲过 1 一点再落回（松手时用）。linear() 的分段是自己调的，不是抄的。 */
+  --spring:linear(0, .22 8%, .64 18%, .96 30%, 1.05 40%, 1.04 50%, 1.01 62%, .995 76%, 1);
+  --shadow-pop:inset 0 1px 0 rgb(255 255 255 / .05),
+               0 10px 30px rgb(var(--shade) / calc(.5 * var(--shade-k))),
+               0 2px 6px rgb(var(--shade) / calc(.3 * var(--shade-k)));
+}
+/* 浅色下浮层靠一圈 1px 的边 + 两层淡投影立起来；深色下是顶上一道 5% 白的"顶光"。 */
+html.theme-light{
+  --shadow-pop:0 0 0 1px rgb(var(--fx) / .06),
+               0 8px 24px rgb(15 23 42 / .10), 0 2px 6px rgb(15 23 42 / .06);
+}
+
+/* ---- 1. 按压回弹 ----
+   按下 60ms 缩到 .975，松手用 --spring 弹回 300ms。禁用 / 灰态的按钮不动
+   （灰态"仍可点、点了给原因"，但不该给出"按下去了"的手感）。 */
+:where(button:not([disabled]):not([aria-disabled="true"]):not(.na)){
+  transition:transform var(--dur-4) var(--spring),
+             background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out),
+             border-color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out),
+             opacity var(--dur-2) var(--ease-out);
+}
+:where(button:not([disabled]):not([aria-disabled="true"]):not(.na)):active{
+  transform:scale(.975);
+  transition:transform var(--dur-1) var(--ease-out);
+}
+/* 行（项目 / agent / Bot / 导航项）按下只轻压 .99：整行缩太多会显得在晃。 */
+:where(.nav, .proj, .arow, .bg-row, .bg-lt){transition:background-color var(--dur-2) var(--ease-out), transform var(--dur-4) var(--spring)}
+:where(.nav, .proj, .arow, .bg-row):active{transform:scale(.99);transition-duration:var(--dur-1)}
+
+/* ---- 2. 浮层：双环阴影 + 进场 ---- */
+.mode-pop,#cardmenu,#need-pop{box-shadow:var(--shadow-pop)}
+.mode-pop:not([hidden]),#cardmenu.on,#need-pop:not([hidden]){
+  animation:feel-pop-in var(--dur-3) var(--ease-swift);
+  transform-origin:top left;
+}
+@keyframes feel-pop-in{from{opacity:0;transform:translateY(-3px) scale(.98)}}
+
+/* ---- 3. 滚动边缘渐隐 ----
+   内容被卷到边外时，那一侧 24px 渐隐成透明；滚到头就收回（用 scroll-driven 动画，
+   不挂 JS 监听）。不能滚的容器没有时间线，两条变量停在初值 0 —— 不渐隐。
+   终端（xterm）不在这里：它自己管视口，罩一层蒙版会吃掉最上/最下一行字。 */
+@property --fade-top{syntax:"<length>";inherits:false;initial-value:0px}
+@property --fade-bot{syntax:"<length>";inherits:false;initial-value:0px}
+@supports (animation-timeline: scroll()) {
+  :where(#scroll, #hist, #rsb .scroll, .bg-lscroll, .bg-feed, .bg-tscroll){
+    -webkit-mask-image:linear-gradient(to bottom, transparent 0, #000 var(--fade-top),
+                                       #000 calc(100% - var(--fade-bot)), transparent 100%);
+    mask-image:linear-gradient(to bottom, transparent 0, #000 var(--fade-top),
+                               #000 calc(100% - var(--fade-bot)), transparent 100%);
+    animation:feel-fade-top linear both, feel-fade-bot linear both;
+    animation-timeline:scroll(self), scroll(self);
+    animation-range:0px 24px, calc(100% - 24px) 100%;
+  }
+  @keyframes feel-fade-top{from{--fade-top:0px}to{--fade-top:24px}}
+  @keyframes feel-fade-bot{from{--fade-bot:24px}to{--fade-bot:0px}}
+}
+
+/* ---- 4. 状态呼吸 ----
+   「等你」的问号和 Bot Group 里等你的点慢慢呼吸（2.4s），提示"这里有人在等"；
+   在干活的那一态已经是转圈（Orca 的 spinner），不再叠动画。 */
+.adot[data-state="ask"],.bg-dot[data-state="waiting"]{animation:feel-breathe 2.4s ease-in-out infinite}
+@keyframes feel-breathe{0%,100%{opacity:1}50%{opacity:.45}}
+
+/* ---- 5. 行内操作：键盘焦点进来也显示（不只是 hover） ---- */
+.tab:focus-within .x{color:var(--faint)}
+
+/* ---- 6. Bot Group：展开的内容从上往下进场 ---- */
+.bg-ev-body{animation:feel-unfold var(--dur-3) var(--ease-swift)}
+@keyframes feel-unfold{from{opacity:0;transform:translateY(-4px);clip-path:inset(0 0 100% 0)}
+                       to{opacity:1;transform:none;clip-path:inset(0 0 0 0)}}
+
+/* ---- 7. 降噪 ----
+   状态栏只留「连接状态 · 工作目录 · 格数」：索引 / 会话库路径 / 列×行 / 字体·连字·渲染
+   是排查用的读数（日志里都有），5h / 周用量计从来没接入过真实计量，只显示 "—"。
+   元素保留（脚本还在写它们、日志探针在读），只是不占状态栏。 */
+#status #s-index,#status .storeit,#status #s-dims,#status .fontit,#status .meter{display:none}
+/* 「并行」页签的计数为 0 时不显示：空着的 0 只是噪声。 */
+.tn-cnt:empty,.tn-cnt[data-n="0"]{display:none}
+
+@media (prefers-reduced-motion: reduce){
+  :where(button, .nav, .proj, .arow, .bg-row):active{transform:none}
+  .mode-pop:not([hidden]),#cardmenu.on,#need-pop:not([hidden]),.bg-ev-body,
+  .adot[data-state="ask"],.bg-dot[data-state="waiting"]{animation:none}
+}

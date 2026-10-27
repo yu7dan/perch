@@ -781,7 +781,7 @@ function renderGrid() {
   applyGridCols(n, shape.cols);
 
   const cnt = $("pn-cnt");
-  if (cnt) cnt.textContent = String(n);
+  if (cnt) { cnt.textContent = String(n); cnt.dataset.n = String(n); }
   // 群组那一屏的"座位"跟着网格模型走（多一格/少一格/换了当前格），所以在这里
   // 补一次。它是"一帧一次"的（scheduleGroup 自己挡），收起时才真的干活 ——
   // 启动路径上 createTab → renderGrid 会跑到这一句，那时 collapsed 还是 false，
