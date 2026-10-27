@@ -34,7 +34,7 @@
 /* 「并行」那格右侧的 agent 计数。它自己带一个类而不是复用 .nav .cnt ——
    那一条是挂在导航栏上的，字号/颜色都是侧栏的语义，搬到标签条上会串。 */
 .tn-cnt{flex:none;font:11px/1 var(--mono);color:var(--faint);
-        padding:1px 5px;border-radius:999px;background:rgba(255,255,255,.06)}
+        padding:1px 5px;border-radius:999px;background:rgb(var(--fx) / .06)}
 /* 重命名输入框 —— **数值逐条取自 Orca 的 .pane-title-input**
    （assets/terminal.css:479-504，token 见 main.css:257-263 的暗色那一组）。
    Orca 在标签里用的也是同一个 Input 组件，所以这组数值对标签同样成立；
@@ -50,8 +50,8 @@
 .tab-input::placeholder{color:var(--pane-title-placeholder)}
 /* 聚焦时只加一圈边框，不加外发光：标签条只有 36px 高，发光会溢到分隔线上。
    ⚠️ 边框色**不是**我们的 --accent（饱和蓝）。Orca 的 `.pane-title-input:focus-visible`
-   用的是 `border-color: var(--ring)`，而它暗色主题的 --ring = **#737373**（中性灰，
-   main.css:341；亮色那组是 #a1a1a1，:224）。第一版我用 --accent 试了一下，
+   用的是 `border-color: var(--ring)`，而它暗色主题的 --ring = **var(--t-3)**（中性灰，
+   main.css:341；亮色那组是 var(--t-2)，:224）。第一版我用 --accent 试了一下，
    在 36px 的深色标签条上那圈蓝亮得像报错，和 Orca 的"只是把边界描一下"不是一个东西。 */
 .tab-input:focus-visible{border-color:var(--ring)}
 /* 同一个输入框用在**左栏 agent 行**里（⋯ 菜单 → 重命名）。
@@ -70,7 +70,7 @@
 .tab .x{width:16px;height:16px;border-radius:3px;display:grid;place-items:center;
         color:transparent;font-size:14px;line-height:1;flex:none}
 .tab:hover .x{color:var(--faint)}
-.tab .x:hover{background:rgba(255,255,255,.12);color:var(--fg)}
+.tab .x:hover{background:rgb(var(--fx) / .12);color:var(--fg)}
 .tab-add{width:30px;display:grid;place-items:center;color:var(--faint)}
 .tab-add:hover{color:var(--fg)}
 
@@ -86,7 +86,7 @@
             display:flex;align-items:center;gap:7px;
             width:180px;height:26px;box-sizing:border-box;padding:0 10px;
             border-radius:var(--r);background:var(--card);border:1px solid var(--ring);
-            box-shadow:0 10px 26px rgba(0,0,0,.5);
+            box-shadow:0 10px 26px rgb(var(--shade) / calc(.5 * var(--shade-k)));
             color:var(--fg);font-size:12px;user-select:none;
             opacity:.97;transition:opacity 90ms ease}
 .drag-ghost .nm{min-width:0;flex:1}
@@ -120,7 +120,7 @@
    动画取自 assets/main.css:1787-1801。只保留我们目前用得到的态。
    Orca 在标签上用 size="md"：外框 h-3 w-3 = 12px、实心点 size-2 = 8px、
    spinner 也是 8px（border-2）。
-     idle    → bg-neutral-500/40 —— Tailwind neutral-500(#737373) 打四折
+     idle    → bg-neutral-500/40 —— Tailwind neutral-500(var(--t-3)) 打四折
      working → border-yellow-500(#eab308) 的环，**顶边透明**才像在转
      off     → 我们自己的：连接断了。Orca 没这个态（它是 Electron 应用，
                终端不存在"断开"，我们这条 stream 会断）。
@@ -132,7 +132,7 @@
 .adot::before{content:"";border-radius:999px}
 .adot[data-state="idle"]::before{width:8px;height:8px;background:rgba(115,115,115,.4)}
 .adot[data-state="working"]::before{width:8px;height:8px;box-sizing:border-box;
-  border:2px solid #eab308;border-top-color:transparent;
+  border:2px solid var(--amber);border-top-color:transparent;
   animation:agent-spinner-rotate 86400s steps(1036800,end) infinite}
 .adot[data-state="off"]::before{width:8px;height:8px;background:var(--red)}
 /* 非正常收尾（StopFailure：撞限额、鉴权失败…）—— Orca 的 blocked/failed 都是红点
@@ -204,7 +204,7 @@
 /* Why（Orca 注释原文的语义）：降级动效下动画被关掉，此时**必须把顶边也补上** ——
    顶边透明的静止圆环看起来像坏了，一个完整的环才是"有意为之的静态标记"。 */
 @media (prefers-reduced-motion: reduce){
-  .adot[data-state="working"]::before{animation:none;border-top-color:#eab308}
+  .adot[data-state="working"]::before{animation:none;border-top-color:var(--amber)}
 }
 /* 86400turn / 86400s + 1036800 步 = 每秒正好 1 圈、每秒 12 帧。
    为什么不用 rotate(360deg) + infinite：那样每圈都重置，相位浮点会漂；
@@ -242,28 +242,28 @@
    搬过来的好处是连它踩过的坑一起继承了（见文件末尾那几段补丁）。
 
    原文件里的 token（main.css:257-263，暗色）：
-     --terminal-pane-title-on-dark-fg:              rgb(255 255 255 / .52)
-     --terminal-pane-title-on-dark-button-fg:       rgb(255 255 255 / 1)
-     --terminal-pane-title-on-dark-button-hover-fg: rgb(255 255 255 / 1)
-     --terminal-pane-title-on-dark-input-bg:        rgb(255 255 255 / .04)
-     --terminal-pane-title-on-dark-separator:       rgb(255 255 255 / .06)
+     --terminal-pane-title-on-dark-fg:              rgb(var(--fx) / .52)
+     --terminal-pane-title-on-dark-button-fg:       rgb(var(--fx) / 1)
+     --terminal-pane-title-on-dark-button-hover-fg: rgb(var(--fx) / 1)
+     --terminal-pane-title-on-dark-input-bg:        rgb(var(--fx) / .04)
+     --terminal-pane-title-on-dark-separator:       rgb(var(--fx) / .06)
    注意 button-fg 是**纯白**，不是我以为的 85% —— 变暗靠的是 opacity，
    不是颜色。这就是「质感」和「差不多」的区别。 */
 :root{
   --pane-title-height:24px;
-  --pane-title-fg:rgb(255 255 255 / .52);
-  --pane-title-button-fg:rgb(255 255 255 / 1);
-  --pane-title-button-hover-fg:rgb(255 255 255 / 1);
-  --pane-title-separator:rgb(255 255 255 / .06);
+  --pane-title-fg:rgb(var(--fx) / .52);
+  --pane-title-button-fg:rgb(var(--fx) / 1);
+  --pane-title-button-hover-fg:rgb(var(--fx) / 1);
+  --pane-title-separator:rgb(var(--fx) / .06);
   /* 重命名输入框那三个（main.css:257-263 的暗色组，原样）：
      input-fg 是 70% 白 —— 比 fg(52%) 亮，因为"正在编辑"的东西必须比
      旁边只读的东西更实；placeholder 38% 是最淡的一档。 */
-  --pane-title-input-bg:rgb(255 255 255 / .04);
-  --pane-title-input-fg:rgb(255 255 255 / .7);
-  --pane-title-placeholder:rgb(255 255 255 / .38);
+  --pane-title-input-bg:rgb(var(--fx) / .04);
+  --pane-title-input-fg:rgb(var(--fx) / .7);
+  --pane-title-placeholder:rgb(var(--fx) / .38);
   /* 聚焦环。Orca 暗色主题的 --ring = #737373（main.css:341）—— 中性灰，
      不是饱和蓝。理由见下面 .tab-input 那条注释。 */
-  --ring:#737373;
+  --ring:var(--t-3);
   /* 格子头的高度（C4）。**它必须是个令牌**，因为有两处要对齐：
      .cellhead 自己，以及面板 A 那条浮出按钮 overlay（.phead）—— 那条 overlay
      得**落在格子头下方**，否则它右端那颗按钮正好压在最右上那格的 × 上，
@@ -274,13 +274,13 @@
      以及网格自己的缝（#termbody 的 gap）。以前只有前者，值是硬写的字面量；
      现在格子之间也要同一条线，写两遍就会漂。
      色值出处：Orca `lib/terminal-theme.ts:20`
-       DEFAULT_TERMINAL_DIVIDER_DARK = '#3f3f46'（暗色）
-       DEFAULT_TERMINAL_DIVIDER_LIGHT = '#d4d4d8'（亮色，我们只有暗色主题）
+       DEFAULT_TERMINAL_DIVIDER_DARK = 'var(--b-2)'（暗色）
+       DEFAULT_TERMINAL_DIVIDER_LIGHT = 'var(--t-1)'（亮色，我们只有暗色主题）
      粗细出处：Orca `shared/default-global-settings.ts:91`
        terminalDividerThicknessPx: 3
      （CSS 里那个 4px 是它 `terminal.css:78` 的兜底值，真实默认是 3。） */
-  --divider-line:#3f3f46;
-  --divider-line-strong:#52525b;
+  --divider-line:var(--b-2);
+  --divider-line-strong:var(--b-3);
   --grid-gap:3px;
   /* ── C6a：右栏（外壳级独立列）的宽度 ────────────────────────────────────
      这里只放**首帧**的值；真正的值由 JS 写上来（它可以被用户拖、会被
@@ -498,7 +498,7 @@
    现在每个格子都真实可见，各量各的盒子、各推各的尺寸，这一整类问题不存在。
    =========================================================================== */
 /* ⚠️ C4.5：缝从 1px 的 --line-soft 换成 3px 的 --divider-line（= Orca 的
-   #3f3f46）。原来那条 `rgba(255,255,255,.045)` 在暗底上基本看不见 ——
+   var(--b-2)）。原来那条 `rgb(var(--fx) / .045)` 在暗底上基本看不见 ——
    用户的原话是「并行和并行之间要有明显的区分，现在就是区分不大，很容易
    混为一谈」，这就是它。
 
@@ -528,7 +528,7 @@
    ⚠️ 只在 N≥2 时启用（.multi）。一格的时候没有"别的格"可比，压暗它自己
    等于无端把终端变灰；而且建格的瞬间 activeTab 还没定，那时压暗会闪一下。
 
-   ⚠️ 0.9 是**混在网格底色（#3f3f46）上的**，不是混在黑上 —— 所以被压暗那几格的
+   ⚠️ 0.9 是**混在网格底色（var(--b-2)）上的**，不是混在黑上 —— 所以被压暗那几格的
    纯黑底色会被抬到 #0F 左右（0.9×10 + 0.1×63），比当前格"亮"一点点。
    实测过：以 claude 自己的橙 #D77757 为基准解 a·c+(1-a)·bg，
    非当前格 = #C87255 ⇒ a = 0.896、bg ≈ (63,63,70)。**这是 Orca 的机制本身**
@@ -598,7 +598,7 @@
             display:flex;align-items:center;gap:6px;height:24px;
             padding:0 4px 0 8px;cursor:pointer;
             background:var(--side);border-bottom:1px solid var(--line-soft);
-            box-shadow:0 6px 14px -8px rgba(0,0,0,.55);
+            box-shadow:0 6px 14px -8px rgb(var(--shade) / calc(.55 * var(--shade-k)));
             font-size:11.5px;color:var(--muted)}
 .cellbanner::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;
                     background:var(--amber)}
@@ -623,7 +623,7 @@
 .cellhead .aswap{width:16px;height:16px;flex:none;display:grid;place-items:center;
   padding:0;border:0;border-radius:3px;background:none;color:var(--faint);cursor:pointer;
   transition:color 140ms ease,background-color 140ms ease}
-.cellhead .aswap:hover{background:rgba(255,255,255,.12);color:var(--fg)}
+.cellhead .aswap:hover{background:rgb(var(--fx) / .12);color:var(--fg)}
 .cell.fresh .aswap{color:var(--accent)}
 .cell.fresh .aswap:hover{background:color-mix(in srgb,var(--accent) 16%,transparent);
   color:var(--accent)}
@@ -692,7 +692,7 @@
      ② **每条一个角色头行**（图标 + 角色词 + 时间）。时间从右边那一列挪进头行：
         右对齐的等宽时间戳会在正文右侧拉出一条参差的灰边，而且它和"谁在说"
         是同一件事的两个面，本来就该挨着。
-     ③ **行内代码不是色块**。原来是 #d8b98a 压 #22262e 的实心片，而 agent 正文
+     ③ **行内代码不是色块**。原来是 #d8b98a 压 var(--s-2) 的实心片，而 agent 正文
         里满是路径 —— 满屏高亮记号笔，**这是"丑"的主因**。改成"等宽 + 极淡底 +
         正文色"：它是同一个句子里的一个词，不该跳出来。
 
@@ -739,12 +739,12 @@
 .hist-empty{padding:16px 12px;color:var(--faint);font-size:12px}
 /* 对话流里的 markdown 元素。原来是原样吐出 `**粗体**` 和反引号 ——
    满屏符号，是这块区域质感最差的地方。 */
-.hit .tx code{font:11.5px/1.5 var(--mono);background:rgba(255,255,255,.055);
+.hit .tx code{font:11.5px/1.5 var(--mono);background:rgb(var(--fx) / .055);
               color:var(--fg);padding:1px 4px;border-radius:3px}
 /* 代码块：**通栏出血**，不要圆角描边盒 —— 盒子里再嵌一条自己的横向滚动条，
    看起来就像正文里塞了第二个面板（原来是 border + radius + 自己的滚动条）。
    左边一条 2px 的线代替盒子：它只说"这段是代码"，不制造第二个容器。 */
-.hit .tx pre.code{font:11.5px/1.6 var(--mono);color:var(--fg2);background:#131313;
+.hit .tx pre.code{font:11.5px/1.6 var(--mono);color:var(--fg2);background:var(--s-1);
                   border-left:2px solid var(--line);border-radius:0;
                   padding:6px 12px 6px 10px;margin:6px -12px;overflow-x:auto;
                   white-space:pre;scrollbar-width:thin}
@@ -786,7 +786,7 @@
 .hit .more .mo{display:inline-flex;align-items:center;gap:4px;font:11px/1 var(--sans);
                color:var(--muted);background:none;border:0;padding:3px 6px;
                border-radius:4px;cursor:pointer}
-.hit .more .mo:hover{color:var(--fg);background:var(--hover,#33333a)}
+.hit .more .mo:hover{color:var(--fg);background:var(--hover,var(--b-1))}
 @media (prefers-reduced-motion: reduce){ .hit.fold .more{transition:none} }
 
 /* ---------------------------------------------------------------------------
@@ -1072,20 +1072,20 @@
 .gperm .pf .go.allow:hover{background:#1b52f0;color:#fff}
 /* 条件项：描边 chip，每一项都有清楚的边界。 */
 .gperm .pf .go.extra{border:1px solid var(--line);padding:3px 8px}
-.gperm .pf .go.extra:hover{background:var(--card-hov);border-color:rgba(255,255,255,.14);color:var(--fg)}
+.gperm .pf .go.extra:hover{background:var(--card-hov);border-color:rgb(var(--fx) / .14);color:var(--fg)}
 /* 展开器：比选项弱，是一枚 disclosure，不是第三类选择。 */
 .gperm .pf .go.more{color:var(--faint);font-weight:400;padding:3px 4px}
 .gperm .pf .go.more:hover{background:none;color:var(--fg2)}
 /* 拒绝：负向、无边框、吃余量推到右侧，与允许左右分开。 */
 .gperm .pf .go.deny{margin-left:auto;color:var(--red);padding:4px 8px}
-.gperm .pf .go.deny:hover{background:rgba(255,101,104,.08);color:var(--red)}
+.gperm .pf .go.deny:hover{background:rgb(var(--red-rgb) / .08);color:var(--red)}
 /* 时间与「去这一格」是导航，不是选择：一道竖线与拒绝隔开，颜色再压一档。 */
 .gperm .pf .tm{border-left:1px solid var(--line-soft);padding-left:8px;margin-left:2px}
 .gperm .pf .go[data-go]{color:var(--faint)}
 .gperm .pf .go[data-go]:hover{color:var(--fg2)}
 /* 不可用：灰（颜色/底色），不做禁。 */
 .gperm .pf .go.mute{color:var(--faint);cursor:default;font-weight:400}
-.gperm .pf .go.allow.mute,.gperm .pf .go.allow.mute:hover{background:rgba(255,255,255,.06);color:var(--faint)}
+.gperm .pf .go.allow.mute,.gperm .pf .go.allow.mute:hover{background:rgb(var(--fx) / .06);color:var(--faint)}
 .gperm .pf .go.extra.mute,.gperm .pf .go.extra.mute:hover{background:none;border-color:var(--line-soft);color:var(--faint)}
 .gperm .pf .go.deny.mute,.gperm .pf .go.deny.mute:hover{background:none;color:var(--faint)}
 .gperm .pf .go.mute:hover{background:none}

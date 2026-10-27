@@ -262,9 +262,9 @@ func (s *Server) applySettingsPatch(p settings.Patch, why string) {
 		s.pushSettings(err)
 		return
 	}
-	log.Printf("[settings] %s：默认目录=%s 字号=%d 字体=%s 启动=%s 语言=%s UI=%s 模式=%s 默认 agent=%s 快捷键=%s 关窗确认=%v 结束确认=%v",
+	log.Printf("[settings] %s：默认目录=%s 字号=%d 字体=%s 启动=%s 语言=%s UI=%s 模式=%s 主题=%s 默认 agent=%s 快捷键=%s 关窗确认=%v 结束确认=%v",
 		why, pick(next.DefaultCWD, "(内置)"), next.TermFontSize, next.TermFontFamily,
-		next.StartView, next.Language, next.UIMode, next.TopMode,
+		next.StartView, next.Language, next.UIMode, next.TopMode, next.Theme,
 		pick(next.DefaultAgent, "(自动)"), pick(next.NewAgentShortcut, "(关闭)"),
 		next.ConfirmClose, next.ConfirmEndAgent)
 	s.pushSettings(nil)

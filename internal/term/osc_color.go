@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"sync/atomic"
 )
 
 // 终端程序（Claude Code 就在其中）会问「你的前景/背景是什么颜色」：
@@ -33,20 +34,50 @@ const (
 	oscBEL        = 0x07
 )
 
-// 我们声明的终端颜色，**必须与 index.html 的 --term-bg / xterm theme.background
-// 是同一个值**，否则 agent 会按错误的底色选色（它据此决定用深底还是浅底、挑哪套强调色）。
+// 我们声明的终端颜色，**必须与 00-base.css 的 --term-bg / --term-fg、
+// 10-term.js 的 xterm theme 是同一组值**，否则 agent 会按错误的底色选色
+// （它据此决定用深底还是浅底、挑哪套强调色）。
 //
-// 2026-10-15：底色由 Orca 的 #282c34 改为与应用画布相同的 #0a0a0a，
-// 理由见 index.html 顶部那段说明。ANSI 调色板没动。
+// 2026-10-15：深色底由 Orca 的 #282c34 改为与应用画布相同的 #0a0a0a。
+// 2026-10-28：有了浅色主题。前端解析出有效明暗后发 term.theme 过来（SetLight），
+// 这里和 COLORFGBG 一起跟着换；浅色前景取 Orca「Builtin Tango Light」的 #2e3434，
+// 底色是我们的画布 #f9fafb（方案 C）。
 //
 // ⚠️ 探针事实：本机 claude.exe 至今**没有**发过 OSC 10/11 查询
 // （internal/stream/serve.go 里 20 秒后的 `[osc] 这段时间收到的查询统计` 一直是 map[]）。
 // 所以这条是"保持正确"，不是在修一个正在发生的问题 —— 但哪天某个 agent
-// 开始问了，它必须拿到新的这个值。
+// 开始问了，它必须拿到当前主题的那个值。
 const (
-	TermForeground = "#ffffff"
-	TermBackground = "#0a0a0a"
+	darkForeground  = "#ffffff"
+	darkBackground  = "#0a0a0a"
+	lightForeground = "#2e3434"
+	lightBackground = "#f9fafb"
 )
+
+var termLight atomic.Bool
+
+// SetLight 记下界面当前的有效明暗（前端解析完 system 之后告诉我们）。
+func SetLight(on bool) { termLight.Store(on) }
+
+// Light 报告当前是不是浅色。
+func Light() bool { return termLight.Load() }
+
+// Colors 返回当前主题下声明给 agent 的前景 / 背景色。
+func Colors() (fg, bg string) {
+	if termLight.Load() {
+		return lightForeground, lightBackground
+	}
+	return darkForeground, darkBackground
+}
+
+// ColorFGBG 是 COLORFGBG 的 fg;bg 索引形式：深色 = 白字黑底 15;0，浅色 = 黑字白底 0;15。
+// 只影响**之后**起的进程 —— 环境变量没法改给已经在跑的 agent。
+func ColorFGBG() string {
+	if termLight.Load() {
+		return "0;15"
+	}
+	return "15;0"
+}
 
 // oscColorQueries **必须按长度降序**排列：`ESC]10;?` 是 `ESC]10;?;?` 的前缀，
 // 短的那个排前面会把长的截断成「查前景」而漏掉背景。
@@ -122,12 +153,13 @@ func (r *OSCResponder) Scan(chunk []byte) []string {
 			default:
 				continue // 这条不是查询，换下一种形式试
 			}
+			fg, bg := Colors()
 			if q.fg {
-				replies = append(replies, OSCReply(10, TermForeground))
+				replies = append(replies, OSCReply(10, fg))
 				r.seen["10"]++
 			}
 			if q.bg {
-				replies = append(replies, OSCReply(11, TermBackground))
+				replies = append(replies, OSCReply(11, bg))
 				r.seen["11"]++
 			}
 			i = end

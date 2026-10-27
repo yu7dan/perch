@@ -229,6 +229,9 @@ function setNavView(view) {
     });
     renderLists(searchKey());
     viewProbe("回到工作区");
+    if (SETTINGS.topMode === "botgroup" && typeof renderBotGroup === "function") {
+      renderBotGroup("回到 Bot Group");
+    }
   }
 }
 

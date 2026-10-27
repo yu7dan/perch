@@ -170,6 +170,40 @@ const DEFAULT_SPAWN_SPEC = { agent: "claude", cwd: "", target: "scratch",
    ⚠️ 它必须**定义在 createTab 之前**：启动那次 burst 是**模块求值期间**跑的，
    而文件后半那批 LUCIDE_* 常量到那一刻还没执行到 —— 在函数体里引用它们就是
    TDZ 的 ReferenceError（表现是"第一格建不出来"，和图标本身毫无关系）。 */
+/* xterm 主题。深色：ANSI 16 色逐字取自 Orca 的默认暗色主题 "Ghostty Default Style Dark"，
+   只有 background / cursorAccent 跟着画布 #0a0a0a 走（理由见 00-base.css 顶部）。
+   浅色（2026-10-28）：ANSI 逐字取自 Orca 的 "Builtin Tango Light"
+   （src/shared/terminal-themes/defaults.ts:31-56 —— 它把 Tango 原版近白的 yellow/white
+   压深过，浅底上 agent 的强调色才读得清），底色换成我们的画布 #f9fafb。
+   ⚠️ 底色 / 前景改了要同步 osc_color.go 的 light/dark 常量和 00-base.css 的 --term-*。 */
+const TERM_THEME_DARK = Object.freeze({
+  background: "#0a0a0a", foreground: "#ffffff",
+  cursor: "#ffffff", cursorAccent: "#0a0a0a",
+  selectionBackground: "#5a7898", selectionForeground: "#ffffff",
+  black: "#1d1f21", red: "#cc6666", green: "#b5bd68", yellow: "#f0c674",
+  blue: "#81a2be", magenta: "#b294bb", cyan: "#8abeb7", white: "#c5c8c6",
+  brightBlack: "#666666", brightRed: "#d54e53", brightGreen: "#b9ca4a",
+  brightYellow: "#e7c547", brightBlue: "#7aa6da", brightMagenta: "#c397d8",
+  brightCyan: "#70c0b1", brightWhite: "#eaeaea",
+});
+const TERM_THEME_LIGHT = Object.freeze({
+  background: "#f9fafb", foreground: "#2e3434",
+  cursor: "#2e3434", cursorAccent: "#f9fafb",
+  selectionBackground: "#accef7", selectionForeground: "#2e3434",
+  black: "#2e3436", red: "#cc0000", green: "#4e9a06", yellow: "#8e7700",
+  blue: "#3465a4", magenta: "#75507b", cyan: "#05727e", white: "#6a6a6a",
+  brightBlack: "#555753", brightRed: "#ef2929", brightGreen: "#1b7a1b",
+  brightYellow: "#6d5a00", brightBlue: "#204a87", brightMagenta: "#ad7fa8",
+  brightCyan: "#034b50", brightWhite: "#3d3d3d",
+});
+function termThemeNow() {
+  return document.documentElement.classList.contains("theme-light") ? TERM_THEME_LIGHT : TERM_THEME_DARK;
+}
+// Orca 按底色亮度分档（terminal-contrast-correction.ts）：亮底 4.5（WCAG-AA 正文），暗底 3。
+function termContrastNow() {
+  return document.documentElement.classList.contains("theme-light") ? 4.5 : 3;
+}
+
 const LUCIDE_TRIANGLE_ALERT =
   '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/>' +
   '<path d="M12 9v4"/><path d="M12 17h.01"/>';
@@ -447,7 +481,7 @@ const term = new Terminal({
   // （terminal-contrast-correction.ts）：亮底 4.5（WCAG-AA 正文），
   // 暗底 3（WCAG-AA 大字）。它把 4.5 用在暗底上会"把鲜艳的 ANSI 色
   // 过度提亮"（原注释点名的 bug #7934）。我们的底是 #0a0a0a（近黑），取 3。
-  minimumContrastRatio: 3,
+  minimumContrastRatio: termContrastNow(),
   drawBoldTextInBrightColors: true,
   scrollbar: { width: 7 },          // 细滚动条；FitAddon 会把它算成一条 gutter，代价约 1 列
   // macOS 上非美式键盘要靠 Option 组合出 @ 和 € 这类字符。
@@ -462,16 +496,7 @@ const term = new Terminal({
   // ANSI 16 色（black…brightWhite）逐字取自 Orca 的默认暗色主题
   // "Ghostty Default Style Dark"，**不动** —— 它们与底色无绑定关系。
   // 只有 background / cursorAccent 跟着 --term-bg 走了我们的画布色，理由见文件顶部。
-  theme: {
-    background: "#0a0a0a", foreground: "#ffffff",
-    cursor: "#ffffff", cursorAccent: "#0a0a0a",
-    selectionBackground: "#5a7898", selectionForeground: "#ffffff",
-    black: "#1d1f21", red: "#cc6666", green: "#b5bd68", yellow: "#f0c674",
-    blue: "#81a2be", magenta: "#b294bb", cyan: "#8abeb7", white: "#c5c8c6",
-    brightBlack: "#666666", brightRed: "#d54e53", brightGreen: "#b9ca4a",
-    brightYellow: "#e7c547", brightBlue: "#7aa6da", brightMagenta: "#c397d8",
-    brightCyan: "#70c0b1", brightWhite: "#eaeaea",
-  },
+  theme: termThemeNow(),
 });
 const fit = new FitAddon.FitAddon();
 term.loadAddon(fit);
@@ -962,6 +987,9 @@ window.addEventListener("resize", refit);
      漏掉 refit 的表现是"字变了，但换行位置还按旧字号算"。 */
   T.applyAppearance = () => {
     try {
+      const th = termThemeNow();
+      if (term.options.theme !== th) term.options.theme = th;
+      term.options.minimumContrastRatio = termContrastNow();
       const stack = termFontStack();
       const size = SETTINGS.termFontSize;
       if (term.options.fontFamily !== stack) term.options.fontFamily = stack;

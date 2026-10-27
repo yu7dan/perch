@@ -79,6 +79,7 @@ function settingsDefaultLabel(key) {
   if (key === "termFontFamily") return v === "jetbrains" ? "JetBrains Mono" : "Cascadia Code";
   if (key === "uiMode") return v === "classic" ? t("settings.uiMode.classic") : t("settings.uiMode.clean");
   if (key === "startView") return v === "workspace" ? t("settings.startView.workspace") : t("settings.startView.dash");
+  if (key === "theme") return t("settings.theme.system");
   if (key === "defaultAgent") return t("settings.defaultAgent.autoShort");
   if (key === "newAgentShortcut") return v || t("settings.shortcut.unset");
   if (typeof v === "boolean") return v ? t("settings.switch.on") : t("settings.switch.off");
@@ -256,9 +257,8 @@ function syncSettingsUI() {
     b.classList.toggle("on", on);
     b.setAttribute("aria-checked", String(on));
   }
-  // 主题目前只有深色。浅色是灰的、**不是 disabled** —— 点它会给一句解释。
   for (const b of document.querySelectorAll("#settings [data-set-theme]")) {
-    const on = b.dataset.setTheme === "dark";
+    const on = b.dataset.setTheme === SETTINGS.theme;
     b.classList.toggle("on", on);
     b.setAttribute("aria-checked", String(on));
   }
@@ -656,12 +656,8 @@ $("settings").addEventListener("click", (e) => {
     return;
   }
   if (b.dataset.setTheme !== undefined) {
-    if (b.dataset.setTheme === "light") {
-      // 界面主题不是终端主题：应用里还有一百多处写死的深色值，
-      // 做浅色要整份换令牌，不在这一版的范围（灰着但可点，点一下说明原因）。
-      showToast(t("settings.toast.lightTitle"), t("settings.toast.lightNote"), "info");
-      sendCtrl({ type: "log", msg: "设置：点了浅色主题（未实现）" });
-    }
+    if (b.dataset.setTheme === SETTINGS.theme) return;
+    settingsSend({ theme: b.dataset.setTheme }, `主题 → ${b.dataset.setTheme}`);
     return;
   }
   if (b.dataset.setStart !== undefined) {

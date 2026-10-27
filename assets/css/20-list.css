@@ -45,7 +45,7 @@
       margin-bottom:5px;cursor:pointer;transition:background .1s,border-color .1s}
 .card:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
 .card:hover{background:var(--card-hov)}
-.card.sel{background:var(--card-sel);border-color:#3d3d47}
+.card.sel{background:var(--card-sel);border-color:var(--b-2)}
 .card .t{font-size:12.5px;font-weight:500;color:var(--fg);display:flex;align-items:center;gap:6px}
 .card .t .nm{min-width:0;flex:1}
 .card .r2{display:flex;align-items:center;gap:6px;margin-top:5px;min-width:0;overflow:hidden}
@@ -53,9 +53,9 @@
    min-width:0 + flex-shrink 让目录名先省略，而不是把右边的 chip 直接挤出去。 */
 .chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:1px 6px;
       border-radius:var(--r-sm);font:11px/1.5 var(--mono);color:var(--fg2);
-      background:#2c2c33;border:1px solid #33333b;flex:0 1 auto;min-width:0}
-.chip.br{color:var(--green);background:#1d2a20;border-color:#27402c}
-.chip.warn{color:var(--amber);background:#2b2418;border-color:#3d3320}
+      background:var(--s-3);border:1px solid var(--b-1);flex:0 1 auto;min-width:0}
+.chip.br{color:var(--green);background:rgb(var(--green-rgb) / .08);border-color:rgb(var(--green-rgb) / .22)}
+.chip.warn{color:var(--amber);background:rgb(var(--amber-rgb) / .08);border-color:rgb(var(--amber-rgb) / .22)}
 .chip .x{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card .p{margin-top:6px;font-size:11.5px;color:var(--muted);line-height:1.4}
 .card .r3{display:flex;align-items:center;gap:6px;margin-top:6px;color:var(--faint);
@@ -86,12 +86,12 @@
 .cardbtn{display:flex;align-items:center;justify-content:center;flex:none;
   width:20px;height:20px;padding:0;border:0;border-radius:5px;background:transparent;
   color:var(--faint);cursor:pointer}
-.cardbtn:hover{background:#3a3a42;color:var(--fg)}
+.cardbtn:hover{background:var(--b-2);color:var(--fg)}
 /* 「接不上」的灰态：**灰但仍然可点**，点一下把原因用 toast 说出来。
    不用 disabled 属性 —— 禁用元素在 Chromium 里不显示 title（tooltip），
    于是"为什么灰"这件事就没有出口了，用户只能看到一颗点不动的死按钮。 */
-.cardbtn.na{color:#4a4a52;cursor:default}
-.cardbtn.na:hover{background:transparent;color:#4a4a52}
+.cardbtn.na{color:var(--b-3);cursor:default}
+.cardbtn.na:hover{background:transparent;color:var(--b-3)}
 /* 卡片行尾那颗 `›` 没有了：它原来只是"这卡能点"的装饰，现在行尾是实打实的
    动作按钮，再留一颗指示符会让两件事长得一样。功能没变（点卡身 = 下段切到这条
    会话），见 cardHTML 的注释。 */
@@ -102,18 +102,18 @@
    同一份 SessionActionMenuItems（AiVaultSessionRow.tsx:145-282 等），
    我们三处都调 openCardMenu()。 */
 #cardmenu{position:fixed;z-index:60;min-width:196px;padding:4px;display:none;
-  background:#232329;border:1px solid #33333c;border-radius:8px;
-  box-shadow:0 8px 24px rgba(0,0,0,.45)}
+  background:var(--s-pop);border:1px solid var(--b-1);border-radius:8px;
+  box-shadow:0 8px 24px rgb(var(--shade) / calc(.45 * var(--shade-k)))}
 #cardmenu.on{display:block}
 #cardmenu .mi{display:flex;align-items:center;gap:7px;width:100%;padding:5px 8px;
   border:0;border-radius:5px;background:transparent;color:var(--fg);
   font-size:12px;text-align:left;cursor:pointer}
-#cardmenu .mi:hover{background:#33333c}
+#cardmenu .mi:hover{background:var(--b-1)}
 /* 同 .cardbtn.na：做灰不做禁（禁了 title 就不弹了）。 */
-#cardmenu .mi.na{color:#5a5a63}
-#cardmenu .mi.na:hover{background:#2b2b32;color:#8a8a93}
+#cardmenu .mi.na{color:var(--t-4)}
+#cardmenu .mi.na:hover{background:var(--s-3);color:var(--t-3)}
 #cardmenu .mi svg{flex:none;opacity:.8}
-#cardmenu .sep{height:1px;margin:4px 6px;background:#33333c}
+#cardmenu .sep{height:1px;margin:4px 6px;background:var(--b-1)}
 #cardmenu .mhead{padding:4px 8px 5px;color:var(--faint);font:10.5px/1.4 var(--mono);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
@@ -126,7 +126,7 @@
    内容由 89-agent-cfg.js 现填；壳只有头（图标/名字/配置路径/关闭）。 */
 #agentcfg{position:fixed;z-index:66;right:0;top:var(--titlebar-h);bottom:24px;width:420px;
           display:none;flex-direction:column;background:var(--panel);
-          border-left:1px solid var(--line);box-shadow:-20px 0 48px rgba(0,0,0,.45);
+          border-left:1px solid var(--line);box-shadow:-20px 0 48px rgb(var(--shade) / calc(.45 * var(--shade-k)));
           animation:ac-in .18s cubic-bezier(.2,.8,.2,1)}
 #agentcfg.on{display:flex}
 @keyframes ac-in{from{transform:translateX(14px);opacity:0}to{transform:none;opacity:1}}
@@ -144,7 +144,7 @@
                    padding:0 4px;line-height:15px}
 #agentcfg .ac-x{flex:none;width:24px;height:24px;display:grid;place-items:center;border:0;
                 border-radius:6px;background:transparent;color:var(--muted);cursor:pointer}
-#agentcfg .ac-x:hover{background:#33333c;color:var(--fg)}
+#agentcfg .ac-x:hover{background:var(--b-1);color:var(--fg)}
 #agentcfg .ac-body{flex:1;overflow:auto;padding:12px 14px 18px;
                    display:flex;flex-direction:column;gap:9px}
 #agentcfg .ac-status{display:flex;align-items:center;gap:7px;flex-wrap:wrap;
@@ -168,30 +168,30 @@
 #agentcfg .ac-btn:disabled{opacity:.45;cursor:default}
 #agentcfg .ac-btn.primary{background:var(--accent);border-color:transparent;color:#fff}
 #agentcfg .ac-btn.primary:hover:not(:disabled){filter:brightness(1.14)}
-#agentcfg .ac-btn.danger{color:var(--red);border-color:rgba(255,101,104,.35)}
+#agentcfg .ac-btn.danger{color:var(--red);border-color:rgb(var(--red-rgb) / .35)}
 #agentcfg .ac-btn.danger:hover:not(:disabled){border-color:var(--red);color:var(--red)}
 #agentcfg .ac-btn.quiet{padding:2px 7px;background:transparent;border-color:transparent;
                         color:var(--faint);font-size:10.5px}
-#agentcfg .ac-btn.quiet:hover{color:var(--fg);background:#2b2b32}
+#agentcfg .ac-btn.quiet:hover{color:var(--fg);background:var(--s-3)}
 #agentcfg .ac-hint{font-size:10.5px;line-height:1.6;color:var(--faint)}
 /* 只读的快捷键提示（OpenCode 的 variant 在它自己的 TUI 里切）。 */
 #agentcfg .ac-hint kbd{font:10px/1 var(--mono);color:var(--fg2);padding:1px 4px;
   border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;
   background:var(--card);margin:0 1px;white-space:nowrap}
 #agentcfg .ac-note{font-size:10.5px;line-height:1.6;color:var(--muted);padding:6px 9px;
-                   border-radius:6px;background:rgba(255,255,255,.04)}
+                   border-radius:6px;background:rgb(var(--fx) / .04)}
 #agentcfg .ac-err{font-size:11px;line-height:1.6;color:var(--red);padding:6px 9px;
-                  border-radius:6px;background:rgba(255,101,104,.08)}
-#agentcfg .ac-drift{padding:7px 9px;border-radius:6px;background:rgba(234,179,8,.08);
-                    border:1px solid rgba(234,179,8,.22);display:flex;flex-direction:column;gap:3px}
-#agentcfg .ac-drift b{font-size:11px;font-weight:500;color:#f5d06a}
+                  border-radius:6px;background:rgb(var(--red-rgb) / .08)}
+#agentcfg .ac-drift{padding:7px 9px;border-radius:6px;background:rgb(var(--amber-rgb) / .08);
+                    border:1px solid rgb(var(--amber-rgb) / .22);display:flex;flex-direction:column;gap:3px}
+#agentcfg .ac-drift b{font-size:11px;font-weight:500;color:var(--amber-text)}
 #agentcfg .ac-drift span{font-size:10.5px;line-height:1.55;color:var(--muted)}
 /* 漂移条里的动作（保留现状）与说明同一行；按钮用琥珀色，和告警一个语气。 */
 #agentcfg .ac-drift-acts{display:flex;align-items:center;gap:8px;margin-top:3px;flex-wrap:wrap}
-#agentcfg .ac-drift-acts .ac-btn{padding:2px 8px;font-size:10.5px;color:#f5d06a;
-  background:rgba(234,179,8,.10);border-color:rgba(234,179,8,.35)}
-#agentcfg .ac-drift-acts .ac-btn:hover:not(:disabled){background:rgba(234,179,8,.18);
-  border-color:rgba(234,179,8,.55);color:#ffe08a}
+#agentcfg .ac-drift-acts .ac-btn{padding:2px 8px;font-size:10.5px;color:var(--amber-text);
+  background:rgb(var(--amber-rgb) / .10);border-color:rgb(var(--amber-rgb) / .35)}
+#agentcfg .ac-drift-acts .ac-btn:hover:not(:disabled){background:rgb(var(--amber-rgb) / .18);
+  border-color:rgb(var(--amber-rgb) / .55);color:var(--amber-text)}
 #agentcfg .ac-sec{display:flex;align-items:baseline;gap:8px;margin-top:6px;
                   padding-top:10px;border-top:1px solid var(--line-soft)}
 #agentcfg .ac-sec-title{font-size:11px;font-weight:600;color:var(--muted);
@@ -204,7 +204,7 @@
 #agentcfg .ac-field select{flex:1;min-width:0;font:11px/1.5 var(--ui);color:var(--fg);
                            background:var(--card);border:1px solid var(--line);
                            border-radius:6px;padding:4px 6px;cursor:pointer}
-#agentcfg .ac-field select:hover:not(:disabled){border-color:#4a4a52}
+#agentcfg .ac-field select:hover:not(:disabled){border-color:var(--b-3)}
 #agentcfg .ac-field select:focus{outline:none;border-color:var(--accent)}
 #agentcfg .ac-field select:disabled{opacity:.55;cursor:default}
 
@@ -215,12 +215,12 @@
   border:1px solid var(--line);border-radius:6px;padding:4px 8px;cursor:pointer;text-align:left}
 #agentcfg .ac-pick-btn span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #agentcfg .ac-pick-btn i{flex:none;font-style:normal;font-size:9px;color:var(--faint)}
-#agentcfg .ac-pick-btn:hover:not(:disabled){border-color:#4a4a52}
+#agentcfg .ac-pick-btn:hover:not(:disabled){border-color:var(--b-3)}
 #agentcfg .ac-pick.open .ac-pick-btn{border-color:var(--accent)}
 #agentcfg .ac-pick-btn:disabled{opacity:.55;cursor:default}
 .ac-pop{position:fixed;z-index:80;width:320px;max-height:300px;display:flex;flex-direction:column;
   background:var(--panel);border:1px solid var(--line);border-radius:8px;
-  box-shadow:0 14px 40px rgba(0,0,0,.5);overflow:hidden}
+  box-shadow:0 14px 40px rgb(var(--shade) / calc(.5 * var(--shade-k)));overflow:hidden}
 .ac-pop-find{flex:none;height:26px;margin:7px 7px 5px;padding:0 8px;
   font:11px/1.5 var(--ui);color:var(--fg);background:var(--card);
   border:1px solid var(--line);border-radius:6px;outline:none}
@@ -232,57 +232,57 @@
 .ac-pop-opt{display:flex;align-items:center;gap:6px;width:100%;padding:3px 8px;
   border:0;border-radius:5px;background:transparent;color:var(--fg2);
   font:11px/1.6 var(--ui);cursor:pointer;text-align:left}
-.ac-pop-opt:hover,.ac-pop-opt:focus{outline:none;background:#2b2b32;color:var(--fg)}
+.ac-pop-opt:hover,.ac-pop-opt:focus{outline:none;background:var(--s-3);color:var(--fg)}
 .ac-pop-opt.on{color:var(--fg)}
 .ac-pop-opt .tick{flex:none;width:10px;color:var(--accent)}
 .ac-pop-opt .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ac-pop-opt .grp{flex:none;font-size:9.5px;color:var(--faint)}
 .ac-pop-opt[hidden],.ac-pop-grp[hidden]{display:none}
 #agentcfg .ac-confirm{display:flex;flex-direction:column;gap:8px;padding:10px 11px;
-                      border:1px solid rgba(255,101,104,.28);border-radius:8px;
-                      background:rgba(255,101,104,.05)}
+                      border:1px solid rgb(var(--red-rgb) / .28);border-radius:8px;
+                      background:rgb(var(--red-rgb) / .05)}
 #agentcfg .ac-confirm>b{font-size:12px;font-weight:600}
 #agentcfg .ac-confirm>p{margin:0;font-size:10.5px;line-height:1.6;color:var(--muted)}
 #agentcfg .ac-diff{display:flex;flex-direction:column;gap:8px}
 #agentcfg .ac-diff-file{border:1px solid var(--line-soft);border-radius:6px;
-                        background:rgba(0,0,0,.18);overflow:hidden}
+                        background:rgb(var(--shade) / calc(.18 * var(--shade-k)));overflow:hidden}
 #agentcfg .ac-diff-path{display:flex;align-items:center;gap:6px;padding:4px 8px;
                         font:10px/1.5 var(--mono);color:var(--muted);
                         border-bottom:1px solid var(--line-soft);word-break:break-all}
 #agentcfg .ac-tag{margin-left:auto;flex:none;font:9.5px/1 var(--ui);color:var(--faint);
                   border:1px solid var(--line);border-radius:999px;padding:2px 5px}
-#agentcfg .ac-tag.del{color:var(--red);border-color:rgba(255,101,104,.3)}
+#agentcfg .ac-tag.del{color:var(--red);border-color:rgb(var(--red-rgb) / .3)}
 #agentcfg .ac-diff-line{display:flex;gap:6px;padding:1px 8px;
                         font:10px/1.6 var(--mono);word-break:break-all}
 #agentcfg .ac-diff-line .op{flex:none;color:var(--faint)}
-#agentcfg .ac-diff-line.del .op,#agentcfg .ac-diff-line.del code{color:#fca5a5}
+#agentcfg .ac-diff-line.del .op,#agentcfg .ac-diff-line.del code{color:var(--red-text)}
 #agentcfg .ac-diff-line.back .op{color:var(--green)}
 #agentcfg .ac-diff-line code{font:inherit;color:var(--fg2);white-space:pre-wrap}
 
 #openpanel{position:fixed;z-index:70;width:432px;padding:0 0 4px;display:none;
   flex-direction:column;max-height:min(560px,72vh);
-  background:#232329;border:1px solid #33333c;border-radius:10px;
-  box-shadow:0 12px 32px rgba(0,0,0,.5)}
+  background:var(--s-pop);border:1px solid var(--b-1);border-radius:10px;
+  box-shadow:0 12px 32px rgb(var(--shade) / calc(.5 * var(--shade-k)))}
 #openpanel.on{display:flex}
 #openpanel .op-head{display:flex;align-items:center;gap:8px;padding:9px 12px 6px}
 #openpanel .op-title{flex:1;font-size:12.5px;font-weight:600}
 #openpanel .op-x{flex:none;width:22px;height:22px;display:grid;place-items:center;
   border:0;border-radius:5px;background:transparent;color:var(--faint);cursor:pointer}
-#openpanel .op-x:hover{background:#33333c;color:var(--fg)}
-#openpanel .op-tabs{display:flex;gap:2px;padding:0 10px;border-bottom:1px solid #33333c}
+#openpanel .op-x:hover{background:var(--b-1);color:var(--fg)}
+#openpanel .op-tabs{display:flex;gap:2px;padding:0 10px;border-bottom:1px solid var(--b-1)}
 #openpanel .op-tab{padding:6px 10px;border:0;border-bottom:2px solid transparent;
   background:transparent;color:var(--muted);font-size:12px;cursor:pointer}
 #openpanel .op-tab:hover{color:var(--fg)}
 #openpanel .op-tab.on{color:var(--fg);border-bottom-color:var(--accent)}
 #openpanel .op-ws{display:flex;align-items:center;gap:8px;padding:8px 12px;
-  border-bottom:1px solid #2c2c34}
+  border-bottom:1px solid var(--s-3)}
 #openpanel .op-wslab{flex:none;color:var(--faint);font:10.5px/1 var(--mono)}
-#op-ws{flex:1;min-width:0;padding:4px 6px;border:1px solid #3a3a44;border-radius:6px;
-  background:#2b2b32;color:var(--fg);font-size:11.5px}
-#op-ws:disabled{color:#6b6b74;border-color:#33333c;background:#26262c}
-#op-all{flex:none;padding:4px 8px;border:1px solid #3a3a44;border-radius:6px;
+#op-ws{flex:1;min-width:0;padding:4px 6px;border:1px solid var(--b-2);border-radius:6px;
+  background:var(--s-3);color:var(--fg);font-size:11.5px}
+#op-ws:disabled{color:var(--t-4);border-color:var(--b-1);background:var(--s-pop)}
+#op-all{flex:none;padding:4px 8px;border:1px solid var(--b-2);border-radius:6px;
   background:transparent;color:var(--muted);font-size:10.5px;cursor:pointer}
-#op-all:hover{color:var(--fg);border-color:#4a4a56}
+#op-all:hover{color:var(--fg);border-color:var(--b-3)}
 #op-all.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 55%,transparent);
   background:color-mix(in srgb,var(--accent) 12%,transparent)}
 #openpanel .op-body{padding:10px 12px 6px;overflow:auto;min-height:96px}
@@ -294,19 +294,19 @@
   color:#fff;font-size:12px;font-weight:600;cursor:pointer}
 #openpanel .op-go:hover{filter:brightness(1.14)}
 #openpanel .op-search{width:100%;box-sizing:border-box;margin-bottom:6px;padding:5px 8px;
-  border:1px solid #3a3a44;border-radius:6px;background:#2b2b32;color:var(--fg);
+  border:1px solid var(--b-2);border-radius:6px;background:var(--s-3);color:var(--fg);
   font-size:11.5px;outline:none}
-#openpanel .op-search:focus{border-color:#5a5a68}
+#openpanel .op-search:focus{border-color:var(--t-4)}
 #openpanel .op-row{display:block;width:100%;padding:6px 8px;border:0;border-radius:6px;
   background:transparent;color:var(--fg);text-align:left;cursor:pointer}
-#openpanel .op-row:hover{background:#33333c}
-#openpanel .op-row.na:hover{background:#2b2b32}
-#openpanel .op-row.na{color:#5a5a63;cursor:default}
+#openpanel .op-row:hover{background:var(--b-1)}
+#openpanel .op-row.na:hover{background:var(--s-3)}
+#openpanel .op-row.na{color:var(--t-4);cursor:default}
 #openpanel .op-row1{display:flex;align-items:baseline;gap:8px}
 #openpanel .op-rowtitle{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap;font-size:12px}
-#openpanel .op-row.na .op-rowtitle{color:#5a5a63}
-#openpanel .op-tag{flex:none;padding:1px 6px;border:1px solid #3d5a44;border-radius:999px;
+#openpanel .op-row.na .op-rowtitle{color:var(--t-4)}
+#openpanel .op-tag{flex:none;padding:1px 6px;border:1px solid rgb(var(--green-rgb) / .35);border-radius:999px;
   color:var(--green);font:10px/1.4 var(--mono)}
 #openpanel .op-row2{display:flex;gap:6px;margin-top:2px;color:var(--faint);
   font:10.5px/1.3 var(--mono);overflow:hidden;white-space:nowrap}
@@ -320,10 +320,10 @@
 #openpanel .op-aghead{display:flex;align-items:center;gap:8px}
 #openpanel .op-aglab{color:var(--faint);font:10.5px/1 var(--mono)}
 #openpanel .op-aglist{display:flex;flex-direction:column;gap:1px;max-height:164px;overflow:auto;
-  padding:3px;border:1px solid #2f2f37;border-radius:7px;background:#1f1f24}
+  padding:3px;border:1px solid var(--s-3);border-radius:7px;background:var(--s-2)}
 #openpanel .op-agent{display:flex;align-items:center;gap:8px;width:100%;padding:5px 6px;
   border:0;border-radius:5px;background:transparent;color:var(--fg);text-align:left;cursor:pointer}
-#openpanel .op-agent:hover{background:#2b2b32}
+#openpanel .op-agent:hover{background:var(--s-3)}
 #openpanel .op-agent.on{background:color-mix(in srgb,var(--accent) 15%,transparent)}
 #openpanel .op-agent:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
 #openpanel .op-agico{flex:none;width:16px;height:16px;display:grid;place-items:center}
@@ -332,7 +332,7 @@
 #openpanel .op-agnm{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg2);
   overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 #openpanel .op-agent.on .op-agnm{color:var(--fg)}
-#openpanel .op-agpill{flex:none;padding:0 5px;border:1px solid #3d5a44;border-radius:999px;
+#openpanel .op-agpill{flex:none;padding:0 5px;border:1px solid rgb(var(--green-rgb) / .35);border-radius:999px;
   color:var(--green);font:9px/1.5 var(--mono)}
 #openpanel .op-agsub{color:var(--faint);font:10px/1.3 var(--mono);overflow:hidden;
   white-space:nowrap;text-overflow:ellipsis}
@@ -342,12 +342,12 @@
 #openpanel .op-agfoot{display:flex;align-items:center;gap:8px;min-height:18px}
 #openpanel .op-agtip{flex:1;min-width:0;color:var(--faint);font:10px/1.4 var(--ui);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#openpanel .op-agdef{flex:none;padding:2px 7px;border:1px solid #3a3a44;border-radius:5px;
+#openpanel .op-agdef{flex:none;padding:2px 7px;border:1px solid var(--b-2);border-radius:5px;
   background:transparent;color:var(--muted);font-size:10.5px;cursor:pointer}
-#openpanel .op-agdef:hover{color:var(--fg);border-color:#4a4a56}
-#openpanel .op-agdef.na,#openpanel .op-agdef.na:hover{color:#5a5a63;border-color:#33333c;
+#openpanel .op-agdef:hover{color:var(--fg);border-color:var(--b-3)}
+#openpanel .op-agdef.na,#openpanel .op-agdef.na:hover{color:var(--t-4);border-color:var(--b-1);
   cursor:default}
-#openpanel .op-go.na{background:#3a3a44;color:#7a7a84;cursor:default}
+#openpanel .op-go.na{background:var(--b-2);color:var(--t-3);cursor:default}
 #openpanel .op-go.na:hover{filter:none}
 #openpanel .op-agempty{padding:12px 4px;color:var(--faint);font-size:11px;line-height:1.6;
   text-align:center}
@@ -356,7 +356,7 @@
    和「添加项目」同一张卡的语言，但正文是纯文本域：brief 是给 agent 读的
    约定，不是富文本。高度固定一屏，避免长文把对话框撑出窗口。 */
 #brief{position:fixed;inset:0;z-index:122;display:grid;place-items:center;
-  padding:24px;background:rgba(0,0,0,.58);backdrop-filter:blur(2px)}
+  padding:24px;background:rgb(var(--shade) / calc(.58 * var(--shade-k)));backdrop-filter:blur(2px)}
 #brief[hidden]{display:none}
 #brief .brief-card{width:min(620px, calc(100vw - 32px))}
 #brief .brief-body{display:flex;flex-direction:column;gap:8px}
@@ -392,10 +392,10 @@
    两层投影（近的一层压出轮廓，远的一层把卡从背景里抬起来）。
    只写一层 8px 模糊的投影，在 #171717 的右栏上看不见 —— 那是第一版的毛病。 */
 .toast{pointer-events:auto;box-sizing:border-box;width:100%;
-  background:linear-gradient(180deg,#27272e,#212127);
-  border:1px solid rgba(255,255,255,.085);border-radius:10px;
-  box-shadow:0 18px 40px rgba(0,0,0,.55),0 3px 10px rgba(0,0,0,.45),
-             inset 0 1px 0 rgba(255,255,255,.05);
+  background:linear-gradient(180deg,var(--s-pop),var(--s-2));
+  border:1px solid rgb(var(--fx) / .085);border-radius:10px;
+  box-shadow:0 18px 40px rgb(var(--shade) / calc(.55 * var(--shade-k))),0 3px 10px rgb(var(--shade) / calc(.45 * var(--shade-k))),
+             inset 0 1px 0 rgb(var(--fx) / .05);
   color:var(--fg);padding:11px 12px 12px 13px;cursor:pointer;
   animation:toastIn .2s cubic-bezier(.16,1,.3,1)}
 .toast.out{animation:toastOut .14s ease-in forwards}
@@ -403,32 +403,32 @@
 /* 图标不是一枚裸字形，是一颗 20px 的浅底圆章 —— 13px 的线稿直接浮在暗底上
    太细，看着"廉价"；圆章给了它重量，也把三种语义（ok/err/info）用底色分开。 */
 .toast .tic{flex:none;display:grid;place-items:center;width:20px;height:20px;
-  margin-top:-1px;border-radius:50%;background:rgba(255,255,255,.06);
+  margin-top:-1px;border-radius:50%;background:rgb(var(--fx) / .06);
   color:var(--muted)}
 .toast .ttl{flex:1;min-width:0;font-size:12.5px;font-weight:600;line-height:20px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .toast .tclose{flex:none;display:grid;place-items:center;width:20px;height:20px;
   margin:-1px -3px 0 0;padding:0;border:0;border-radius:5px;background:transparent;
-  color:rgba(255,255,255,.42);cursor:pointer}
-.toast .tclose:hover{background:rgba(255,255,255,.08);color:var(--fg)}
+  color:rgb(var(--fx) / .42);cursor:pointer}
+.toast .tclose:hover{background:rgb(var(--fx) / .08);color:var(--fg)}
 /* 悬停只亮一下边 —— 整张卡可点（点了就关），得让人知道它是可交互的 */
-.toast:hover{border-color:rgba(255,255,255,.14)}
+.toast:hover{border-color:rgb(var(--fx) / .14)}
 /* 正文缩进到标题文字的左沿（圆章 20 + 间距 9 = 29）——两行读起来是一条而不是两条。
    字号比标题小半档、行高更松，正文是"读"的，标题是"扫"的。 */
 .toast .tbody{margin-top:3px;padding-left:29px;font-size:11.5px;line-height:1.6;
-  color:#adadb6;word-break:break-word}
+  color:var(--t-2);word-break:break-word}
 /* 复制出来的东西（路径、会话 id）走等宽 —— 和状态栏里的路径同一套语言，
    而且一眼能看出"这是一段可以原样粘贴的值"，不是一句说明。 */
-.toast .tbody.mono{font:11px/1.7 var(--mono);color:#b4b4bd}
+.toast .tbody.mono{font:11px/1.7 var(--mono);color:var(--t-2)}
 .toast .tbody:empty{display:none}
-.toast.ok .tic{background:rgba(134,239,172,.14);color:var(--green)}
-.toast.err{border-color:rgba(255,101,104,.28)}
-.toast.err .tic{background:rgba(255,101,104,.15);color:var(--red)}
+.toast.ok .tic{background:rgb(var(--green-rgb) / .14);color:var(--green)}
+.toast.err{border-color:rgb(var(--red-rgb) / .28)}
+.toast.err .tic{background:rgb(var(--red-rgb) / .15);color:var(--red)}
 @keyframes toastIn{from{opacity:0;transform:translateX(12px) scale(.98)}to{opacity:1;transform:none}}
 @keyframes toastOut{to{opacity:0;transform:translateX(10px) scale(.99)}}
 @media (prefers-reduced-motion:reduce){.toast,.toast.out{animation:none}}
 .pill{display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:999px;
-      background:#2c2c33;color:var(--muted);font:10.5px/1.6 var(--mono)}
+      background:var(--s-3);color:var(--muted);font:10.5px/1.6 var(--mono)}
 .pill.g{color:var(--green)} .pill.b{color:var(--accent)} .pill.a{color:var(--amber)}
 .empty{padding:14px 12px;color:var(--faint);font-size:12px;line-height:1.6}
 .empty code{font:11.5px var(--mono);color:var(--muted)}
@@ -549,7 +549,7 @@
 /* 池子读不出来时的横幅。**不做隐** —— 那会让人以为"项目都没了"（不可用的动作
    做灰、做说明，不做隐）。 */
 .poolerr{margin:0 10px 8px;padding:7px 9px;border-radius:var(--r-sm);
-  background:#2b2418;border:1px solid #3d3320;color:#e8c98a;font-size:11.5px;line-height:1.5}
+  background:rgb(var(--amber-rgb) / .08);border:1px solid rgb(var(--amber-rgb) / .22);color:var(--amber-text);font-size:11.5px;line-height:1.5}
 /* 空态里那颗带字的按钮（「添加项目」）。左栏里只有它一个文字按钮 ——
    别的地方都是图标键，多一个文字按钮要能一眼认出是"可以按的"。 */
 .btn{display:inline-flex;align-items:center;gap:6px;margin-top:2px;padding:5px 10px;

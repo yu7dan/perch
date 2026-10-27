@@ -5,6 +5,16 @@
 <title data-i18n="app.title">Perch · 栖枝</title>
 <!-- CSS 按域拆分，链接顺序 = 层叠顺序（基础 token → 各区域 → 第三方覆盖）。
      新增样式放进对应的域文件，不要再建第二份全局样式表。 -->
+<script>
+  // 主题必须在第一帧之前落到 <html> 上（只读 localStorage 缓存；Go 的权威值晚到，
+  // 到了由 05-prefs.js 的 applyTheme 校正）。system = 跟随 Windows 的应用明暗。
+  try {
+    var __th = "system";
+    try { __th = (JSON.parse(localStorage.getItem("perch.settings.v1") || "null") || {}).theme || "system"; } catch (_) {}
+    var __light = __th === "light" || (__th !== "dark" && window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches);
+    document.documentElement.classList.add(__light ? "theme-light" : "theme-dark");
+  } catch (_) {}
+</script>
 <link rel="stylesheet" href="/vendor/xterm.css">
 <link rel="stylesheet" href="/css/00-base.css">
 <link rel="stylesheet" href="/css/10-nav.css">
@@ -16,6 +26,7 @@
 <link rel="stylesheet" href="/css/60-pages.css">
 <link rel="stylesheet" href="/css/70-gateway.css">
 <link rel="stylesheet" href="/css/80-classic.css">
+<link rel="stylesheet" href="/css/90-botgroup.css">
 </head>
 <body>
 
@@ -35,6 +46,11 @@
     } catch (_) {}
     var __onboarded = false;
     try { __onboarded = localStorage.getItem("perch.onboarded.v2") === "1"; } catch (_) {}
+    // 顶层模式是 Bot Group 时首帧就盖上，免得先闪一帧终端网格。
+    if (__perchPref && __perchPref.topMode === "botgroup") {
+      document.getElementById("app").classList.add("botgroup");
+      document.body.classList.add("botgroup");
+    }
     if (!__onboarded || !__perchPref || __perchPref.startView !== "dash") {
       document.getElementById("app").classList.remove("dash");
     }
@@ -66,7 +82,7 @@
            先看到当前模式，点开才出现两个选项；不再把两个按钮常驻在顶上。 -->
       <button type="button" class="mode-trigger" id="top-mode"
               aria-haspopup="menu" aria-controls="mode-pop" aria-expanded="false"
-              title="切换工作区与聊天" data-i18n-title="chrome.mode.aria">
+              title="切换工作区与 Bot Group" data-i18n-title="chrome.mode.aria">
         <span class="mt-ico" id="top-mode-ico" aria-hidden="true"></span>
         <span class="mt-label" id="top-mode-label" data-i18n="chrome.mode.workspaces">Workspaces</span>
         <span class="mt-chev" aria-hidden="true">
@@ -702,19 +718,16 @@
                  data-search="主题 外观 深色 浅色 明暗 theme dark light appearance">
               <div class="settings-lab">
                 <b data-i18n="settings.theme.label">主题</b>
-                <span data-i18n-text="settings.theme.note">界面的明暗。浅色主题还在做。</span>
+                <span data-i18n-text="settings.theme.note">界面和终端的明暗。跟随系统 = 跟着 Windows 的应用模式走。<em class="set-def"
+                      data-set-default-hint="theme"></em></span>
               </div>
               <div class="settings-ctl">
                 <div class="set-seg" role="radiogroup" aria-label="主题" data-i18n-aria-label="settings.theme.label">
-                  <button type="button" role="radio" data-set-theme="dark" aria-checked="true" data-i18n="settings.theme.dark">深色</button>
-                  <button type="button" role="radio" data-set-theme="light" aria-checked="false"
-                          class="na" aria-disabled="true"
-                          aria-label="浅色（还没做，下一版提供）"
-                          data-i18n-aria-label="settings.theme.lightAria"
-                          title="浅色主题还没做，下一版提供"
-                          data-i18n-title="settings.theme.lightTitle"
-                          data-i18n="settings.theme.light">浅色</button>
+                  <button type="button" role="radio" data-set-theme="system" aria-checked="true" data-i18n="settings.theme.system">跟随系统</button>
+                  <button type="button" role="radio" data-set-theme="dark" aria-checked="false" data-i18n="settings.theme.dark">深色</button>
+                  <button type="button" role="radio" data-set-theme="light" aria-checked="false" data-i18n="settings.theme.light">浅色</button>
                 </div>
+                <button type="button" class="set-reset" data-set-reset="theme" hidden data-i18n="settings.resetDefault">恢复默认</button>
               </div>
             </div>
             <div class="settings-row" data-set-row="termFontFamily"
@@ -886,6 +899,11 @@
       </div>
     </div>
   </main>
+
+  <!-- Bot Group（顶层模式之一，见 60-shell 的 MODE_ITEMS / 91-botgroup.js）。
+       和总览同一种盖法：列表 / 主区 / 右栏 visibility:hidden，它盖在第 2 列到最后一列上，
+       画自己的三栏。内容全部由 renderBotGroup() 现填。 -->
+  <main id="bg"></main>
 </div>
 
 <!-- 4. 状态栏。
@@ -1248,7 +1266,7 @@
 
 <!-- 顶层模式下拉。内容由 60-shell 现填，静态外壳只保证它挂在 body 层：
      不被标题栏的拖拽区和 overflow 裁掉。 -->
-<div id="mode-pop" class="mode-pop" role="menu" aria-label="工作区与聊天"
+<div id="mode-pop" class="mode-pop" role="menu" aria-label="工作区与 Bot Group"
      data-i18n-aria-label="chrome.mode.aria" hidden></div>
 
 <!-- 第三方终端库保持原样分发（见 assets/vendor/ 与 THIRD-PARTY.md）。 -->
@@ -1332,6 +1350,7 @@ window.__facts = [];
 <script defer src="/js/88-install.js"></script>
 <script defer src="/js/89-agent-cfg.js"></script>
 <script defer src="/js/90-onboarding.js"></script>
+<script defer src="/js/91-botgroup.js"></script>
 <script defer src="/js/99-boot.js"></script>
 </body>
 </html>

@@ -4,6 +4,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/yu7dan/perch/internal/term"
 )
 
 // envBlocked 列出**绝不能从宿主继承**的终端呈现类变量。
@@ -69,9 +71,8 @@ func BuildEnv(extra map[string]string) []string {
 		"COLORTERM=truecolor",
 		"TERM_PROGRAM=perch",
 		// fg;bg 的 0-15 索引形式。有些工具只认这个、不做 OSC 查询。
-		// 我们的主题是深底 + 白字 → 15;0。底色 2026-10-15 改成 #0a0a0a 后
-		// **这条不用动**：索引 0 就是"黑"，任何近黑底都对得上。
-		"COLORFGBG=15;0",
+		// 深色 = 15;0，浅色 = 0;15（跟着界面主题走，见 term.ColorFGBG）。
+		"COLORFGBG="+term.ColorFGBG(),
 		// 兜底再声明一次"要颜色"，24-bit。有它就不怕上游再塞进别的禁色变量。
 		"FORCE_COLOR=3",
 	)

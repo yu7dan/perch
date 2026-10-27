@@ -132,12 +132,12 @@
         display:flex;align-items:center;gap:5px;
         height:26px;padding:0 10px;border-radius:13px;
         font:11.5px/1 var(--sans);color:var(--fg);
-        background:var(--popover,#26262c);border:1px solid var(--divider-line-strong);
-        box-shadow:0 4px 14px rgba(0,0,0,.45);cursor:pointer;
+        background:var(--popover,var(--s-pop));border:1px solid var(--divider-line-strong);
+        box-shadow:0 4px 14px rgb(var(--shade) / calc(.45 * var(--shade-k)));cursor:pointer;
         opacity:0;pointer-events:none;transform:translate(-50%,6px);
         transition:opacity 150ms ease,transform 150ms ease}
 #h-jump.on{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
-#h-jump:hover{background:var(--hover,#33333a)}
+#h-jump:hover{background:var(--hover,var(--b-1))}
 @media (prefers-reduced-motion: reduce){ #h-jump{transition:none} }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -259,6 +259,6 @@
    因为两者说的是同一件事（"有个东西没到位，但功能还在"）。 */
 #s-grid.warn{color:var(--red)}
 .meter{display:flex;align-items:center;gap:6px;font:11px/1 var(--mono);color:var(--faint)}
-.meter .bar{width:64px;height:4px;border-radius:999px;background:#2f2f35;overflow:hidden}
+.meter .bar{width:64px;height:4px;border-radius:999px;background:var(--s-3);overflow:hidden}
 .meter .bar i{display:block;height:100%;background:var(--muted);width:0}
 

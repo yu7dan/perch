@@ -178,7 +178,7 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		s.fsReadReq(m)
 
 	// 页面级事实、快照补发、系统打开地址
-	case "log", "acts.snapshot", "files.snapshot", "trace.diff", "open.url":
+	case "log", "term.theme", "acts.snapshot", "files.snapshot", "trace.diff", "open.url":
 		s.handleMisc(m)
 
 	// 网关（magpie）

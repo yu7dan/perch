@@ -5,27 +5,27 @@
    键盘：Esc = 取消，Enter = 当前聚焦的按钮（见 85-settings.js）。
    =========================================================================== */
 #confirm{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;
-         background:rgba(0,0,0,.52);animation:cfFade .14s ease-out}
+         background:rgb(var(--shade) / calc(.52 * var(--shade-k)));animation:cfFade .14s ease-out}
 #confirm[hidden]{display:none}
-.cf-card{width:min(430px,calc(100vw - 48px));border:1px solid rgba(255,255,255,.12);
-         border-radius:12px;background:#1a1a1d;padding:20px 20px 16px;
-         box-shadow:0 18px 60px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.4);
+.cf-card{width:min(430px,calc(100vw - 48px));border:1px solid rgb(var(--fx) / .12);
+         border-radius:12px;background:var(--s-2);padding:20px 20px 16px;
+         box-shadow:0 18px 60px rgb(var(--shade) / calc(.55 * var(--shade-k))),0 2px 8px rgb(var(--shade) / calc(.4 * var(--shade-k)));
          animation:cfIn .16s cubic-bezier(.2,.8,.2,1)}
 .cf-head{display:flex;gap:12px;align-items:flex-start}
 .cf-ico{flex:none;display:grid;place-items:center;width:30px;height:30px;border-radius:8px;
-        background:rgba(255,255,255,.07);color:var(--fg2)}
-.cf-ico.warn{background:rgba(255,101,104,.13);color:var(--red)}
+        background:rgb(var(--fx) / .07);color:var(--fg2)}
+.cf-ico.warn{background:rgb(var(--red-rgb) / .13);color:var(--red)}
 .cf-id{min-width:0}
 .cf-id b{display:block;font-size:13.5px;line-height:1.4;font-weight:600;color:var(--fg)}
 .cf-id p{margin:6px 0 0;font-size:12px;line-height:1.75;color:var(--muted);white-space:pre-line}
 .cf-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
 .cf-btn{height:30px;padding:0 14px;border:1px solid var(--line);border-radius:7px;
-        background:rgba(255,255,255,.04);font-size:12px;color:var(--fg2)}
-.cf-btn:hover{background:rgba(255,255,255,.09);color:var(--fg)}
+        background:rgb(var(--fx) / .04);font-size:12px;color:var(--fg2)}
+.cf-btn:hover{background:rgb(var(--fx) / .09);color:var(--fg)}
 .cf-btn.cf-ok{background:var(--accent);border-color:transparent;color:#fff}
 .cf-btn.cf-ok:hover{filter:brightness(1.12)}
 .cf-btn.cf-ok.danger{background:#b91c1c}
-.cf-btn:focus-visible{outline:2px solid rgba(255,255,255,.5);outline-offset:2px}
+.cf-btn:focus-visible{outline:2px solid rgb(var(--fx) / .5);outline-offset:2px}
 @keyframes cfFade{from{opacity:0}}
 @keyframes cfIn{from{opacity:0;transform:translateY(4px) scale(.985)}}
 @media (prefers-reduced-motion:reduce){#confirm,.cf-card{animation:none}}
@@ -44,12 +44,12 @@
 /* 「需要你」浮层。fixed 定位，落点由 80-live 的 placeNeedPop 量铃铛算出来。 */
 #need-pop{position:fixed;z-index:80;width:min(340px,calc(100vw - 16px));
   max-height:min(60vh,480px);display:flex;flex-direction:column;
-  background:#232329;border:1px solid #33333c;border-radius:10px;
-  box-shadow:0 12px 32px rgba(0,0,0,.5);overflow:hidden;
+  background:var(--s-pop);border:1px solid var(--b-1);border-radius:10px;
+  box-shadow:0 12px 32px rgb(var(--shade) / calc(.5 * var(--shade-k)));overflow:hidden;
   animation:npIn .14s cubic-bezier(.16,1,.3,1)}
 #need-pop[hidden]{display:none}
 #need-pop .np-head{display:flex;align-items:center;gap:8px;padding:9px 10px 7px;
-  border-bottom:1px solid #2c2c34}
+  border-bottom:1px solid var(--s-3)}
 #need-pop .np-title{font-size:12px;font-weight:600}
 #need-pop .np-x{width:20px;height:20px;flex:none}
 #need-pop .np-body{overflow:auto;padding:6px 8px 8px}
@@ -69,14 +69,14 @@
 /* .icon-btn 的 display:grid 会盖掉 UA 的 [hidden]，显式补一条（同 30-workspace）。 */
 #files-bar .icon-btn[hidden]{display:none}
 #files-bar .icon-btn:hover{color:var(--fg)}
-#files-bar .icon-btn.na{color:#4a4a52;cursor:default}
-#files-bar .icon-btn.na:hover{color:#4a4a52}
+#files-bar .icon-btn.na{color:var(--b-3);cursor:default}
+#files-bar .icon-btn.na:hover{color:var(--b-3)}
 .fsegs{display:flex;align-items:center;gap:2px;flex:none}
 .fseg{height:22px;padding:0 9px;border:0;border-radius:5px;background:transparent;
   color:var(--muted);font-size:11px;cursor:pointer;
   transition:background-color 120ms ease,color 120ms ease}
 .fseg:hover{color:var(--fg2)}
-.fseg.on{background:rgba(255,255,255,.09);color:var(--fg)}
+.fseg.on{background:rgb(var(--fx) / .09);color:var(--fg)}
 .fsp{flex:1;min-width:0}
 .files-cnt{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap;font:9.5px/1 var(--mono);color:var(--faint);padding:0 4px}
@@ -89,9 +89,9 @@
 #files-rootrow{padding:4px 8px;border-bottom:1px solid var(--line-soft);
   box-sizing:border-box}
 #files-root{width:100%;box-sizing:border-box;height:22px;padding:0 5px;
-  border:1px solid #3a3a44;border-radius:5px;background:#242429;color:var(--fg2);
+  border:1px solid var(--b-2);border-radius:5px;background:var(--s-pop);color:var(--fg2);
   font:10.5px/1.4 var(--mono)}
-#files-root:focus{outline:none;border-color:#5a5a68}
+#files-root:focus{outline:none;border-color:var(--t-4)}
 #files-tree{font-size:12px;padding:4px 0 8px}
 /* 行高 24px、圆角 5px、hover 120ms —— 和左栏同一套手感。 */
 .frow{display:flex;align-items:center;gap:6px;width:100%;box-sizing:border-box;
@@ -129,9 +129,9 @@
 .fop.A{color:var(--green)} .fop.M{color:var(--ask-text)} .fop.R{color:var(--faint)}
 .fbad-slot{flex:none;width:18px;display:flex;justify-content:flex-end}
 .fbad{flex:none;padding:0 3px;border-radius:3px;font:9px/1.5 var(--ui)}
-.fbad.rej{color:var(--red);background:rgba(255,101,104,.12)}
-.fbad.fail{color:var(--ask-text);background:rgba(249,115,22,.12)}
-.fbad.miss{color:var(--amber);background:rgba(234,179,8,.12)}
+.fbad.rej{color:var(--red);background:rgb(var(--red-rgb) / .12)}
+.fbad.fail{color:var(--ask-text);background:rgb(var(--ask-rgb) / .12)}
+.fbad.miss{color:var(--amber);background:rgb(var(--amber-rgb) / .12)}
 /* ⚠️ 不能叫 .fd —— 流水条目 `.vrow.fd` 已经用了这个名字（30-workspace.css 上面那段
    13px/minmax/auto 的 grid）。同名规则后写的那条会把流水整行压成 52px，
    文字变成一列一个字。这是 2026-10-20 真机验出来的。 */
@@ -151,16 +151,16 @@
 
 /* —— 只读预览 —— */
 #fview{position:fixed;inset:0;z-index:90;display:grid;place-items:center;
-  background:rgba(0,0,0,.58);padding:28px;animation:cfFade .14s ease-out}
+  background:rgb(var(--shade) / calc(.58 * var(--shade-k)));padding:28px;animation:cfFade .14s ease-out}
 #fview[hidden]{display:none}
 .fv-card{width:min(980px,calc(100vw - 56px));height:min(760px,calc(100vh - 56px));
-  display:flex;flex-direction:column;background:#141416;
-  border:1px solid rgba(255,255,255,.12);border-radius:12px;
-  box-shadow:0 24px 70px rgba(0,0,0,.6);overflow:hidden}
+  display:flex;flex-direction:column;background:var(--s-1);
+  border:1px solid rgb(var(--fx) / .12);border-radius:12px;
+  box-shadow:0 24px 70px rgb(var(--shade) / calc(.6 * var(--shade-k)));overflow:hidden}
 .fv-head{display:flex;align-items:center;gap:10px;padding:11px 12px;
   border-bottom:1px solid var(--line-soft)}
 .fv-ico{flex:none;display:grid;place-items:center;width:26px;height:26px;
-  border-radius:7px;background:rgba(255,255,255,.06);color:var(--muted)}
+  border-radius:7px;background:rgb(var(--fx) / .06);color:var(--muted)}
 .fv-id{min-width:0;flex:1}
 .fv-id b{display:block;font-size:12.5px;font-weight:600;color:var(--fg);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -169,61 +169,61 @@
 .fv-meta{flex:none;font:10.5px/1.4 var(--mono);color:var(--muted)}
 .fv-x{flex:none;width:24px;height:24px;display:grid;place-items:center;border:0;
   border-radius:5px;background:transparent;color:var(--faint);cursor:pointer}
-.fv-x:hover{background:#2b2b32;color:var(--fg)}
+.fv-x:hover{background:var(--s-3);color:var(--fg)}
 .fv-note{padding:7px 12px;font-size:11px;line-height:1.55;color:var(--ask-text);
-  background:rgba(249,115,22,.08);border-bottom:1px solid rgba(249,115,22,.16)}
+  background:rgb(var(--ask-rgb) / .08);border-bottom:1px solid rgb(var(--ask-rgb) / .16)}
 .fv-note[hidden]{display:none}
-.fv-note.warn{color:#fcd34d;background:rgba(251,191,36,.07);
-  border-bottom-color:rgba(251,191,36,.16)}
+.fv-note.warn{color:var(--amber-text);background:rgb(var(--amber-rgb) / .07);
+  border-bottom-color:rgb(var(--amber-rgb) / .16)}
 /* 改动 / 文件 两个页签：和文件模块的 fseg 同一套手感（同一个产品里同类控件
    不该长两副样子），只是字号大一号、贴在预览头下面。 */
 .fv-tabs{display:flex;align-items:center;gap:4px;height:32px;padding:0 12px;
-  border-bottom:1px solid var(--line-soft);background:#141416;flex:none}
+  border-bottom:1px solid var(--line-soft);background:var(--s-1);flex:none}
 .fv-tabs[hidden]{display:none}
 .fv-tab{height:22px;padding:0 9px;border:0;border-radius:5px;background:transparent;
   color:var(--muted);font:11.5px/1 var(--sans);cursor:pointer}
-.fv-tab:hover{background:rgba(255,255,255,.06);color:var(--fg2)}
-.fv-tab.on{background:rgba(255,255,255,.1);color:var(--fg)}
-.fv-tab:focus-visible{outline:2px solid rgba(255,255,255,.5);outline-offset:1px}
+.fv-tab:hover{background:rgb(var(--fx) / .06);color:var(--fg2)}
+.fv-tab.on{background:rgb(var(--fx) / .1);color:var(--fg)}
+.fv-tab:focus-visible{outline:2px solid rgb(var(--fx) / .5);outline-offset:1px}
 .fv-sum{font:10.5px/1 var(--mono);color:var(--muted);white-space:nowrap;
   font-variant-numeric:tabular-nums}
 .fv-sum .fv-nchg{color:var(--faint);margin-left:7px}
 .fv-body{flex:1;overflow:auto;padding:0 0 14px;font:12px/1.55 var(--mono);
-  tab-size:2;background:#141416}
+  tab-size:2;background:var(--s-1)}
 .fv-body .fl{display:flex;min-width:max-content}
-.fv-body .fl:hover{background:rgba(255,255,255,.035)}
+.fv-body .fl:hover{background:rgb(var(--fx) / .035)}
 .fv-body .ln{flex:none;width:52px;padding-right:12px;text-align:right;
-  color:#4b4b55;user-select:none;position:sticky;left:0;background:#141416}
+  color:var(--b-3);user-select:none;position:sticky;left:0;background:var(--s-1)}
 .fv-body .lc{white-space:pre;padding-right:18px;color:var(--fg2)}
 /* 改动页：两列行号 + 前缀 + 正文。行号不粘（diff 里横向滚动时让它跟着走，
    比两条 sticky 背景在 add/del 行上对不齐好）。 */
 .fv-body .df{display:flex;min-width:max-content}
 .fv-body .df .dln{flex:none;width:42px;padding-right:8px;text-align:right;
-  color:#4b4b55;user-select:none}
-.fv-body .df .dsig{flex:none;width:16px;text-align:center;color:#6b6b76;user-select:none}
+  color:var(--b-3);user-select:none}
+.fv-body .df .dsig{flex:none;width:16px;text-align:center;color:var(--t-4);user-select:none}
 .fv-body .df .dc{white-space:pre;padding-right:18px;color:var(--fg2)}
-.fv-body .df.add{background:rgba(46,160,67,.13)}
-.fv-body .df.del{background:rgba(248,81,73,.12)}
-.fv-body .df.add .dc{color:#b7f7c0}
-.fv-body .df.del .dc{color:#ffb4ad}
-.fv-body .df.add .dln,.fv-body .df.del .dln{color:#7d7d88}
+.fv-body .df.add{background:rgb(var(--green-rgb) / .13)}
+.fv-body .df.del{background:rgb(var(--red-rgb) / .12)}
+.fv-body .df.add .dc{color:var(--green-text)}
+.fv-body .df.del .dc{color:var(--red-text)}
+.fv-body .df.add .dln,.fv-body .df.del .dln{color:var(--t-3)}
 .fv-body .df.meta .dc{color:var(--faint);font-style:italic}
 .fv-body .dfh{min-width:max-content;padding:4px 16px;margin-top:4px;
-  color:#8b8b98;background:rgba(255,255,255,.035);font:11.5px/1.55 var(--mono)}
+  color:var(--t-3);background:rgb(var(--fx) / .035);font:11.5px/1.55 var(--mono)}
 .fv-body .dfchg + .dfchg{margin-top:0;border-top:1px solid var(--line-soft)}
 /* Write/时间这条是**贴顶的满宽条**：向上滚时始终压在 .fv-body 顶边，
    不在 padding/段间距里露一条缝。滚动容器顶部不留 padding，间距交给
    段落自身；下一段开始时，它的头会把上一段的头顶走。 */
 .fv-body .dfhead{display:flex;align-items:center;gap:8px;padding:7px 14px 6px;
   font:11px/1.4 var(--ui);color:var(--muted);position:sticky;top:0;
-  background:#141416;z-index:2;box-shadow:0 1px 0 var(--line-soft)}
+  background:var(--s-1);z-index:2;box-shadow:0 1px 0 var(--line-soft)}
 .fv-body .dftool{font-weight:600;color:var(--fg2)}
 .fv-body .dfwhen{color:var(--faint);font-family:var(--mono)}
 .fv-body .dfsp{flex:1;min-width:8px}
 .fv-body .dfsum{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .fv-body .dfbad{padding:1px 5px;border-radius:4px;color:var(--red);
-  background:rgba(255,101,104,.1);font-size:10px}
-.fv-body .dfbad.fail{color:var(--ask-text);background:rgba(249,115,22,.1)}
+  background:rgb(var(--red-rgb) / .1);font-size:10px}
+.fv-body .dfbad.fail{color:var(--ask-text);background:rgb(var(--ask-rgb) / .1)}
 .fv-body .dfsec{padding:4px 16px;color:var(--faint);font:10.5px/1.5 var(--ui)}
 .fv-body .dfnote{padding:6px 16px 9px;color:var(--ask-text);font:11px/1.55 var(--ui);
   white-space:pre-wrap;word-break:break-word}
@@ -234,25 +234,25 @@
 .fv-foot{display:flex;align-items:center;gap:8px;padding:9px 12px;
   border-top:1px solid var(--line-soft)}
 .fv-foot button{height:26px;padding:0 10px;border:1px solid var(--line);
-  border-radius:6px;background:rgba(255,255,255,.04);color:var(--fg2);
+  border-radius:6px;background:rgb(var(--fx) / .04);color:var(--fg2);
   font-size:11.5px;cursor:pointer}
-.fv-foot button:hover{background:rgba(255,255,255,.09);color:var(--fg)}
-.fv-foot button:focus-visible{outline:2px solid rgba(255,255,255,.5);outline-offset:2px}
+.fv-foot button:hover{background:rgb(var(--fx) / .09);color:var(--fg)}
+.fv-foot button:focus-visible{outline:2px solid rgb(var(--fx) / .5);outline-offset:2px}
 
 /* —— 添加项目 —— */
 #add-project{position:fixed;inset:0;z-index:120;display:grid;place-items:center;
-  background:rgba(0,0,0,.58);padding:24px;animation:cfFade .14s ease-out}
+  background:rgb(var(--shade) / calc(.58 * var(--shade-k)));padding:24px;animation:cfFade .14s ease-out}
 #add-project[hidden]{display:none}
 .ap-card{width:min(560px,calc(100vw - 48px));max-height:calc(100vh - 48px);
-  display:flex;flex-direction:column;background:#1a1a1d;
-  border:1px solid rgba(255,255,255,.12);border-radius:14px;
-  box-shadow:0 22px 70px rgba(0,0,0,.6),0 2px 8px rgba(0,0,0,.4);
+  display:flex;flex-direction:column;background:var(--s-2);
+  border:1px solid rgb(var(--fx) / .12);border-radius:14px;
+  box-shadow:0 22px 70px rgb(var(--shade) / calc(.6 * var(--shade-k))),0 2px 8px rgb(var(--shade) / calc(.4 * var(--shade-k)));
   animation:cfIn .16s cubic-bezier(.2,.8,.2,1);overflow:hidden}
 .ap-head{display:flex;align-items:center;padding:15px 18px 10px}
 .ap-title{flex:1;font-size:13.5px;font-weight:600;color:var(--fg)}
 .ap-x{width:24px;height:24px;display:grid;place-items:center;border:0;border-radius:5px;
   background:transparent;color:var(--faint);cursor:pointer}
-.ap-x:hover{background:#2b2b32;color:var(--fg)}
+.ap-x:hover{background:var(--s-3);color:var(--fg)}
 .ap-body{padding:0 18px 6px;overflow:auto;min-height:0}
 .ap-step[hidden]{display:none}
 .ap-lead{margin:0 0 4px;color:var(--muted);font-size:12px;line-height:1.65}
@@ -263,10 +263,10 @@
   transition:border-color .14s,background .14s}
 .ap-action.primary{border-color:color-mix(in srgb,var(--accent) 52%,var(--line));
   background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 10%,var(--card)),var(--card) 70%)}
-.ap-action:hover{border-color:var(--fg2);background:rgba(255,255,255,.035)}
+.ap-action:hover{border-color:var(--fg2);background:rgb(var(--fx) / .035)}
 .ap-action:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .ap-ico{width:31px;height:31px;flex:none;display:grid;place-items:center;border-radius:9px;
-  border:1px solid var(--line);background:rgba(255,255,255,.035);color:var(--fg2)}
+  border:1px solid var(--line);background:rgb(var(--fx) / .035);color:var(--fg2)}
 .ap-action.primary .ap-ico{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 35%,var(--line))}
 .ap-tx{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
 .ap-tx b{font-size:12px;font-weight:600;color:var(--fg);line-height:1.4}
@@ -279,14 +279,14 @@
   letter-spacing:.06em;text-transform:uppercase}
 .ap-row{display:flex;align-items:flex-start;gap:8px;min-width:0}
 .ap-pathbox{flex:1;min-width:0;box-sizing:border-box;padding:8px 10px;
-  border:1px solid #3a3a44;border-radius:7px;background:#242429;color:var(--fg2);
+  border:1px solid var(--b-2);border-radius:7px;background:var(--s-pop);color:var(--fg2);
   font:11.5px/1.5 var(--mono);overflow-wrap:anywhere;word-break:break-word}
-.ap-change{flex:none;height:30px;padding:0 10px;border:1px solid #3a3a44;border-radius:6px;
+.ap-change{flex:none;height:30px;padding:0 10px;border:1px solid var(--b-2);border-radius:6px;
   background:transparent;color:var(--muted);font-size:11px;cursor:pointer}
-.ap-change:hover{color:var(--fg);border-color:#4a4a56}
+.ap-change:hover{color:var(--fg);border-color:var(--b-3)}
 .ap-change:focus-visible,.ap-input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .ap-input{width:100%;box-sizing:border-box;height:34px;padding:0 10px;
-  border:1px solid #3a3a44;border-radius:7px;background:#242429;color:var(--fg);
+  border:1px solid var(--b-2);border-radius:7px;background:var(--s-pop);color:var(--fg);
   font-size:12px}
 .ap-preview{margin-top:7px;min-height:16px;color:var(--faint);
   font:10.5px/1.5 var(--mono);overflow-wrap:anywhere}
@@ -297,34 +297,34 @@
   border-top:1px solid var(--line-soft)}
 .ap-sp{flex:1}
 .ap-foot button{height:30px;padding:0 13px;border:1px solid var(--line);border-radius:7px;
-  background:rgba(255,255,255,.04);color:var(--fg2);font-size:12px;cursor:pointer}
-.ap-foot button:hover{background:rgba(255,255,255,.09);color:var(--fg)}
+  background:rgb(var(--fx) / .04);color:var(--fg2);font-size:12px;cursor:pointer}
+.ap-foot button:hover{background:rgb(var(--fx) / .09);color:var(--fg)}
 .ap-foot button.primary{background:var(--accent);border-color:transparent;color:#fff;
   font-weight:600}
 .ap-foot button.primary:hover{filter:brightness(1.12)}
-.ap-foot button.primary.na{background:rgba(255,255,255,.05);border-color:var(--line);
+.ap-foot button.primary.na{background:rgb(var(--fx) / .05);border-color:var(--line);
   color:var(--faint);filter:none}
 .ap-foot button[hidden]{display:none}
 .ap-use-existing{margin-right:auto;border-color:transparent!important;
   background:transparent!important;color:var(--accent)!important;padding-left:0!important}
 .ap-use-existing:hover{text-decoration:underline}
-.ap-foot button:focus-visible{outline:2px solid rgba(255,255,255,.5);outline-offset:2px}
+.ap-foot button:focus-visible{outline:2px solid rgb(var(--fx) / .5);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){#add-project,.ap-card{animation:none}}
 
 /* —— 新建 Agent —— */
 #newagent{position:fixed;inset:0;z-index:95;display:grid;place-items:center;
-  background:rgba(0,0,0,.52);padding:24px;animation:cfFade .14s ease-out}
+  background:rgb(var(--shade) / calc(.52 * var(--shade-k)));padding:24px;animation:cfFade .14s ease-out}
 #newagent[hidden]{display:none}
 .na-card{width:min(520px,calc(100vw - 48px));max-height:calc(100vh - 48px);
-  display:flex;flex-direction:column;background:#1a1a1d;
-  border:1px solid rgba(255,255,255,.12);border-radius:12px;
-  box-shadow:0 18px 60px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.4);
+  display:flex;flex-direction:column;background:var(--s-2);
+  border:1px solid rgb(var(--fx) / .12);border-radius:12px;
+  box-shadow:0 18px 60px rgb(var(--shade) / calc(.55 * var(--shade-k))),0 2px 8px rgb(var(--shade) / calc(.4 * var(--shade-k)));
   animation:cfIn .16s cubic-bezier(.2,.8,.2,1);overflow:hidden}
 .na-head{display:flex;align-items:center;padding:14px 16px 10px}
 .na-title{flex:1;font-size:13.5px;font-weight:600}
 .na-x{width:24px;height:24px;display:grid;place-items:center;border:0;border-radius:5px;
   background:transparent;color:var(--faint);cursor:pointer}
-.na-x:hover{background:#2b2b32;color:var(--fg)}
+.na-x:hover{background:var(--s-3);color:var(--fg)}
 .na-body{padding:0 16px 4px;overflow:auto;min-height:0}
 .na-lead{margin:0 0 10px;color:var(--muted);font-size:11.5px;line-height:1.55}
 .na-labrow{display:flex;align-items:center;justify-content:space-between;gap:10px;
@@ -336,9 +336,9 @@
 .na-addproj:hover{text-decoration:underline}
 .na-addproj:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .na-proj{display:flex;align-items:center;gap:9px;width:100%;box-sizing:border-box;
-  min-height:40px;padding:7px 9px;border:1px solid #3a3a44;border-radius:8px;
-  background:#242429;color:var(--fg);text-align:left;cursor:pointer}
-.na-proj:hover{border-color:#4a4a56}
+  min-height:40px;padding:7px 9px;border:1px solid var(--b-2);border-radius:8px;
+  background:var(--s-pop);color:var(--fg);text-align:left;cursor:pointer}
+.na-proj:hover{border-color:var(--b-3)}
 .na-proj:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .na-projico{flex:none;width:18px;height:18px;display:grid;place-items:center;color:var(--muted)}
 .na-projwho{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
@@ -347,11 +347,11 @@
 .na-projpath{font:10px/1.3 var(--mono);color:var(--faint);min-width:0}
 .na-chev{flex:none;color:var(--faint);display:grid;place-items:center}
 .na-agents{display:flex;flex-direction:column;gap:1px;max-height:240px;overflow:auto;
-  padding:3px;border:1px solid #2f2f37;border-radius:7px;background:#1f1f24}
+  padding:3px;border:1px solid var(--s-3);border-radius:7px;background:var(--s-2)}
 .na-agent{display:flex;align-items:center;gap:8px;width:100%;padding:6px;
   border:0;border-radius:5px;background:transparent;color:var(--fg);
   text-align:left;cursor:pointer}
-.na-agent:hover{background:#2b2b32}
+.na-agent:hover{background:var(--s-3)}
 .na-agent.on{background:color-mix(in srgb,var(--accent) 15%,transparent)}
 .na-agent:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
 .na-agico{flex:none;width:16px;height:16px;display:grid;place-items:center}
@@ -362,7 +362,7 @@
 .na-agent.on .na-agnm{color:var(--fg)}
 .na-agsub{font:10px/1.3 var(--mono);color:var(--faint);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.na-agpill{flex:none;padding:0 5px;border:1px solid #3d5a44;border-radius:999px;
+.na-agpill{flex:none;padding:0 5px;border:1px solid rgb(var(--green-rgb) / .35);border-radius:999px;
   color:var(--green);font:9px/1.5 var(--mono)}
 .na-agck{flex:none;width:13px;color:transparent}
 .na-agent.on .na-agck{color:var(--accent)}
@@ -371,7 +371,7 @@
   border-radius:6px;background:transparent;color:var(--muted);font-size:10.5px;cursor:pointer}
 .na-agempty button:hover{border-color:var(--accent);color:var(--fg)}
 .na-target{margin:10px 0 0;padding:8px 10px;border:1px solid var(--line-soft);
-  border-radius:7px;background:rgba(255,255,255,.018);color:var(--muted);
+  border-radius:7px;background:rgb(var(--fx) / .018);color:var(--muted);
   font:10.5px/1.5 var(--mono);overflow-wrap:anywhere}
 .na-target .k{color:var(--faint)}
 .na-note{margin:8px 0 2px;min-height:24px;font-size:11px;line-height:1.6;color:var(--faint);
@@ -380,21 +380,21 @@
 .na-foot{display:flex;justify-content:flex-end;gap:8px;padding:10px 16px 14px;
   border-top:1px solid var(--line-soft)}
 .na-foot button{height:30px;padding:0 14px;border:1px solid var(--line);border-radius:7px;
-  background:rgba(255,255,255,.04);color:var(--fg2);font-size:12px;cursor:pointer}
-.na-foot button:hover{background:rgba(255,255,255,.09);color:var(--fg)}
+  background:rgb(var(--fx) / .04);color:var(--fg2);font-size:12px;cursor:pointer}
+.na-foot button:hover{background:rgb(var(--fx) / .09);color:var(--fg)}
 .na-foot button.primary{background:var(--accent);border-color:transparent;color:#fff;
   font-weight:600}
 .na-foot button.primary:hover{filter:brightness(1.12)}
-.na-foot button.primary.na{background:rgba(255,255,255,.05);border-color:var(--line);
+.na-foot button.primary.na{background:rgb(var(--fx) / .05);border-color:var(--line);
   color:var(--faint);filter:none}
-.na-foot button:focus-visible{outline:2px solid rgba(255,255,255,.5);outline-offset:2px}
+.na-foot button:focus-visible{outline:2px solid rgb(var(--fx) / .5);outline-offset:2px}
 
 /* 项目搜索层：挂在 body 上，避免被对话框的 overflow 裁掉。 */
 .na-pop{position:fixed;z-index:140;display:flex;flex-direction:column;
   min-width:320px;max-width:min(560px,calc(100vw - 16px));
-  max-height:min(420px,calc(100vh - 24px));background:#1f1f24;
-  border:1px solid rgba(255,255,255,.14);border-radius:10px;
-  box-shadow:0 18px 50px rgba(0,0,0,.55);overflow:hidden}
+  max-height:min(420px,calc(100vh - 24px));background:var(--s-2);
+  border:1px solid rgb(var(--fx) / .14);border-radius:10px;
+  box-shadow:0 18px 50px rgb(var(--shade) / calc(.55 * var(--shade-k)));overflow:hidden}
 .na-pop[hidden]{display:none}
 .na-pop-search{display:flex;align-items:center;gap:8px;flex:none;padding:9px 11px;
   border-bottom:1px solid var(--line-soft);color:var(--faint)}
@@ -405,7 +405,7 @@
 .na-opt{display:flex;align-items:center;gap:9px;width:100%;box-sizing:border-box;
   padding:7px 8px;border:0;border-radius:6px;background:transparent;color:var(--fg);
   text-align:left;cursor:pointer}
-.na-opt:hover,.na-opt.active{background:#2b2b32}
+.na-opt:hover,.na-opt.active{background:var(--s-3)}
 .na-opt.on{background:color-mix(in srgb,var(--accent) 14%,transparent)}
 .na-opt .ico{flex:none;width:17px;height:17px;display:grid;place-items:center;color:var(--muted)}
 .na-opt .who{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
@@ -421,7 +421,7 @@
 .na-empty{padding:12px 10px;color:var(--faint);font-size:11px;line-height:1.55}
 .na-pop-foot{flex:none;padding:9px 11px;border-top:1px solid var(--line-soft);
   color:var(--accent);font-size:11.5px;cursor:pointer}
-.na-pop-foot:hover{background:rgba(255,255,255,.035)}
+.na-pop-foot:hover{background:rgb(var(--fx) / .035)}
 .na-pop-foot:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 
 /* 添加项目成功后的短暂定位高亮；拖放悬停时同一块区域给出落点提示。 */

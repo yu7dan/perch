@@ -21,9 +21,9 @@
 .gw-actions.right{margin-left:auto}
 .gw-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:22px;
         padding:0 8px;border:1px solid var(--line);border-radius:var(--r-sm);
-        background:rgba(255,255,255,.03);color:var(--fg2);font-size:11px;cursor:pointer;
+        background:rgb(var(--fx) / .03);color:var(--fg2);font-size:11px;cursor:pointer;
         white-space:nowrap;transition:background .12s,border-color .12s,color .12s}
-.gw-btn:hover{border-color:var(--faint);color:var(--fg);background:rgba(255,255,255,.07)}
+.gw-btn:hover{border-color:var(--faint);color:var(--fg);background:rgb(var(--fx) / .07)}
 .gw-btn.primary{background:var(--accent);border-color:transparent;color:#fff}
 .gw-btn.primary:hover{background:#1d5cf0;color:#fff}
 .gw-btn:disabled{opacity:.4;cursor:default}

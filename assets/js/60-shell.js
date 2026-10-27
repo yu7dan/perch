@@ -110,6 +110,8 @@ const LIST_ICON = {
 };
 const NAV_ICON = {
   folder: LUCIDE_FOLDER,
+  // Lucide bot 原始 path：Bot Group 模式下「工作区」那一项换成它。
+  bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
   chat: LUCIDE_SQUARE_TERMINAL,
   // Lucide 的 layout-dashboard 原始 path（抄现成的，不手画）：
   // 四块面板，正好是"总览 = 多块读数拼成一页"的字形。
@@ -158,9 +160,12 @@ function renderNav() {
     const cls = "nav" + (n.view === NAV_HERE ? " on" : "") + (n.soon ? " soon" : "");
     const extra = n.soon ? ` data-soon="1" title="${esc(t(n.whyKey || ""))}"` : "";
     const cnt = n.cnt ? `<span class="cnt" id="${n.cnt}">0</span>` : "";
-    const label = t(n.labelKey);
+    // 「工作区」这一项是工作视图的入口：Bot Group 模式下它就叫 Bot Group。
+    const bg = n.view === "workspace" && SETTINGS.topMode === "botgroup";
+    const label = bg ? t("chrome.mode.botgroup") : t(n.labelKey);
+    const icon = bg ? "bot" : n.icon;
     return `<div class="${cls}" data-nav="${esc(n.view || "")}" data-view="${esc(n.view || "")}"${extra}>`
-      + svg(NAV_ICON[n.icon], 15, 1.7) + `<span>${esc(label)}</span>${cnt}</div>`;
+      + svg(NAV_ICON[icon], 15, 1.7) + `<span>${esc(label)}</span>${cnt}</div>`;
   };
   rail.innerHTML =
     NAV_ITEMS.filter((n) => !n.bottom).map(one).join("") +
@@ -169,21 +174,22 @@ function renderNav() {
   syncCounts();
 }
 
-/* 顶层模式 = 一个触发器 + 下拉（形态照 Codex 桌面端的 Chat/Codex 切换）。
-   Beta.3 只有 Workspaces 真的可用；Chat 在菜单里灰着，点它会用右侧提示卡
-   说明 1.0 才到。真正的 Clean 不是这里，它是之后加在终端面板上的皮套。 */
+/* 顶层模式 = 一个触发器 + 下拉（形态照 Codex 桌面端的模式切换）。
+   两项：Workspaces（项目 + agent + 终端）/ Bot Group（一个目标下的 Bot 团队）。
+   Chat 已从产品里移除（2026-10-28 用户定的）。Bot Group 和 Workspace 不是同一个
+   东西：它盖住列表、主区和右栏，画自己的三栏（见 91-botgroup.js）。 */
+const LUCIDE_BOT = NAV_ICON.bot;
 const MODE_ITEMS = [
   { mode: "workspaces", icon: LUCIDE_FOLDER, titleKey: "chrome.mode.workspaces",
-    descKey: "chrome.mode.workspacesSub", soon: false },
-  { mode: "chat", icon: LUCIDE_MESSAGE_SQUARE, titleKey: "chrome.mode.chat",
-    descKey: "chrome.mode.chatSoon", soon: true },
+    descKey: "chrome.mode.workspacesSub" },
+  { mode: "botgroup", icon: LUCIDE_BOT, titleKey: "chrome.mode.botgroup",
+    descKey: "chrome.mode.botgroupSub" },
 ];
 function modeCurrent() {
-  // Beta.3 不真正切到 Chat；旧缓存/手改配置写着 chat 也只显示 Workspaces。
-  return "workspaces";
+  return SETTINGS.topMode === "botgroup" ? "botgroup" : "workspaces";
 }
 function modeLabel(mode) {
-  return t(mode === "chat" ? "chrome.mode.chat" : "chrome.mode.workspaces");
+  return t(mode === "botgroup" ? "chrome.mode.botgroup" : "chrome.mode.workspaces");
 }
 function renderModeMenu() {
   const pop = $("mode-pop");
@@ -191,27 +197,35 @@ function renderModeMenu() {
   const cur = modeCurrent();
   pop.innerHTML = MODE_ITEMS.map((it) => {
     const on = it.mode === cur;
-    return `<button type="button" class="mi${on ? " on" : ""}${it.soon ? " soon" : ""}" `
-      + `data-topmode="${it.mode}" role="menuitemradio" aria-checked="${on}" `
-      + `${it.soon ? 'aria-disabled="true" ' : ""}tabindex="-1">`
+    return `<button type="button" class="mi${on ? " on" : ""}" `
+      + `data-topmode="${it.mode}" role="menuitemradio" aria-checked="${on}" tabindex="-1">`
       + `<span class="mi-ico">${lucide(it.icon, 14)}</span>`
-      + `<span class="mi-main"><span class="mi-title"><b>${esc(t(it.titleKey))}</b>`
-      + `${it.soon ? '<span class="mi-tag">1.0</span>' : ""}</span>`
+      + `<span class="mi-main"><span class="mi-title"><b>${esc(t(it.titleKey))}</b></span>`
       + `<span class="mi-sub">${esc(t(it.descKey))}</span></span>`
       + `<span class="mi-ck">${on ? "✓" : ""}</span></button>`;
   }).join("");
+}
+/* 模式落到 DOM 上只有一个类：#app.botgroup。总览/设置盖在它上面（CSS 里
+   用 :not(.dash):not(.settings) 让位），所以切模式不用碰导航状态。 */
+function applyTopMode() {
+  const on = modeCurrent() === "botgroup";
+  $("app").classList.toggle("botgroup", on);
+  document.body.classList.toggle("botgroup", on);
+  if (on && typeof renderBotGroup === "function") renderBotGroup("切到 Bot Group");
 }
 function renderTopMode() {
   const trigger = $("top-mode");
   if (!trigger) return;
   const mode = modeCurrent();
   const ico = $("top-mode-ico");
-  if (ico) ico.innerHTML = lucide(mode === "chat" ? LUCIDE_MESSAGE_SQUARE : LUCIDE_FOLDER, 14);
+  if (ico) ico.innerHTML = lucide(mode === "botgroup" ? LUCIDE_BOT : LUCIDE_FOLDER, 14);
   const label = $("top-mode-label");
   if (label) label.textContent = modeLabel(mode);
   trigger.dataset.mode = mode;
   trigger.setAttribute("aria-label", `${t("chrome.mode.aria")} · ${modeLabel(mode)}`);
   renderModeMenu();
+  applyTopMode();
+  renderNav();
 }
 function placeModePop() {
   const trigger = $("top-mode"), pop = $("mode-pop");
@@ -244,16 +258,22 @@ function setModePop(open, focus) {
 }
 function topModePick(mode) {
   setModePop(false);
-  if (mode === "chat") {
-    showToast(t("chrome.mode.chatTitle"), t("chrome.mode.chatNote"), "info");
-    sendCtrl({ type: "log", msg: "顶层模式：点了 Chat（1.0 才启用）" });
-    return;
-  }
-  if (SETTINGS.topMode === "workspaces") return;
-  SETTINGS.topMode = "workspaces";
+  const next = mode === "botgroup" ? "botgroup" : "workspaces";
+  // 在总览/设置里切模式 = 想去看那个模式：先回到工作视图。
+  if (NAV_HERE !== "workspace" && typeof setNavView === "function") setNavView("workspace");
+  if (SETTINGS.topMode === next) return;
+  SETTINGS.topMode = next;
   saveSettingsCache();
   renderTopMode();
-  sendCtrl({ type: "settings.set", settings: { topMode: "workspaces" } });
+  sendCtrl({ type: "settings.set", settings: { topMode: next } });
+  sendCtrl({ type: "log", msg: `顶层模式 → ${next}` });
+  if (next === "workspaces") {
+    requestAnimationFrame(() => {
+      if (!activeTab) return;
+      activeTab.refit();
+      activeTab.focus();
+    });
+  }
 }
 {
   const trigger = $("top-mode"), pop = $("mode-pop");

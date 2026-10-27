@@ -61,9 +61,12 @@ type Settings struct {
 	// "clean" 是之后加在终端面板上的皮套，尚未实现。它只换壳，不改
 	// Project/agent 的信息架构。
 	UIMode string `json:"uiMode"`
-	// TopMode 是顶层模式："workspaces"（默认）| "chat"。Beta.3 只落盘，
-	// Chat 的完整读写要到 1.0；现在的切换按钮仍是灰态。
+	// TopMode 是顶层模式："workspaces"（默认）| "botgroup"。Chat 已从产品里
+	// 移除，旧配置里写着 "chat" 的按默认值处理。
 	TopMode string `json:"topMode"`
+	// Theme 是界面明暗："system"（默认，跟随 Windows）| "dark" | "light"。
+	// "system" 由前端按 prefers-color-scheme 解析；Go 只存用户选的那一档。
+	Theme string `json:"theme"`
 	// DefaultAgent 是「新开一格」默认用谁；空 = 自动（优先有状态能力的已安装
 	// agent）。存的是 agent id，不是名字 —— 名字会变，id 不会。
 	DefaultAgent string `json:"defaultAgent"`
@@ -87,6 +90,7 @@ func Defaults() Settings {
 		Language:         "auto",
 		UIMode:           "classic",
 		TopMode:          "workspaces",
+		Theme:            "system",
 		NewAgentShortcut: "Ctrl+Alt+N",
 		ConfirmClose:     true,
 		ConfirmEndAgent:  true,
@@ -140,11 +144,17 @@ func (s Settings) Normalize() Settings {
 	default:
 		s.UIMode = d.UIMode
 	}
+	switch strings.ToLower(strings.TrimSpace(s.Theme)) {
+	case "dark", "light", "system":
+		s.Theme = strings.ToLower(strings.TrimSpace(s.Theme))
+	default:
+		s.Theme = d.Theme
+	}
 	switch strings.ToLower(strings.TrimSpace(s.TopMode)) {
 	case "workspaces":
 		s.TopMode = "workspaces"
-	case "chat":
-		s.TopMode = "chat"
+	case "botgroup":
+		s.TopMode = "botgroup"
 	default:
 		s.TopMode = d.TopMode
 	}
@@ -227,6 +237,7 @@ type Patch struct {
 	Language         *string `json:"language,omitempty"`
 	UIMode           *string `json:"uiMode,omitempty"`
 	TopMode          *string `json:"topMode,omitempty"`
+	Theme            *string `json:"theme,omitempty"`
 	DefaultAgent     *string `json:"defaultAgent,omitempty"`
 	NewAgentShortcut *string `json:"newAgentShortcut,omitempty"`
 	ConfirmClose     *bool   `json:"confirmClose,omitempty"`
@@ -236,7 +247,7 @@ type Patch struct {
 // Empty 表示这条请求什么都没提。
 func (p Patch) Empty() bool {
 	return p.DefaultCWD == nil && p.TermFontSize == nil && p.TermFontFamily == nil &&
-		p.StartView == nil && p.Language == nil && p.UIMode == nil && p.TopMode == nil &&
+		p.StartView == nil && p.Language == nil && p.UIMode == nil && p.TopMode == nil && p.Theme == nil &&
 		p.DefaultAgent == nil && p.NewAgentShortcut == nil && p.ConfirmClose == nil && p.ConfirmEndAgent == nil
 }
 
@@ -278,9 +289,9 @@ func Load() *Store {
 	}
 	cur = cur.Normalize()
 	s.cur = cur
-	log.Printf("[settings] 载入：默认目录=%s 字号=%d 字体=%s 启动=%s 语言=%s UI=%s 模式=%s 默认 agent=%s 快捷键=%s 关窗确认=%v 结束确认=%v（%s）",
+	log.Printf("[settings] 载入：默认目录=%s 字号=%d 字体=%s 启动=%s 语言=%s UI=%s 模式=%s 主题=%s 默认 agent=%s 快捷键=%s 关窗确认=%v 结束确认=%v（%s）",
 		pick(cur.DefaultCWD, "(内置)"), cur.TermFontSize, cur.TermFontFamily,
-		cur.StartView, cur.Language, cur.UIMode, cur.TopMode,
+		cur.StartView, cur.Language, cur.UIMode, cur.TopMode, cur.Theme,
 		pick(cur.DefaultAgent, "(自动)"), pick(cur.NewAgentShortcut, "(关闭)"),
 		cur.ConfirmClose, cur.ConfirmEndAgent, f)
 	return s
@@ -345,6 +356,9 @@ func (s *Store) Patch(p Patch) (Settings, error) {
 	}
 	if p.UIMode != nil {
 		next.UIMode = *p.UIMode
+	}
+	if p.Theme != nil {
+		next.Theme = *p.Theme
 	}
 	if p.TopMode != nil {
 		next.TopMode = *p.TopMode

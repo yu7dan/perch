@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yu7dan/perch/internal/term"
 	"github.com/yu7dan/perch/internal/uimsg"
 )
 
@@ -17,6 +18,12 @@ func (s *Server) handleMisc(m *Msg) {
 		// 页面级事实（没有标签归属的那些）走这条 —— 它比任何标签流命都长，
 		// 页面刚起来还没标签时也能落日志。
 		log.Printf("[web] %s", m.Msg)
+	case "term.theme":
+		// 前端解析出的有效明暗（system 已经按 Windows 设置落成 dark/light）。
+		// 只影响之后的 OSC 10/11 应答和新起进程的 COLORFGBG。
+		light := m.Msg == "light"
+		term.SetLight(light)
+		log.Printf("[theme] 终端明暗 → %s", m.Msg)
 	case "acts.snapshot":
 		s.actsSnapshot(m)
 	case "files.snapshot":

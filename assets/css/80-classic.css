@@ -12,7 +12,7 @@
 #app.ui-classic #titlebar,
 #app.ui-classic #rail,
 #app.ui-classic #list,
-#app.ui-classic #rsb{background:var(--bg)}
+#app.ui-classic #rsb{background:var(--chrome)}
 #app.ui-classic #titlebar{border-bottom-color:var(--line-soft)}
 #app.ui-classic .tb-rail{background:transparent;border-right-color:var(--line-soft);padding-left:12px}
 /* 品牌 mark 保留；产品名收成一个小号字标，不把左边 132px 变成一块空白。 */
@@ -20,12 +20,12 @@
   text-transform:uppercase;color:var(--faint)}
 #app.ui-classic .tb-list{background:transparent;border-right-color:var(--line-soft);padding:0 8px}
 #app.ui-classic .mode-trigger{height:24px;padding:0 4px;color:var(--fg2);font-size:11.5px}
-#app.ui-classic .mode-trigger:hover{background:rgba(255,255,255,.05)}
+#app.ui-classic .mode-trigger:hover{background:rgb(var(--fx) / .05)}
 
 /* 左栏：去掉卡片式的“抬起来”感，只留行和一条细缩进线。 */
 #app.ui-classic #rail{border-right:1px solid var(--line-soft);padding-top:8px}
 #app.ui-classic #rail .nav{border-radius:3px;color:var(--muted)}
-#app.ui-classic #rail .nav.on{background:rgba(255,255,255,.055);color:var(--fg);font-weight:500}
+#app.ui-classic #rail .nav.on{background:rgb(var(--fx) / .055);color:var(--fg);font-weight:500}
 #app.ui-classic #list{border-right:1px solid var(--line-soft)}
 #app.ui-classic .list-head{padding:14px 12px 6px}
 #app.ui-classic .list-head h1{font-size:10.5px;font-weight:600;letter-spacing:.13em;
@@ -40,7 +40,7 @@
 #app.ui-classic .arow{margin-left:18px;padding-left:8px;border-left:1px solid var(--line-soft);
   border-radius:0 3px 3px 0}
 #app.ui-classic .arow .nm{font-size:11.5px;color:var(--fg2)}
-#app.ui-classic .arow.sel{background:rgba(255,255,255,.055)}
+#app.ui-classic .arow.sel{background:rgb(var(--fx) / .055)}
 #app.ui-classic .arow .tm{opacity:.6}
 #app.ui-classic .arow .sw{color:var(--faint)}
 /* 品牌 logo 是 agent 行唯一的彩色装饰；状态点还挂在它右下角。 */
@@ -86,7 +86,7 @@
 
 /* 状态栏：只留有决策价值的读数（连接、索引、工作目录、用量）。
    Store/字体/尺寸是诊断信息，Clean 默认收掉。 */
-body.ui-classic #status{background:var(--bg);border-top-color:var(--line-soft);gap:12px}
+body.ui-classic #status{background:var(--chrome);border-top-color:var(--line-soft);gap:12px}
 body.ui-classic #status .storeit,
 body.ui-classic #status .fontit,
 body.ui-classic #status #s-grid,

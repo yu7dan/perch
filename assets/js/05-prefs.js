@@ -20,7 +20,8 @@ const SETTINGS_DEFAULTS = Object.freeze({
   startView: "workspace",      // "workspace" | "dash"
   language: "auto",            // "auto"（跟随系统）| "en" | "zh"
   uiMode: "classic",           // 当前只有 Classic；Clean 是之后加在终端面板上的皮套
-  topMode: "workspaces",       // "workspaces" | "chat"（Chat 1.0 才启用）
+  topMode: "workspaces",       // "workspaces" | "botgroup"（Chat 已移除）
+  theme: "system",             // "system"（跟随 Windows）| "dark" | "light"
   defaultAgent: "",            // 空 = 自动（优先有状态能力的已安装 agent）
   // 新建格快捷键：**应用内**、有焦点时生效。Ctrl/Alt 至少带一个，主键只认
   // A-Z / 0-9 / F1-F12；空串 = 关闭。这里存的是规范形状（Ctrl+Alt+N），
@@ -118,7 +119,9 @@ function normalizeSettings(raw) {
   // Beta.3 当前这套降噪外观就是 Classic。旧缓存把它叫 clean 的也归到 classic；
   // 真正的 Clean（终端面板皮套）等这一轮验收后再讨论。
   s.uiMode = "classic";
-  s.topMode = String(s.topMode || "").toLowerCase() === "chat" ? "chat" : "workspaces";
+  s.topMode = String(s.topMode || "").toLowerCase() === "botgroup" ? "botgroup" : "workspaces";
+  const th = String(s.theme || "").toLowerCase();
+  s.theme = (th === "dark" || th === "light") ? th : "system";
   // agent id 只做去空白；能不能用由 30-pages 的 defaultAgentId() 对着
   // **当前探测到的名单**判（设置里写着、但这台机器没装 = 回落到自动）。
   s.defaultAgent = typeof s.defaultAgent === "string" ? s.defaultAgent.trim().toLowerCase() : "";
@@ -177,6 +180,7 @@ function applySettings(next, meta) {
   saveSettingsCache();
   if (typeof setLocale === "function") setLocale(SETTINGS.language);
   applyUIMode();
+  applyTheme("设置");
   if (typeof renderTopMode === "function") renderTopMode();
 
   if (typeof m.effectiveCwd === "string" && m.effectiveCwd) {
@@ -204,6 +208,38 @@ function applySettings(next, meta) {
 // 把外观改到**所有**已经存在的格子上。xterm 的字体/字号必须在运行时改
 // term.options，再清一遍 WebGL 字形图集（旧图集是按旧字体度量的），
 // 最后 refit —— 单元格宽高变了，PTY 的列/行也得跟着重算。
+/* ---- 主题 ----
+   设置存的是用户选的那一档（system / dark / light）；落到 DOM 上的是**有效明暗**：
+   <html> 上的 theme-light / theme-dark（首帧内联脚本已先按缓存加过一次）。
+   切换那两帧加 theme-switching 关掉过渡（Orca document-theme.ts 的做法）。
+   终端跟着换 xterm 主题；Go 那边换 OSC 10/11 应答和新进程的 COLORFGBG。 */
+const THEME_MQ = (() => { try { return window.matchMedia("(prefers-color-scheme: light)"); } catch (_) { return null; } })();
+let THEME_NOW = "";
+function themeEffective() {
+  if (SETTINGS.theme === "light" || SETTINGS.theme === "dark") return SETTINGS.theme;
+  return THEME_MQ && THEME_MQ.matches ? "light" : "dark";
+}
+function applyTheme(why) {
+  const eff = themeEffective();
+  if (eff === THEME_NOW) return;
+  const first = THEME_NOW === "";
+  THEME_NOW = eff;
+  const root = document.documentElement;
+  if (!first) root.classList.add("theme-switching");
+  root.classList.toggle("theme-light", eff === "light");
+  root.classList.toggle("theme-dark", eff === "dark");
+  if (!first) requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove("theme-switching")));
+  applyTermAppearance();
+  if (typeof sendCtrl === "function") {
+    sendCtrl({ type: "term.theme", msg: eff });
+    if (!first) sendCtrl({ type: "log", msg: `主题 → ${eff}（设置=${SETTINGS.theme}，${why || ""}）` });
+  }
+  if (typeof renderBotGroup === "function" && document.body.classList.contains("botgroup")) renderBotGroup();
+}
+if (THEME_MQ && THEME_MQ.addEventListener) {
+  THEME_MQ.addEventListener("change", () => { if (SETTINGS.theme === "system") applyTheme("系统明暗变化"); });
+}
+
 function applyTermAppearance() {
   if (!PERCH_TERM_READY) return;
   try {

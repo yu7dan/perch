@@ -92,6 +92,16 @@ func TestSettingsUIModeNormalize(t *testing.T) {
 	if got := Defaults().TopMode; got != "workspaces" {
 		t.Fatalf("default topMode should be workspaces, got %q", got)
 	}
+	for _, tc := range []struct{ in, want string }{
+		{"botgroup", "botgroup"}, {" BotGroup ", "botgroup"},
+		{"chat", "workspaces"}, {"", "workspaces"},
+	} {
+		s := Defaults()
+		s.TopMode = tc.in
+		if got := s.Normalize().TopMode; got != tc.want {
+			t.Errorf("TopMode %q normalized to %q, want %q", tc.in, got, tc.want)
+		}
+	}
 }
 
 func TestNormalizeShortcut(t *testing.T) {
