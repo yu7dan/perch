@@ -79,21 +79,26 @@ type Settings struct {
 	// 关窗会带走所有正在跑的 agent，结束 agent 会删掉它的座位记录。
 	ConfirmClose    bool `json:"confirmClose"`
 	ConfirmEndAgent bool `json:"confirmEndAgent"`
+	// TrustAgentFolders：起格前替用户预先信任 agent 要进的文件夹（Claude / Qoder / agy 各自的
+	// 信任记录里追加这一项），免得它首启停在「信任这个文件夹吗」—— Claude 2.x 那一屏默认选的是
+	// 「退出」。默认开（Orca 也是）；关掉 = 每个新文件夹由 agent 自己问。见 internal/agenttrust。
+	TrustAgentFolders bool `json:"trustAgentFolders"`
 }
 
 // Defaults 是全部默认值；任何其它地方都不许再写一份。
 func Defaults() Settings {
 	return Settings{
-		TermFontSize:     14,
-		TermFontFamily:   "cascadia",
-		StartView:        "workspace",
-		Language:         "auto",
-		UIMode:           "classic",
-		TopMode:          "workspaces",
-		Theme:            "system",
-		NewAgentShortcut: "Ctrl+Alt+N",
-		ConfirmClose:     true,
-		ConfirmEndAgent:  true,
+		TermFontSize:      14,
+		TermFontFamily:    "cascadia",
+		StartView:         "workspace",
+		Language:          "auto",
+		UIMode:            "classic",
+		TopMode:           "workspaces",
+		Theme:             "system",
+		NewAgentShortcut:  "Ctrl+Alt+N",
+		ConfirmClose:      true,
+		ConfirmEndAgent:   true,
+		TrustAgentFolders: true,
 	}
 }
 
@@ -230,25 +235,26 @@ func NormalizeShortcut(raw string) (string, bool) {
 // Patch 是 ctl 的 "settings.set" 带来的增量。指针 = "这条请求有没有
 // 提到这个字段"：false / 0 / 空串都是**合法值**，不能用零值判断缺省。
 type Patch struct {
-	DefaultCWD       *string `json:"defaultCwd,omitempty"`
-	TermFontSize     *int    `json:"termFontSize,omitempty"`
-	TermFontFamily   *string `json:"termFontFamily,omitempty"`
-	StartView        *string `json:"startView,omitempty"`
-	Language         *string `json:"language,omitempty"`
-	UIMode           *string `json:"uiMode,omitempty"`
-	TopMode          *string `json:"topMode,omitempty"`
-	Theme            *string `json:"theme,omitempty"`
-	DefaultAgent     *string `json:"defaultAgent,omitempty"`
-	NewAgentShortcut *string `json:"newAgentShortcut,omitempty"`
-	ConfirmClose     *bool   `json:"confirmClose,omitempty"`
-	ConfirmEndAgent  *bool   `json:"confirmEndAgent,omitempty"`
+	DefaultCWD        *string `json:"defaultCwd,omitempty"`
+	TermFontSize      *int    `json:"termFontSize,omitempty"`
+	TermFontFamily    *string `json:"termFontFamily,omitempty"`
+	StartView         *string `json:"startView,omitempty"`
+	Language          *string `json:"language,omitempty"`
+	UIMode            *string `json:"uiMode,omitempty"`
+	TopMode           *string `json:"topMode,omitempty"`
+	Theme             *string `json:"theme,omitempty"`
+	DefaultAgent      *string `json:"defaultAgent,omitempty"`
+	NewAgentShortcut  *string `json:"newAgentShortcut,omitempty"`
+	ConfirmClose      *bool   `json:"confirmClose,omitempty"`
+	ConfirmEndAgent   *bool   `json:"confirmEndAgent,omitempty"`
+	TrustAgentFolders *bool   `json:"trustAgentFolders,omitempty"`
 }
 
 // Empty 表示这条请求什么都没提。
 func (p Patch) Empty() bool {
 	return p.DefaultCWD == nil && p.TermFontSize == nil && p.TermFontFamily == nil &&
 		p.StartView == nil && p.Language == nil && p.UIMode == nil && p.TopMode == nil && p.Theme == nil &&
-		p.DefaultAgent == nil && p.NewAgentShortcut == nil && p.ConfirmClose == nil && p.ConfirmEndAgent == nil
+		p.DefaultAgent == nil && p.NewAgentShortcut == nil && p.ConfirmClose == nil && p.ConfirmEndAgent == nil && p.TrustAgentFolders == nil
 }
 
 // Store 是设置文件的持有者。零值不可用；用 Load 构造。
@@ -383,6 +389,9 @@ func (s *Store) Patch(p Patch) (Settings, error) {
 	}
 	if p.ConfirmEndAgent != nil {
 		next.ConfirmEndAgent = *p.ConfirmEndAgent
+	}
+	if p.TrustAgentFolders != nil {
+		next.TrustAgentFolders = *p.TrustAgentFolders
 	}
 	next = next.Normalize()
 	if next == old {

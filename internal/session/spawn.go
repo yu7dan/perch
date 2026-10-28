@@ -174,6 +174,7 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 		}
 		log.Printf("[startup t%d] Bot %s/%s 接上总线（perch-bg 可用）", tab.ID, tab.Spec.Group, tab.Spec.Bot)
 	}
+	m.runPreLaunch(tab.ID, tab.Spec.Agent, cwd, env)
 	t2 := time.Now()
 	sess, err := term.Start(exe, args, cwd, agent.BuildEnv(env), cols, rows)
 	ptyTook := time.Since(t2)
@@ -210,4 +211,26 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 	log.Printf("[perch] tab=%d 已启动 pid=%d exe=%s 参数%d个(settings=%d字节) cwd=%s resume=%s",
 		tab.ID, sess.Pid(), exe, len(args), len(settings), cwd, tab.Spec.Resume.Kind)
 	return r, nil
+}
+
+// runPreLaunch 调 preLaunch，最多等 1.5 秒：写别人的配置文件可能碰上锁或慢盘，
+// 那就让 agent 自己问，不能把起格拖住。
+func (m *Manager) runPreLaunch(tabID int, agentID, cwd string, env map[string]string) {
+	m.profileMu.RLock()
+	fn := m.preLaunch
+	m.profileMu.RUnlock()
+	if fn == nil {
+		return
+	}
+	cp := make(map[string]string, len(env))
+	for k, v := range env {
+		cp[k] = v
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); fn(tabID, agentID, cwd, cp) }()
+	select {
+	case <-done:
+	case <-time.After(1500 * time.Millisecond):
+		log.Printf("[startup t%d] 预先信任文件夹超时，照常起格（agent 可能会自己问）", tabID)
+	}
 }

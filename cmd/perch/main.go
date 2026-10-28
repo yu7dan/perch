@@ -9,6 +9,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/yu7dan/perch/internal/agenttrust"
 	"io"
 	"log"
 	"os"
@@ -245,6 +246,17 @@ func main() {
 	})
 	// Bot Group C：成员格起来时拿口令 + 总线地址、PATH 里放 perch-bg；忙闲变化和关格告诉协调器。
 	a.tabs.SetOrchestration(a.coord.BotEnv, session.InstallBgCLI(embeddedBgCLI), a.coord.OnStatus, a.coord.TabClosed)
+	// 设置 › 预先信任 agent 的工作文件夹（默认开）：起格前把 cwd 写进 agent 自己的信任记录。
+	a.tabs.SetPreLaunch(func(tabID int, agentID, cwd string, env map[string]string) {
+		if !agenttrust.Supported(agentID) || !a.prefs.Snapshot().TrustAgentFolders {
+			return
+		}
+		out, err := agenttrust.Grant(agentID, cwd, env)
+		if out == agenttrust.Unchanged {
+			return
+		}
+		log.Printf("[startup t%d] 预先信任文件夹 %s（%s）：%s %v", tabID, cwd, agentID, out, errOrNil(err))
+	})
 	// dsh 的“状态”不是启动时顺手能做的：它要写用户的 DSH home patch，
 	// 还要把官方 hook 桥和 peer 装进 dsh-tui profile。所以只放在两个
 	// **用户明确点下**的动作里（安装完成 / 名单里的「接入状态」），不静默跑。
@@ -692,4 +704,11 @@ func pick(s, alt string) string {
 		return alt
 	}
 	return s
+}
+
+func errOrNil(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }

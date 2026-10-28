@@ -813,6 +813,19 @@
                 <button type="button" class="set-reset" data-set-reset="confirmEndAgent" hidden data-i18n="settings.resetDefault">恢复默认</button>
               </div>
             </div>
+            <div class="settings-row" data-set-row="trustAgentFolders"
+                 data-search="信任 文件夹 首启 安全 worktree trust folder workspace safety first run">
+              <div class="settings-lab">
+                <b data-i18n="settings.trustAgentFolders.label">预先信任 agent 的工作文件夹</b>
+                <span data-i18n-text="settings.trustAgentFolders.note">起格前把它要进的文件夹写进 agent 自己的信任记录（Claude Code、Qoder、Antigravity），首启不再停在「信任这个文件夹吗」。只加这一个文件夹，不碰主目录和盘符根。关掉 = 每个新文件夹由 agent 自己问。<em class="set-def"
+                      data-set-default-hint="trustAgentFolders"></em></span>
+              </div>
+              <div class="settings-ctl">
+                <button type="button" class="set-switch" role="switch" data-set-flag="trustAgentFolders"
+                        aria-checked="true" aria-label="预先信任 agent 的工作文件夹" data-i18n-aria-label="settings.trustAgentFolders.label"><i></i></button>
+                <button type="button" class="set-reset" data-set-reset="trustAgentFolders" hidden data-i18n="settings.resetDefault">恢复默认</button>
+              </div>
+            </div>
             <div class="settings-row" data-set-row="startView"
                  data-search="启动 打开 首页 落点 总览 工作区 start launch startup view home">
               <div class="settings-lab">

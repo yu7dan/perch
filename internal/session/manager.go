@@ -58,6 +58,9 @@ type Manager struct {
 	bgBin      string
 	statusHook func(tabID int, prev, now string)
 	closedHook func(tabID int)
+	// preLaunch：起 PTY 之前的最后一步（预先信任文件夹，见 internal/agenttrust）。由组合根注入；
+	// 它自己决定做不做（看设置），这里只负责在对的时机、带上这一格的 env 调它，而且最多等 1.5 秒。
+	preLaunch func(tabID int, agent, cwd string, env map[string]string)
 }
 
 // New 构造空的会话表。Defs 在 agent.SetHost 之后由 SetDefs 填 —— 顺序见
@@ -100,6 +103,13 @@ func (m *Manager) SetOrchestration(botEnv func(tabID int, group, bot string) map
 	statusHook func(tabID int, prev, now string), closedHook func(tabID int)) {
 	m.profileMu.Lock()
 	m.botEnv, m.bgBin, m.statusHook, m.closedHook = botEnv, bgBin, statusHook, closedHook
+	m.profileMu.Unlock()
+}
+
+// SetPreLaunch 注入起 PTY 前的钩子（见 preLaunch 字段）。
+func (m *Manager) SetPreLaunch(fn func(tabID int, agent, cwd string, env map[string]string)) {
+	m.profileMu.Lock()
+	m.preLaunch = fn
 	m.profileMu.Unlock()
 }
 

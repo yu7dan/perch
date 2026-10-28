@@ -29,6 +29,7 @@ const SETTINGS_DEFAULTS = Object.freeze({
   newAgentShortcut: "Ctrl+Alt+N",
   confirmClose: true,
   confirmEndAgent: true,
+  trustAgentFolders: true,
 });
 const SETTINGS_CACHE_KEY = "perch.settings.v1";
 
@@ -130,6 +131,7 @@ function normalizeSettings(raw) {
   s.newAgentShortcut = normalizeShortcutString(s.newAgentShortcut);
   s.confirmClose = s.confirmClose !== false;
   s.confirmEndAgent = s.confirmEndAgent !== false;
+  s.trustAgentFolders = s.trustAgentFolders !== false;
   return s;
 }
 
