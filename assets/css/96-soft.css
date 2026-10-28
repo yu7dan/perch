@@ -1,0 +1,59 @@
+/* ===========================================================================
+   浅色「去生硬」（用户 2026-10-28 看过 现状 / 去生硬 对比图后确认方向；颜色不变）
+   ---------------------------------------------------------------------------
+   浅色下显得廉价、生硬的原因不在色温，而在：
+     ① 实心灰块太多（选中项、卡片、输入框、胶囊全是灰底 + 灰边）；
+     ② 没有高低层次，只有平面拼接；
+     ③ 线太多、太实；
+     ④ 圆角 / 字号没有统一节奏。
+   做法（只作用于浅色，深色不动）：
+     · 选中 = 淡叠底 + 左侧居中 2×14 短竖条 + 加深文字；胶囊 = 几乎透明的叠色；
+     · 三层：底（外框 / 内容）→ 面（卡片 / 输入框 / 按钮：纯白 + 极淡投影）→ 浮层（投影更明显）；
+     · 页签竖线、格子缝、协作链分隔线收淡或去掉，外框 / 内容之间只留一根细线；
+     · 圆角三档：卡片 12 / 控件 8 / 胶囊 6；
+     · Bot Group 车道标签改淡底深字。
+   对比图：_tools/shell-compare/gallery-soft.html（截图环境里的同一份规则 = shell-C1.css）。
+   ⚠️ 令牌写在 html:root.theme-light 上：特异度要压过 00-base 里 html.theme-light 那一组。
+   =========================================================================== */
+html:root.theme-light{
+  --c-raise:#ffffff;
+  --s-deep:#ffffff; --s-1:#ffffff; --s-2:#ffffff; --s-pop:#ffffff;
+  --card:rgb(15 23 42 / .055); --card-hov:rgb(15 23 42 / .04); --card-sel:rgb(15 23 42 / .06);
+  --line:rgb(15 23 42 / .085); --line-soft:rgb(15 23 42 / .06); --divider-line:rgb(15 23 42 / .08);
+  --b-1:rgb(15 23 42 / .09); --b-2:rgb(15 23 42 / .12); --b-3:rgb(15 23 42 / .18);
+  --c-lift:0 0 0 1px rgb(15 23 42 / .05), 0 1px 2px rgb(15 23 42 / .05), 0 6px 18px rgb(15 23 42 / .045);
+  --c-pop:0 0 0 1px rgb(15 23 42 / .07), 0 4px 10px rgb(15 23 42 / .07), 0 16px 40px rgb(15 23 42 / .10);
+}
+/* ① 实心灰块 → 淡叠底 + 指示线 / 亮面 */
+html.theme-light #app.ui-classic #list,html.theme-light #app.ui-classic .set-nav,html.theme-light #bg .bg-list{box-shadow:none}
+/* 指示线是一根居中的 2×14 短竖条（不是贴着圆角的整条内阴影，那样会弯成括号） */
+html.theme-light #app.ui-classic #rail .nav.on,html.theme-light .set-nav-it.on{background:linear-gradient(var(--fg),var(--fg)) 0 50% / 2px 14px no-repeat,rgb(15 23 42 / .05);box-shadow:none;color:var(--fg)}
+html.theme-light #app.ui-classic #rail .nav:hover:not(.on),html.theme-light .set-nav-it:hover:not(.on){background:rgb(15 23 42 / .035)}
+html.theme-light #app.ui-classic .arow.sel{background:rgb(15 23 42 / .045)}
+html.theme-light .fseg.on,html.theme-light .mini-segs button.on,html.theme-light .tn-cnt,html.theme-light .set-seg button.on{background:rgb(15 23 42 / .06)}
+/* ② 三层：卡片 / 输入框 = 亮面 + 极淡投影；浮层投影明显些 */
+html.theme-light .ov-card,html.theme-light .settings-card{background:var(--c-raise);border-color:transparent;box-shadow:var(--c-lift)}
+html.theme-light #app.ui-classic .search,html.theme-light .search{background:var(--c-raise);border-color:transparent;box-shadow:0 0 0 1px rgb(15 23 42 / .08)}
+html.theme-light #dash .ws-act:not(.primary),html.theme-light .set-btn{background:var(--c-raise);border-color:transparent;box-shadow:0 0 0 1px rgb(15 23 42 / .09),0 1px 2px rgb(15 23 42 / .04)}
+html.theme-light .set-seg{border-color:transparent;background:rgb(15 23 42 / .035)}
+html.theme-light #cardmenu,html.theme-light .mode-pop,html.theme-light #need-pop,html.theme-light .ap-card{box-shadow:var(--c-pop)}
+/* ③ 线少一点、淡一点：格子之间、页签之间、标题栏下沿都只留极淡的线 */
+html.theme-light #app.ui-classic #termbody{background:rgb(15 23 42 / .06)}
+html.theme-light #app.ui-classic #titlebar .tab{border-right-color:transparent}
+/* ④ 圆角统一成三档：卡片 12 / 控件 8 / 小胶囊 6 */
+html.theme-light .ov-card,html.theme-light .settings-card{border-radius:12px}
+html.theme-light #app.ui-classic #rail .nav,html.theme-light .set-nav-it,html.theme-light .search,html.theme-light .ws-act,html.theme-light .set-btn{border-radius:8px}
+html.theme-light .fseg,html.theme-light .mini-segs button,html.theme-light .set-seg button{border-radius:6px}
+/* Bot Group */
+html:root.theme-light #bg{--bg-raise:#ffffff;--bg-chip:#ffffff;--bg-line:rgb(15 23 42 / .09);--bg-line2:rgb(15 23 42 / .06);
+  --bg-hov:rgb(15 23 42 / .035);--bg-sel:rgb(15 23 42 / .05)}
+html.theme-light #bg .bg-badge{color:color-mix(in srgb,var(--lane) 78%,#000);background:color-mix(in srgb,var(--lane) 13%,transparent)}
+html.theme-light #bg .bg-chip{border-color:transparent;box-shadow:0 0 0 1px rgb(15 23 42 / .08)}
+html.theme-light #bg .bg-chip.cur{box-shadow:0 0 0 1px var(--lane),0 0 0 3px color-mix(in srgb,var(--lane) 16%,transparent)}
+html.theme-light #bg .bg-cbox{border-color:transparent;box-shadow:var(--c-lift);border-radius:12px}
+html.theme-light #bg .bg-ev.open:not(.ask),html.theme-light #bg .bg-ev.run{background:var(--c-raise);border-color:transparent;box-shadow:var(--c-lift)}
+html.theme-light #bg .bg-lt.sel{background:var(--c-raise)}
+html.theme-light #bg .bg-row.sel{background:rgb(15 23 42 / .05)}
+html.theme-light #bg .bg-btn,html.theme-light #bg .bg-search{border-color:transparent;box-shadow:0 0 0 1px rgb(15 23 42 / .09);background:var(--c-raise);border-radius:8px}
+html.theme-light #bg .bg-btn.primary{box-shadow:none;background:var(--bg-fg)}
+html.theme-light #bg .bg-chain{border-top-color:transparent}
