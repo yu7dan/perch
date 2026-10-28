@@ -1030,18 +1030,42 @@ function ccImeLineEndColumn(line, start, cols) {
   }
   return null;
 }
+// 输入框的边框 / 状态行：走续行时遇到它们就停。
+function ccImeStopLine(txt) {
+  const t = txt.trim();
+  return /^[─━═╌┄]{3,}/.test(t) || t.includes("⏵") || /for shortcuts|esc to /i.test(t);
+}
 // 自下而上找输入框（转录在上、输入框在它下面，所以最低的那个才是）。
-// 找不到就返回 null —— 此时**不干预**，维持 xterm 自己的行为，不比现在差。
+// 返回 null = **不干预**，维持 xterm 自己的行为（摆在它的光标上）：
+//   ① 没认出输入框；② xterm 的光标本来就落在输入框里（新版 Claude Code / 别的 agent
+//   把光标放对了，就信它 —— Orca terminal-ime-candidate-anchor.ts 也是先信光标）。
+// 2026-10-29 修：原来只锚在 ❯ 那一行的行尾。输入折到第二行时续行上没有 ❯，候选框和
+// 预编辑串就被钉在第一行最右边（用户看到的「打到第二行就不聚焦、错位」）。现在顺着续行
+// 往下走到最后一行，贴在那一行的字后面；正好写满一行就落到下一行的起始列。
 function ccImeAnchor(buf, term) {
+  const cols = term.cols;
   for (let row = term.rows - 1; row >= 0; row--) {
     const line = buf.getLine(buf.baseY + row);
     if (!line) continue;
-    const start = ccImeInputStartColumn(line, term.cols);
+    const start = ccImeInputStartColumn(line, cols);
     if (start === null) continue;
-    const rest = line.translateToString(true, start, term.cols);
-    if (!rest.trim()) return { row, column: Math.min(start, term.cols - 1) };
-    const end = ccImeLineEndColumn(line, start, term.cols);
-    return { row, column: Math.min(end ?? start, term.cols - 1) };
+    let last = row;
+    for (let r = row + 1; r < term.rows; r++) {
+      const l = buf.getLine(buf.baseY + r);
+      if (!l) break;
+      const txt = l.translateToString(true);
+      if (!txt.trim() || ccImeStopLine(txt)) break;
+      if (txt.slice(0, start).trim() !== "") break;   // 续行的缩进和输入起始列对齐
+      last = r;
+    }
+    const cy = buf.cursorY, cx = buf.cursorX;
+    if (cy >= row && cy <= last && (cy > row || cx >= start)) return null;
+    const ln = last === row ? line : buf.getLine(buf.baseY + last);
+    const rest = ln.translateToString(true, start, cols);
+    if (!rest.trim()) return { row: last, column: Math.min(start, cols - 1) };
+    const end = ccImeLineEndColumn(ln, start, cols) ?? start;
+    if (end >= cols && last + 1 < term.rows) return { row: last + 1, column: Math.min(start, cols - 1) };
+    return { row: last, column: Math.min(end, cols - 1) };
   }
   return null;
 }
@@ -1084,8 +1108,12 @@ function installImeAnchor(t) {
     put(ta, "left", `${left}px`);
     // 预编辑的可见overlay也得跟着走，否则只有候选框对、画面上的拼音还在原处
     if (compView) {
+      // 预编辑串也夹在屏内（原来用的是没夹过的 rawLeft，贴近右边缘时会溢出，
+      // 溢出就会让 Chromium 去卷动外层容器 —— 「打字时画面偏移」的嫌疑之一）。
+      const cvw = compView.getBoundingClientRect().width || 0;
+      const cvLeft = Math.max(0, Math.min(rawLeft, m.cols * m.cw - cvw));
       put(compView, "top", top);
-      put(compView, "left", `${rawLeft}px`);
+      put(compView, "left", `${cvLeft}px`);
       put(compView, "height", `${m.ch}px`);
       put(compView, "lineHeight", `${m.ch}px`);
     }
@@ -1177,3 +1205,24 @@ function installImeAnchor(t) {
 //    校准值（实测出来的，复用时直接用）：watchXmin=应用左边界（左边的窗口动画每帧
 //    400~600 像素，纯噪音）、minCount=1500（相邻帧动画）～4000（长时间挂机）。
 
+
+// 终端格外层被卷开的兜底与取证（2026-10-29）。.cell/.cellbody/.termhost 已改成 overflow:clip，
+// 卷不动了；但格子外面还有几层（网格、页面）。任何一层**本不该滚**的盒子被浏览器卷开（为了把
+// 输入法 textarea 滚进视野），整格就会平移。这里在捕获阶段接住 scroll：目标在终端区里、又不是
+// xterm 自己的滚动区，就立刻归零，并记一笔是谁、卷了多少 —— 下次「画面偏移」有证据可查。
+const TERM_SCROLL_LOGGED = new Set();
+document.addEventListener("scroll", (e) => {
+  const el = e.target;
+  if (!(el instanceof HTMLElement)) return;
+  if (el.closest(".xterm-viewport, .xterm-scrollable-element") || el.classList.contains("xterm-viewport")) return;
+  if (!el.querySelector(".xterm") && !el.closest(".xterm")) return;
+  const ov = getComputedStyle(el);
+  if (/(auto|scroll)/.test(ov.overflowX + ov.overflowY)) return;   // 本来就是滚动区
+  if (!el.scrollTop && !el.scrollLeft) return;
+  const key = (el.id || el.className || el.tagName) + "";
+  if (!TERM_SCROLL_LOGGED.has(key)) {
+    TERM_SCROLL_LOGGED.add(key);
+    sendCtrl({ type: "log", msg: `终端外层被卷开 ${key} scrollTop=${el.scrollTop} scrollLeft=${el.scrollLeft}（已归零）` });
+  }
+  el.scrollTop = 0; el.scrollLeft = 0;
+}, true);

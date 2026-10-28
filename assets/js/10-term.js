@@ -482,6 +482,9 @@ const term = new Terminal({
   cursorStyle: "block",             // Orca 默认块状光标，不是竖线
   cursorInactiveStyle: "outline",
   scrollback: 5000,                 // Orca 桌面默认 5000 行
+  // ConPTY 的版本告诉 xterm（Orca windows-pty-compatibility.ts）：它按这个决定重排和折行标记怎么处理。
+  // 版本号从 Go 来（settings 推送里的 osBuild），首帧用上次记下的。
+  ...(OS_BUILD ? { windowsPty: { backend: "conpty", buildNumber: OS_BUILD } } : {}),
   scrollSensitivity: 1.15,
   fastScrollSensitivity: 5,
   allowProposedApi: true,           // unicode11 与 serialize 需要
@@ -945,37 +948,21 @@ function settle() {
     raf = requestAnimationFrame(settle); return;
   }
   rejectLogged = false;
-  // changed 必须在 pushSize() 之前算 —— 它里面有 lastSizeSent 的去重。
-  const changed = `${p.cols}x${p.rows}` !== lastSizeSent;
-  fit.fit();                                  // 到这一步才动 xterm
+  // 行列数没变就不动 xterm（Orca pane-fit.ts:121-125：亚像素的分隔条移动不该触发重排）。
+  const same = p.cols === term.cols && p.rows === term.rows;
+  // fit 会让 xterm 重排缓冲：先记下「你在看哪儿」，fit 完再还原 —— 在底部就继续跟着输出，
+  // 往上翻着的就钉在原来那一行（照 Orca pane-scroll.ts 的 captureScrollState / restore）。
+  const scroll = same ? null : termCaptureScroll(term);
+  if (!same) fit.fit();                       // 到这一步才动 xterm
+  if (scroll) termRestoreScroll(term, scroll);
   pushSize();
   // 这一格的真实列数到这一刻才成立（fit 之前 term.cols 还是旧值）——
   // 「N 格 · X 列/格」那个读数要在这里刷，渲染格数变化时它还是计划值。
   paintGridStatus();
-  if (changed) {
-    // 尺寸一变，Claude Code 就把整屏重画一遍；而 xterm 在重排/收缩时会把**上一帧的
-    // 残留**顶进回滚缓冲 —— 实测比例是 1:1（日志：每调窄一次，回滚缓冲里就多一个
-    // 开场介绍框，且回滚缓冲行数从 72 涨到 95）。配合 CLI 自己的重画，用户往上滚
-    // 就看到一串叠着的吉祥物，终端右侧还会冒出滚动条。
-    //
-    // 那些残留是**半截旧帧**，不是历史。全屏 TUI 本该跑在备用屏上 —— 备用屏的语义
-    // 恰恰就是"重排不留残留"、且不写回滚缓冲。Claude Code 没用备用屏（它的启动
-    // 字节里只有 [2J[H，没有 ?1049h），所以这个责任落回终端这边。
-    // 这里按备用屏的语义把回滚缓冲清掉：面板永远只有"当前这一屏"，不冒滚动条、
-    // 不叠吉祥物。真正的历史在右边那一列（「对话流」模块）—— 它和这块终端屏
-    // 是两个地方，C6a 之后更是两列，这个"分工"没变，只是包装换了。
-    // （Orca 保留 5000 行回滚，见 shared/terminal-scrollback-policy.ts —— 它那边是
-    //   编辑器里的通用终端，要留真历史；我们的 pane 是 agent 的活屏，语义不同。）
-    const wipe = (then) => (then ? term.write("\x1b[3J", then) : term.write("\x1b[3J"));
-    wipe();                                   // 第一次：清 xterm 重排/收缩时顶上来的残留
-    // 第二次：清 CLI 收到新尺寸后重画那一帧时补进来的（实测拖窄 -400px 那次，
-    // 只清一次的话首帧里还留着 3 份 —— Ink 会把开场介绍框当静态输出再吐一遍）。
-    setTimeout(() => {
-      // 计数放进 write 的回调 —— xterm 的 write 是**异步解析**的，
-      // 同一个 tick 里读 buffer 会读到清理前的状态（这个坑骗过我一次）。
-      wipe(() => countBanners(`tab=${T.id} resize ${p.cols}x${p.rows}`, T));
-    }, 400);
-  }
+  // ⚠️ 2026-10-29 删掉了这里原来的「尺寸一变就发两次 ESC[3J 清回滚」。当初是为了不让重排把
+  // Claude Code 的开场介绍框一份份顶进回滚（往上滚看到一串吉祥物）；代价是右栏开合、拖分隔条、
+  // 格数变化都会把历史清光 —— 用户用下来就是「终端锁死、不能往上翻」。Orca 保留 5000 行回滚、
+  // 从不清（shared/terminal-scrollback-policy.ts），宁可偶尔多一份介绍框。我们跟它。
 }
 function refit() { if (!raf) { tries = 0; raf = requestAnimationFrame(settle); } }
 new ResizeObserver(refit).observe(host);
@@ -1914,3 +1901,49 @@ function agentTabIcon(id, size) {
 // Go 在运行期注册 `term:<id>` 这个 stream handler，而服务端是**在连接建立时**
 // 才按名字查 handler，查不到直接 404（stream_server.go:247-256）。所以必须等 Go
 // 把 id 和名字发回来，前端才能去连。顺序由这条应答保证，不靠时序运气。
+
+// fit 前后的滚动位置（照 Orca lib/pane-manager/pane-scroll.ts + terminal-reflow-scroll-anchor.ts，MIT；
+// 去掉了 WebGL 拆装重试和 SSH 那些我们没有的分支）。
+// 在底部 → fit 完继续贴底跟输出；往上翻着 → 用 marker 钉住「看到的第一行所在的那一整条逻辑行」，
+// 再按格数偏移回到同一处（重排会把折行重新编号，裸行号会漂）。
+function termCaptureScroll(term) {
+  const buf = term.buffer.active;
+  const wasAtBottom = buf.viewportY >= buf.baseY;
+  if (wasAtBottom || buf.type !== "normal") return { wasAtBottom, type: buf.type };
+  let lineY = buf.viewportY;
+  while (lineY > 0 && buf.getLine(lineY) && buf.getLine(lineY).isWrapped) lineY--;
+  let marker = null;
+  try { marker = term.registerMarker(lineY - (buf.baseY + buf.cursorY)); } catch (_) { marker = null; }
+  return { wasAtBottom, type: buf.type, viewportY: buf.viewportY, marker,
+    cellOffset: (buf.viewportY - lineY) * Math.max(term.cols, 1) };
+}
+function termRestoreScroll(term, s) {
+  try {
+    const buf = term.buffer.active;
+    if (!s || s.type !== buf.type || s.type === "alternate") return;
+    if (s.wasAtBottom) { term.scrollToBottom(); return; }
+    let line = s.marker && !s.marker.isDisposed && s.marker.line >= 0 ? s.marker.line : s.viewportY;
+    let remain = s.cellOffset || 0;
+    const cols = Math.max(term.cols, 1);
+    while (line < buf.baseY && remain >= cols && buf.getLine(line + 1) && buf.getLine(line + 1).isWrapped) {
+      remain -= cols; line++;
+    }
+    term.scrollToLine(Math.min(line, buf.baseY));
+  } catch (_) {
+    // 渲染器正在拆装（WebGL 回收）时量不到尺寸：这一次不还原，不能把 settle 打断
+  } finally {
+    if (s && s.marker) s.marker.dispose();
+  }
+}
+
+// Windows 内部版本号（xterm 的 windowsPty 要它）。Go 在 settings 推送里带来；记一份给下次首帧用。
+let OS_BUILD = +(localStorage.getItem("perch.osBuild") || 0);
+function setOsBuild(n) {
+  n = n | 0;
+  if (!n || n === OS_BUILD) return;
+  OS_BUILD = n;
+  try { localStorage.setItem("perch.osBuild", String(n)); } catch (_) {}
+  for (const t of (typeof TAB_LIST !== "undefined" ? TAB_LIST : [])) {
+    try { if (t.term) t.term.options.windowsPty = { backend: "conpty", buildNumber: n }; } catch (_) {}
+  }
+}

@@ -578,6 +578,7 @@ function dispatchCtl(m) {
       // 默认目录的提交错误就地显示在输入框下面，不再弹 toast（85-settings.js）。
       const inline = typeof settingsMessageArrived === "function" && settingsMessageArrived(m);
       if (m.err && !inline) showToast(t("ctl.settingsFailedTitle"), tMsg(m.errCode, m.errParams, m.err), "err");
+      if (m.osBuild && typeof setOsBuild === "function") setOsBuild(m.osBuild);
       if (m.settings) {
         applySettings(m.settings, {
           fromGo: true,

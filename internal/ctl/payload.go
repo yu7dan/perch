@@ -230,6 +230,7 @@ func (s *Server) settingsWire(err error) map[string]any {
 		m["cwd"] = s.deps.DefaultCWD()
 	}
 	m["builtinCwd"] = builtin
+	m["osBuild"] = osBuild()
 	m["defaultCwdMissing"] = s.deps.Prefs.DefaultCWDUnavailable()
 	return withUIErr(m, err)
 }
