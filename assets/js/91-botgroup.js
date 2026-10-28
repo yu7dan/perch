@@ -998,8 +998,44 @@ function bgFeedHeadHTML(g) {
     + bgTermBtn(b);
 }
 /* ---------- 右：工作树 · 泳道 ---------- */
-function bgLaneTabsHTML(g) {
-  return bgLanes(g).map((b) => {
+/* 任务进程里车道多了怎么排（2026-10-28）：右栏只有 352 宽，6 条车道平分每列只剩 56px，标签全被截成「Co…」。
+   做法：车道顺序永远不变（不跳来跳去）；放得下几列就展开几列（每列至少 BG_LANE_MIN，标签读得出来），
+   优先展开 聚焦的 → 等你的 → 在干活的；其余收成 BG_RAIL_W 宽的细轨 —— 只留竖线和节点小点，
+   并行的形态还在、光迹照样落得上去；悬停说是谁在干什么，点一下聚焦它（它随即展开）。
+   车道头跟着同一套宽度，收起的只留车道色点和 agent 图标。 */
+const BG_LANE_MIN = 104, BG_RAIL_W = 20;
+function bgLaneRank(b) {
+  if (BG.focus === b.id) return 0;
+  const s = bgBotState(b);
+  return s === "waiting" ? 1 : s === "working" ? 2 : 3;
+}
+function bgLaneLayout(g, width) {
+  const lanes = bgLanes(g);
+  if (!lanes.length) return [];
+  const avail = Math.max(120, width - 16);
+  let full = lanes.length;
+  while (full > 1 && full * BG_LANE_MIN + (lanes.length - full) * BG_RAIL_W > avail) full--;
+  const open = new Set(lanes.map((b, i) => ({ b, i, r: bgLaneRank(b) }))
+    .sort((a, c) => a.r - c.r || a.i - c.i).slice(0, full).map((o) => o.b.id));
+  const colW = Math.floor((avail - (lanes.length - full) * BG_RAIL_W) / full);
+  let x = 0;
+  return lanes.map((b) => {
+    const w = open.has(b.id) ? colW : BG_RAIL_W;
+    const o = { b, left: x, w, open: open.has(b.id) };
+    x += w;
+    return o;
+  });
+}
+function bgLaneTip(g, b) {
+  const cur = bgCurrent(g, b);
+  return [b.role, bgAgentName(b.agent), t(BG_STATE_KEY[bgBotState(b)]), cur ? cur.title : ""].filter(Boolean).join(" · ");
+}
+function bgLaneTabsHTML(g, lay) {
+  return lay.map(({ b, open }) => {
+    if (!open) {
+      return `<button type="button" class="bg-lt rail" data-bg-focus="${esc(b.id)}" style="--lane:${bgColor(g, b.id)}" title="${esc(bgLaneTip(g, b))}">`
+        + `<span class="bg-lt-n"><i></i></span><span class="bg-lt-a">${bgAgentIco(b.agent)}</span>${bgDot(bgBotState(b))}</button>`;
+    }
     const st = bgBotState(b);
     const d = bgDerive(g, b);
     const cur = bgCurrent(g, b);
@@ -1021,10 +1057,10 @@ function bgLaneTabsHTML(g) {
      · 分叉（子代理）：在本车道里往右拐出一根平行支线，子代理做完在下一个节点处合回来（双圈）；
      · 还在干活 / 在等你：接着最后一个节点虚线往下，末尾一个「正在处理 / 等你确认」节点。
    每条车道只画最近 40 个节点：再往前的在过程流里翻。 */
-function bgTreeSVG(g, width) {
+function bgTreeSVG(g, width, lay) {
   const lanes = bgLanes(g);
   if (!lanes.length) return "";
-  const colW = Math.max(80, Math.floor((width - 16) / lanes.length));
+  lay = lay || bgLaneLayout(g, width);
   const x0 = 14, top = 22, rowH = 34, dotH = 12;
   const parts = [];
   let H = top + 20;
@@ -1044,9 +1080,10 @@ function bgTreeSVG(g, width) {
       default: return `<circle cx="${x}" cy="${y}" r="3" fill="${c}"/>`;
     }
   };
-  lanes.forEach((b, li) => {
-    const x = x0 + li * colW, c = bgColor(g, b.id);
-    const right = li === lanes.length - 1 ? width - 4 : x + colW - 6;
+  lay.forEach(({ b, left, w, open }, li) => {
+    const c = bgColor(g, b.id);
+    const x = open ? left + x0 : left + BG_RAIL_W / 2 + 4;
+    const right = li === lay.length - 1 ? width - 4 : left + x0 + w - 20;
     const st = bgBotState(b);
     const agent = bgAgentName(b.agent);
     // 这条车道的元素：节点 / 小点（连着的小点并成一个）
@@ -1072,6 +1109,27 @@ function bgTreeSVG(g, width) {
     // 竖线：实线贯穿已发生的部分，末尾那段（正在处理 / 等你）是虚线
     const y1 = shown.length ? shown[0].cy : (tail ? tail.cy : top);
     const y2 = shown.length ? shown[shown.length - 1].cy : y1;
+    if (!open) {
+      // 细轨：同样的节点位置（光迹照样落得上去），只是不写字；整条可点 = 聚焦它
+      parts.push(`<g data-lane="${esc(b.id)}" class="bg-rail"><title>${esc(bgLaneTip(g, b))}</title>`
+        + `<rect class="bg-rail-hit" data-bg-focus="${esc(b.id)}" x="${left + 2}" y="0" width="${BG_RAIL_W}" height="4000"/>`);
+      if (shown.length > 1) parts.push(`<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="${c}" stroke-width="1.6"/>`);
+      if (tail && shown.length) parts.push(`<line x1="${x}" y1="${y2}" x2="${x}" y2="${tail.cy}" stroke="${c}" stroke-width="1.2" stroke-dasharray="3 3" opacity=".6"/>`);
+      parts.push(`</g>`);
+      shown.forEach((e) => {
+        const key = esc(g.id + ":" + b.id + ":" + e.it.id);
+        const bad = e.it.kind === "fail";
+        parts.push(`<g data-lane="${esc(b.id)}" data-bg-node="${key}"><circle class="bg-node-ring" cx="${x}" cy="${e.cy}" r="7" stroke="${c}"/>`
+          + `<circle cx="${x}" cy="${e.cy}" r="${e.dot ? 1.8 : 3.2}" fill="${bad ? "var(--bg-bad)" : c}"/></g>`);
+      });
+      if (tail) {
+        parts.push(`<g data-lane="${esc(b.id)}" data-bg-node="${esc(g.id + ":" + b.id + ":tail")}"><circle class="bg-node-ring" cx="${x}" cy="${tail.cy}" r="7" stroke="${c}"/>`
+          + (tail.kind === "approval" ? `<circle cx="${x}" cy="${tail.cy}" r="4.2" fill="var(--bg-panel)" stroke="var(--bg-ask)" stroke-width="2"/>`
+            : `<circle cx="${x}" cy="${tail.cy}" r="3.6" fill="var(--bg-panel)" stroke="${tail.kind === "idle" ? "var(--bg-faint)" : c}" stroke-width="1.2" stroke-dasharray="2 1.8"/>`)
+          + `</g>`);
+      }
+      return;
+    }
     parts.push(`<g data-lane="${esc(b.id)}">`);
     if (shown.length > 1) parts.push(`<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="${c}" stroke-width="2"/>`);
     if (tail && shown.length) parts.push(`<line x1="${x}" y1="${y2}" x2="${x}" y2="${tail.cy}" stroke="${c}" stroke-width="1.4" stroke-dasharray="3 3" opacity=".6"/>`);
@@ -1222,12 +1280,13 @@ function bgTopHTML(g, waiting) {
     +   `</div>`
     + `</header>`
     + `<div class="bg-goal">${srcLine}${g.goal ? `<span class="bg-sep">·</span><span class="bg-goal-k">${esc(t("bg.head.goal"))}</span><span class="ell">${esc(g.goal)}</span>` : ""}</div>`
-    + `<div class="bg-chain">${bgChainHTML(g) || `<div class="bg-empty sm">${esc(t("bg.chain.noBots"))}</div>`}</div>`;
+    + `<div class="bg-chain${bgLanes(g).length > 4 ? " many" : ""}">${bgChainHTML(g) || `<div class="bg-empty sm">${esc(t("bg.chain.noBots"))}</div>`}</div>`;
 }
-function bgTreeHTML(g, waiting) {
+function bgTreeHTML(g, waiting, lay) {
   const lanes = bgLanes(g);
+  const cols = lay.map((o, i) => (i === lay.length - 1 ? "minmax(0,1fr)" : o.w + "px")).join(" ");
   return `<div class="bg-th"><b>${esc(t("bg.tree.title"))}</b><span>${esc(t("bg.tree.sub", { n: lanes.length, w: waiting }))}</span></div>`
-    + (lanes.length ? `<div class="bg-lts" style="--n:${lanes.length}">${bgLaneTabsHTML(g)}</div>` : "")
+    + (lanes.length ? `<div class="bg-lts" style="grid-template-columns:${cols}">${bgLaneTabsHTML(g, lay)}</div>` : "")
     + `<div class="bg-tseg"><span class="segs-mini"><button type="button" data-bg-act="focus-cur">${esc(t("bg.tree.focus"))}</button>`
     +   `<button type="button" data-bg-focus="all">${esc(t("bg.tree.all"))}</button></span><span class="mono bg-now">${esc(bgTime(new Date().toISOString()).slice(0, 5))}</span></div>`
     + `<div class="bg-tscroll" id="bg-tscroll"></div>`
@@ -1270,9 +1329,11 @@ function renderBotGroup(why) {
     if (switched || ((a || b || c) && (atEnd || BG_STICK))) feed.scrollTop = feed.scrollHeight;
     const ts0 = $("bg-tscroll");
     const tsTop = ts0 ? ts0.scrollTop : 0;
-    bgSet($("bg-tree"), bgTreeHTML(g, waiting));
+    const tw = Math.max(260, (ts0 && ts0.clientWidth) || (($("bg-tree") && $("bg-tree").clientWidth) || 352) - 2);
+    const lay = bgLaneLayout(g, tw);
+    bgSet($("bg-tree"), bgTreeHTML(g, waiting, lay));
     const ts = $("bg-tscroll");
-    if (bgSet(ts, bgTreeSVG(g, Math.max(260, ts.clientWidth || 340)) || `<div class="bg-empty sm">${esc(t("bg.tree.empty"))}</div>`)) ts.scrollTop = tsTop;
+    if (bgSet(ts, bgTreeSVG(g, Math.max(260, ts.clientWidth || tw), lay) || `<div class="bg-empty sm">${esc(t("bg.tree.empty"))}</div>`)) ts.scrollTop = tsTop;
     bgComposerSync(g);
     bgApplyFocus(g, switched);
     bgMotionAfterRender(g, switched);

@@ -185,7 +185,7 @@ html:not(.theme-light) #bg .bg-badge{color:var(--lane);background:color-mix(in s
 .bg-th{display:flex;align-items:baseline;justify-content:space-between;padding:14px 14px 8px}
 .bg-th b{font-size:12.5px;font-weight:600}
 .bg-th span{font-size:11px;color:var(--bg-faint)}
-.bg-lts{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));border-top:1px solid var(--bg-line);border-bottom:1px solid var(--bg-line)}
+.bg-lts{display:grid;border-top:1px solid var(--bg-line);border-bottom:1px solid var(--bg-line)}
 .bg-lt{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:8px 8px 7px;text-align:left;
   border-right:1px solid var(--bg-line2);min-width:0;position:relative}
 .bg-lt:last-child{border-right:0}
@@ -562,3 +562,14 @@ textarea.bg-cin::placeholder{color:var(--bg-faint)}
   #bg,.bg-drawer,.bg-drawer.open{transition:none}
   .bg-drawer[data-move]>*,.bgd-name-in{animation:none}
 }
+
+/* ---------- 车道多了：细轨 + 交接链两列（2026-10-28） ---------- */
+.bg-lt.rail{align-items:center;padding:8px 0 7px;gap:5px;min-width:0}
+.bg-lt.rail .bg-lt-n{justify-content:center}
+.bg-lt.rail .bg-lt-a{justify-content:center}
+.bg-lt.rail .bg-dot{margin-top:1px}
+#bg-tscroll .bg-rail-hit{fill:transparent;cursor:pointer}
+#bg-tscroll g.bg-rail:hover .bg-rail-hit{fill:var(--bg-hov)}
+.bg-chain.many{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:22px;row-gap:5px}
+.bg-chain.many .bg-chain-row{min-width:0}
+.bg-chain.many .bg-chips{flex-wrap:nowrap;overflow:hidden}
