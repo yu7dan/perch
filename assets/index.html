@@ -588,7 +588,9 @@
        内容全部静态放在这里（单例、看得见、量得到），动态值由 85-settings.js
        的 syncSettingsUI 填。 -->
   <main id="settings">
-    <div class="settings-scroll">
+    <!-- 设置的左侧导航（2026-10-28，照 Orca 的 SettingsSidebar）：搜索在上，分组导航在下；
+         右边仍是一整页滚动，点一项 = 滚到那一节，滚动时高亮跟着走（84b-settings-nav.js）。 -->
+    <aside class="set-nav" id="set-nav">
       <div class="settings-search" id="set-searchbar">
         <div class="settings-search-in">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -604,6 +606,9 @@
           <span class="set-search-kbd" id="set-search-kbd"><kbd>Ctrl</kbd><kbd>F</kbd></span>
         </div>
       </div>
+      <nav class="set-nav-list" id="set-nav-list" aria-label="设置分区" data-i18n-aria-label="settings.nav.aria"></nav>
+    </aside>
+    <div class="settings-scroll" id="set-scroll">
       <div class="settings-wrap">
         <header class="settings-head">
           <h1 data-i18n="settings.title">设置</h1>
@@ -616,7 +621,7 @@
           <button type="button" class="set-btn" id="set-empty-clear" data-i18n="settings.empty.clear">清空搜索</button>
         </div>
 
-        <section class="settings-sec" data-search="工作区 目录 路径 workspace directory path cwd">
+        <section class="settings-sec" id="set-sec-workspace" data-search="工作区 目录 路径 workspace directory path cwd">
           <div class="settings-sec-head">
             <h2 data-i18n="settings.section.workspace">工作区</h2>
             <p data-i18n="settings.section.workspace.note">新开的格子和「默认工作区」落在哪个目录。已经跑着的格子不受影响。</p>
@@ -666,7 +671,7 @@
           <div class="settings-card" id="set-agents"></div>
         </section>
 
-        <section class="settings-sec" data-search="外观 显示 语言 language locale appearance look display">
+        <section class="settings-sec" id="set-sec-appearance" data-search="外观 显示 语言 language locale appearance look display">
           <div class="settings-sec-head">
             <h2 data-i18n="settings.section.appearance">外观</h2>
             <p data-i18n="settings.section.appearance.note">终端和界面的显示方式。字体随应用分发，不依赖系统安装。</p>
@@ -778,7 +783,7 @@
           </div>
         </section>
 
-        <section class="settings-sec" data-search="行为 交互 behavior interaction">
+        <section class="settings-sec" id="set-sec-behavior" data-search="行为 交互 behavior interaction">
           <div class="settings-sec-head">
             <h2 data-i18n="settings.section.behavior">行为</h2>
             <p data-i18n="settings.section.behavior.note">新建格子时预选哪个 Agent；关窗和结束 agent 都是会带走正在运行的东西的动作，默认先问一句。</p>
@@ -853,7 +858,7 @@
           </div>
         </section>
 
-        <section class="settings-sec" data-search="关于 版本 引导 about version onboarding">
+        <section class="settings-sec" id="set-sec-about" data-search="关于 版本 引导 about version onboarding">
           <div class="settings-sec-head">
             <h2 data-i18n="settings.section.about">关于</h2>
             <p data-i18n="settings.section.about.note">版本、鸣谢，以及重新打开首次使用引导。</p>
@@ -1306,6 +1311,7 @@ window.__facts = [];
 <script defer src="/js/82-file-icons.js"></script>
 <script defer src="/js/83-files.js"></script>
 <script defer src="/js/84-settings-search.js"></script>
+<script defer src="/js/84b-settings-nav.js"></script>
 <script defer src="/js/85-settings.js"></script>
 <script defer src="/js/85b-providers.js"></script>
 <script defer src="/js/86-dash.js"></script>

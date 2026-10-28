@@ -185,6 +185,7 @@ function setNavView(view) {
     renderSettings("进入设置");
     sendCtrl({ type: "settings.get" });
     if (typeof provRequest === "function") { renderProviderSettings(); provRequest(); }
+    if (typeof renderSetNav === "function") { renderSetNav(); requestAnimationFrame(setNavSync); }
     // 进来就能直接打字搜索（Orca 的设置页同样把焦点交给搜索框）。
     if (typeof focusSettingsSearch === "function") focusSettingsSearch(false);
   } else {

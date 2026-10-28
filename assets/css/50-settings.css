@@ -250,3 +250,25 @@ textarea.pv-in{height:auto;min-height:52px;padding:7px 10px;resize:vertical;line
 .ag-env-chip button{width:16px;height:16px;border-radius:50%;color:var(--faint);font-size:12px;line-height:1}
 .ag-env-chip button:hover{background:rgb(var(--red-rgb) / .12);color:var(--red)}
 .ag-err{padding:0}
+
+/* ===== 左侧导航（2026-10-28，照 Orca SettingsSidebar：搜索在上、分组、当前项高亮）===== */
+.set-nav{flex:none;width:232px;display:flex;flex-direction:column;min-height:0;
+  background:var(--side);border-right:1px solid var(--line-soft)}
+.set-nav .settings-search{position:static;padding:14px 12px 10px;background:none}
+.set-nav .settings-search-in{max-width:none;height:30px}
+.set-nav .set-search-kbd{display:none}
+.set-nav-list{flex:1;min-height:0;overflow-y:auto;padding:6px 10px 16px;display:flex;flex-direction:column;gap:14px}
+.set-nav-grp{display:flex;flex-direction:column;gap:2px}
+.set-nav-grp > p{margin:0 0 4px;padding:0 10px;font-size:10.5px;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--faint)}
+.set-nav-it{display:flex;align-items:center;gap:9px;width:100%;height:30px;padding:0 10px;border-radius:8px;
+  font-size:13px;color:var(--muted);text-align:left;
+  transition:background-color var(--dur-2) var(--ease-out),color var(--dur-2) var(--ease-out)}
+.set-nav-it svg{flex:none;opacity:.85}
+.set-nav-it:hover{background:rgb(var(--fx) / .05);color:var(--fg2)}
+.set-nav-it.on{background:rgb(var(--fx) / .08);color:var(--fg);font-weight:500;box-shadow:inset 0 0 0 1px rgb(var(--fx) / .06)}
+.set-nav-it.dim{color:var(--t-4)}
+.set-nav-it:focus-visible{outline:2px solid rgb(var(--fx) / .3);outline-offset:-2px}
+.set-nav-it .n{margin-left:auto;font:10.5px var(--mono);color:var(--faint)}
+#settings .settings-scroll{scroll-padding-top:24px}
+#settings .settings-wrap{padding-top:28px}

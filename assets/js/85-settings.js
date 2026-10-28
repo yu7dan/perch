@@ -726,6 +726,7 @@ function onLocaleChanged() {
   if (typeof renderFiles === "function") renderFiles(true);
   if (typeof renderNeed === "function") renderNeed();
   if (typeof renderSideLive === "function") renderSideLive();
+  if (typeof renderSetNav === "function") renderSetNav();
   // 设置 › 模型提供商 / Agents 与 Bot Group 页也是 JS 现画的。
   if (typeof renderProviderSettings === "function" && NAV_HERE === "settings") renderProviderSettings();
   if (typeof renderBotGroup === "function" && document.body.classList.contains("botgroup")) renderBotGroup();

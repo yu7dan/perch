@@ -47,7 +47,7 @@
 #app.settings #tabs,
 #app.settings .tb-list,
 #app.settings .tb-rsb{display:none}
-#settings{grid-column:2 / -1;grid-row:2;display:none;flex-direction:column;
+#settings{grid-column:2 / -1;grid-row:2;display:none;flex-direction:row;
           position:relative;z-index:6;min-width:0;min-height:0;background:var(--bg);
           /* 最外 4px 留给窗口缩放边：设置页的滚动条不能压在边框上，
              否则右沿拖不动（判据要真按真拖比 GetWindowRect，别用合成 WM_NCHITTEST）。 */
