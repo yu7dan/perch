@@ -269,6 +269,7 @@ const BG_I = {
   file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>',
   play: '<path d="M6 4.5v15l13-7.5z"/>',
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
   bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
 };
 function bgIco(name, size) { return lucide(BG_I[name], size || 14); }
@@ -344,10 +345,9 @@ function bgEvLane(e) { return e.bot || "manager"; }
 /* ---------- 左栏：Bot Group 列表 ---------- */
 function bgRowHTML(g, b, on) {
   const st = bgBotState(b);
-  const sel = on && BG.focus === b.id;
   const docked = BG.dock && bgTabOf(b) === BG.dock;
   const task = bgTaskOf(g, b) || t(BG_STATE_KEY[st]);
-  return `<div class="bg-row${b.manager ? " bg-mgr" : ""}${sel ? " sel" : ""}${docked ? " docked" : ""}" data-bg-group="${esc(g.id)}" data-bg-focus="${esc(b.id)}" style="--lane:${bgColor(g, b.id)}">`
+  return `<div class="bg-row${b.manager ? " bg-mgr" : ""}${docked ? " docked" : ""}" data-bg-group="${esc(g.id)}" data-bg-focus="${esc(b.id)}" style="--lane:${bgColor(g, b.id)}">`
     + `<span class="bg-ri">${bgAgentIco(b.agent)}</span>`
     + `<span class="bg-rmain"><span class="bg-rt ell"><b>${esc(b.manager ? "Manager" : b.role)}</b> · ${esc(task)}</span>`
     + `<span class="bg-rs ell">${esc(bgAgentName(b.agent))} · ${esc(bgWhere(g, b))}</span></span>`
@@ -412,7 +412,7 @@ function bgChainHTML(g) {
     if (mgr) chips.push(bgChip({ who: "Manager", agent: mgr.agent, ok: true }, color));
     chips.push(bgChip({ who: bgAgentName(b.agent), agent: b.agent, cur: st === "working", ok: did && st !== "working" && st !== "waiting", dim: st === "pending" }, color));
     if (st === "waiting") chips.push(bgChip({ who: t("bg.chain.you"), you: true, cur: true }, color));
-    return `<div class="bg-chain-row${sel ? " sel" : ""}${BG.focus !== "all" && !sel ? " mute" : ""}" data-bg-focus="${esc(b.id)}">`
+    return `<div class="bg-chain-row" data-bg-focus="${esc(b.id)}">`
       + `<span class="bg-lane-l" style="--lane:${color}"><i></i>${esc(b.role)}</span>`
       + `<span class="bg-chips">${chips.join(`<span class="bg-arrow">→</span>`)}</span></div>`;
   }).join("");
@@ -559,7 +559,8 @@ function bgDerive(g, b) {
   const acts = (v && v.acts) || [];
   const lastA = acts[acts.length - 1];
   const asks = bgGroupAsks(g, b);
-  const key = [(v && v.actsGen) | 0, acts.length, lastA ? lastA.id + "|" + lastA.ok + "|" + (lastA.text || "").length : "", asks.length].join(":");
+  const st = bgBotState(b);
+  const key = [(v && v.actsGen) | 0, acts.length, lastA ? lastA.id + "|" + lastA.ok + "|" + (lastA.text || "").length : "", asks.length, st].join(":");
   const hit = tab && BG_DERIVED.get(tab);
   if (hit && hit.key === key) return hit.out;
   const items = [];
@@ -597,6 +598,13 @@ function bgDerive(g, b) {
     }
   }
   flush(Date.now());
+  // 每一轮里它最后说的那段话 = 这一轮的结论；这一轮做完了（不是正在干 / 正在等你）就标「阶段完成」。
+  let lastText = null;
+  for (const it of items) {
+    if (it.type === "prompt") { if (lastText) lastText.turnEnd = true; lastText = null; }
+    else if (it.type === "text") lastText = it;
+  }
+  if (lastText && st !== "working" && st !== "waiting") lastText.turnEnd = true;
   const out = { items, todo, hasActs: acts.length > 0 };
   if (tab) BG_DERIVED.set(tab, { key, out });
   return out;
@@ -705,6 +713,7 @@ function bgMsgRow(o) {
     + (o.to ? `<span class="bg-ev-meta">${esc(o.to)}</span>` : "")
     + `<span class="bg-msg-t">${esc(o.time || "")}</span></div>`
     + (o.you ? `<div class="bg-msg-b you">${esc(o.text || "")}</div>` : `<div class="bg-msg-b">${bgMd(o.text)}</div>`)
+    + (o.stage ? `<div class="bg-stage">${bgIco("check", 11)}<span>${esc(t("bg.feed.stageDone"))}</span></div>` : "")
     + `</div>`;
 }
 const bgYouIco = () => bgIco("user", 14);
@@ -771,7 +780,7 @@ function bgConvHTML(g, b) {
 /* 某个 Bot 说的一段话（定稿的 .bg-msg）。 */
 function bgSaidHTML(g, b, it, showBadge) {
   return bgMsgRow({ who: b.manager ? "Manager" : bgAgentName(b.agent), icon: bgAgentIco(b.agent), color: bgColor(g, b.id),
-    badge: showBadge && !b.manager ? bgBadge(g, b.id) : "", time: bgTime(it.at).slice(0, 5), text: it.text });
+    badge: showBadge && !b.manager ? bgBadge(g, b.id) : "", time: bgTime(it.at).slice(0, 5), text: it.text, stage: !!it.turnEnd });
 }
 /* 「它在做什么」：建组时写的分工任务 > 待办清单里正在做的那一项 > 最近一行过程。 */
 function bgTaskOf(g, b) {
@@ -801,7 +810,7 @@ function bgLiveHTML(g, members) {
     }
     if (!title) return "";
     const right = st === "working" ? t("bg.feed.workingAs", { who: bgAgentName(b.agent) }) : "";
-    return `<div class="bg-ev run" style="--lane:${bgColor(g, b.id)}"><div class="bg-ev-h"><span class="bg-caret blank"></span>`
+    return `<div class="bg-ev run" data-bg-ev="${esc(g.id + ":" + b.id + ":tail")}" style="--lane:${bgColor(g, b.id)}"><div class="bg-ev-h"><span class="bg-caret blank"></span>`
       + `<span class="bg-ev-g">${bgGlyph(st === "working" ? "running" : "wait")}</span>${BG.focus === "all" ? bgBadge(g, b.id) : ""}`
       + `<span class="bg-ev-t ell">${esc(title)}</span><span class="bg-ev-r">${esc(right)}</span></div></div>`;
   }).join("");
@@ -839,7 +848,7 @@ function bgAskRowHTML(g, b, tab, perm, ask) {
     if (err) note = err.text;
   }
   const a = perm || ask;
-  return `<div class="bg-ev ask open" data-bg-tab="${tab.id}" style="--lane:${color}">`
+  return `<div class="bg-ev ask open" data-bg-tab="${tab.id}" data-bg-ev="${esc(g.id + ":" + b.id + ":tail")}" style="--lane:${color}">`
     + `<div class="bg-ev-h"><span class="bg-caret">${bgIco("chev", 11)}</span><span class="bg-ev-g">${bgGlyph("approval", color)}</span>`
     + bgBadge(g, b.id) + `<span class="bg-ev-t ell">${esc(title)}</span><span class="bg-ev-r">${esc(bgTime(a.at))}</span></div>`
     + `<div class="bg-ev-body"><div class="bg-gate">${bgIco("shield", 13)}<span>${esc(clamp(gate, 240))}</span></div>${opts}`
@@ -876,14 +885,13 @@ function bgFeedHeadHTML(g) {
 /* ---------- 右：工作树 · 泳道 ---------- */
 function bgLaneTabsHTML(g) {
   return bgLanes(g).map((b) => {
-    const sel = BG.focus === b.id;
     const st = bgBotState(b);
     const d = bgDerive(g, b);
     const cur = bgCurrent(g, b);
     const pct = d.todo && d.todo.total ? Math.round(100 * d.todo.done / d.todo.total) : 0;
     const head = d.todo && d.todo.total ? `${d.todo.done}/${d.todo.total}` : t(BG_STATE_KEY[st]);
     const note = st === "waiting" ? t("bg.state.waiting") : (cur ? cur.title : "");
-    return `<button type="button" class="bg-lt${sel ? " sel" : ""}" data-bg-focus="${esc(b.id)}" style="--lane:${bgColor(g, b.id)}">`
+    return `<button type="button" class="bg-lt" data-bg-focus="${esc(b.id)}" style="--lane:${bgColor(g, b.id)}">`
       + `<span class="bg-lt-n"><i></i>${esc(b.role)}</span>`
       + `<span class="bg-lt-a">${bgAgentIco(b.agent)}<span class="ell">${esc(bgAgentName(b.agent))}</span></span>`
       + `<span class="bg-lt-bar"><span style="width:${pct}%"></span></span>`
@@ -921,9 +929,7 @@ function bgTreeSVG(g, width) {
   tails.forEach((tl, i) => { tl.y = tailY0 + i * rowH; });
   const tailY = tailY0;
   const H = tailY0 + tails.length * rowH + 16;
-  const focus = BG.focus;
   const parts = [];
-  const opOf = (lane) => (focus === "all" || focus === lane ? 1 : 0.28);
   // 竖线：从这条车道第一个节点画到最后一个；还在干活 / 等你就再虚线拖到末尾那个节点。
   for (const b of lanes) {
     const idx = evs.map((e, i) => (e.lane === b.id ? i : -1)).filter((i) => i >= 0);
@@ -931,7 +937,7 @@ function bgTreeSVG(g, width) {
     if (!idx.length && !tail) continue;
     const x = xOf(b.id), c = bgColor(g, b.id);
     const y1 = idx.length ? ys[idx[0]] : (tail ? tail.y : tailY), y2 = idx.length ? ys[idx[idx.length - 1]] : (tail ? tail.y : tailY);
-    parts.push(`<g opacity="${opOf(b.id)}"><line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="${c}" stroke-width="2"/>`);
+    parts.push(`<g data-lane="${esc(b.id)}"><line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="${c}" stroke-width="2"/>`);
     if (tail && idx.length) parts.push(`<line x1="${x}" y1="${y2}" x2="${x}" y2="${tail.y}" stroke="${c}" stroke-width="1.4" stroke-dasharray="3 3" opacity=".55"/>`);
     parts.push(`</g>`);
   }
@@ -945,7 +951,7 @@ function bgTreeSVG(g, width) {
     const yEnd = j >= 0 ? ys[j] : (tl0 ? tl0.y : y + rowH);
     for (let k = i + 1; k < evs.length && ys[k] <= yEnd; k++) if (evs[k].lane === e.lane) branchUntil.set(k, true);
     const dashed = !(e.fork && e.fork.done);
-    parts.push(`<g opacity="${opOf(e.lane)}"><path d="M${x} ${y} C ${x} ${y + 8}, ${bx} ${y + 4}, ${bx} ${y + 14} L ${bx} ${yEnd - 14}`
+    parts.push(`<g data-lane="${esc(e.lane)}"><path d="M${x} ${y} C ${x} ${y + 8}, ${bx} ${y + 4}, ${bx} ${y + 14} L ${bx} ${yEnd - 14}`
       + (j >= 0 ? ` C ${bx} ${yEnd - 4}, ${x} ${yEnd - 8}, ${x} ${yEnd}` : "")
       + `" fill="none" stroke="${c}" stroke-width="1.5"${dashed ? ` stroke-dasharray="3 2.5"` : ""} opacity=".85"/></g>`);
     if (j >= 0) evs[j] = Object.assign({}, evs[j], { merged: true });
@@ -970,14 +976,14 @@ function bgTreeSVG(g, width) {
     const b = bgBot(g, e.lane);
     const lx = x + (branchUntil.has(i) ? 21 : 10);
     const strong = e.kind === "fail" ? ` class="bad"` : "";
-    parts.push(`<g opacity="${opOf(e.lane)}" data-bg-node="${esc(g.id + ":" + e.lane + ":" + e.id)}">${nodeSVG(e.kind, x, y, c)}`
+    parts.push(`<g data-lane="${esc(e.lane)}" data-bg-node="${esc(g.id + ":" + e.lane + ":" + e.id)}"><circle class="bg-node-ring" cx="${x}" cy="${y}" r="10" stroke="${c}"/>${nodeSVG(e.kind, x, y, c)}`
       + (e.merged ? `<circle cx="${x}" cy="${y}" r="8" fill="none" stroke="${c}" stroke-width="1.2" opacity=".6"/>` : "")
       + `<text x="${lx}" y="${y - 1}"${strong}>${esc(bgFit(e.title, width - lx - 4))}</text>`
       + `<text x="${lx}" y="${y + 10}" class="sub">${esc(bgFit(`${bgAgentName(b && b.agent)} · ${bgTime(e.at).slice(0, 5)}`, width - lx - 4))}</text></g>`);
   });
   for (const tl of tails) {
     const x = xOf(tl.b.id), c = bgColor(g, tl.b.id);
-    parts.push(`<g opacity="${opOf(tl.b.id)}">${nodeSVG(tl.kind, x, tl.y, c)}`
+    parts.push(`<g data-lane="${esc(tl.b.id)}" data-bg-node="${esc(g.id + ":" + tl.b.id + ":tail")}"><circle class="bg-node-ring" cx="${x}" cy="${tl.y}" r="10" stroke="${c}"/>${nodeSVG(tl.kind, x, tl.y, c)}`
       + `<text x="${x + 10}" y="${tl.y - 1}"${tl.kind === "approval" ? ` class="ask"` : ""}>${esc(bgFit(tl.title, width - x - 14))}</text>`
       + `<text x="${x + 10}" y="${tl.y + 10}" class="sub">${esc(bgFit(bgAgentName(tl.b.agent), width - x - 14))}</text></g>`);
   }
@@ -1081,8 +1087,8 @@ function bgTreeHTML(g, waiting) {
   const lanes = bgLanes(g);
   return `<div class="bg-th"><b>${esc(t("bg.tree.title"))}</b><span>${esc(t("bg.tree.sub", { n: lanes.length, w: waiting }))}</span></div>`
     + (lanes.length ? `<div class="bg-lts" style="--n:${lanes.length}">${bgLaneTabsHTML(g)}</div>` : "")
-    + `<div class="bg-tseg"><span class="segs-mini"><button type="button" class="${BG.focus === "all" ? "" : "on"}" data-bg-act="focus-cur">${esc(t("bg.tree.focus"))}</button>`
-    +   `<button type="button" class="${BG.focus === "all" ? "on" : ""}" data-bg-focus="all">${esc(t("bg.tree.all"))}</button></span><span class="mono bg-now">${esc(bgTime(new Date().toISOString()).slice(0, 5))}</span></div>`
+    + `<div class="bg-tseg"><span class="segs-mini"><button type="button" data-bg-act="focus-cur">${esc(t("bg.tree.focus"))}</button>`
+    +   `<button type="button" data-bg-focus="all">${esc(t("bg.tree.all"))}</button></span><span class="mono bg-now">${esc(bgTime(new Date().toISOString()).slice(0, 5))}</span></div>`
     + `<div class="bg-tscroll" id="bg-tscroll"></div>`
     + `<div class="bg-legend"><div class="bg-lg-h">${esc(t("bg.legend.title"))}</div><div class="bg-lg-grid">${bgLegendHTML()}</div></div>`;
 }
@@ -1127,6 +1133,8 @@ function renderBotGroup(why) {
     const ts = $("bg-tscroll");
     if (bgSet(ts, bgTreeSVG(g, Math.max(260, ts.clientWidth || 340)) || `<div class="bg-empty sm">${esc(t("bg.tree.empty"))}</div>`)) ts.scrollTop = tsTop;
     bgComposerSync(g);
+    bgApplyFocus(g, switched);
+    bgMotionAfterRender(g, switched);
   }
   BG_STICK = false;
   if (why) sendCtrl({ type: "log", msg: `Bot Group 渲染（${why}）组=${BOTGROUPS.length} 当前=${g ? g.id : "-"} focus=${BG.focus} theme=${light ? "light" : "dark"}` });
@@ -1135,6 +1143,168 @@ function renderBotGroup(why) {
 function bgPickGroup(gid) {
   BG.group = gid || "";
   try { localStorage.setItem("perch.bg.group", BG.group); } catch (_) {}
+}
+
+/* ---------- 动效（第 2 步，2026-10-28；效果以桌面参考视频为准，节点长出的手感参考 LayerFS） ----------
+   1. 聚焦：选中 / 变淡只切类，不重画 —— 元素还是那几个，CSS 过渡才动得起来
+      （以前聚焦一换就整块 innerHTML，变淡是"啪"一下）。
+   2. 连线：鼠标停在过程流的一行上（或者刚展开一行），从这一行拉一条曲线到工作树里对应的节点，
+      节点套一圈环；反过来停在节点上也一样。「正在处理 / 等你确认」那一行连到车道末尾的节点。
+      曲线是描出来的（stroke-dashoffset），不是一下子出现。
+   3. 节点长出：工作树里新出现的节点从 0 弹到 1（带一点过冲），标签随后淡入；第一次画不弹。
+   4. 行进场：过程流里新出现的行轻轻上浮淡入；第一次画、切会话时不逐行进场（整块淡入）。 */
+const BG_SEEN = new Map();      // gid → Set(工作树节点 key)
+const BG_ROWS_SEEN = new Map(); // gid|focus → Set(过程流行 key)
+const BGL = { hover: "", open: "", drawn: "" };
+
+function bgApplyFocus(g, switched) {
+  const root = $("bg");
+  if (!root) return;
+  const f = BG.focus;
+  root.querySelectorAll(".bg-chain-row").forEach((el) => {
+    const on = el.dataset.bgFocus === f;
+    el.classList.toggle("sel", on);
+    el.classList.toggle("mute", f !== "all" && !on);
+  });
+  root.querySelectorAll(".bg-lt").forEach((el) => el.classList.toggle("sel", el.dataset.bgFocus === f));
+  root.querySelectorAll(".bg-row[data-bg-focus]").forEach((el) =>
+    el.classList.toggle("sel", el.dataset.bgGroup === g.id && el.dataset.bgFocus === f));
+  root.querySelectorAll("#bg-tscroll g[data-lane]").forEach((el) => el.classList.toggle("mute", f !== "all" && el.dataset.lane !== f));
+  const fc = root.querySelector('[data-bg-act="focus-cur"]'), fa = root.querySelector('.bg-tseg [data-bg-focus="all"]');
+  if (fc) fc.classList.toggle("on", f !== "all");
+  if (fa) fa.classList.toggle("on", f === "all");
+  if (switched) {
+    const list = $("bg-feed-list");
+    if (list) { list.classList.remove("bg-swap"); void list.offsetWidth; list.classList.add("bg-swap"); }
+  }
+}
+
+function bgMotionAfterRender(g, switched) {
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // 节点长出
+  const seen = BG_SEEN.get(g.id);
+  const nodes = [...document.querySelectorAll("#bg-tscroll g[data-bg-node]")];
+  if (!seen) BG_SEEN.set(g.id, new Set(nodes.map((n) => n.dataset.bgNode)));
+  else {
+    for (const n of nodes) {
+      const k = n.dataset.bgNode;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      if (!reduce) n.classList.add("pop");
+    }
+  }
+  // 行进场
+  const rk = g.id + "|" + BG.focus;
+  const rows = [...document.querySelectorAll("#bg-feed-list > [data-bg-ev], #bg-live > [data-bg-ev]")];
+  const rs = BG_ROWS_SEEN.get(rk);
+  if (!rs || switched) BG_ROWS_SEEN.set(rk, new Set(rows.map((r) => r.dataset.bgEv)));
+  else {
+    for (const r of rows) {
+      const k = r.dataset.bgEv;
+      if (rs.has(k)) continue;
+      rs.add(k);
+      if (!reduce) r.classList.add("enter");
+    }
+  }
+  bgLinkDraw(false);
+}
+
+/* 连线：目标 = 鼠标停着的那一行 / 节点，没有就用最近展开的那一行。 */
+function bgLinkKey() { return BGL.hover || BGL.open || ""; }
+function bgLinkLayer() {
+  let svg = $("bg-link");
+  const root = $("bg");
+  if (!svg && root) {
+    svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.id = "bg-link";
+    svg.setAttribute("aria-hidden", "true");
+    root.appendChild(svg);
+  }
+  return svg;
+}
+function bgLinkClear() {
+  const svg = $("bg-link");
+  if (svg) svg.innerHTML = "";
+  document.querySelectorAll("#bg .bg-ev.linked").forEach((el) => el.classList.remove("linked"));
+  document.querySelectorAll("#bg-tscroll g.hl").forEach((el) => el.classList.remove("hl"));
+  BGL.drawn = "";
+}
+function bgLinkDraw(animate) {
+  const key = bgLinkKey();
+  const root = $("bg");
+  if (!root || !document.body.classList.contains("botgroup")) return;
+  if (!key) { bgLinkClear(); return; }
+  const row = root.querySelector(`#bg-feed [data-bg-ev="${CSS.escape(key)}"]`);
+  const node = root.querySelector(`#bg-tscroll g[data-bg-node="${CSS.escape(key)}"]`);
+  document.querySelectorAll("#bg .bg-ev.linked").forEach((el) => { if (el !== row) el.classList.remove("linked"); });
+  document.querySelectorAll("#bg-tscroll g.hl").forEach((el) => { if (el !== node) el.classList.remove("hl"); });
+  if (row) row.classList.add("linked");
+  if (node) node.classList.add("hl");
+  const svg = bgLinkLayer();
+  if (!svg) return;
+  if (!row || !node) { svg.innerHTML = ""; BGL.drawn = ""; return; }
+  const base = root.getBoundingClientRect();
+  const feed = $("bg-feed").getBoundingClientRect(), ts = $("bg-tscroll").getBoundingClientRect();
+  const h = (row.querySelector(".bg-ev-h") || row).getBoundingClientRect();
+  const shape = node.querySelector(":scope > :not(.bg-node-ring)") || node;
+  const n = shape.getBoundingClientRect();
+  const y1 = h.top + h.height / 2, y2 = n.top + n.height / 2;
+  // 两头都要在各自的可视区里，否则不画（行被滚走 / 节点被滚走时不拉一条穿出去的线）
+  if (y1 < feed.top || y1 > feed.bottom || y2 < ts.top || y2 > ts.bottom) { svg.innerHTML = ""; BGL.drawn = ""; return; }
+  const x1 = h.right - base.left - 6, x2 = n.left - base.left + n.width / 2;
+  const a = y1 - base.top, b = y2 - base.top, dx = Math.max(60, (x2 - x1) * 0.5);
+  const color = getComputedStyle(row).getPropertyValue("--lane").trim() || "var(--bg-muted)";
+  const d = `M${x1.toFixed(1)} ${a.toFixed(1)} C ${(x1 + dx).toFixed(1)} ${a.toFixed(1)}, ${(x2 - dx).toFixed(1)} ${b.toFixed(1)}, ${x2.toFixed(1)} ${b.toFixed(1)}`;
+  const fresh = BGL.drawn !== key;
+  svg.innerHTML = `<path class="bg-link-path" d="${d}" stroke="${color}"/><circle class="bg-link-dot" cx="${x1.toFixed(1)}" cy="${a.toFixed(1)}" r="2.6" fill="${color}"/>`;
+  const p = svg.firstChild;
+  if (fresh && animate !== false && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const len = p.getTotalLength();
+    p.style.strokeDasharray = `${len} ${len}`;
+    p.style.strokeDashoffset = String(len);
+    p.getBoundingClientRect();
+    p.style.transition = "stroke-dashoffset 420ms cubic-bezier(.2,.8,.2,1)";
+    p.style.strokeDashoffset = "0";
+  }
+  BGL.drawn = key;
+}
+/* 展开一行时把工作树滚到它的节点（平滑），滚完再画线。 */
+function bgRevealNode(key) {
+  const node = document.querySelector(`#bg-tscroll g[data-bg-node="${CSS.escape(key)}"]`);
+  const ts = $("bg-tscroll");
+  if (!node || !ts) return;
+  const n = node.getBoundingClientRect(), r = ts.getBoundingClientRect();
+  if (n.top >= r.top + 20 && n.bottom <= r.bottom - 20) return;
+  ts.scrollTo({ top: ts.scrollTop + (n.top - r.top) - r.height / 2, behavior: "smooth" });
+}
+{
+  const root = $("bg");
+  if (root && !root.dataset.motion) {
+    root.dataset.motion = "1";
+    root.addEventListener("mouseover", (e) => {
+      const el = e.target.closest("#bg-feed [data-bg-ev], #bg-tscroll g[data-bg-node]");
+      const k = el ? (el.dataset.bgEv || el.dataset.bgNode) : "";
+      if (k === BGL.hover) return;
+      BGL.hover = k;
+      bgLinkDraw(true);
+    });
+    root.addEventListener("mouseleave", () => { if (BGL.hover) { BGL.hover = ""; bgLinkDraw(true); } });
+    // 展开 / 收起一行：记成「最近展开的」，并把工作树滚到它的节点
+    root.addEventListener("click", (e) => {
+      const h = e.target.closest(".bg-ev.has-body > .bg-ev-h");
+      if (!h) return;
+      const k = h.parentElement.dataset.bgEv;
+      requestAnimationFrame(() => {
+        BGL.open = BG.open.has(k) ? k : (BGL.open === k ? "" : BGL.open);
+        if (BGL.open) bgRevealNode(BGL.open);
+        bgLinkDraw(true);
+      });
+    }, true);
+    let raf = 0;
+    const redraw = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; bgLinkDraw(false); }); };
+    root.addEventListener("scroll", redraw, true);
+    window.addEventListener("resize", redraw);
+  }
 }
 
 /* ---------- 删除 ----------

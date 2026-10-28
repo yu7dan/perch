@@ -92,3 +92,8 @@ html.theme-light{
   .mode-pop:not([hidden]),#cardmenu.on,#need-pop:not([hidden]),.bg-ev-body,
   .adot[data-state="ask"],.bg-dot[data-state="waiting"]{animation:none}
 }
+
+/* ---- 8. 换页：总览 / 设置 / Bot Group 出现时整页轻轻淡入（display 从 none 变出来时动画会重播） ---- */
+#app.dash #dash,#app.settings #settings,#app.botgroup:not(.dash):not(.settings) #bg{animation:feel-view-in var(--dur-3) var(--ease-swift)}
+@keyframes feel-view-in{from{opacity:0;transform:translateY(4px)}}
+@media (prefers-reduced-motion: reduce){#app.dash #dash,#app.settings #settings,#app.botgroup #bg{animation:none}}

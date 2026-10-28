@@ -342,3 +342,35 @@ textarea.bg-cin::placeholder{color:var(--bg-faint)}
 .bg-opt.na:hover{border-color:var(--bg-line);color:var(--bg-faint)}
 .bg-ev-note{margin-top:6px;font-size:11px;color:var(--bg-bad)}
 .bg-step.bad .bg-step-k,.bg-step.bad .bg-step-v{color:var(--bg-bad)}
+
+/* ---------- 动效（第 2 步）：聚焦变淡、连线、节点长出、行进场 ---------- */
+#bg .bg-chain-row{transition:opacity var(--dur-3) var(--ease-out)}
+#bg .bg-tree-svg g[data-lane]{transition:opacity var(--dur-3) var(--ease-out)}
+#bg .bg-tree-svg g[data-lane].mute{opacity:.26}
+#bg .bg-lt,#bg .bg-row,#bg .bg-ev,#bg .bg-ev-h,#bg .bg-chip{transition:background-color var(--dur-2) var(--ease-out),box-shadow var(--dur-2) var(--ease-out),opacity var(--dur-2) var(--ease-out)}
+/* 切会话：整块轻轻淡入 */
+#bg-feed-list.bg-swap{animation:bg-swap var(--dur-3) var(--ease-swift)}
+@keyframes bg-swap{from{opacity:0;transform:translateY(3px)}}
+/* 新出现的行：上浮淡入 */
+#bg .bg-ev.enter{animation:bg-enter 260ms var(--ease-swift) both}
+@keyframes bg-enter{from{opacity:0;transform:translateY(5px)}}
+/* 被连上的那一行：淡淡的车道色底 */
+#bg .bg-ev.linked > .bg-ev-h{background:color-mix(in srgb,var(--lane) 9%,transparent)}
+/* 连线层 */
+#bg-link{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:8;overflow:visible}
+#bg-link .bg-link-path{fill:none;stroke-width:1.5;stroke-linecap:round;opacity:.85}
+#bg-link .bg-link-dot{opacity:.9}
+/* 节点：被连上时套一圈环；新节点弹出来（带一点过冲），标签随后淡入 */
+#bg .bg-node-ring{fill:none;stroke-width:1.4;opacity:0;transition:opacity var(--dur-2) var(--ease-out)}
+#bg-tscroll g.hl .bg-node-ring{opacity:.7}
+#bg-tscroll g.hl text:not(.sub){font-weight:700}
+#bg-tscroll g.pop > :not(text):not(.bg-node-ring){transform-box:fill-box;transform-origin:center;
+  animation:bg-pop 500ms cubic-bezier(.2,.9,.3,1.35) 80ms both}
+#bg-tscroll g.pop > text{animation:bg-fade 320ms var(--ease-out) 260ms both}
+@keyframes bg-pop{from{transform:scale(0)}to{transform:scale(1)}}
+@keyframes bg-fade{from{opacity:0}}
+@media (prefers-reduced-motion: reduce){
+  #bg .bg-ev.enter,#bg-feed-list.bg-swap,#bg-tscroll g.pop > *{animation:none}
+}
+.bg-stage{display:inline-flex;align-items:center;gap:4px;margin-top:6px;height:20px;padding:0 7px;border-radius:6px;font-size:11px;
+  color:var(--bg-ok);background:color-mix(in srgb,var(--bg-ok) 9%,transparent)}
