@@ -340,3 +340,4 @@ textarea.bg-cin::placeholder{color:var(--bg-faint)}
 .bg-opt.na{color:var(--bg-faint);border-style:dashed;cursor:default}
 .bg-opt.na:hover{border-color:var(--bg-line);color:var(--bg-faint)}
 .bg-ev-note{margin-top:6px;font-size:11px;color:var(--bg-bad)}
+.bg-step.bad .bg-step-k,.bg-step.bad .bg-step-v{color:var(--bg-bad)}

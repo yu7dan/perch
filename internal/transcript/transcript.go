@@ -146,7 +146,8 @@ type ActItem struct {
 	Rel   string `json:"rel,omitempty"`
 	Add   int    `json:"add,omitempty"`
 	Del   int    `json:"del,omitempty"`
-	OK    *bool  `json:"ok,omitempty"` // nil = 还在跑
+	OK    *bool  `json:"ok,omitempty"`   // nil = 还在跑
+	Done  string `json:"done,omitempty"` // 结果回来的时刻（工具调用才有）
 	Agent string `json:"agent,omitempty"`
 	At    string `json:"at"`
 
@@ -181,6 +182,19 @@ type ActItem struct {
 	   所以这里只报能看见的（第几回合 / 距上次几个回合），不编 token、不编回合数。 */
 	Turn      int `json:"turn,omitempty"`
 	Swallowed int `json:"swallowed,omitempty"`
+
+	/* **只有 Bash / PowerShell 会有**：命令本身的第一行（Text 优先放 description，
+	   给人看；这里留原命令，给 Bot Group 归类用 —— 跑测试 / git commit / push 要从命令认）。 */
+	Cmd string `json:"cmd,omitempty"`
+	/* **只有 TodoWrite 会有**：待办清单的进度（Bot Group 的车道进度条就是它）。 */
+	Todo *TodoSum `json:"todo,omitempty"`
+}
+
+// TodoSum 是一次 TodoWrite 之后的清单进度：完成几项 / 一共几项 / 正在做哪一项。
+type TodoSum struct {
+	Done  int    `json:"done"`
+	Total int    `json:"total"`
+	Cur   string `json:"cur,omitempty"`
 }
 
 // QOpt 是 AskUserQuestion 的一个选项。

@@ -163,3 +163,39 @@ func fileOp(tool string) (string, bool) {
 	}
 	return "", false
 }
+
+// readTodos 把 TodoWrite 的清单折成进度。形状：{"todos":[{"content","status","activeForm"}]}，
+// status 是 pending / in_progress / completed。读不出来就 nil（前端就不画进度条）。
+func readTodos(in toolInput) *TodoSum {
+	raw := in["todos"]
+	if len(raw) == 0 {
+		return nil
+	}
+	var ts []struct {
+		Content    string `json:"content"`
+		Status     string `json:"status"`
+		ActiveForm string `json:"activeForm"`
+	}
+	if json.Unmarshal(raw, &ts) != nil || len(ts) == 0 {
+		return nil
+	}
+	sum := &TodoSum{Total: len(ts)}
+	for _, t := range ts {
+		switch t.Status {
+		case "completed":
+			sum.Done++
+		case "in_progress":
+			if sum.Cur == "" {
+				sum.Cur = clip(pick(t.ActiveForm, t.Content), 80)
+			}
+		}
+	}
+	return sum
+}
+
+func pick(a, b string) string {
+	if strings.TrimSpace(a) != "" {
+		return a
+	}
+	return b
+}

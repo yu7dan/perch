@@ -168,36 +168,17 @@ function bgReleaseTab(tab, why) {
   sendCtrl({ type: "log", msg: `Bot Group：格子 tab=${tab.id} pane=${tab.paneID} 回到 Workspaces（${why || ""}）` });
 }
 
-/* ---------- 状态跃迁 → 过程流 ----------
-   renderAgentDot 每 400–700ms 就可能叫一次，这里只在**折过之后的状态**变了才动。
-   working ↔ idle 在一轮里会抖（标题字形、hook 先后），稳 1.2s 才记；
-   「等你」立刻记（那是这页最要紧的一件事）。
-   刚上线的第一个 idle 不记（「上线」那条已经说了）。 */
+/* ---------- 状态跃迁 ----------
+   renderAgentDot 每 400–700ms 就可能叫一次，这里只在**折过之后的状态**变了才重画。
+   生命周期（开始干活 / 空闲 / 停了）**不再落进过程流**：定稿的过程流和工作树画的是工作，
+   这些只体现在成员行的状态点、车道页签和「正在处理」那一行上。 */
 const BG_EV_OF = { working: "working", ask: "waiting", idle: "idle", unread: "idle", off: "stopped", failed: "fail" };
 function botStateChanged(tab, s) {
   const k = BG_EV_OF[s] || "idle";
   if (!tab.bgBorn) tab.bgBorn = Date.now();
-  if (tab.botShown !== k) {
-    tab.botShown = k;
-    tab.bgIdleSince = k === "idle" ? Date.now() : 0;
-    if (k === "working" && tab.bgRoute) tab.bgRoute.sawWork = true;
-    bgSchedule();
-  }
-  if (tab.botLast === undefined) {
-    tab.botLast = k === "idle" ? "idle" : "";
-    if (k === "idle") return;
-  }
-  if (k === tab.botPend && tab.botTimer) return;
-  tab.botPend = k;
-  clearTimeout(tab.botTimer);
-  const commit = () => {
-    tab.botTimer = 0;
-    if (tab.botPend === tab.botLast || !tab.group || !TAB_LIST.includes(tab)) return;
-    tab.botLast = tab.botPend;
-    sendCtrl({ type: "botgroup.event", id: tab.group, event: { bot: tab.bot, kind: tab.botPend, title: "" } });
-  };
-  if (k === "waiting") commit();
-  else tab.botTimer = setTimeout(commit, 1200);
+  if (tab.botShown === k) return;
+  tab.botShown = k;
+  bgSchedule();
 }
 
 /* ---------- 抽屉（Bot 的终端） ---------- */
@@ -314,6 +295,8 @@ function bgGlyph(kind, color) {
     case "started": return `<svg width="12" height="12" viewBox="0 0 12 12"><path d="M3.5 2.2v7.6L10 6Z" fill="${c}"/></svg>`;
     case "working": return `<svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="4.2" fill="none" stroke="${c}" stroke-width="1.3"/><path d="M6 1.8a4.2 4.2 0 0 1 0 8.4Z" fill="${c}"/></svg>`;
     case "idle": return `<svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="3.6" fill="none" stroke="var(--bg-faint)" stroke-width="1.3"/></svg>`;
+    case "fork": return `<svg width="12" height="12" viewBox="0 0 12 12"><circle cx="4" cy="3" r="1.6" fill="none" stroke="${c}" stroke-width="1.3"/><circle cx="4" cy="9.4" r="1.6" fill="none" stroke="${c}" stroke-width="1.3"/><circle cx="9" cy="5" r="1.6" fill="none" stroke="${c}" stroke-width="1.3"/><path d="M4 4.6v3.2M9 6.6c0 1.6-1.4 2.2-3.4 2.6" fill="none" stroke="${c}" stroke-width="1.3"/></svg>`;
+    case "compact": return `<svg width="12" height="12" viewBox="0 0 12 12"><path d="M2.5 2 6 4.6 9.5 2M2.5 10 6 7.4 9.5 10" fill="none" stroke="${c}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     case "stopped": return `<svg width="12" height="12" viewBox="0 0 12 12"><rect x="3" y="3" width="6" height="6" rx="1" fill="var(--bg-faint)"/></svg>`;
     default: return `<svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="2" fill="${c}"/></svg>`;
   }
@@ -363,13 +346,11 @@ function bgRowHTML(g, b, on) {
   const st = bgBotState(b);
   const sel = on && BG.focus === b.id;
   const docked = BG.dock && bgTabOf(b) === BG.dock;
-  const sub = b.manager
-    ? (g.source && g.source.kind === "derived" ? t("bg.list.derivedMgr") : bgAgentName(b.agent))
-    : (b.task || bgAgentName(b.agent));
+  const task = bgTaskOf(g, b) || t(BG_STATE_KEY[st]);
   return `<div class="bg-row${b.manager ? " bg-mgr" : ""}${sel ? " sel" : ""}${docked ? " docked" : ""}" data-bg-group="${esc(g.id)}" data-bg-focus="${esc(b.id)}" style="--lane:${bgColor(g, b.id)}">`
     + `<span class="bg-ri">${bgAgentIco(b.agent)}</span>`
-    + `<span class="bg-rmain"><span class="bg-rt ell"><b>${esc(b.role)}</b> · ${esc(t(BG_STATE_KEY[st]))}</span>`
-    + `<span class="bg-rs ell">${esc(sub)}</span></span>`
+    + `<span class="bg-rmain"><span class="bg-rt ell"><b>${esc(b.manager ? "Manager" : b.role)}</b> · ${esc(task)}</span>`
+    + `<span class="bg-rs ell">${esc(bgAgentName(b.agent))} · ${esc(bgWhere(g, b))}</span></span>`
     + `<button type="button" class="bg-rterm" data-bg-term="${esc(b.id)}" data-bg-group="${esc(g.id)}" title="${esc(t(st === "pending" || st === "off" ? "bg.feed.startTitle" : "bg.feed.openTermTitle"))}">${bgIco(st === "pending" || st === "off" ? "play" : "term", 12)}</button>`
     + `${bgDot(st)}</div>`;
 }
@@ -413,47 +394,264 @@ function bgListHTML() {
 /* ---------- 中上：交接链 ----------
    阶段 B 还没有交接：每条车道就是「Manager → 这个 Bot」（组的分工本身）。
    阶段 C 的 handoff 事件会接在后面。 */
-function bgChip(g, b, cur) {
-  const you = !b;
-  const cls = "bg-chip" + (cur ? " cur" : "") + (you ? " you" : "");
-  const ico = you ? `<span class="bg-ci">${bgIco("user", 12)}</span>` : `<span class="bg-ci">${bgAgentIco(b.agent)}</span>`;
-  const who = you ? t("bg.chain.you") : (b.manager ? "Manager" : bgAgentName(b.agent));
-  return `<span class="${cls}" style="--lane:${bgColor(g, b ? b.id : "")}">${ico}<span>${esc(who)}</span></span>`;
+function bgChip(c, laneColor) {
+  const cls = "bg-chip" + (c.cur ? " cur" : "") + (c.dim ? " dim" : "") + (c.you ? " you" : "");
+  const ico = c.you ? `<span class="bg-ci">${bgIco("user", 12)}</span>` : `<span class="bg-ci">${bgAgentIco(c.agent)}</span>`;
+  return `<span class="${cls}" style="--lane:${laneColor}">${ico}<span>${esc(c.who)}</span>${c.ok ? `<span class="bg-ok">✓</span>` : ""}</span>`;
 }
+/* 每条车道的交接链：Manager 把活交给这个 Bot；它卡在等你时链尾是「你」。
+   ✓ = 这一段做完了；描边高亮 = 当前在谁手上；虚线 = 还没轮到。 */
 function bgChainHTML(g) {
   const mgr = bgManager(g);
   return bgLanes(g).map((b) => {
     const sel = BG.focus === b.id;
     const st = bgBotState(b);
-    const chips = [bgChip(g, mgr, false), bgChip(g, b, st === "working")];
-    if (st === "waiting") chips.push(bgChip(g, null, true));
+    const color = bgColor(g, b.id);
+    const did = bgDerive(g, b).items.some((x) => x.type === "proc" || x.type === "text");
+    const chips = [];
+    if (mgr) chips.push(bgChip({ who: "Manager", agent: mgr.agent, ok: true }, color));
+    chips.push(bgChip({ who: bgAgentName(b.agent), agent: b.agent, cur: st === "working", ok: did && st !== "working" && st !== "waiting", dim: st === "pending" }, color));
+    if (st === "waiting") chips.push(bgChip({ who: t("bg.chain.you"), you: true, cur: true }, color));
     return `<div class="bg-chain-row${sel ? " sel" : ""}${BG.focus !== "all" && !sel ? " mute" : ""}" data-bg-focus="${esc(b.id)}">`
-      + `<span class="bg-lane-l" style="--lane:${bgColor(g, b.id)}"><i></i><span class="ell">${esc(b.role)}</span></span>`
+      + `<span class="bg-lane-l" style="--lane:${color}"><i></i>${esc(b.role)}</span>`
       + `<span class="bg-chips">${chips.join(`<span class="bg-arrow">→</span>`)}</span></div>`;
   }).join("");
 }
+/* ---------- 从每个 Bot 的对话里归纳「过程」 ----------
+   定稿的过程流和工作树画的是**工作**：产物、提交/保存、测试 ✓✗、重试、上下文压缩、
+   分叉出去的子代理、等你确认 —— 不是「上线 / 空闲」这种生命周期。
+   这些全都在每个 Bot 自己的转录里（LIVE.acts，和右栏对话流同一个来源），这里归纳：
+     · 一段连续的工具调用（夹在两段说话之间）= 一行过程，标题按里面最要紧的那一步定，
+       展开是逐步明细（读取 / 编辑 / 运行 …），右边是「N 步 · 用时」；
+     · Task / Agent 子代理 = 分叉（工作树上画一条支线，子代理做完合回来）；
+     · 跑测试（npm test / go test / pytest …）= 测试 ✓/✗，失败后再跑 = 重试 #n；
+     · git commit = 提交，git push = 推送，Write 新文件 = 产物，Edit = 提交/保存；
+     · compact = 上下文压缩；TodoWrite = 车道进度（不单独成行）。
+   只归纳、不落盘：转录本身就是持久的（重启后 acts.snapshot 会把最近的补回来）。 */
+const BG_TEST_RE = /(^|[\s;&|(])((npm|pnpm|yarn|bun)\s+(run\s+)?test\b|go\s+test\b|pytest\b|vitest\b|jest\b|cargo\s+test\b|node\s+--test\b|mocha\b|dotnet\s+test\b)/i;
+const BG_STEP_KEY = {
+  Read: "bg.step.read", Edit: "bg.step.edit", MultiEdit: "bg.step.edit", NotebookEdit: "bg.step.edit",
+  Write: "bg.step.write", Bash: "bg.step.run", PowerShell: "bg.step.run", Grep: "bg.step.search",
+  Glob: "bg.step.search", Task: "bg.step.fork", Agent: "bg.step.fork", WebFetch: "bg.step.web", WebSearch: "bg.step.web",
+};
+function bgBlockEnd(tools) {
+  let m = 0;
+  for (const a of tools) { const d = Date.parse(a.done || ""); if (!isNaN(d) && d > m) m = d; }
+  return m;
+}
+function bgBase(p) { return String(p || "").split(/[\\/]/).filter(Boolean).pop() || ""; }
+function bgDur(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return s + "s";
+  const m = Math.floor(s / 60);
+  return m < 60 ? `${m}m ${s % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+function bgAtMs(a) { const t = Date.parse(a && a.at); return isNaN(t) ? 0 : t; }
 
-/* ---------- 中：过程流（= 群聊）/ 单聊 ----------
-   版式就是定稿的那一套（用户 2026-10-28 明确要求还原，别另起一套聊天皮）：
+/* 一段工具调用 → 一行过程。返回 null = 这段里没有值得成行的东西。 */
+function bgBlock(b, acts, prevTestFailed, endAt) {
+  const tools = acts.filter((a) => a.kind === "tool" && a.tool !== "TodoWrite" && a.tool !== "AskUserQuestion");
+  if (!tools.length) return null;
+  const cmd = (a) => a.cmd || "";
+  const first = acts[0], last = acts[acts.length - 1];
+  const forks = tools.filter((a) => a.tool === "Task" || a.tool === "Agent");
+  const tests = tools.filter((a) => BG_TEST_RE.test(cmd(a)));
+  const commits = tools.filter((a) => /\bgit\s+commit\b/.test(cmd(a)));
+  const pushes = tools.filter((a) => /\bgit\s+push\b/.test(cmd(a)));
+  const writes = tools.filter((a) => a.tool === "Write");
+  const edits = tools.filter((a) => /^(Edit|MultiEdit|NotebookEdit)$/.test(a.tool));
+  const fails = tools.filter((a) => a.ok === false);
+  const files = (list) => {
+    const names = [...new Set(list.map((a) => bgBase(a.rel || a.path)).filter(Boolean))];
+    return names.length > 1 ? `${names[0]} ×${names.length}` : (names[0] || "");
+  };
+  let kind, title, meta = "", retry = 0;
+  if (forks.length) {
+    kind = "fork";
+    title = t("bg.p.fork", { x: forks.map((a) => a.agent || a.text.replace(/^子代理：/, "")).join("、") });
+  } else if (tests.length) {
+    const tl = tests[tests.length - 1];
+    kind = tl.ok === false ? "fail" : tl.ok == null ? "running" : "test";
+    title = t(kind === "fail" ? "bg.p.testFail" : "bg.p.test", { x: clamp(cmd(tl), 48) });
+    if (prevTestFailed) retry = prevTestFailed;
+  } else if (pushes.length) {
+    kind = "commit"; title = t("bg.p.push", { x: clamp(cmd(pushes[0]).replace(/^.*git\s+push\s*/, ""), 40) });
+  } else if (commits.length) {
+    const m = /-m\s+["']([^"']+)/.exec(cmd(commits[0]));
+    kind = "commit"; title = t("bg.p.commit", { x: m ? clamp(m[1], 48) : "" });
+  } else if (writes.length) {
+    kind = "artifact"; title = t("bg.p.artifact", { x: files(writes) });
+  } else if (edits.length) {
+    kind = "commit"; title = t("bg.p.save", { x: files(edits) });
+  } else if (fails.length) {
+    kind = "fail"; title = t("bg.p.error", { x: fails[0].tool || "" });
+  } else {
+    // 剩下的：跑了命令就是「运行 · 它说要干什么」，只读 / 只搜才是「查看」。
+    const run = tools.find((a) => a.tool === "Bash" || a.tool === "PowerShell");
+    kind = "dot";
+    title = run ? t("bg.p.run", { x: clamp(run.text || run.cmd || "", 48) })
+      : t("bg.p.look", { x: clamp(tools[0].rel || tools[0].text || tools[0].tool, 48) });
+  }
+  const add = tools.reduce((n, a) => n + (a.add | 0), 0), del = tools.reduce((n, a) => n + (a.del | 0), 0);
+  if (add || del) meta = `+${add} −${del}`;
+  if (retry) meta = (meta ? meta + " · " : "") + t("bg.p.retry", { n: retry });
+  const sub = acts.filter((a) => a.kind === "tool" || a.kind === "thinking").map((a, i, arr) => {
+    const next = arr[i + 1] || null;
+    // 工具用它自己的结果时刻（转录里真有的 done）；思考用到下一步开始。没有就不写。
+    const done = Date.parse(a.done || "");
+    const took = a.kind === "tool" ? (isNaN(done) ? 0 : done - bgAtMs(a)) : (next ? bgAtMs(next) - bgAtMs(a) : 0);
+    if (a.kind === "thinking") return [t("bg.step.think"), "", took > 900 ? bgDur(took) : "", null];
+    return [t(BG_STEP_KEY[a.tool] || "bg.step.tool", { x: a.tool }), a.rel || a.cmd || a.text || "", took > 900 ? bgDur(took) : "", a.ok];
+  });
+  const running = tools.some((a) => a.ok == null);
+  return {
+    type: "proc", id: first.id || (b.id + ":" + bgAtMs(first)), at: first.at, end: last.at, lane: b.id,
+    kind: running && kind !== "fork" ? "running" : kind, title, meta, sub, running,
+    // 用时 = 从这段第一步开始到最后一个工具的结果回来（转录里的 done）；没有结果时刻就不写用时。
+    steps: tools.length, dur: bgBlockEnd(tools) ? Math.max(0, bgBlockEnd(tools) - bgAtMs(first)) : -1,
+    fork: forks.length ? { done: forks.every((a) => a.ok != null) } : null,
+    testFailed: kind === "fail" && tests.length > 0,
+  };
+}
+
+/* 一段连续的工具调用再按「要紧的那一步」切开：分叉、写出产物、跑测试、提交 / 推送、
+   出错各自成一行（参考视频里就是一件事一行）。读 / 搜跟着它后面那件事走；
+   编辑攒在一起，碰到下一件要紧的事之前先收成一行「提交/保存」。 */
+function bgSplit(block) {
+  const segs = [];
+  let cur = [];
+  const isEdit = (a) => a.kind === "tool" && /^(Edit|MultiEdit|NotebookEdit)$/.test(a.tool);
+  const isFork = (a) => a.kind === "tool" && (a.tool === "Task" || a.tool === "Agent");
+  const isSig = (a) => a.kind === "tool" && (isFork(a) || a.tool === "Write" || a.ok === false
+    || BG_TEST_RE.test(a.cmd || "") || /gits+(commit|push)/.test(a.cmd || ""));
+  for (const x of block) {
+    if (isSig(x) && x.tool !== "Write" && cur.some(isEdit)) { segs.push(cur); cur = []; }
+    if (isFork(x) && cur.some((y) => y.kind === "tool")) { segs.push(cur); cur = []; }
+    cur.push(x);
+    if (isSig(x)) { segs.push(cur); cur = []; }
+  }
+  if (cur.length) segs.push(cur);
+  return segs;
+}
+/* 群里发给某个 Bot 的那几句话（用来认出它对话里哪几轮是「从群里来的」）。 */
+function bgGroupAsks(g, b) {
+  const out = [];
+  for (const e of bgEvents(g)) {
+    if (e.bot !== "you" || e.kind !== "msg") continue;
+    const to = String(e.title || "");
+    const all = /@(全员|everyone|all)\b/i.test(to);
+    const name = "@" + (b.manager ? "Manager" : b.role);
+    if (all || to.split(/\s+/).includes(name)) out.push(String(e.text || "").trim());
+  }
+  return out;
+}
+function bgStripIntro(s) {
+  s = String(s || "");
+  if (/^\[Perch Bot Group/.test(s)) { const cut = s.indexOf("\n\n"); s = cut >= 0 ? s.slice(cut + 2) : ""; }
+  return s;
+}
+
+/* 一个 Bot 的完整归纳：[prompt | text | proc | compact]，带缓存（acts 没变就不重算）。 */
+const BG_DERIVED = new WeakMap();
+function bgDerive(g, b) {
+  const tab = bgTabOf(b);
+  const v = tab ? LIVE.get(tab.id) : null;
+  const acts = (v && v.acts) || [];
+  const lastA = acts[acts.length - 1];
+  const asks = bgGroupAsks(g, b);
+  const key = [(v && v.actsGen) | 0, acts.length, lastA ? lastA.id + "|" + lastA.ok + "|" + (lastA.text || "").length : "", asks.length].join(":");
+  const hit = tab && BG_DERIVED.get(tab);
+  if (hit && hit.key === key) return hit.out;
+  const items = [];
+  let todo = null, block = [], groupTurn = false, prevTestFailed = 0;
+  const flush = (nextAt) => {
+    if (!block.length) return;
+    const segs = bgSplit(block);
+    block = [];
+    segs.forEach((seg, si) => {
+      const end = si + 1 < segs.length ? bgAtMs(segs[si + 1][0]) : nextAt;
+      const p = bgBlock(b, seg, prevTestFailed, end);
+      if (!p) return;
+      if (p.testFailed) prevTestFailed++;
+      else if (p.kind === "test") prevTestFailed = 0;
+      p.groupTurn = groupTurn;
+      items.push(p);
+    });
+  };
+  for (const a of acts) {
+    if (a.kind === "tool" || a.kind === "thinking") {
+      if (a.tool === "TodoWrite" && a.todo) todo = a.todo;
+      block.push(a);
+      continue;
+    }
+    flush(bgAtMs(a));
+    if (a.kind === "prompt") {
+      const text = bgStripIntro(a.text).trim();
+      groupTurn = !!text && asks.some((q) => q && (text === q || text.endsWith(q)));
+      if (text) items.push({ type: "prompt", id: a.id, at: a.at, text, lane: b.id, groupTurn });
+    } else if (a.kind === "text") {
+      items.push({ type: "text", id: a.id, at: a.at, text: a.text, lane: b.id, groupTurn });
+    } else if (a.kind === "compact") {
+      items.push({ type: "proc", id: a.id, at: a.at, end: a.at, lane: b.id, kind: "compact", title: t("bg.p.compact"),
+        meta: a.turn ? t("flow.turn", { n: a.turn }) : "", sub: [], steps: 0, dur: 0, groupTurn });
+    }
+  }
+  flush(Date.now());
+  const out = { items, todo, hasActs: acts.length > 0 };
+  if (tab) BG_DERIVED.set(tab, { key, out });
+  return out;
+}
+/* 这个 Bot 眼下在做的那一件（车道页签、左栏、正在处理行都用它）。 */
+function bgCurrent(g, b) {
+  const d = bgDerive(g, b);
+  for (let i = d.items.length - 1; i >= 0; i--) if (d.items[i].type === "proc") return d.items[i];
+  return null;
+}
+
+/* ---------- 中：过程流 ----------
+   版式就是 A 阶段定稿的那一套（用户 2026-10-28 两次明确：回到定稿，用真实数据填满）：
      · 发言 = .bg-msg（图标 + 名字 + 车道标 + 时间，下面正文）；
-     · 事件 = .bg-ev 行（符号 + 车道标 + 标题 + 时间）；
+     · 过程 = .bg-ev 行（▸ 符号 + 车道标 + 标题 + 附注 + 「N 步 · 用时」），点开是逐步明细；
      · 正在处理 = .bg-ev.run；等你确认 = .bg-ev.ask 展开态（盾牌一行 + .bg-opt 选项）。
-   全部车道 = 群聊：组的过程流（你说的、成员回的、状态事件）按时间交错。
-   聚焦一个成员 = 和它单聊：那一格自己的对话（LIVE.acts；没在跑就退回盘上记录）。 */
+   全部车道：你在群里说的话、各 Bot 对群里那几轮的回答、所有车道的过程，按时间交错。
+   聚焦一个 Bot：和它单聊 —— 它自己的完整对话（说的话 + 过程）。 */
 function bgEventRow(g, e, showBadge) {
   const key = g.id + ":" + e.id;
   const open = BG.open.has(key);
   const lane = bgEvLane(e);
   const color = bgColor(g, lane);
-  const cls = "bg-ev" + (e.kind === "waiting" || e.kind === "approval" ? " ask" : "")
-    + (e.kind === "fail" ? " bad" : "") + (open ? " open" : "") + (e.text ? " has-body" : "");
+  const cls = "bg-ev" + (e.kind === "approval" ? " ask" : "") + (e.kind === "fail" ? " bad" : "") + (open ? " open" : "");
   const caret = e.text ? `<span class="bg-caret">${bgIco("chev", 11)}</span>` : `<span class="bg-caret blank"></span>`;
   const body = open && e.text ? `<div class="bg-ev-body"><div class="bg-ev-sum">${esc(e.text)}</div></div>` : "";
   return `<div class="${cls}" data-bg-ev="${esc(key)}" style="--lane:${color}">`
     + `<div class="bg-ev-h">${caret}<span class="bg-ev-g">${bgGlyph(e.kind, color)}</span>`
     + (showBadge ? bgBadge(g, lane) : "")
     + `<span class="bg-ev-t ell">${esc(bgEvTitle(g, e))}</span>`
-    + `<span class="bg-ev-r">${esc(bgTime(e.ts))}</span></div>${body}</div>`;
+    + `<span class="bg-ev-r">${esc(bgTime(e.ts).slice(0, 5))}</span></div>${body}</div>`;
+}
+/* 一行过程（定稿里的 .bg-ev）：点开 = 「已完成 N 个步骤 · 用时」+ 逐步明细。 */
+function bgProcRow(g, p, showBadge) {
+  const key = g.id + ":" + p.lane + ":" + p.id;
+  const open = BG.open.has(key);
+  const color = bgColor(g, p.lane);
+  const glyphKind = p.kind === "compact" ? "compact" : p.kind;
+  const cls = "bg-ev has-body" + (p.kind === "fail" ? " bad" : "") + (open ? " open" : "");
+  const right = !p.steps ? bgTime(p.at).slice(0, 5)
+    : p.dur >= 0 ? t("bg.feed.steps", { n: p.steps, d: bgDur(p.dur) }) : t("bg.feed.stepsOnly", { n: p.steps });
+  let body = "";
+  if (open) {
+    body = `<div class="bg-ev-body"><div class="bg-ev-sum">${esc(p.sub.length ? t("bg.feed.stepsDone", { n: p.sub.length }) + (p.dur >= 0 ? " · " + bgDur(p.dur) : "") : bgTime(p.at))}</div>`
+      + p.sub.map((s) => `<div class="bg-step${s[3] === false ? " bad" : ""}"><span class="bg-caret">${bgIco("chev", 10)}</span>`
+        + `<span class="bg-step-k">${esc(s[0])}</span><span class="bg-step-v ell" title="${esc(s[1])}">${esc(s[1])}</span>`
+        + `<span class="bg-ev-r">${esc(s[2])}</span></div>`).join("")
+      + `</div>`;
+  }
+  return `<div class="${cls}" data-bg-ev="${esc(key)}" style="--lane:${color}">`
+    + `<div class="bg-ev-h"><span class="bg-caret">${bgIco("chev", 11)}</span><span class="bg-ev-g">${bgGlyph(glyphKind, color)}</span>`
+    + (showBadge ? bgBadge(g, p.lane) : "")
+    + `<span class="bg-ev-t ell">${esc(p.title)}</span>`
+    + (p.meta ? `<span class="bg-ev-meta">${esc(p.meta)}</span>` : "")
+    + `<span class="bg-ev-r">${esc(right)}</span></div>${body}</div>`;
 }
 
 /* 聊天正文的 markdown：比对话流那份 md() 多认块级结构（段落、列表、标题、引用、表格）——
@@ -522,79 +720,92 @@ function bgMsgHTML(g, e, showBadge) {
     time: bgTime(e.ts).slice(0, 5), text: e.text });
 }
 function bgGroupFeedHTML(g) {
-  const evs = bgEvents(g);
-  if (!evs.length) return `<div class="bg-empty">${esc(t("bg.feed.empty"))}</div>`;
-  return evs.map((e) => e.kind === "msg" ? bgMsgHTML(g, e, true) : bgEventRow(g, e, true)).join("");
+  const rows = [];
+  // 落了盘的：你在群里说的话、建组、交接 / 审批（阶段 C）。生命周期（上线 / 空闲 / 开始干活）不进流。
+  for (const e of bgEvents(g)) {
+    if (e.kind === "msg") {
+      // 早先版本把回复也落过盘；现在回复从转录里来，这种旧记录只在那个 Bot 一条对话都没有时才显示。
+      if (e.bot !== "you") { const b = bgBot(g, bgEvLane(e)); if (b && bgDerive(g, b).hasActs) continue; }
+      rows.push({ at: e.ts, html: bgMsgHTML(g, e, true) });
+    } else if (e.kind === "created" || e.kind === "handoff" || e.kind === "approval" || e.kind === "artifact" || e.kind === "review") {
+      rows.push({ at: e.ts, html: bgEventRow(g, e, true) });
+    }
+  }
+  // 从转录归纳的：群里派的那几轮里它说的话 + 所有车道的过程。
+  for (const b of bgMembers(g)) {
+    for (const it of bgDerive(g, b).items) {
+      if (it.type === "proc") { if (!it.running) rows.push({ at: it.at, html: bgProcRow(g, it, true) }); }
+      else if (it.type === "text" && it.groupTurn) rows.push({ at: it.at, html: bgSaidHTML(g, b, it, true) });
+    }
+  }
+  if (!rows.length) return `<div class="bg-empty">${esc(t("bg.feed.empty"))}</div>`;
+  rows.sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
+  return rows.map((r) => r.html).join("");
 }
-
 /* 单聊：那一格的对话。工具调用是一行 .bg-ev（图例里的「工具调用」小点），thinking 不出。
    第一条消息前面那段身份说明（bgWrite 加的）是给 agent 看的，这里不显示。 */
 function bgConvHTML(g, b) {
-  const tab = bgTabOf(b);
-  const v = tab ? LIVE.get(tab.id) : null;
-  const acts = (v && v.acts) || [];
-  const color = bgColor(g, b.id);
-  const who = b.manager ? "Manager" : bgAgentName(b.agent);
-  const ico = bgAgentIco(b.agent);
-  const you = (text, at) => {
-    let s = text || "";
-    if (/^\[Perch Bot Group/.test(s)) { const cut = s.indexOf("\n\n"); s = cut >= 0 ? s.slice(cut + 2) : ""; }
-    return s.trim() ? bgMsgRow({ you: true, who: t("bg.chain.you"), icon: bgYouIco(), color: "var(--bg-muted)", time: bgTime(at).slice(0, 5), text: s }) : "";
-  };
+  const d = bgDerive(g, b);
   const rows = [];
-  if (acts.length) {
-    for (const a of acts) {
-      if (a.kind === "prompt") rows.push(you(a.text, a.at));
-      else if (a.kind === "text") rows.push(bgMsgRow({ who, icon: ico, color, time: bgTime(a.at).slice(0, 5), text: a.text }));
-      else if (a.kind === "tool") {
-        const k = a.ok === false ? "fail" : a.ok == null ? "running" : "dot";
-        rows.push(`<div class="bg-ev${a.ok === false ? " bad" : ""}${a.ok == null ? " run" : ""}" style="--lane:${color}"><div class="bg-ev-h">`
-          + `<span class="bg-caret blank"></span><span class="bg-ev-g">${bgGlyph(k, color)}</span>`
-          + `<span class="bg-ev-t">${esc(a.tool || "tool")}</span><span class="bg-ev-meta ell">${esc(a.rel || a.text || "")}</span>`
-          + `<span class="bg-ev-r">${esc(bgTime(a.at))}</span></div></div>`);
-      }
+  if (d.items.length) {
+    for (const it of d.items) {
+      if (it.type === "prompt") rows.push(bgMsgRow({ you: true, who: t("bg.chain.you"), icon: bgYouIco(), color: "var(--bg-muted)", time: bgTime(it.at).slice(0, 5), text: it.text }));
+      else if (it.type === "text") rows.push(bgSaidHTML(g, b, it, false));
+      else if (it.type === "proc" && !it.running) rows.push(bgProcRow(g, it, false));
     }
   } else {
+    // 没在跑（还没起过 / 停了）：退回盘上那份最近的对话记录。
+    const tab = bgTabOf(b);
     const hist = (tab && tab.sessionID && STATE && STATE.history && STATE.history[tab.sessionID]) || [];
     for (const it of hist) {
-      rows.push(it.role === "user" ? you(it.text, it.at)
-        : bgMsgRow({ who, icon: ico, color, time: bgTime(it.at).slice(0, 5), text: it.text }));
+      const text = it.role === "user" ? bgStripIntro(it.text).trim() : it.text;
+      if (!text) continue;
+      rows.push(it.role === "user"
+        ? bgMsgRow({ you: true, who: t("bg.chain.you"), icon: bgYouIco(), color: "var(--bg-muted)", time: bgTime(it.at).slice(0, 5), text })
+        : bgSaidHTML(g, b, { at: it.at, text }, false));
     }
   }
-  const html = rows.join("");
-  return html || `<div class="bg-empty">${esc(t("bg.feed.empty"))}</div>`;
+  return rows.join("") || `<div class="bg-empty">${esc(t("bg.feed.empty"))}</div>`;
 }
-
 /* 正在发生：排队中 / 正在启动 / 正在回复（定稿里的 .bg-ev.run 那一行）。 */
+/* 某个 Bot 说的一段话（定稿的 .bg-msg）。 */
+function bgSaidHTML(g, b, it, showBadge) {
+  return bgMsgRow({ who: b.manager ? "Manager" : bgAgentName(b.agent), icon: bgAgentIco(b.agent), color: bgColor(g, b.id),
+    badge: showBadge && !b.manager ? bgBadge(g, b.id) : "", time: bgTime(it.at).slice(0, 5), text: it.text });
+}
+/* 「它在做什么」：建组时写的分工任务 > 待办清单里正在做的那一项 > 最近一行过程。 */
+function bgTaskOf(g, b) {
+  if (b.task) return b.task;
+  const d = bgDerive(g, b);
+  if (d.todo && d.todo.cur) return d.todo.cur;
+  const cur = bgCurrent(g, b);
+  return cur ? cur.title : "";
+}
+/* 它在哪儿干活：会话记录里的 git 分支，没有就是项目文件夹名（定稿里那一栏是 wt/xxx）。 */
+function bgWhere(g, b) {
+  const tab = bgTabOf(b);
+  const s = tab && tab.sessionID && STATE && Array.isArray(STATE.sessions) ? STATE.sessions.find((x) => x.id === tab.sessionID) : null;
+  const br = s && s.branch && s.branch !== "HEAD" ? s.branch : "";   // 不是 git 仓库时会报 HEAD
+  return br || bgBase(g.project);
+}
+/* 正在发生（定稿里的 .bg-ev.run）：正在处理 · 它眼下那一步　　<Agent> 工作中；排队 / 启动中也是这一行。 */
 function bgLiveHTML(g, members) {
   return members.map((b) => {
-    const tab = bgTabOf(b);
     const q = BG_Q.get(g.id + "/" + b.id) || [];
     const st = bgBotState(b);
-    const route = tab && tab.bgRoute && tab.bgRoute.gid === g.id ? tab.bgRoute : null;
-    let line = "";
-    if (q.length) line = t(st === "pending" || st === "off" ? "bg.chat.starting" : "bg.chat.queued", { n: q.length });
-    else if ((route || BG.focus === b.id) && st === "working") line = t("bg.chat.typing");
-    if (!line) return "";
-    let meta = "";
-    if (st === "working" && tab) {
-      const since = route ? route.at - 1500 : (tab.bgSentAt || 0) - 1500;
-      const acts = (LIVE.get(tab.id) || {}).acts || [];
-      for (let i = acts.length - 1; i >= 0; i--) {
-        const a = acts[i];
-        if (Date.parse(a.at) < since) break;
-        if (a.kind === "tool") { meta = (a.tool || "") + " · " + (a.rel || a.text || ""); break; }
-        if (a.kind === "text" && a.text) { meta = a.text; break; }
-      }
+    let title = "";
+    if (q.length) title = t(st === "pending" || st === "off" ? "bg.chat.starting" : "bg.chat.queued", { n: q.length });
+    else if (st === "working") {
+      const cur = bgCurrent(g, b);
+      title = t("bg.feed.running", { x: cur && cur.running ? cur.title : t("bg.feed.thinking") });
     }
+    if (!title) return "";
+    const right = st === "working" ? t("bg.feed.workingAs", { who: bgAgentName(b.agent) }) : "";
     return `<div class="bg-ev run" style="--lane:${bgColor(g, b.id)}"><div class="bg-ev-h"><span class="bg-caret blank"></span>`
-      + `<span class="bg-ev-g">${bgGlyph(st === "working" ? "running" : "wait")}</span>${bgBadge(g, b.id)}`
-      + `<span class="bg-ev-t">${esc(line)}</span>`
-      + (meta ? `<span class="bg-ev-meta ell">${esc(meta.replace(/\s+/g, " ").slice(0, 120))}</span>` : "")
-      + `</div></div>`;
+      + `<span class="bg-ev-g">${bgGlyph(st === "working" ? "running" : "wait")}</span>${BG.focus === "all" ? bgBadge(g, b.id) : ""}`
+      + `<span class="bg-ev-t ell">${esc(title)}</span><span class="bg-ev-r">${esc(right)}</span></div></div>`;
   }).join("");
 }
-
 /* 等你确认（定稿里 .bg-ev.ask 的展开态：盾牌一行 + 一排 .bg-opt）。
    作答走 Workspaces 群组看板那几条函数和它们的闸（55-perm / 50-ask）：外面包一层
    .gperm / .gask 只是让那几条函数认得出是哪一件事。屏上对不上就做灰（不做禁）。 */
@@ -657,78 +868,121 @@ function bgFeedHeadHTML(g) {
   }
   const b = bgBot(g, BG.focus);
   if (!b) return "";
-  return `<span class="bg-fh-t">${bgBadge(g, b.id)}<b>${esc(bgAgentName(b.agent))}${b.task ? " · " + esc(b.task) : ""}</b></span>`
+  const task = bgTaskOf(g, b);
+  return `<span class="bg-fh-t">${bgBadge(g, b.id)}<b>${esc(bgAgentName(b.agent))}${task ? " · " + esc(task) : ""}</b></span>`
+    + `<span class="bg-fh-r mono">${esc(bgWhere(g, b))}</span>`
     + bgTermBtn(b);
 }
-
 /* ---------- 右：工作树 · 泳道 ---------- */
 function bgLaneTabsHTML(g) {
-  const evs = bgEvents(g);
   return bgLanes(g).map((b) => {
     const sel = BG.focus === b.id;
     const st = bgBotState(b);
-    let last = null;
-    for (let i = evs.length - 1; i >= 0; i--) if (evs[i].bot === b.id) { last = evs[i]; break; }
+    const d = bgDerive(g, b);
+    const cur = bgCurrent(g, b);
+    const pct = d.todo && d.todo.total ? Math.round(100 * d.todo.done / d.todo.total) : 0;
+    const head = d.todo && d.todo.total ? `${d.todo.done}/${d.todo.total}` : t(BG_STATE_KEY[st]);
+    const note = st === "waiting" ? t("bg.state.waiting") : (cur ? cur.title : "");
     return `<button type="button" class="bg-lt${sel ? " sel" : ""}" data-bg-focus="${esc(b.id)}" style="--lane:${bgColor(g, b.id)}">`
-      + `<span class="bg-lt-n"><i></i><span class="ell">${esc(b.role)}</span></span>`
+      + `<span class="bg-lt-n"><i></i>${esc(b.role)}</span>`
       + `<span class="bg-lt-a">${bgAgentIco(b.agent)}<span class="ell">${esc(bgAgentName(b.agent))}</span></span>`
-      + `<span class="bg-lt-s ell" data-state="${esc(st)}">${esc(t(BG_STATE_KEY[st]))}${last ? " · " + esc(bgAgo(last.ts)) : ""}</span></button>`;
+      + `<span class="bg-lt-bar"><span style="width:${pct}%"></span></span>`
+      + `<span class="bg-lt-s ell" data-state="${esc(st)}">${esc(head)}${note ? " · " + esc(note) : ""}</span></button>`;
   }).join("");
 }
-
 /* 泳道图：每条车道一列竖线，事件按时间往下排（所有车道共享一条时间轴，
    同一时刻发生的事在同一高度上）。Manager 的事件和对话不进图（它在过程流里）。
    只画最近 60 条：再往前的在过程流里翻。 */
+/* 泳道图（定稿那一张）：每条车道一列竖线，节点是归纳出来的过程，所有车道共享一条时间轴。
+   分叉（子代理）= 从节点往右拐出一条支线，子代理做完在下一个节点处合回来（合并 ⊙）；
+   还没做完 = 支线虚线一直拖到底。车道还在干活 / 等你时，末尾拖一段虚线和一个「正在处理 / 等你」节点。
+   只画最近 60 个节点：再往前的在过程流里翻。 */
 function bgTreeSVG(g, width) {
   const lanes = bgLanes(g);
-  const evs = bgEvents(g).filter((e) => e.kind !== "msg" && e.bot && e.bot !== "manager" && lanes.some((b) => b.id === e.bot)).slice(-60);
-  if (!lanes.length || !evs.length) return "";
+  if (!lanes.length) return "";
+  const nodes = [];
+  for (const b of lanes) for (const it of bgDerive(g, b).items) if (it.type === "proc" && !it.running) nodes.push(it);
+  nodes.sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
+  const evs = nodes.slice(-60);
+  const tails = lanes.map((b) => {
+    const st = bgBotState(b);
+    if (st === "working") { const cur = bgCurrent(g, b); return { b, kind: "running", title: t("bg.feed.running", { x: cur && cur.running ? cur.title : t("bg.feed.thinking") }) }; }
+    if (st === "waiting") return { b, kind: "approval", title: t("bg.tree.waitYou") };
+    return null;
+  }).filter(Boolean);
+  if (!evs.length && !tails.length) return "";
   const colW = Math.max(70, Math.floor((width - 16) / lanes.length));
   const x0 = 14;
   const xOf = (id) => { const i = lanes.findIndex((b) => b.id === id); return x0 + (i < 0 ? 0 : i) * colW; };
   const rowH = 34, top = 18;
   const ys = evs.map((_, i) => top + i * rowH);
-  const H = top + evs.length * rowH + 40;
+  // 末尾节点（正在处理 / 等你）各占一行，免得几条车道的标签挤在同一高度上打架。
+  const tailY0 = top + evs.length * rowH + 8;
+  tails.forEach((tl, i) => { tl.y = tailY0 + i * rowH; });
+  const tailY = tailY0;
+  const H = tailY0 + tails.length * rowH + 16;
   const focus = BG.focus;
   const parts = [];
-  lanes.forEach((b) => {
-    const idx = evs.map((e, i) => (e.bot === b.id ? i : -1)).filter((i) => i >= 0);
-    if (!idx.length) return;
-    const x = xOf(b.id), y1 = ys[idx[0]], y2 = ys[idx[idx.length - 1]], c = bgColor(g, b.id);
-    const op = focus === "all" || focus === b.id ? 1 : 0.28;
-    const st = bgBotState(b);
-    parts.push(`<g opacity="${op}"><line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="${c}" stroke-width="2"/>`);
-    if (st === "working" || st === "waiting") {
-      parts.push(`<line x1="${x}" y1="${y2}" x2="${x}" y2="${H - 22}" stroke="${c}" stroke-width="1.4" stroke-dasharray="3 3" opacity=".55"/>`);
-    }
+  const opOf = (lane) => (focus === "all" || focus === lane ? 1 : 0.28);
+  // 竖线：从这条车道第一个节点画到最后一个；还在干活 / 等你就再虚线拖到末尾那个节点。
+  for (const b of lanes) {
+    const idx = evs.map((e, i) => (e.lane === b.id ? i : -1)).filter((i) => i >= 0);
+    const tail = tails.find((x) => x.b === b);
+    if (!idx.length && !tail) continue;
+    const x = xOf(b.id), c = bgColor(g, b.id);
+    const y1 = idx.length ? ys[idx[0]] : (tail ? tail.y : tailY), y2 = idx.length ? ys[idx[idx.length - 1]] : (tail ? tail.y : tailY);
+    parts.push(`<g opacity="${opOf(b.id)}"><line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="${c}" stroke-width="2"/>`);
+    if (tail && idx.length) parts.push(`<line x1="${x}" y1="${y2}" x2="${x}" y2="${tail.y}" stroke="${c}" stroke-width="1.4" stroke-dasharray="3 3" opacity=".55"/>`);
     parts.push(`</g>`);
-  });
+  }
+  // 分叉：子代理那一支。
+  const branchUntil = new Map();   // 节点下标 → 它在某条支线的跨度里（标签往右让一让）
   evs.forEach((e, i) => {
-    const x = xOf(e.bot), y = ys[i], c = bgColor(g, e.bot);
-    const op = focus === "all" || focus === e.bot ? 1 : 0.28;
-    let node;
-    switch (e.kind) {
-      case "commit": node = `<circle cx="${x}" cy="${y}" r="4.5" fill="${c}"/>`; break;
-      case "handoff": node = `<path d="M${x} ${y - 5.5} L${x + 5.5} ${y} L${x} ${y + 5.5} L${x - 5.5} ${y} Z" fill="${c}"/>`; break;
-      case "artifact": node = `<rect x="${x - 4.5}" y="${y - 4.5}" width="9" height="9" rx="1.5" fill="var(--bg-panel)" stroke="${c}" stroke-width="1.6"/>`; break;
-      case "test": case "review": node = `<circle cx="${x}" cy="${y}" r="6" fill="var(--bg-ok)"/><path d="M${x - 2.6} ${y} l1.8 1.8 l3.4 -3.6" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`; break;
-      case "fail": node = `<circle cx="${x}" cy="${y}" r="6" fill="var(--bg-bad)"/><path d="M${x - 2.2} ${y - 2.2} l4.4 4.4 M${x + 2.2} ${y - 2.2} l-4.4 4.4" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>`; break;
-      case "approval": case "waiting": node = `<circle cx="${x}" cy="${y}" r="6.5" fill="var(--bg-panel)" stroke="var(--bg-ask)" stroke-width="2.2"/><circle cx="${x}" cy="${y}" r="2.2" fill="var(--bg-ask)"/>`; break;
-      case "started": node = `<path d="M${x - 3.5} ${y - 5} L${x + 5} ${y} L${x - 3.5} ${y + 5} Z" fill="${c}"/>`; break;
-      case "working": node = `<circle cx="${x}" cy="${y}" r="5" fill="var(--bg-panel)" stroke="${c}" stroke-width="1.5"/><path d="M${x} ${y - 5} a5 5 0 0 1 0 10 Z" fill="${c}"/>`; break;
-      case "idle": node = `<circle cx="${x}" cy="${y}" r="4" fill="var(--bg-panel)" stroke="var(--bg-faint)" stroke-width="1.4"/>`; break;
-      case "stopped": node = `<rect x="${x - 3.5}" y="${y - 3.5}" width="7" height="7" rx="1" fill="var(--bg-faint)"/>`; break;
-      default: node = `<circle cx="${x}" cy="${y}" r="3" fill="${c}"/>`;
-    }
-    const room = width - x - 14;
-    const strong = e.kind === "waiting" || e.kind === "approval" ? ` class="ask"` : (e.kind === "fail" ? ` class="bad"` : "");
-    parts.push(`<g opacity="${op}" data-bg-ev="${esc(g.id + ":" + e.id)}">${node}`
-      + `<text x="${x + 10}" y="${y - 1}"${strong}>${esc(bgFit(bgEvTitle(g, e), room))}</text>`
-      + `<text x="${x + 10}" y="${y + 10}" class="sub">${esc(bgTime(e.ts))} · #${e.id}</text></g>`);
+    if (e.kind !== "fork") return;
+    const x = xOf(e.lane), y = ys[i], c = bgColor(g, e.lane), bx = x + 11;
+    const j = e.fork && e.fork.done ? evs.findIndex((f, k) => k > i && f.lane === e.lane) : -1;
+    const tl0 = tails.find((tt) => tt.b.id === e.lane);
+    const yEnd = j >= 0 ? ys[j] : (tl0 ? tl0.y : y + rowH);
+    for (let k = i + 1; k < evs.length && ys[k] <= yEnd; k++) if (evs[k].lane === e.lane) branchUntil.set(k, true);
+    const dashed = !(e.fork && e.fork.done);
+    parts.push(`<g opacity="${opOf(e.lane)}"><path d="M${x} ${y} C ${x} ${y + 8}, ${bx} ${y + 4}, ${bx} ${y + 14} L ${bx} ${yEnd - 14}`
+      + (j >= 0 ? ` C ${bx} ${yEnd - 4}, ${x} ${yEnd - 8}, ${x} ${yEnd}` : "")
+      + `" fill="none" stroke="${c}" stroke-width="1.5"${dashed ? ` stroke-dasharray="3 2.5"` : ""} opacity=".85"/></g>`);
+    if (j >= 0) evs[j] = Object.assign({}, evs[j], { merged: true });
   });
+  // 节点 + 标签
+  const nodeSVG = (kind, x, y, c) => {
+    switch (kind) {
+      case "commit": return `<circle cx="${x}" cy="${y}" r="4.5" fill="${c}"/>`;
+      case "handoff": return `<path d="M${x} ${y - 5.5} L${x + 5.5} ${y} L${x} ${y + 5.5} L${x - 5.5} ${y} Z" fill="${c}"/>`;
+      case "artifact": return `<rect x="${x - 4.5}" y="${y - 4.5}" width="9" height="9" rx="1.5" fill="var(--bg-panel)" stroke="${c}" stroke-width="1.6"/>`;
+      case "test": case "review": return `<circle cx="${x}" cy="${y}" r="6" fill="var(--bg-ok)"/><path d="M${x - 2.6} ${y} l1.8 1.8 l3.4 -3.6" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+      case "fail": return `<circle cx="${x}" cy="${y}" r="6" fill="var(--bg-bad)"/><path d="M${x - 2.2} ${y - 2.2} l4.4 4.4 M${x + 2.2} ${y - 2.2} l-4.4 4.4" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>`;
+      case "approval": return `<circle cx="${x}" cy="${y}" r="6.5" fill="var(--bg-panel)" stroke="var(--bg-ask)" stroke-width="2.2"/><circle cx="${x}" cy="${y}" r="2.2" fill="var(--bg-ask)"/>`;
+      case "running": return `<circle cx="${x}" cy="${y}" r="5" fill="var(--bg-panel)" stroke="${c}" stroke-width="1.4" stroke-dasharray="2.4 2"/>`;
+      case "fork": return `<circle cx="${x}" cy="${y}" r="4.6" fill="var(--bg-panel)" stroke="${c}" stroke-width="1.6"/><circle cx="${x}" cy="${y}" r="1.6" fill="${c}"/>`;
+      case "compact": return `<path d="M${x - 4} ${y - 4.5} L${x} ${y - 1} L${x + 4} ${y - 4.5} M${x - 4} ${y + 4.5} L${x} ${y + 1} L${x + 4} ${y + 4.5}" fill="none" stroke="${c}" stroke-width="1.5" stroke-linecap="round"/>`;
+      default: return `<circle cx="${x}" cy="${y}" r="3" fill="${c}"/>`;
+    }
+  };
+  evs.forEach((e, i) => {
+    const x = xOf(e.lane), y = ys[i], c = bgColor(g, e.lane);
+    const b = bgBot(g, e.lane);
+    const lx = x + (branchUntil.has(i) ? 21 : 10);
+    const strong = e.kind === "fail" ? ` class="bad"` : "";
+    parts.push(`<g opacity="${opOf(e.lane)}" data-bg-node="${esc(g.id + ":" + e.lane + ":" + e.id)}">${nodeSVG(e.kind, x, y, c)}`
+      + (e.merged ? `<circle cx="${x}" cy="${y}" r="8" fill="none" stroke="${c}" stroke-width="1.2" opacity=".6"/>` : "")
+      + `<text x="${lx}" y="${y - 1}"${strong}>${esc(bgFit(e.title, width - lx - 4))}</text>`
+      + `<text x="${lx}" y="${y + 10}" class="sub">${esc(bgFit(`${bgAgentName(b && b.agent)} · ${bgTime(e.at).slice(0, 5)}`, width - lx - 4))}</text></g>`);
+  });
+  for (const tl of tails) {
+    const x = xOf(tl.b.id), c = bgColor(g, tl.b.id);
+    parts.push(`<g opacity="${opOf(tl.b.id)}">${nodeSVG(tl.kind, x, tl.y, c)}`
+      + `<text x="${x + 10}" y="${tl.y - 1}"${tl.kind === "approval" ? ` class="ask"` : ""}>${esc(bgFit(tl.title, width - x - 14))}</text>`
+      + `<text x="${x + 10}" y="${tl.y + 10}" class="sub">${esc(bgFit(bgAgentName(tl.b.agent), width - x - 14))}</text></g>`);
+  }
   return `<svg class="bg-tree-svg" width="${width}" height="${H}" viewBox="0 0 ${width} ${H}">${parts.join("")}</svg>`;
 }
-
 /* 等宽 10.5px：ASCII ≈ 6.3px，CJK ≈ 10.5px。按可用宽度截断，免得最后一列压出边。 */
 function bgFit(s, room) {
   let w = 0, out = "";
@@ -741,9 +995,9 @@ function bgFit(s, room) {
 }
 
 const BG_LEGEND = [
-  ["started", "bg.legend.started"], ["working", "bg.legend.working"], ["waiting", "bg.legend.waitYou"], ["idle", "bg.legend.idle"],
-  ["stopped", "bg.legend.stopped"], ["fail", "bg.legend.fail"], ["handoff", "bg.legend.handoff"], ["commit", "bg.legend.commit"],
-  ["artifact", "bg.legend.artifact"], ["test", "bg.legend.test"], ["memory", "bg.legend.checkpoint"], ["created", "bg.legend.created"],
+  ["commit", "bg.legend.commit"], ["handoff", "bg.legend.handoff"], ["memory", "bg.legend.checkpoint"], ["test", "bg.legend.test"],
+  ["fail", "bg.legend.fail"], ["review", "bg.legend.review"], ["artifact", "bg.legend.artifact"], ["fork", "bg.legend.fork"],
+  ["approval", "bg.legend.waitYou"], ["running", "bg.legend.running"], ["compact", "bg.legend.compact"], ["dot", "bg.legend.tool"],
 ];
 function bgLegendHTML() {
   return BG_LEGEND.map(([k, key]) => `<span class="bg-lg">${bgGlyph(k, "var(--bg-fg2)")}<span>${esc(t(key))}</span></span>`).join("");
@@ -810,12 +1064,12 @@ function bgTopHTML(g, waiting) {
     ? `<span class="bg-from">${bgIco("split", 12)}${esc(t("bg.head.derived"))} ${bgAgentIco(g.source.agent)}<b>${esc(g.source.title || bgAgentName(g.source.agent))}</b></span>`
     : `<span class="bg-from">${esc(t("bg.head.standalone"))}</span>`;
   return `<header class="bg-head">`
-    +   `<div class="bg-title"><h2 class="ell">${esc(g.name)}</h2><span class="bg-proj mono ell" title="${esc(g.project)}">${esc(g.project)}</span></div>`
+    +   `<div class="bg-title"><h2>${esc(g.name)}</h2><span class="bg-proj mono ell" title="${esc(g.project)}">${esc(bgBase(g.project))}</span></div>`
     +   `<div class="bg-acts">`
     +     (waiting ? `<button type="button" class="bg-needbtn" data-bg-act="need">${bgDot("waiting")}${esc(t("bg.head.needYou", { n: waiting }))}</button>` : "")
-    +     (g.brief ? `<button type="button" class="bg-btn" data-bg-act="brief" title="${esc(g.brief)}">${bgIco("file", 12)}<span>${esc(t("bg.head.brief"))}</span></button>` : "")
-    +     `<button type="button" class="bg-btn na" data-bg-act="na" title="${esc(t("bg.head.laterC"))}">${bgIco("pause", 12)}<span>${esc(t("bg.head.pauseAll"))}</span></button>`
-    +     `<button type="button" class="bg-btn na" data-bg-act="na" title="${esc(t("bg.head.laterC"))}">${bgIco("plus", 12)}<span>${esc(t("bg.head.addBot"))}</span></button>`
+    +     `<button type="button" class="bg-btn" data-bg-act="na" title="${esc(t("bg.head.laterC"))}">${bgIco("pause", 12)}<span>${esc(t("bg.head.pauseAll"))}</span></button>`
+    +     `<button type="button" class="bg-btn primary" data-bg-act="addbot">${bgIco("plus", 12)}<span>${esc(t("bg.head.addBot"))}</span></button>`
+    +     (g.brief ? `<button type="button" class="icon-btn" data-bg-act="brief" title="${esc(t("bg.head.brief"))}" aria-label="${esc(t("bg.head.brief"))}">${bgIco("file", 14)}</button>` : "")
     +     `<button type="button" class="icon-btn" data-bg-act="delete" title="${esc(t("bg.head.delete"))}" aria-label="${esc(t("bg.head.delete"))}">${bgIco("trash", 14)}</button>`
     +     `<button type="button" class="icon-btn bg-theme" data-bg-act="theme" title="${esc(t(light ? "bg.head.toDark" : "bg.head.toLight"))}">${bgIco(light ? "moon" : "sun", 14)}</button>`
     +   `</div>`
@@ -925,8 +1179,9 @@ function bgOpenCreate(opts) {
     const cur = (typeof activeTab !== "undefined" && activeTab) ? naProjectOwning(effCwd(activeTab)) : null;
     project = cur ? cur.path : ((naRealProjects()[0] || {}).path || "");
   }
+  const add = opts.addTo || null;   // 「加 Bot」：往已有的组里加（只填 Bot 那一段）
   BGC = {
-    source: src,
+    add, source: src,
     name: src ? currentTabTitle(src) : "",
     goal: "",
     project,
@@ -945,7 +1200,7 @@ function bgOpenCreate(opts) {
   }
   el.hidden = false;
   bgRenderCreate();
-  requestAnimationFrame(() => { const n = $("bgc-name"); if (n) { n.focus(); n.select(); } });
+  requestAnimationFrame(() => { const n = $(add ? "bgc-role0" : "bgc-name") || document.querySelector(".bgc-role"); if (n) { n.focus(); n.select(); } });
   sendCtrl({ type: "log", msg: `Bot Group：打开${src ? `衍生（tab=${src.id} pane=${src.paneID}）` : "新建"}对话框` });
 }
 function bgCloseCreate() {
@@ -960,9 +1215,9 @@ function bgAgentPicker(name, cur) {
 }
 function bgCreateInvalid() {
   if (!BGC) return "x";
-  if (!BGC.name.trim()) return t("bg.c.needName");
-  if (!BGC.project) return t("bg.c.needProject");
-  if (!BGC.source && !BGC.manager) return t("bg.c.needManager");
+  if (!BGC.add && !BGC.name.trim()) return t("bg.c.needName");
+  if (!BGC.add && !BGC.project) return t("bg.c.needProject");
+  if (!BGC.add && !BGC.source && !BGC.manager) return t("bg.c.needManager");
   if (!BGC.bots.length) return t("bg.c.needBot");
   if (BGC.bots.some((b) => !b.role.trim() || !b.agent)) return t("bg.c.needRole");
   return "";
@@ -982,23 +1237,27 @@ function bgRenderCreate() {
   const mgrHTML = src
     ? `<div class="bgc-src">${bgAgentIco(src.spec && src.spec.agent)}<b class="ell">${esc(currentTabTitle(src))}</b><span>${esc(t("bg.c.srcNote"))}</span></div>`
     : bgAgentPicker("manager", BGC.manager);
+  // 加 Bot：已有几条车道，新行的车道色就从第几个往下接；上限也扣掉已有的。
+  const addG = BGC.add ? BOTGROUPS.find((x) => x.id === BGC.add) : null;
+  const have = addG ? bgLanes(addG).length : 0;
+  const cap = BG_MAX_BOTS - have;
   const bots = BGC.bots.map((b, i) =>
-    `<div class="bgc-bot" style="--lane:${BG_LANE_PALETTE[i % BG_LANE_PALETTE.length]}">`
+    `<div class="bgc-bot" style="--lane:${BG_LANE_PALETTE[(have + i) % BG_LANE_PALETTE.length]}">`
     + `<div class="bgc-bot-h"><i></i><input class="ap-input bgc-role" data-bot="${i}" value="${esc(b.role)}" placeholder="${esc(t("bg.c.rolePh"))}" spellcheck="false" maxlength="24">`
     + `<button type="button" class="ap-x" data-bgc-del="${i}" title="${esc(t("bg.c.removeBot"))}" aria-label="${esc(t("bg.c.removeBot"))}">${bgIco("x", 12)}</button></div>`
     + bgAgentPicker("bot:" + i, b.agent) + `</div>`).join("");
-  const full = BGC.bots.length >= BG_MAX_BOTS;
+  const full = BGC.bots.length >= cap;
   const invalid = bgCreateInvalid();
   el.innerHTML = `<div class="ap-card bgc-card" role="document">`
-    + `<div class="ap-head"><span class="ap-title">${esc(src ? t("bg.c.titleDerive") : t("bg.c.title"))}</span>`
+    + `<div class="ap-head"><span class="ap-title">${esc(addG ? t("bg.c.titleAdd", { name: addG.name }) : src ? t("bg.c.titleDerive") : t("bg.c.title"))}</span>`
     + `<button class="ap-x" data-bgc="close" title="${esc(t("common.close"))}" aria-label="${esc(t("common.close"))}">${bgIco("x", 12)}</button></div>`
     + `<div class="ap-body">`
-    +   `<p class="ap-lead">${esc(t(src ? "bg.c.leadDerive" : "bg.c.lead"))}</p>`
-    +   `<div class="ap-lab">${esc(t("bg.c.name"))}</div><input class="ap-input" id="bgc-name" value="${esc(BGC.name)}" spellcheck="false" maxlength="60" placeholder="${esc(t("bg.c.namePh"))}">`
+    +   `<p class="ap-lead">${esc(t(addG ? "bg.c.leadAdd" : src ? "bg.c.leadDerive" : "bg.c.lead"))}</p>`
+    +   (addG ? "" : `<div class="ap-lab">${esc(t("bg.c.name"))}</div><input class="ap-input" id="bgc-name" value="${esc(BGC.name)}" spellcheck="false" maxlength="60" placeholder="${esc(t("bg.c.namePh"))}">`
     +   `<div class="ap-lab">${esc(t("bg.c.goal"))}</div><textarea class="ap-input bgc-goal" id="bgc-goal" rows="2" spellcheck="false" placeholder="${esc(t("bg.c.goalPh"))}">${esc(BGC.goal)}</textarea>`
     +   `<div class="ap-lab">${esc(t("bg.c.project"))}</div>${projHTML}`
-    +   `<div class="ap-lab">Manager</div>${mgrHTML}`
-    +   `<div class="ap-lab bgc-lab">${esc(t("bg.c.bots", { n: BGC.bots.length, max: BG_MAX_BOTS }))}</div>`
+    +   `<div class="ap-lab">Manager</div>${mgrHTML}`)
+    +   `<div class="ap-lab bgc-lab">${esc(t("bg.c.bots", { n: BGC.bots.length, max: cap }))}</div>`
     +   `<div class="bgc-bots">${bots}</div>`
     +   `<div class="bgc-add">`
     +     `<button type="button" class="ap-change${full ? " na" : ""}" data-bgc="add" title="${esc(full ? t("bg.c.full", { max: BG_MAX_BOTS }) : "")}">${bgIco("plus", 11)} ${esc(t("bg.c.addBot"))}</button>`
@@ -1008,7 +1267,7 @@ function bgRenderCreate() {
     + `</div>`
     + `<div class="ap-foot"><span class="bgc-note">${esc(t("bg.c.note"))}</span><span class="ap-sp"></span>`
     +   `<button type="button" data-bgc="close">${esc(t("common.cancel"))}</button>`
-    +   `<button type="button" class="primary${invalid || BGC.busy ? " na" : ""}" data-bgc="create" title="${esc(invalid)}">${esc(t(BGC.busy ? "bg.c.creating" : "bg.c.create"))}</button>`
+    +   `<button type="button" class="primary${invalid || BGC.busy ? " na" : ""}" data-bgc="create" title="${esc(invalid)}">${esc(t(BGC.busy ? "bg.c.creating" : addG ? "bg.c.addConfirm" : "bg.c.create"))}</button>`
     + `</div></div>`;
 }
 function bgBindCreate(el) {
@@ -1040,7 +1299,7 @@ function bgBindCreate(el) {
     const pre = e.target.closest("[data-bgc-preset]");
     const act = e.target.closest("[data-bgc]");
     if (pre || (act && act.dataset.bgc === "add")) {
-      if (BGC.bots.length >= BG_MAX_BOTS) { showToast(t("bg.c.full", { max: BG_MAX_BOTS }), "", "err"); return; }
+      if (BGC.bots.length >= BG_MAX_BOTS - (BGC.add ? bgLanes(BOTGROUPS.find((x) => x.id === BGC.add)).length : 0)) { showToast(t("bg.c.full", { max: BG_MAX_BOTS }), "", "err"); return; }
       BGC.bots.push({ role: pre ? t(pre.dataset.bgcPreset) : "", agent: defaultAgentId() });
       bgRenderCreate();
       const roles = el.querySelectorAll(".bgc-role");
@@ -1064,6 +1323,26 @@ async function bgSubmitCreate() {
   if (src && !(src.paneID | 0)) { BGC.err = t("bg.c.noPane"); bgRenderCreate(); return; }
   BGC.busy = true; BGC.err = "";
   bgRenderCreate();
+  if (BGC.add) {
+    // 加 Bot：逐个记进组里（回执里带着新 Bot），再逐个起格。
+    const gid = BGC.add;
+    const added = [];
+    for (const b of BGC.bots) {
+      const r = await bgRequest({ type: "botgroup.addbot", id: gid, botgroup: { bots: [{ role: b.role.trim(), agent: b.agent }] } });
+      if (!BGC) return;
+      if (!r.ok || !r.bot) { BGC.busy = false; BGC.err = r.err || t("bg.err.create"); bgRenderCreate(); return; }
+      added.push(r.bot);
+    }
+    bgCloseCreate();
+    const g = BOTGROUPS.find((x) => x.id === gid);
+    for (const nb of added) {
+      if (g && !bgBot(g, nb.id)) g.bots.push(nb);
+      await bgStartBot(g, nb, "加 Bot");
+    }
+    sendCtrl({ type: "log", msg: `Bot Group：${gid} 加了 ${added.length} 个 Bot（${added.map((x) => x.id).join(",")}）` });
+    bgSchedule();
+    return;
+  }
   const input = {
     name: BGC.name.trim(), goal: BGC.goal.trim(), project: BGC.project,
     bots: BGC.bots.map((b) => ({ role: b.role.trim(), agent: b.agent })),
@@ -1186,29 +1465,8 @@ function bgWrite(g, b, tab, item) {
   // 粘贴和回车分开送：同一包里的 \r 会被一些 TUI 当成粘贴内容里的换行。
   setTimeout(() => { try { if (tab.stream) tab.stream.send(enc.encode("\r")); } catch (_) {} }, 160);
   tab.bgSentAt = Date.now();
-  if (item.origin === "group") tab.bgRoute = { gid: g.id, bot: b.id, at: Date.now(), sawWork: false };
   sendCtrl({ type: "log", msg: `Bot Group：送达 ${g.id}/${b.id} tab=${tab.id} ${bp ? "bracketed" : "单行"} ${body.length} 字（${item.origin}）` });
   bgSchedule(true);
-}
-
-/* 群里派出去的那一轮收尾了没：稳定空闲 1.5s，且确实干过活（或者送出去已经 8s 了 ——
-   很快的回答可能一次 working 都没被看见）。 */
-function bgSettleAll() {
-  const now = Date.now();
-  for (const tab of TAB_LIST) {
-    const r = tab.bgRoute;
-    if (!r || !tab.group) continue;
-    if (tab.botShown !== "idle" || !tab.bgIdleSince || now - tab.bgIdleSince < 1500) continue;
-    if (!r.sawWork && now - r.at < 8000) continue;
-    tab.bgRoute = null;
-    const acts = (LIVE.get(tab.id) || {}).acts || [];
-    const texts = acts.filter((a) => a.kind === "text" && a.text && Date.parse(a.at) >= r.at - 1500).map((a) => a.text.trim());
-    let text = texts.join("\n\n");
-    if (text.length > 12000) text = text.slice(0, 12000) + "\n\n…";
-    if (text) sendCtrl({ type: "botgroup.event", id: r.gid, event: { bot: r.bot, kind: "msg", title: "", text } });
-    sendCtrl({ type: "log", msg: `Bot Group：${r.gid}/${r.bot} 这一轮收尾，回群 ${texts.length} 段 ${text.length} 字` });
-    bgSchedule(true);
-  }
 }
 
 /* ---------- 输入框 ---------- */
@@ -1316,7 +1574,6 @@ function bgBindComposer() {
 }
 setInterval(() => {
   if (BG_Q.size) bgPumpAll();
-  bgSettleAll();
   // 「等你」卡的可点与否来自读屏，屏变了不会有事件：页面开着且有人在等时每秒重画一次。
   if (document.body.classList.contains("botgroup")) {
     const g = bgGroup();
@@ -1389,6 +1646,8 @@ function bgFocus(gid, focus, why) {
           saveSettingsCache();
           applyTheme("Bot Group 页头");
           sendCtrl({ type: "settings.set", settings: { theme: next } });
+        } else if (a === "addbot") {
+          if (g) bgOpenCreate({ addTo: g.id });
         } else if (a === "new") {
           bgOpenCreate({});
         } else if (a === "delete") {

@@ -50,6 +50,21 @@ func (s *Server) handleBotGroup(m *Msg) {
 		}
 		s.Push(res)
 		s.pushBotGroups()
+	case "botgroup.addbot":
+		// 页头「加 Bot」：先记进组里，前端拿到回执里的 bot 再起它的格子。
+		if m.BotGroup == nil || len(m.BotGroup.Bots) != 1 {
+			return
+		}
+		b, err := st.AddBot(m.ID, m.BotGroup.Bots[0])
+		res := map[string]any{"type": "botgroup.result", "req": m.Req, "op": m.Type, "ok": err == nil, "id": m.ID}
+		if err != nil {
+			res["err"] = err.Error()
+		} else {
+			res["bot"] = b
+			log.Printf("[botgroup] 组 %s 加 Bot %s「%s」(%s)", m.ID, b.ID, b.Role, b.Agent)
+		}
+		s.Push(res)
+		s.pushBotGroups()
 	case "botgroup.bind":
 		if err := st.BindPane(m.ID, m.BotID, m.Pane); err != nil {
 			log.Printf("[botgroup] 绑定格子失败：%v", err)

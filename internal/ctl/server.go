@@ -189,7 +189,7 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		s.handleProviders(m)
 
 	// Bot Group（阶段 B：数据与创建）
-	case "botgroups.get", "botgroup.create", "botgroup.bind", "botgroup.event", "botgroup.delete":
+	case "botgroups.get", "botgroup.create", "botgroup.bind", "botgroup.addbot", "botgroup.event", "botgroup.delete":
 		s.handleBotGroup(m)
 
 	// 工作区共享 brief（Beta.3）

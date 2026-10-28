@@ -117,6 +117,16 @@ func (tr *trace) consumeAssistant(raw json.RawMessage, at string) *ActItem {
 			if b.Name == "Agent" || b.Name == "Task" {
 				it.Agent = in.str("description")
 			}
+			if b.Name == "Bash" || b.Name == "PowerShell" {
+				c := strings.TrimSpace(in.str("command"))
+				if i := strings.IndexByte(c, '\n'); i >= 0 {
+					c = c[:i]
+				}
+				it.Cmd = clip(c, 200)
+			}
+			if b.Name == "TodoWrite" {
+				it.Todo = readTodos(in)
+			}
 			if b.Name == "AskUserQuestion" {
 				it.Qs = readQuestions(in)
 				// 落一行事实：这条流水是「它在等你答」的**唯一**证据来源，
@@ -463,6 +473,7 @@ func (tr *trace) consumeResult(raw, res json.RawMessage, at string) *ActItem {
 	if idx, has := tr.byID[id]; has && id != "" {
 		it := &tr.acts[idx]
 		it.OK = &ok
+		it.Done = at // 结果落盘的时刻（Bot Group 的「N 步 · 用时」照它算，不猜）
 		if add > 0 || del > 0 {
 			it.Add, it.Del = add, del
 		}

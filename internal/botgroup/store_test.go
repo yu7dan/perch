@@ -81,3 +81,27 @@ func TestEventsAnchorByID(t *testing.T) {
 		t.Fatal("group not deleted")
 	}
 }
+
+func TestAddBot(t *testing.T) {
+	dir, proj := t.TempDir(), t.TempDir()
+	s := Load(dir)
+	g, _ := s.Create(CreateInput{Name: "g", Project: proj, ManagerAgent: "claude", Bots: []BotInput{{Role: "开发", Agent: "codex"}}})
+	b, err := s.AddBot(g.ID, BotInput{Role: "审阅", Agent: "opencode"})
+	if err != nil || b.ID != "b2" {
+		t.Fatalf("AddBot = %+v %v", b, err)
+	}
+	if _, err := s.AddBot(g.ID, BotInput{Role: "", Agent: "x"}); err == nil {
+		t.Fatal("empty role accepted")
+	}
+	for i := 0; i < MaxBots-2; i++ {
+		if _, err := s.AddBot(g.ID, BotInput{Role: "r", Agent: "codex"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.AddBot(g.ID, BotInput{Role: "over", Agent: "codex"}); err == nil {
+		t.Fatal("more than MaxBots accepted")
+	}
+	if got := len(Load(dir).List()[0].Bots); got != MaxBots+1 {
+		t.Fatalf("after reload bots=%d", got)
+	}
+}

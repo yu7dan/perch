@@ -430,3 +430,47 @@ func writeBrief(g Group) error {
 	b.WriteString("\n## 共享记忆\n\n（Manager 和各个 Bot 在这里记下决定、约定和交接要点。）\n")
 	return os.WriteFile(p, []byte(b.String()), 0o644)
 }
+
+// MaxBots 是一个组里 Bot 的上限（不算 Manager），和前端车道色的数目一致。
+const MaxBots = 6
+
+// AddBot 给已有的组再加一个 Bot（页头「加 Bot」）。id 接着往下编（b1、b2…，删过的不复用）。
+func (s *Store) AddBot(gid string, in BotInput) (Bot, error) {
+	role := strings.TrimSpace(in.Role)
+	if role == "" || in.Agent == "" {
+		return Bot{}, fmt.Errorf("新 Bot 缺少角色或 agent")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken {
+		return Bot{}, fmt.Errorf("botgroups.json 解析失败，为了不覆盖它，这次没有保存")
+	}
+	for gi := range s.f.Groups {
+		g := &s.f.Groups[gi]
+		if g.ID != gid {
+			continue
+		}
+		n, top := 0, 0
+		for _, b := range g.Bots {
+			if b.Manager {
+				continue
+			}
+			n++
+			if v, err := strconv.Atoi(strings.TrimPrefix(b.ID, "b")); err == nil && v > top {
+				top = v
+			}
+		}
+		if n >= MaxBots {
+			return Bot{}, fmt.Errorf("每个组最多 %d 个 Bot", MaxBots)
+		}
+		b := Bot{ID: fmt.Sprintf("b%d", top+1), Role: role, Agent: in.Agent,
+			Task: strings.TrimSpace(in.Task), CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+		g.Bots = append(g.Bots, b)
+		if err := s.saveLocked(); err != nil {
+			g.Bots = g.Bots[:len(g.Bots)-1]
+			return Bot{}, err
+		}
+		return b, nil
+	}
+	return Bot{}, fmt.Errorf("找不到组 %s", gid)
+}
