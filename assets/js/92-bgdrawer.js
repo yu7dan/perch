@@ -10,12 +10,17 @@
    要重启才生效的项（agent / 模型 / 强度 / 权限 / 文件夹）存完挂一条「下次启动生效」，空闲时可以立刻重启。 */
 
 /* 每个 agent 能按角色设的项（m 模型 / e 强度 / p 权限；Go：agent.BotLaunch，两边一起改）。
-   pAsk=false：这个 agent 本来就不问（Pi），工作区 = 完全访问，只有「只读」真有区别。 */
+   pAsk=false：这个 agent 本来就不问（Pi），工作区 = 完全访问，只有「只读」真有区别。
+   ef：这个 agent 自己认的强度档位（没写就用「设置 › 模型」那一份）。
+   这一版支持 Claude Code / Codex / Pi / OpenCode / Qoder / Antigravity（用户 2026-10-28 定）；
+   Cursor、Copilot、DeepSeek Harness 暂不支持，那几项做灰。 */
 const BG_CFG_CAPS = {
   claude: { m: true, e: true, p: true, pAsk: true },
   codex: { m: true, e: true, p: true, pAsk: true },
   opencode: { m: true, e: false, p: true, pAsk: true, mHint: "provider/model" },
-  pi: { m: true, e: true, p: true, pAsk: false },
+  pi: { m: true, e: true, p: true, pAsk: false, ef: ["off", "minimal", "low", "medium", "high", "xhigh", "max"] },
+  qoder: { m: true, e: true, p: true, pAsk: true, ef: ["low", "medium", "high"] },
+  agy: { m: true, e: true, p: true, pAsk: true, ef: ["low", "medium", "high", "xhigh", "max"] },
 };
 function bgdCan(agent, k) { const c = BG_CFG_CAPS[agent]; return !!(c && c[k]); }
 const BG_CLAUDE_ALIASES = ["opus", "sonnet", "haiku"];
@@ -253,7 +258,8 @@ function bgdInput(field, value, ph, opts) {
 }
 function bgdEffortHTML(b) {
   const ok = bgdCan(b.agent, "e");
-  const efforts = (typeof PROV !== "undefined" && PROV.efforts && PROV.efforts.length) ? PROV.efforts : ["low", "medium", "high", "max"];
+  const own = BG_CFG_CAPS[b.agent] && BG_CFG_CAPS[b.agent].ef;
+  const efforts = own || ((typeof PROV !== "undefined" && PROV.efforts && PROV.efforts.length) ? PROV.efforts : ["low", "medium", "high", "max"]);
   const cur = b.effort || "";
   return `<div class="bgd-seg sm${ok ? "" : " grey"}" role="group"${ok ? "" : ` title="${esc(t("bg.d.unsupported", { agent: bgAgentName(b.agent) }))}"`}>`
     + `<button type="button" data-bgd-effort="" aria-pressed="${ok && !cur}">${esc(t("bg.d.effort.default"))}</button>`

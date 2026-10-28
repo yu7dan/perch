@@ -27,9 +27,21 @@ func TestBotLaunch(t *testing.T) {
 	if !reflect.DeepEqual(args, []string{"--model", "x", "--thinking", "high", "--tools", "read,grep,find,ls"}) {
 		t.Fatalf("pi args = %v", args)
 	}
-	env, args = BotLaunch("qoder", BotConfig{Model: "x", Permission: "read-only"})
+	_, args = BotLaunch("qoder", BotConfig{Model: "q1", Effort: "high", Permission: "read-only"})
+	if !reflect.DeepEqual(args, []string{"-m", "q1", "--reasoning-effort", "high", "--tools", "Read", "Grep", "Glob"}) {
+		t.Fatalf("qoder args = %v", args)
+	}
+	_, args = BotLaunch("agy", BotConfig{Model: "gemini-x", Effort: "max", Permission: "full-access"})
+	if !reflect.DeepEqual(args, []string{"--model", "gemini-x", "--effort", "max", "--dangerously-skip-permissions"}) {
+		t.Fatalf("agy args = %v", args)
+	}
+	_, args = BotLaunch("agy", BotConfig{Permission: "read-only"})
+	if !reflect.DeepEqual(args, []string{"--mode", "plan"}) {
+		t.Fatalf("agy read-only args = %v", args)
+	}
+	env, args = BotLaunch("copilot", BotConfig{Model: "x", Permission: "read-only"})
 	if len(env) != 0 || len(args) != 0 {
-		t.Fatalf("qoder should get nothing, got %v %v", env, args)
+		t.Fatalf("copilot should get nothing, got %v %v", env, args)
 	}
 	if env, args := BotLaunch("claude", BotConfig{}); len(env) != 0 || len(args) != 0 {
 		t.Fatalf("empty config should inject nothing, got %v %v", env, args)

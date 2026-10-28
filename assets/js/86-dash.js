@@ -269,7 +269,9 @@ function renderDashKpis() {
   const cache7 = d7.map((a) => tokCacheRate(a.tokens) || 0);
   const avgPrev = turns7.slice(0, 6).reduce((a, b) => a + b, 0) / 6;
   const delta = avgPrev > 0 ? Math.round((100 * ((td.turns || 0) - avgPrev)) / avgPrev) : null;
-  const live = wsTabs().filter((t) => t.id > 0);
+  // 和旁边的「需要你」同一个口径：Bot Group 的成员格也算（原来只数 Workspaces，出现过「在跑 0/0 · 1 个等你」）。
+  const live = TAB_LIST.filter((t) => t.id > 0);
+  const bots = live.filter((t) => t.group).length;
   const running = live.filter((t) => !t.connDown).length;
   const need = needModel();
   const working = live.filter((t) => cellState(t) === "working").length;
@@ -296,7 +298,7 @@ function renderDashKpis() {
     `<div class="s${cls ? " " + cls : ""}">${esc(sub)}</div>${spark || ""}</div>`;
   const inp = tok ? (tok.in || 0) + (tok.cacheRead || 0) + (tok.cacheWrite || 0) : 0;
   host.innerHTML =
-    card(t("dash.kpi.running"), dashNum(running), t("ov.kpi.ofPanes", { n: live.length }),
+    card(t("dash.kpi.running"), dashNum(running), t("ov.kpi.ofPanes", { n: live.length }) + (bots ? " · " + t("ov.kpi.bots", { n: bots }) : ""),
       t("ov.kpi.runningSub", { need: need.wait.length, working }), need.wait.length ? "ask" : "") +
     card(t("dash.kpi.turnsToday"), dashNum(td.turns || 0), "",
       delta == null ? t("ov.kpi.noBaseline") : t(delta >= 0 ? "ov.kpi.up" : "ov.kpi.down", { n: Math.abs(delta) }),
@@ -551,14 +553,21 @@ function renderDashNeed() {
   host.classList.remove("quiet");
   host.innerHTML = M.wait.slice(0, 4).map((r) => {
     const typ = (r.t.spec && r.t.spec.agent) || "";
-    const proj = ovProjectOf(r.t);
-    return `<div class="ov-card ov-needcard need k-${esc(r.kind)}" data-tab="${r.t.id}" role="button" tabindex="0">` +
+    // Bot Group 的成员：标题是「组名 · 角色」，第二行说它在哪个组、是哪个 agent（Bot 没有会话名，
+    // 原来退回成光秃秃的 agent 名，看不出是哪个组的哪个角色）。
+    const bg = r.t.group && typeof BOTGROUPS !== "undefined" ? BOTGROUPS.find((x) => x.id === r.t.group) : null;
+    const bot = bg ? (bg.bots || []).find((x) => x.id === r.t.bot) : null;
+    const name = bot ? bg.name + " · " + (bot.manager ? "Manager" : bot.role) : currentTabTitle(r.t);
+    const proj = bot ? t("ov.need.inGroup", { agent: typeof opAgentById === "function" && opAgentById(typ) ? opAgentById(typ).name : typ }) : ovProjectOf(r.t);
+    // ⚠️ 不挂 .need：右栏「需要你」的 .need 是一张 13px 首列的网格（40-sidebar.css，后加载），
+    //    挂上就把这张卡的图标塞进 13px、压在标题上。点击委托认 .ov-needcard（99-boot.js）。
+    return `<div class="ov-card ov-needcard k-${esc(r.kind)}" data-tab="${r.t.id}" role="button" tabindex="0">` +
       `<span class="ov-need-ico">${typeof agentMarkHTML === "function" ? agentMarkHTML(typ) : ""}</span>` +
-      `<span class="ov-need-m"><span class="hd"><b class="ell">${esc(currentTabTitle(r.t))}</b>` +
+      `<span class="ov-need-m"><span class="hd"><b class="ell">${esc(name)}</b>` +
       `<span class="ov-chip ask">${esc(needWhy(r.kind))}</span>` +
       `<span class="tm">${esc(rel(r.at))}</span></span>` +
       (r.text ? `<span class="tx">${esc(r.text)}</span>` : "") +
-      (proj ? `<span class="pj">${esc(t("ov.need.project", { name: proj }))}</span>` : "") + `</span>` +
+      (proj ? `<span class="pj">${esc(bot ? proj : t("ov.need.project", { name: proj }))}</span>` : "") + `</span>` +
       `<span class="ov-btn sm">${esc(t("ov.need.go"))} →</span></div>`;
   }).join("");
 }

@@ -482,7 +482,8 @@ textarea.bg-cin::placeholder{color:var(--bg-faint)}
 .bgd-seg{position:relative;display:flex;gap:2px;padding:2px;border-radius:10px;background:var(--bg-hov)}
 .bgd-seg button{flex:1;height:30px;border-radius:8px;font-size:13px;color:var(--bg-muted);white-space:nowrap;
   transition:background-color .15s ease,color .15s ease,box-shadow .15s ease,scale 290ms var(--bgd-tap)}
-.bgd-seg.sm button{height:26px;font-size:12px}
+.bgd-seg.sm{flex-wrap:wrap}
+.bgd-seg.sm button{height:26px;font-size:12px;flex:1 0 auto;padding:0 8px}
 .bgd-seg button:hover{color:var(--bg-fg)}
 .bgd-seg button[aria-pressed=true]{background:var(--bg-raise);color:var(--bg-fg);box-shadow:0 1px 3px rgb(0 0 0 / .14)}
 .bgd-seg button:active{scale:.96}
@@ -570,6 +571,16 @@ textarea.bg-cin::placeholder{color:var(--bg-faint)}
 .bg-lt.rail .bg-dot{margin-top:1px}
 #bg-tscroll .bg-rail-hit{fill:transparent;cursor:pointer}
 #bg-tscroll g.bg-rail:hover .bg-rail-hit{fill:var(--bg-hov)}
-.bg-chain.many{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:22px;row-gap:5px}
-.bg-chain.many .bg-chain-row{min-width:0}
-.bg-chain.many .bg-chips{flex-wrap:nowrap;overflow:hidden}
+/* 交接链：一任务一行；一行放不下横着翻（滚轮），超过 4 行整块上下翻；名字不截短 */
+.bg-chain{max-height:calc(4 * 29px + 20px);overflow-y:auto;scrollbar-width:thin;overscroll-behavior:contain}
+.bg-chain-row{min-width:0;flex:none}
+.bg-chain .bg-chips{flex:1 1 auto;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;min-width:0;padding:2px 0}
+.bg-chain .bg-chips::-webkit-scrollbar{display:none}
+.bg-chain .bg-chip,.bg-chain .bg-arrow{flex:none}
+/* 下面 / 上面还有行：边缘渐隐提示（和行内横向一样） */
+.bg-chain.ovf-b{-webkit-mask-image:linear-gradient(#000 calc(100% - 26px),transparent);mask-image:linear-gradient(#000 calc(100% - 26px),transparent)}
+.bg-chain.ovf-t{-webkit-mask-image:linear-gradient(transparent,#000 22px);mask-image:linear-gradient(transparent,#000 22px)}
+.bg-chain.ovf-t.ovf-b{-webkit-mask-image:linear-gradient(transparent,#000 22px,#000 calc(100% - 26px),transparent);mask-image:linear-gradient(transparent,#000 22px,#000 calc(100% - 26px),transparent)}
+.bg-chain .bg-chips.ovf-r{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent)}
+.bg-chain .bg-chips.ovf-l{-webkit-mask-image:linear-gradient(to right,transparent,#000 28px);mask-image:linear-gradient(to right,transparent,#000 28px)}
+.bg-chain .bg-chips.ovf-l.ovf-r{-webkit-mask-image:linear-gradient(to right,transparent,#000 28px,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(to right,transparent,#000 28px,#000 calc(100% - 28px),transparent)}

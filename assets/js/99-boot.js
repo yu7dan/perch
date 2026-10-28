@@ -20,12 +20,18 @@ $("dash-live")?.addEventListener("click", (e) => {
   jumpToTab(t, "点总览「运行中」");
 });
 
-// 点「在等你」的一行 = 回到工作区 + 跳到那一格。
+// 点「在等你」的一张卡 = 回到工作区 + 跳到那一格；Bot 的卡 = 回到 Bot Group、聚焦这个 Bot（等你的卡就在它的单聊里）。
 $("dash-need").addEventListener("click", (e) => {
-  const row = e.target.closest(".need");
+  const row = e.target.closest(".ov-needcard[data-tab]");
   if (!row) return;
   const t = liveTab(row.dataset.tab | 0);
   if (!t) return;
+  if (t.group && typeof bgFocus === "function") {
+    if (SETTINGS.topMode !== "botgroup" && typeof topModePick === "function") topModePick("botgroup");
+    else setNavView("workspace");
+    bgFocus(t.group, t.bot, "点总览「在等你」");
+    return;
+  }
   setNavView("workspace");
   jumpToTab(t, "点总览「在等你」");
 });

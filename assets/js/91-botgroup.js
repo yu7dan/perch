@@ -71,7 +71,7 @@ function bgTabOf(bot) {
 function bgBotState(bot) {
   const tab = bgTabOf(bot);
   if (!tab) return bot && bot.paneId ? "off" : "pending";
-  if (BG_BYPASS.has(tab.id)) return "waiting";
+  if (BG_GATES.has(tab.id)) return "waiting";
   const s = cellState(tab);
   if (s === "working") return "working";
   if (s === "ask") return "waiting";
@@ -909,70 +909,85 @@ function bgAskRowHTML(g, b, tab, perm, ask) {
     + `<div class="bg-ev-body"><div class="bg-gate">${bgIco("shield", 13)}<span>${esc(clamp(gate, 240))}</span></div>${opts}`
     + (note ? `<div class="bg-ev-note">${esc(note)}</div>` : "") + `</div></div>`;
 }
-/* ---------- Claude「完全访问」的确认门（2026-10-28 实测） ----------
-   claude --permission-mode bypassPermissions 第一次启动先停在一屏确认：
-   「❯ No, exit / Yes, I accept · Enter to confirm」，默认选中的是 No。Bot 的终端是收着的 ——
-   这时群里送一条消息，最后那下回车正好选了「No, exit」，claude 直接退出。
-   所以读屏认出它（和登录门同一个做法）：门在时这个 Bot 算「等你」（送达只在空闲时送，回车不会误按），
-   群里出一张确认卡。接受 = ↓ 再回车（实测 ↓ 会把 ❯ 移到 Yes）；Claude 记住之后不再问。 */
-const BG_BYPASS = new Map();   // tab id → 出现的时间
-function bgReadBypass(tab) {
-  if (!tab || tab.connDown || !tab.group || !tab.term) return false;
+/* ---------- Bot 的启动门（2026-10-28 实测） ----------
+   Bot 的终端是收着的，agent 第一次在某个文件夹 / 某种权限下启动时停在一屏要人回答的问题上，用户看不见。
+   而这时群里送一条消息，最后那下回车会替用户把那一屏答掉（还可能答错）。三种门：
+     · bypass：Claude「完全访问」的确认 ——「❯ No, exit / Yes, I accept」，默认选中的是 No，
+               一下回车 claude 就退出了。接受 = ↓ 再回车（实测 ↓ 会把 ❯ 移到 Yes），记住之后不再问；
+     · trust： Claude / Qoder「Do you trust the files in this folder?」——默认选中的是「信任」，回车即信任；
+     · login： 登录门（80-live 的 LOGIN_GATES 已经在读屏认它，这里只出卡）。
+   都和登录门同一个做法：读可见屏幕。门在时这个 Bot 算「等你」（送达只在空闲时送，回车不会误按），
+   群里出一张卡，能直接答的直接答，别的去终端。 */
+const BG_GATES = new Map();   // tab id → { kind, at }
+function bgReadGate(tab) {
+  if (!tab || tab.connDown || !tab.group || !tab.term) return "";
   const buf = tab.term.buffer.active;
-  if (!buf) return false;
+  if (!buf) return "";
   const lo = Math.max(0, buf.viewportY), hi = Math.min(buf.length - 1, lo + (tab.term.rows || 50) - 1);
-  let mode = false, yes = false;
+  let bypass = false, accept = false, trust = false;
   for (let i = lo; i <= hi; i++) {
     const line = buf.getLine(i);
     if (!line) continue;
     const s = line.translateToString(true);
-    if (/Bypass Permissions mode/i.test(s)) mode = true;
-    if (/Yes, I accept/i.test(s)) yes = true;
+    if (/Bypass Permissions mode/i.test(s)) bypass = true;
+    if (/Yes, I accept/i.test(s)) accept = true;
+    if (/Do you trust the files in this folder/i.test(s)) trust = true;
   }
-  return mode && yes;
+  if (bypass && accept) return "bypass";
+  if (trust) return "trust";
+  if (typeof LOGIN_GATES !== "undefined" && LOGIN_GATES.has(tab.id)) return "login";
+  return "";
 }
 setInterval(() => {
   if (document.hidden) return;
   let changed = false;
   for (const tab of TAB_LIST) {
     if (!tab.group) continue;
-    const on = bgReadBypass(tab);
-    if (on === BG_BYPASS.has(tab.id)) continue;
+    const kind = bgReadGate(tab);
+    const prev = BG_GATES.get(tab.id);
+    if ((prev ? prev.kind : "") === kind) continue;
     changed = true;
-    if (on) BG_BYPASS.set(tab.id, Date.now()); else BG_BYPASS.delete(tab.id);
-    sendCtrl({ type: "log", msg: `Bot Group：完全访问确认门 ${on ? "出现" : "消失"} tab=${tab.id} ${tab.group}/${tab.bot}` });
+    if (kind) BG_GATES.set(tab.id, { kind, at: Date.now() }); else BG_GATES.delete(tab.id);
+    sendCtrl({ type: "log", msg: `Bot Group：启动门 ${kind || "消失"}（原来 ${prev ? prev.kind : "无"}）tab=${tab.id} ${tab.group}/${tab.bot}` });
   }
-  for (const id of [...BG_BYPASS.keys()]) if (!TAB_LIST.some((x) => x.id === id)) { BG_BYPASS.delete(id); changed = true; }
+  for (const id of [...BG_GATES.keys()]) if (!TAB_LIST.some((x) => x.id === id)) { BG_GATES.delete(id); changed = true; }
   if (changed) bgSchedule();
 }, 1000);
-function bgBypassCardHTML(g, b, tab) {
+function bgGateCardHTML(g, b, tab, kind) {
   const color = bgColor(g, b.id);
+  const agent = bgAgentName(b.agent);
+  const where = typeof bgdFolder === "function" ? bgdFolder(g, b) : g.project;
+  const btn = (cls, attrs, label) => `<button type="button" class="bg-opt${cls}" ${attrs}>${esc(label)}</button>`;
+  const opts = kind === "bypass"
+    ? btn(" primary", `data-gate="accept"`, t("bg.bypass.accept")) + btn("", `data-gate="ws"`, t("bg.bypass.ws"))
+    : kind === "trust" ? btn(" primary", `data-gate="trust"`, t("bg.gate.trustBtn")) : "";
+  const gate = kind === "bypass" ? t("bg.bypass.gate", { agent })
+    : kind === "trust" ? t("bg.gate.trust", { agent, path: where }) : t("bg.gate.login", { agent });
   return `<div class="bg-ev ask open" data-bg-tab="${tab.id}" data-bg-ev="${esc(g.id + ":" + b.id + ":tail")}" style="--lane:${color}">`
     + `<div class="bg-ev-h"><span class="bg-caret">${bgIco("chev", 11)}</span><span class="bg-ev-g">${bgGlyph("approval", color)}</span>`
-    + bgBadge(g, b.id) + `<span class="bg-ev-t ell">${esc(t("bg.bypass.title"))}</span></div>`
-    + `<div class="bg-ev-body"><div class="bg-gate">${bgIco("shield", 13)}<span>${esc(t("bg.bypass.gate"))}</span></div>`
-    + `<div class="bg-opts"><button type="button" class="bg-opt primary" data-bypass="accept">${esc(t("bg.bypass.accept"))}</button>`
-    + `<button type="button" class="bg-opt" data-bypass="ws">${esc(t("bg.bypass.ws"))}</button>`
-    + `<button type="button" class="bg-opt" data-go="${tab.id}">${esc(t("bg.card.goTerm"))}</button></div></div></div>`;
+    + bgBadge(g, b.id) + `<span class="bg-ev-t ell">${esc(t("bg.gate.title." + kind))}</span></div>`
+    + `<div class="bg-ev-body"><div class="bg-gate">${bgIco("shield", 13)}<span>${esc(gate)}</span></div>`
+    + `<div class="bg-opts">${opts}${btn(opts ? "" : " primary", `data-go="${tab.id}"`, t(kind === "login" ? "bg.gate.loginBtn" : "bg.card.goTerm"))}</div></div></div>`;
 }
-function bgBypassAnswer(tab, how) {
+function bgGateAnswer(tab, how) {
   const g = BOTGROUPS.find((x) => x.id === tab.group);
   const b = bgBot(g, tab.bot);
   if (!g || !b) return;
-  sendCtrl({ type: "log", msg: `Bot Group：完全访问确认 ${how} ${g.id}/${b.id} tab=${tab.id}` });
-  if (how === "accept") {
+  sendCtrl({ type: "log", msg: `Bot Group：启动门 回答 ${how} ${g.id}/${b.id} tab=${tab.id}` });
+  if (how === "accept" || how === "trust") {
     if (!tab.stream) return;
-    // ↓ 和回车分两次送（一包里的回车会被当成别的输入），和 stopAgent 同一个手法。
-    tab.stream.send(enc.encode("\x1b[B"));
-    setTimeout(() => { try { if (tab.stream && BG_BYPASS.has(tab.id)) tab.stream.send(enc.encode("\r")); } catch (_) {} }, 250);
+    // 「完全访问」：↓ 再回车（↓ 和回车分两次送，一包里的回车会被当成别的输入，和 stopAgent 同一个手法）；
+    // 「信任文件夹」：默认选中的就是信任，直接回车。
+    if (how === "accept") tab.stream.send(enc.encode("\x1b[B"));
+    setTimeout(() => { try { if (tab.stream && BG_GATES.has(tab.id)) tab.stream.send(enc.encode("\r")); } catch (_) {} }, how === "accept" ? 250 : 0);
     return;
   }
-  bgdSave(g, b, { permission: "workspace-write" }, "确认门：改回工作区").then((ok) => { if (ok) bgdRestart(g, bgBot(g, b.id) || b, true); });
+  bgdSave(g, b, { permission: "workspace-write" }, "启动门：改回工作区").then((ok) => { if (ok) bgdRestart(g, bgBot(g, b.id) || b, true); });
 }
 function bgCardsHTML(g, members) {
   return members.map((b) => {
     const tab = bgTabOf(b);
-    if (tab && BG_BYPASS.has(tab.id)) return bgBypassCardHTML(g, b, tab);
+    if (tab && BG_GATES.has(tab.id)) return bgGateCardHTML(g, b, tab, BG_GATES.get(tab.id).kind);
     const v = tab ? LIVE.get(tab.id) : null;
     if (!v) return "";
     const perm = pendingPerm(v), ask = perm ? null : pendingAsk(v);
@@ -1103,7 +1118,7 @@ function bgTreeSVG(g, width, lay) {
       const cr = bgCurrent(g, b);
       tail = { kind: st === "waiting" ? "approval" : "running",
         title: st === "waiting" ? t("bg.tree.waitYou") : t("bg.feed.running", { x: cr && cr.running ? (cr.short || cr.title) : t("bg.feed.thinking") }) };
-    } else if (!shown.length) tail = { kind: "idle", title: t("bg.tree.standby") };
+    } else tail = { kind: "idle", title: t("bg.tree.standby") };   // 参考视频：每条车道末尾都有「等待 X」
     if (tail) { tail.cy = cur + (shown.length ? 14 : 10); cur = tail.cy + rowH - 10; }
     H = Math.max(H, cur + 24);
     // 竖线：实线贯穿已发生的部分，末尾那段（正在处理 / 等你）是虚线
@@ -1114,7 +1129,7 @@ function bgTreeSVG(g, width, lay) {
       parts.push(`<g data-lane="${esc(b.id)}" class="bg-rail"><title>${esc(bgLaneTip(g, b))}</title>`
         + `<rect class="bg-rail-hit" data-bg-focus="${esc(b.id)}" x="${left + 2}" y="0" width="${BG_RAIL_W}" height="4000"/>`);
       if (shown.length > 1) parts.push(`<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="${c}" stroke-width="1.6"/>`);
-      if (tail && shown.length) parts.push(`<line x1="${x}" y1="${y2}" x2="${x}" y2="${tail.cy}" stroke="${c}" stroke-width="1.2" stroke-dasharray="3 3" opacity=".6"/>`);
+      if (tail) parts.push(`<line x1="${x}" y1="${shown.length ? y2 : top - 10}" x2="${x}" y2="${shown.length ? tail.cy : tail.cy + 30}" stroke="${c}" stroke-width="1.6" stroke-dasharray="3 3" opacity=".85"/>`);
       parts.push(`</g>`);
       shown.forEach((e) => {
         const key = esc(g.id + ":" + b.id + ":" + e.it.id);
@@ -1132,7 +1147,8 @@ function bgTreeSVG(g, width, lay) {
     }
     parts.push(`<g data-lane="${esc(b.id)}">`);
     if (shown.length > 1) parts.push(`<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="${c}" stroke-width="2"/>`);
-    if (tail && shown.length) parts.push(`<line x1="${x}" y1="${y2}" x2="${x}" y2="${tail.cy}" stroke="${c}" stroke-width="1.4" stroke-dasharray="3 3" opacity=".6"/>`);
+    // 末尾那段虚线；空车道（刚加进来、还没干活）从顶上拉一小段虚线穿过「待命」，一眼看得出这也是一条车道
+    if (tail) parts.push(`<line x1="${x}" y1="${shown.length ? y2 : top - 10}" x2="${x}" y2="${shown.length ? tail.cy : tail.cy + 30}" stroke="${c}" stroke-width="1.6" stroke-dasharray="3 3" opacity=".8"/>`);
     // 分叉：本车道里往右拐出一根平行支线
     const inBranch = new Set();
     shown.forEach((e, i) => {
@@ -1264,6 +1280,65 @@ function bgBudgetHTML(g) {
   return `<span class="bg-budget${pct >= 90 ? " hot" : ""}" title="${esc(t("bg.head.budgetTitle"))}">${esc(t("bg.head.budget", { used, cap }))}`
     + `<span class="bg-bbar"><span style="width:${pct}%"></span></span></span>`;
 }
+/* 交接链（用户 2026-10-28 定）：一个任务一行、竖着排；名字不截短 —— 一行放不下就用滚轮往后翻，
+   超过 4 行整块用滚轮上下翻。页头一重画滚动位置就没了，这里记下来再放回去；
+   没被手动翻过的行停在最新那一端（当前交接永远露在外面）。 */
+const BG_CHAIN_MANUAL = new Set();   // 被用户手动横向翻过的车道
+function bgChainSave() {
+  const box = document.querySelector("#bg-top .bg-chain");
+  if (!box) return null;
+  const rows = {};
+  box.querySelectorAll(".bg-chain-row").forEach((r) => { const c = r.querySelector(".bg-chips"); if (c) rows[r.dataset.bgFocus] = c.scrollLeft; });
+  return { top: box.scrollTop, rows };
+}
+function bgChainRestore(keep) {
+  const box = document.querySelector("#bg-top .bg-chain");
+  if (!box) return;
+  if (keep) box.scrollTop = keep.top;
+  bgChainVEdges(box);
+  box.querySelectorAll(".bg-chain-row").forEach((r) => {
+    const c = r.querySelector(".bg-chips");
+    if (!c) return;
+    const lane = r.dataset.bgFocus;
+    c.scrollLeft = BG_CHAIN_MANUAL.has(lane) && keep && lane in keep.rows ? keep.rows[lane] : c.scrollWidth;
+    bgChainEdges(c);
+  });
+}
+function bgChainVEdges(box) {
+  const over = box.scrollHeight > box.clientHeight + 1;
+  box.classList.toggle("ovf-t", over && box.scrollTop > 1);
+  box.classList.toggle("ovf-b", over && box.scrollTop + box.clientHeight < box.scrollHeight - 1);
+}
+function bgChainEdges(c) {
+  const over = c.scrollWidth > c.clientWidth + 1;
+  c.classList.toggle("ovf-l", over && c.scrollLeft > 1);
+  c.classList.toggle("ovf-r", over && c.scrollLeft + c.clientWidth < c.scrollWidth - 1);
+}
+{
+  const root = $("bg");
+  if (root && !root.dataset.chainWheel) {
+    root.dataset.chainWheel = "1";
+    // 竖着滚的滚轮在一行放不下的交接链上 = 横着翻这一行；翻到头了才让整块上下滚。
+    root.addEventListener("wheel", (e) => {
+      const c = e.target.closest(".bg-chain .bg-chips");
+      if (!c || c.scrollWidth <= c.clientWidth + 1) return;
+      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      const atEnd = d > 0 ? c.scrollLeft + c.clientWidth >= c.scrollWidth - 1 : c.scrollLeft <= 0;
+      if (atEnd) return;
+      e.preventDefault();
+      c.scrollLeft += d;
+      const row = c.closest(".bg-chain-row");
+      if (row) BG_CHAIN_MANUAL.add(row.dataset.bgFocus);
+      bgChainEdges(c);
+    }, { passive: false });
+    root.addEventListener("scroll", (e) => {
+      const el = e.target;
+      if (!el.classList) return;
+      if (el.classList.contains("bg-chips")) bgChainEdges(el);
+      else if (el.classList.contains("bg-chain")) bgChainVEdges(el);
+    }, true);
+  }
+}
 function bgTopHTML(g, waiting) {
   const light = document.documentElement.classList.contains("theme-light");
   const srcLine = g.source && g.source.kind === "derived"
@@ -1280,7 +1355,7 @@ function bgTopHTML(g, waiting) {
     +   `</div>`
     + `</header>`
     + `<div class="bg-goal">${srcLine}${g.goal ? `<span class="bg-sep">·</span><span class="bg-goal-k">${esc(t("bg.head.goal"))}</span><span class="ell">${esc(g.goal)}</span>` : ""}</div>`
-    + `<div class="bg-chain${bgLanes(g).length > 4 ? " many" : ""}">${bgChainHTML(g) || `<div class="bg-empty sm">${esc(t("bg.chain.noBots"))}</div>`}</div>`;
+    + `<div class="bg-chain">${bgChainHTML(g) || `<div class="bg-empty sm">${esc(t("bg.chain.noBots"))}</div>`}</div>`;
 }
 function bgTreeHTML(g, waiting, lay) {
   const lanes = bgLanes(g);
@@ -1314,7 +1389,8 @@ function renderBotGroup(why) {
   } else {
     if (BG.focus !== "all" && !bgBot(g, BG.focus)) BG.focus = "all";
     const waiting = (g.bots || []).filter((b) => bgBotState(b) === "waiting").length;
-    bgSet($("bg-top"), bgTopHTML(g, waiting));
+    const chainKeep = bgChainSave();
+    if (bgSet($("bg-top"), bgTopHTML(g, waiting))) bgChainRestore(chainKeep);
     bgSet($("bg-fh"), bgFeedHeadHTML(g));
     const feed = $("bg-feed");
     const atEnd = feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 40;
@@ -1474,7 +1550,8 @@ function bgFlowPoints(g, job) {
   const chip = (ck) => {
     const el = chainRow && chainRow.querySelector(`[data-ck="${ck}"]`);
     const r = el && el.getBoundingClientRect();
-    return r && chainBox && bgVis(r, chainBox) ? { el, r } : null;
+    const rowBox = el && el.closest(".bg-chips") ? el.closest(".bg-chips").getBoundingClientRect() : null;
+    return r && chainBox && bgVis(r, chainBox) && rowBox && bgVis(r, rowBox) ? { el, r } : null;
   };
   const feedBox = $("bg-feed") ? $("bg-feed").getBoundingClientRect() : null;
   const rowEl = root.querySelector(`#bg-feed [data-bg-ev="${CSS.escape(job.key)}"]`);
@@ -2155,8 +2232,8 @@ function bgCardClick(e) {
   const tab = TAB_LIST.find((x) => x.id === (wrap.dataset.bgTab | 0));
   if (!tab) return true;
   const selected = () => { const s = window.getSelection(); return !!(s && !s.isCollapsed && s.toString().trim()); };
-  const bp = e.target.closest("[data-bypass]");
-  if (bp) { if (!selected()) { bgBypassAnswer(tab, bp.dataset.bypass); bgSchedule(); } return true; }
+  const gt = e.target.closest("[data-gate]");
+  if (gt) { if (!selected()) { bgGateAnswer(tab, gt.dataset.gate); bgSchedule(); } return true; }
   if (e.target.closest("[data-go],[data-go-ask]")) { botOpenTerminal(tab); return true; }
   const pm = e.target.closest("[data-perm-more]");
   if (pm) { if (!selected()) { togglePermOpen(pm.dataset.permMore || ""); bgSchedule(); } return true; }

@@ -14,7 +14,12 @@ type BotConfig struct {
 //
 //	Claude / Codex：模型、强度、权限；
 //	OpenCode：模型（-m provider/model）、权限（只读 = --agent plan，完全访问 = --auto，工作区 = 它自己的默认）；
-//	Pi：模型（--model）、强度（--thinking）、权限只有只读（--tools read,grep,find,ls）—— Pi 本来就不问，工作区 = 完全访问。
+//	Pi：模型（--model）、强度（--thinking）、权限只有只读（--tools read,grep,find,ls）—— Pi 本来就不问，工作区 = 完全访问；
+//	Qoder：模型（-m）、强度（--reasoning-effort）、权限（只读 = --tools Read Grep Glob，工作区 = accept_edits，
+//	       完全访问 = bypass_permissions）；
+//	Antigravity：模型（--model）、强度（--effort）、权限（只读 = --mode plan，工作区 = accept-edits，
+//	       完全访问 = --dangerously-skip-permissions）。
+//	（2026-10-28 实测：这些参数两个 CLI 都收、不报错；agy 本机未登录、qoder 停在信任文件夹，再往后的屏幕没看到。）
 //
 // BotLaunch 把一个 Bot 的配置翻译成这一次启动的 env / 参数。它排在「模型提供商」的
 // 注入之后，所以同一项以 Bot 的为准：
@@ -59,6 +64,36 @@ func BotLaunch(agentID string, c BotConfig) (env map[string]string, args []strin
 		}
 		if c.Permission == "read-only" {
 			args = append(args, "--tools", "read,grep,find,ls")
+		}
+	case "qoder":
+		if c.Model != "" {
+			args = append(args, "-m", c.Model)
+		}
+		if c.Effort != "" {
+			args = append(args, "--reasoning-effort", c.Effort)
+		}
+		switch c.Permission {
+		case "read-only":
+			args = append(args, "--tools", "Read", "Grep", "Glob")
+		case "workspace-write":
+			args = append(args, "--permission-mode", "accept_edits")
+		case "full-access":
+			args = append(args, "--permission-mode", "bypass_permissions")
+		}
+	case "agy":
+		if c.Model != "" {
+			args = append(args, "--model", c.Model)
+		}
+		if c.Effort != "" {
+			args = append(args, "--effort", c.Effort)
+		}
+		switch c.Permission {
+		case "read-only":
+			args = append(args, "--mode", "plan")
+		case "workspace-write":
+			args = append(args, "--mode", "accept-edits")
+		case "full-access":
+			args = append(args, "--dangerously-skip-permissions")
 		}
 	case "codex":
 		if c.Model != "" {
