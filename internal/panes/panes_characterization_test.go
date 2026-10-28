@@ -174,3 +174,34 @@ func TestPaneStoreReadOnlyNeverWrites(t *testing.T) {
 		t.Fatal("readOnly flag was cleared")
 	}
 }
+
+// Bot Group 的成员格（2026-10-28）：刚起来、还没说过话的 Bot 也不能被当成
+// "空开合"摘掉 —— 它的身份在组里登记着，摘了组里就挂着一个找不到的 paneId。
+func TestBotGroupPanesSurviveEmptyPrune(t *testing.T) {
+	p := &Store{
+		file: filepath.Join(t.TempDir(), "panes.json"),
+		Panes: []Pane{
+			{PaneID: 1, Agent: "codex", Group: "g1", Bot: "b1"},
+			{PaneID: 2, Agent: "claude", Closed: true, Group: "g1", Bot: "b2"},
+			{PaneID: 3, Agent: "claude"},
+		},
+	}
+	plan := p.RestorePlan(nil)
+	got := map[int]PaneView{}
+	for _, v := range plan.Views {
+		got[v.PaneID] = v
+	}
+	if _, ok := got[3]; ok || len(got) != 2 {
+		t.Fatalf("views=%v want bot panes 1,2 only", got)
+	}
+	if v := got[1]; v.Group != "g1" || v.Bot != "b1" {
+		t.Fatalf("pane 1 view lost its group: %+v", v)
+	}
+	if kept, found := p.Close(1, "test"); !found || !kept {
+		t.Fatalf("empty bot pane close: kept=%v found=%v want true,true", kept, found)
+	}
+	p.SetGroup(1, "", "", "test")
+	if kept, found := p.Close(1, "test"); !found || kept {
+		t.Fatalf("released empty pane close: kept=%v found=%v want false,true", kept, found)
+	}
+}

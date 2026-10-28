@@ -864,6 +864,13 @@
        和总览同一种盖法：列表 / 主区 / 右栏 visibility:hidden，它盖在第 2 列到最后一列上，
        画自己的三栏。内容全部由 renderBotGroup() 现填。 -->
   <main id="bg"></main>
+  <!-- Bot 的终端坞：所有 Bot 格（spec.group）都挂在这里，不进 Workspaces 的网格。
+       平时 visibility:hidden 但**有尺寸**（PTY 的启动闸是首帧尺寸）；
+       打开一个 Bot 的终端 = 这个坞从右侧滑出、只露那一格。 -->
+  <aside id="bg-dock" aria-label="Bot terminal">
+    <div class="bgd-head" id="bg-dock-head"></div>
+    <div id="bg-dock-body"></div>
+  </aside>
 </div>
 
 <!-- 4. 状态栏。

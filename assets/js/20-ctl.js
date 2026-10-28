@@ -208,6 +208,9 @@ function seatSpecFrom(v) {
     restored: true,
     verdict: v.verdict || "",
     spoke: !!v.spoke,
+    // Bot Group 成员格：带着组 / Bot 身份回来，createTab 据此把它挂进格子坞。
+    group: v.group || "",
+    bot: v.bot || "",
   };
 }
 
@@ -304,6 +307,8 @@ function sendSpawn(w) {
 ctl.onopen = () => {
   ctlReady = true;
   ctl.send({ type: "log", msg: `ctl 通道已连接（攒下的建标签请求 ${ctlPending.length} 个）` });
+  // Bot Group 的组清单：冷恢复出来的 Bot 格要靠它对上身份（91-botgroup.js 的 bgSyncTabs）。
+  ctl.send({ type: "botgroups.get" });
   // 冷恢复的清单**抢在**下面那批攒下的建标签请求前面问（步 4 要按"先有计划、
   // 再有座位"的顺序来：清单还没到就先把默认格建出来，那一格会占掉 1 号座位）。
   askRestorePlan();
@@ -475,7 +480,7 @@ function dispatchCtl(m) {
          agent 还得在工作区里看得见、点得回来 —— 在这里重建那份薄快照。 */
       CLOSED_PANES.clear();
       for (const p of RESTORE.panes) {
-        if (!p.closed) continue;
+        if (!p.closed || p.group) continue;   // Bot 格不进 Workspaces 的「已关闭」
         CLOSED_PANES.set(p.paneId | 0, {
           paneId: p.paneId | 0, agent: p.agent || "claude", cwd: p.cwd || "",
           sessionId: p.sessionId || "", lastSeenAt: p.lastSeenAt || "", name: "",
@@ -541,6 +546,9 @@ function dispatchCtl(m) {
     // 设置 › 模型提供商 / Agents（85b-providers.js）。视图里没有任何密钥。
     case "providers": applyProviders(m); return;
     case "provider.result": provResult(m); return;
+    case "botgroups": if (typeof applyBotGroups === "function") applyBotGroups(m); return;
+    case "botgroup.event": if (typeof applyBotGroupEvent === "function") applyBotGroupEvent(m); return;
+    case "botgroup.result": if (typeof botGroupResult === "function") botGroupResult(m); return;
     case "provider.test": provTestResult(m); return;
     case "catalog":
       if (m.catalog) setCatalog(m.catalog, "catalog 推送");
@@ -684,7 +692,7 @@ function applyGridCols(n, cols) {
   $("termbody").style.setProperty("--gcols", String(soloTab ? 1 : cols));
   const lastRow = n % cols === 0 ? cols : n % cols;
   const each = lastRow > 0 ? Math.floor(cols / lastRow) : cols;
-  TAB_LIST.forEach((t, i) => {
+  wsTabs().forEach((t, i) => {
     const k = i - (n - lastRow);              // 本行第几格（0 起；负数=不在最后一行）
     let span = 1;
     if (!soloTab && n > 1 && lastRow < cols && k >= 0) {
@@ -705,7 +713,7 @@ function applyGridCols(n, cols) {
 function renderTermEmpty() {
   const box = $("term-empty");
   if (!box) return;
-  const empty = TAB_LIST.length === 0;
+  const empty = wsTabs().length === 0;
   box.hidden = !empty;
   if (!empty) return;
   const hasProject = (STATE?.projects || []).some((p) => p && p.path && !p.synthetic);
@@ -752,7 +760,7 @@ $("te-closed").addEventListener("click", (e) => {
 // 网格重排。**只动容器上的一个变量**，格子元素由 createTab 建、归属它自己
 // （重命名会把 .nm 换成输入框，重建 DOM 等于把用户正在打的字一起删掉）。
 function renderGrid() {
-  const n = TAB_LIST.length;
+  const n = wsTabs().length;
   const tb = $("termbody");
   // 摆法是 **N 的纯函数**（见上面 gridShape 那段）：不量容器、不看字号、也没有
   // 第二份状态。要每格多大，去读各格自己 fit 完报的 `[web tN] fit=WxH`。
@@ -807,7 +815,7 @@ function renderGrid() {
     // C3 验收要按"结束这一格"的 ×（`.cellhead .x`），而它**每一格都在不同位置**、
     // 而且 N 一变就整体重排 —— 把 N=1 那次量的坐标拿去点 N=2 的格子就是目测。
     // 所以坐标跟着布局事实一起报：重排一次就有一行新的、可直接用的数。
-    const 关格 = TAB_LIST.map((t, i) => {
+    const 关格 = wsTabs().map((t, i) => {
       const el = t.tabEl && t.tabEl.querySelector(".x");
       if (!el) return `#${i + 1}=?`;
       const b = el.getBoundingClientRect();
@@ -819,7 +827,7 @@ function renderGrid() {
     }).join(" ");
     // 点错格的排查靠这一行：关格坐标只能说明头在哪，说明不了**格子本体**
     // 在命中测试里占多大（xterm 的 textarea/canvas 会撑出自己的盒子）。
-    const 格框 = TAB_LIST.map((t, i) => {
+    const 格框 = wsTabs().map((t, i) => {
       const b = t.cellEl.getBoundingClientRect();
       return `#${i + 1}=${Math.round(b.left)},${Math.round(b.top)} ${Math.round(b.width)}×${Math.round(b.height)}`;
     }).join(" ");

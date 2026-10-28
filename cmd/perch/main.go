@@ -24,6 +24,7 @@ import (
 	"github.com/yu7dan/perch/internal/agent"
 	"github.com/yu7dan/perch/internal/agentcatalog"
 	"github.com/yu7dan/perch/internal/appdir"
+	"github.com/yu7dan/perch/internal/botgroup"
 	"github.com/yu7dan/perch/internal/ctl"
 	"github.com/yu7dan/perch/internal/dsh"
 	"github.com/yu7dan/perch/internal/install"
@@ -51,6 +52,7 @@ type perchApp struct {
 	titles    *session.TitleStore
 	prefs     *settings.Store
 	providers *providers.Store
+	botgroups *botgroup.Store
 	pool      *project.Pool
 	panes     *panes.Store
 	tabs      *session.Manager
@@ -134,6 +136,12 @@ func main() {
 	} else {
 		log.Printf("[providers] 拿不到配置目录，这轮只活在内存里：%v", err)
 		a.providers = providers.Load("")
+	}
+	// Bot Group 的组清单与过程流：%APPDATA%Perchotgroups.json + botgroups<组>。
+	if pd, err := appdir.PerchDir(); err == nil {
+		a.botgroups = botgroup.Load(pd)
+	} else {
+		a.botgroups = botgroup.Load("")
 	}
 	a.pool = project.Load()
 	// 「安装即存在」：默认工作区那个目录由我们建出来，因为新格没挑项目时会
@@ -403,6 +411,7 @@ func main() {
 		Pool:           a.pool,
 		Prefs:          a.prefs,
 		Providers:      a.providers,
+		BotGroups:      a.botgroups,
 		Installer:      a.installer,
 		Transcript:     a.follower,
 		DefaultCWD:     a.defaultCWD,

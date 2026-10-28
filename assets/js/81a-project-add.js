@@ -31,7 +31,7 @@ function parentPath(p) {
 
 function apContextPath() {
   const tab = (typeof activeTab !== "undefined" && activeTab && activeTab.id > 0)
-    ? activeTab : (TAB_LIST || []).find((x) => x.id > 0);
+    ? activeTab : wsTabs().find((x) => x.id > 0);
   return tab ? effCwd(tab) : (defaultAreaPath() || defaultWorkspacePath());
 }
 

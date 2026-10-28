@@ -136,6 +136,10 @@ type Pane struct {
 	   ⚠️ 它**不是运行状态**（不违反"状态不落盘"）：它是用户的一次**意图**
 	   （"先收起来"），和 Pane 记的其它东西同一性质。 */
 	Closed bool `json:"closed,omitempty"`
+	// Group / Bot：这一格属于哪个 Bot Group、是其中哪个 Bot（空 = 普通的 Workspaces 格）。
+	// 成员格**不因为"没说过话"被摘掉**：一个刚建、还没派活的 Bot 也是组里的一员。
+	Group string `json:"group,omitempty"`
+	Bot   string `json:"bot,omitempty"`
 }
 
 const (
@@ -447,7 +451,7 @@ func (p *Store) Close(id int, why string) (kept, found bool) {
 			hasConvo = p.SessionExists(cur.Agent, cur.CWD, cur.SessionID)
 		}
 	}
-	if !hasConvo {
+	if !hasConvo && cur.Group == "" {
 		gone := *cur
 		p.Panes = append(p.Panes[:i], p.Panes[i+1:]...)
 		p.dirty = true
@@ -673,6 +677,9 @@ type PaneView struct {
 	// 是 agent.Def 的事，前端多推一次就多一份迟早会漂的规则
 	// （和建格请求为什么不按顺序认领是同一个理由）。
 	Resume Resume `json:"resume"`
+	// Group / Bot：Bot Group 成员格（前端据此把它放进 Bot Group 的格子坞，不进 Workspaces）。
+	Group string `json:"group,omitempty"`
+	Bot   string `json:"bot,omitempty"`
 }
 
 // Plan 是 RestorePlan 的结果。
@@ -735,7 +742,7 @@ func (p *Store) RestorePlan(sessionExists func(agent, cwd, id string) bool) Plan
 		if !hasConvo && strings.TrimSpace(r.SessionID) != "" {
 			hasConvo = sessionExists(r.Agent, r.CWD, r.SessionID)
 		}
-		if !hasConvo {
+		if !hasConvo && r.Group == "" {
 			emptyClosed = append(emptyClosed, r.PaneID)
 			continue
 		}
@@ -773,6 +780,7 @@ func (p *Store) RestorePlan(sessionExists func(agent, cwd, id string) bool) Plan
 			PaneID: r.PaneID, Agent: r.Agent, CWD: r.CWD,
 			SessionID: r.SessionID, Verdict: v, Resume: rv, Spoke: r.Spoke, Talked: r.Talked,
 			Closed: r.Closed, LastSeenAt: r.LastSeenAt, OnDisk: onDisk,
+			Group: r.Group, Bot: r.Bot,
 		})
 	}
 	if len(emptyClosed) > 0 {
@@ -991,4 +999,23 @@ func clip(s string, n int) string {
 		return string(r)
 	}
 	return string(r[:n]) + "…"
+}
+
+// SetGroup 记下（或清掉）一格的 Bot Group 成员身份。group 为空 = 退出组，回到普通格。
+// 找不到这一格时什么都不做（衍生时原 Agent 的格子必然在册；找不到说明它刚被删）。
+func (p *Store) SetGroup(id int, group, bot, why string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i := range p.Panes {
+		if p.Panes[i].PaneID != id {
+			continue
+		}
+		if p.Panes[i].Group == group && p.Panes[i].Bot == bot {
+			return
+		}
+		p.Panes[i].Group, p.Panes[i].Bot = group, bot
+		p.dirty = true
+		p.writeLocked("Bot Group 成员 pane=" + strconv.Itoa(id) + "（" + why + "）")
+		return
+	}
 }

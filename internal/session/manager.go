@@ -193,6 +193,9 @@ func (m *Manager) Create(spec SpawnSpec) *Tab {
 		// 降级那一笔（如果有）**跟在 Bind 后面**写：Bind 的规矩是"空值不覆盖"，
 		// 两者写的是不同字段，谁也不影响谁 —— 分开写是为了让"留证"这件事
 		// 一眼看得出是**附带**的，不是建格的一部分。
+		if spec.Group != "" {
+			m.panes.SetGroup(paneID, spec.Group, spec.Bot, fmt.Sprintf("建格 tab=%d", host.ID))
+		}
 		if spec.DegradedFrom != "" {
 			m.panes.MarkDegraded(paneID, spec.DegradedFrom, fmt.Sprintf("tab=%d 被拒后改起新会话", host.ID))
 		}

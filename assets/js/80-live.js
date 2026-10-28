@@ -1218,6 +1218,8 @@ function applyActs(m) {
   }
   if (v.acts.length > 300) v.acts.splice(0, v.acts.length - 300);
   scheduleLive();
+  // Bot 的对话也是 Bot Group 页的正文（单聊 / 正在回复的预览，见 91-botgroup.js）。
+  if (typeof bgSchedule === "function" && TAB_LIST.some((x) => x.id === tab && x.group)) bgSchedule();
 }
 
 /* 页面刚连上时，tracer 手上**已经有**的那段流水是"连之前"推的 —— 而 pushJSON

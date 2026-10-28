@@ -39,4 +39,9 @@ type SpawnSpec struct {
 	// 不必再开一条 ctl 消息去说（多一条消息就多一个"它没到"的失败模式）。
 	// 它只喂给 panes.Store.MarkDegraded 留一笔证据，**不参与任何判定**。
 	DegradedFrom string `json:"degradedFrom,omitempty"`
+	// Group / Bot：这一格是某个 Bot Group 的成员（2026-10-28）。它照样是真实的 agent
+	// 格，只是不出现在 Workspaces 里；成员身份记进格子记录（panes.Pane.Group），
+	// 重启后还认得、也不会因为"还没说过话"被冷恢复摘掉。
+	Group string `json:"group,omitempty"`
+	Bot   string `json:"bot,omitempty"`
 }

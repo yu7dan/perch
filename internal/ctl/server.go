@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yu7dan/perch/internal/botgroup"
 	"github.com/yu7dan/perch/internal/install"
 	"github.com/yu7dan/perch/internal/panes"
 	"github.com/yu7dan/perch/internal/project"
@@ -66,6 +67,7 @@ type Deps struct {
 	Pool       *project.Pool
 	Prefs      *settings.Store
 	Providers  *providers.Store
+	BotGroups  *botgroup.Store
 	Installer  *install.Installer
 	Transcript *transcript.Follower
 
@@ -185,6 +187,10 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 	// 模型提供商 / 每个 agent 的配置（Perch 自己的）
 	case "providers.get", "provider.save", "provider.delete", "provider.test", "agent.config.set":
 		s.handleProviders(m)
+
+	// Bot Group（阶段 B：数据与创建）
+	case "botgroups.get", "botgroup.create", "botgroup.bind", "botgroup.event", "botgroup.delete":
+		s.handleBotGroup(m)
 
 	// 工作区共享 brief（Beta.3）
 	case "workspace.brief.get", "workspace.brief.set":

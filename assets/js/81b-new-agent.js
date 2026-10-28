@@ -60,7 +60,7 @@ function naTargetFromProjectPath(path) {
 
 function naDefaultTarget() {
   const tab = (typeof activeTab !== "undefined" && activeTab && activeTab.id > 0)
-    ? activeTab : (TAB_LIST || []).find((x) => x.id > 0);
+    ? activeTab : wsTabs().find((x) => x.id > 0);
   if (tab) return naTargetFromCwd(effCwd(tab));
   return naNoneTarget();
 }

@@ -355,7 +355,7 @@ function viewProbe(why) {
      模型里有几个格、DOM 里就画几行。2026-10-20 起收起的组**也画**（折叠成
      0 高 + inert），所以 DOM 数不再只等于"展开的那些" —— 另报一个"可见"
      （展开组里的），两个数都对得上才算没漏行。 */
-  const model = TAB_LIST.filter((t) => t.id > 0);
+  const model = wsTabs().filter((t) => t.id > 0);
   const withPane = model.filter((t) => (t.paneID | 0) > 0).length;
   const stopped = model.filter((t) => t.connDown).length;
   const agentsShown = agents.filter((el) => {
@@ -428,7 +428,7 @@ function tabsInProject(p) {
   /* ⚠️ 格的 `spec.cwd` 可能是**空串**（= "没指定目录"），而那种格实际落在
      **默认工作区**里（Go 那边只有一处答案，见 defaultCWD）。
      ownerProjectPath 会把空串映射成默认目录，并保证只归属一条路径。 */
-  return TAB_LIST.filter((t) =>
+  return wsTabs().filter((t) =>
     t.id > 0 && normPath(ownerProjectPath((t.spec && t.spec.cwd) || "")) === normPath(path));
 }
 // 一组格子里**最该被看见的那个态**（attention-first，表用群组那一张 —— 同一份
@@ -906,7 +906,7 @@ function renderWorkspaceView(key) {
   // 它留给未来的 Chat。数据仍留在盘上，这里只把归属标掉，防止它们掉进
   // 下面的"未归类"adopt 行又冒出来。已有 agent 不会因此被删除。
   const hiddenDefaultTabs = defPath
-    ? TAB_LIST.filter((t) => t.id > 0 && !used.has(t.id) && insidePath(effCwd(t), defPath))
+    ? wsTabs().filter((t) => t.id > 0 && !used.has(t.id) && insidePath(effCwd(t), defPath))
     : [];
   const hiddenDefaultClosed = defPath
     ? closedList().filter((r) => !usedClosed.has(r.paneId) &&
@@ -917,7 +917,7 @@ function renderWorkspaceView(key) {
 
   // 没有 Sessions / Projects 分段头：一份 Project 列表就是这一列的全部。
   // 未归类行也算列表内容：搜到未归类目录时不能再叠一句「没有匹配的项目」。
-  const unAll = TAB_LIST.filter((t) => t.id > 0 && !used.has(t.id));
+  const unAll = wsTabs().filter((t) => t.id > 0 && !used.has(t.id));
   const unClosed = closedList().filter((r) => !usedClosed.has(r.paneId));
   /* 空态只在池子和未归类都真的没有东西时出现。 */
   html = rows.length ? rows.join("")
@@ -1036,7 +1036,7 @@ function renderProjLive() {
       tabs = tabsInProject(path);
       closed = closedInProject(path);
     } else if (kind === "adopt") {
-      tabs = TAB_LIST.filter((t) =>
+      tabs = wsTabs().filter((t) =>
         t.id > 0 && normPath(effCwd(t)) === normPath(path));
       closed = closedList().filter((r) =>
         normPath(r.cwd || defaultWorkspacePath()) === normPath(path));
@@ -1353,6 +1353,9 @@ async function resumeAgentInSeat(t) {
     resume: sid ? { kind: "exact", id: sid } : { kind: "new", id: "" },
     // 同一个身份：Go 那边认领旧记录，不换 paneId（见 panes.go 的 claim）
     paneId: pane || undefined,
+    // Bot Group 成员格接上之后还是 Bot（还挂在格子坞里，见 91-botgroup.js）。
+    group: t.group || undefined,
+    bot: t.bot || undefined,
   };
   sendCtrl({ type: "log", msg: `接上 agent tab=${t.id} pane=${pane} sid=${sid ? sid.slice(0, 8) : "(无)"} 座位序=${at}` });
   // ⚠️ 不带 forget（记录是证据）；reseat = 别发 lib.reload（见 closeTab 末尾那段：
@@ -1661,6 +1664,9 @@ function agentMenuItems(tab) { // 参数别叫 t：会遮住 i18n 的 t()
     { act: "new", icon: ICON_PLUS, label: t("shell.menu.newHereWs"),
       hint: t("shell.menu.newHereWsHint", { dir: dir || t("shell.menu.defaultDir") })
           + newAgentShortcutTip() },
+    // 衍生 Bot Group：这个 Agent 直接当 Manager（91-botgroup.js 的 bgOpenCreate）。
+    { act: "derive", icon: ICON_FORK, label: t("bg.menu.derive"), cls: tab.paneID ? "" : " na",
+      hint: tab.paneID ? t("bg.menu.deriveHint") : t("bg.menu.deriveNoPane") },
     { sep: true },
     { act: "opendir", icon: ICON_DIR, label: t("live.menu.openCwd"), cls: dir ? "" : " na",
       hint: dir || t("shell.menu.noDir") },
@@ -1712,6 +1718,7 @@ function doAgentAct(act, el, tab, rowEl) { // 参数别叫 t：会遮住 i18n �
       break;
     }
     case "new": openNewAgent({ cwd: effCwd(tab), why: "左栏 agent 菜单" }); break;
+    case "derive": if (typeof bgOpenCreate === "function") bgOpenCreate({ source: tab }); break;
     case "opendir": {
       const d = effCwd(tab);
       if (d) sendCtrl({ type: "open", mode: "open", path: d });

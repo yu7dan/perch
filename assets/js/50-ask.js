@@ -161,7 +161,7 @@ const askScreenSig = (m) =>
    只在**群组开着**时跑 —— 群组没开时那一行根本不存在。 */
 function syncAskScreens() {
   if (!collapsed) return;
-  for (const t of TAB_LIST) {
+  for (const t of wsTabs()) {
     const v = LIVE.get(t.id);
     const a = v && (v.acts || []).find((x) => x.kind === "tool" && x.tool === "AskUserQuestion" && x.ok == null);
     const qs = (a && a.qs) || [];
@@ -180,7 +180,7 @@ function syncAskScreens() {
   // 那条提问不再挂着了 ⇒ 读数清掉（不清的话下次会带着旧勾选/旧进度画出来）
   if (askScreen.size || answerPick.size) {
     const live = new Set();
-    for (const t of TAB_LIST) {
+    for (const t of wsTabs()) {
       const v = LIVE.get(t.id);
       for (const x of (v && v.acts) || []) if (x.tool === "AskUserQuestion" && x.ok == null) live.add(x.id);
     }

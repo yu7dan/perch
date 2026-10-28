@@ -269,7 +269,7 @@ function renderDashKpis() {
   const cache7 = d7.map((a) => tokCacheRate(a.tokens) || 0);
   const avgPrev = turns7.slice(0, 6).reduce((a, b) => a + b, 0) / 6;
   const delta = avgPrev > 0 ? Math.round((100 * ((td.turns || 0) - avgPrev)) / avgPrev) : null;
-  const live = TAB_LIST.filter((t) => t.id > 0);
+  const live = wsTabs().filter((t) => t.id > 0);
   const running = live.filter((t) => !t.connDown).length;
   const need = needModel();
   const working = live.filter((t) => cellState(t) === "working").length;
@@ -698,7 +698,7 @@ const DASH_RUN_ORDER = { ask: 0, unread: 1, working: 2, failed: 3, idle: 4, done
 function renderDashLiveFeed() {
   const host = $("dash-live");
   if (!host) return;
-  const live = TAB_LIST.filter((t) => t.id > 0);
+  const live = wsTabs().filter((t) => t.id > 0);
   const sub = $("dash-live-sub");
   if (sub) sub.textContent = live.length ? t("dash.run.sub", { n: live.length }) : "";
   if (!live.length) {

@@ -61,7 +61,7 @@ function showPage(t) {
   /* N=1 不给拎 —— 判据照抄 Orca `expand-collapse.ts:50` 的
      `if (panes.length <= 1) return false`：只有一个 agent 时"独立页"和网格
      是同一个东西，拎出去只是让标签条多一张纸，还多一处要维护的状态。 */
-  if (TAB_LIST.length <= 1) {
+  if (wsTabs().length <= 1) {
     // 兜底：手势那条已经挡过一次（见 pointermove 里那段），这里是第二道闸 ——
     // 别的入口将来要是绕过手势直接调它，也不该能拎出去。
     sendCtrl({ type: "log", msg: `拒绝拎出 tab=${t.id}：并行里只有 1 格（Orca 同判据 panes.length<=1）` });
@@ -175,7 +175,7 @@ $("termbody").addEventListener("pointermove", (e) => {
     /* 只有一格时**连幽灵片都不给**。给一个"拖得动、放得下"的假象，再在松手时
        说"不行"，那是在骗人 —— 拿掉了 d.on 的启动，就等于这个手势在这里压根
        不存在（和拖不动的东西手感一致）。判据见 showPage：Orca 同一条。 */
-    if (TAB_LIST.length <= 1) {
+    if (wsTabs().length <= 1) {
       sendCtrl({ type: "log", msg: `拒绝拎出 tab=${d.t.id}：并行里只有 1 格（Orca 同判据 panes.length<=1），手势不启动` });
       dragState = null;      // 撤掉本次手势；pointerup 会看到 null 直接收手
       return;
@@ -247,6 +247,11 @@ $("tablist").addEventListener("click", (e) => {
 // 它只剩三件事：把 #termhost 这个 id 挪过来（文件里按 id 找宿主的代码要），
 // 标记哪一格是当前格（左边那条竖条），以及把焦点交给它。
 function setActive(t) {
+  // Bot 格不进 Workspaces 的"当前格"：要看它，就在 Bot Group 页的终端抽屉里打开。
+  if (t && t.group) {
+    if (typeof botOpenTerminal === "function") botOpenTerminal(t);
+    return;
+  }
   /* ⚠️ 第二个判据不是洁癖：`activeTab` 已经是它，**不代表这一格已经接上了**。
      座位是"先登记再建"的（见 createTab 开头）—— 它可能在终端还没建好时就被认成了
      当前格（closeTab 挑下一个当前格时会挑到它），那一次调用是靠 T 上那几个空实现
@@ -367,7 +372,7 @@ function closeTab(t, opts) {
      { setExpandedPane(null); restoreExpandedLayout(); }`）。
      只剩一格时"页面视图"和"网格视图"是同一个东西，留着那张页只是多一张永远
      点不掉、也点不出差别的标签。 */
-  if (soloTab && TAB_LIST.length <= 1) {
+  if (soloTab && wsTabs().length <= 1) {
     const st = soloTab;
     soloTab = null;
     removePageEl(st);
@@ -376,7 +381,7 @@ function closeTab(t, opts) {
   renderPageTabs();
   if (activeTab === t) {
     activeTab = null; term = null;
-    setActive(TAB_LIST[Math.min(i, TAB_LIST.length - 1)] || null);
+    setActive(wsTabs()[Math.min(i, wsTabs().length - 1)] || null);
   }
   renderGrid();     // 格数变了 → 重排列数、重算主区宽度
   // 左栏的行就是 agent：这一格没了，那一行也得跟着没（2026-10-17 起左栏
@@ -698,7 +703,7 @@ function currentWorkspacePath() {
   const projs = (STATE?.projects || []).filter((p) => p && p.path && !p.synthetic);
   if (!projs.length) return "";
   const t = (activeTab && activeTab.id > 0) ? activeTab
-    : (TAB_LIST || []).find((x) => x.id > 0);
+    : wsTabs().find((x) => x.id > 0);
   const cwd = t ? effCwd(t) : "";
   if (cwd) {
     let best = null, bestLen = -1;

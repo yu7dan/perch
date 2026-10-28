@@ -52,6 +52,17 @@ func (s *Server) tabNew(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		"cwd": host.Spec.CWD,
 	})
 	_ = s.send(c, reply)
+	// Bot Group 成员格：格子一起来就把 paneId 记进组里，并在过程流里记一笔。
+	if m.Spec.Group != "" && s.deps.BotGroups != nil && host.PaneID > 0 {
+		if err := s.deps.BotGroups.BindPane(m.Spec.Group, m.Spec.Bot, host.PaneID); err == nil {
+			s.botStarted(m.Spec.Group, m.Spec.Bot, m.Spec.Agent)
+		} else if s.deps.Panes != nil {
+			// 组已经不在了（冷恢复时带回来的旧身份）：格子记录上的成员身份一并摘掉，
+			// 否则它会一直豁免「空开合」清理、每次重启都先挂进坞里再被放回来。
+			log.Printf("[botgroup] 绑定格子失败，摘掉成员身份 pane=%d：%v", host.PaneID, err)
+			s.deps.Panes.SetGroup(host.PaneID, "", "", "所属 Bot Group 已不在")
+		}
+	}
 	if m.Req != 0 {
 		tabReqCache[m.Req] = reply // 重发同一令牌时重放它 —— 绝不建第二个格子
 	}

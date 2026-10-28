@@ -134,11 +134,6 @@ html.theme-light #bg{
   color:#fff;background:var(--lane);flex:none;letter-spacing:.02em}
 html:not(.theme-light) #bg .bg-badge{color:var(--lane);background:color-mix(in srgb,var(--lane) 16%,transparent)}
 .bg-feed{flex:1;min-height:0;overflow:auto;padding:2px 14px 14px}
-.bg-msg{padding:9px 6px 7px}
-.bg-msg-h{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--bg-muted)}
-.bg-msg-h b{font-weight:600;color:var(--bg-fg2)}
-.bg-msg-t{font:10.5px var(--mono);color:var(--bg-faint)}
-.bg-msg-b{margin-top:4px;font-size:13px;line-height:1.6;color:var(--bg-fg)}
 .bg-ev{border-radius:7px;margin:1px 0}
 .bg-ev-h{display:flex;align-items:center;gap:8px;height:30px;padding:0 8px 0 4px;cursor:pointer;border-radius:7px}
 .bg-ev-h:hover{background:var(--bg-hov)}
@@ -173,11 +168,6 @@ html:not(.theme-light) #bg .bg-badge{color:var(--lane);background:color-mix(in s
 .bg-empty.sm{padding:8px 0;text-align:left}
 
 /* 输入框 */
-.bg-composer{padding:8px 16px 14px}
-.bg-cbox{border:1px solid var(--bg-line);border-radius:10px;background:var(--bg-raise);padding:9px 10px 7px 12px}
-.bg-cin{font-size:12.5px;color:var(--bg-faint);min-height:20px}
-.bg-cfoot{display:flex;align-items:center;justify-content:space-between;margin-top:4px;font-size:10.5px;color:var(--bg-faint)}
-.bg-send{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;background:var(--bg-fg);color:var(--bg-bg)}
 
 /* ---------- 右：工作树 ---------- */
 .bg-tree{display:flex;flex-direction:column;min-height:0;background:var(--bg-side);border-left:1px solid var(--bg-line)}
@@ -215,3 +205,191 @@ html:not(.theme-light) #bg .bg-badge{color:var(--lane);background:color-mix(in s
 .bg-lg-h{font-size:10.5px;color:var(--bg-faint);margin-bottom:6px}
 .bg-lg-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px 8px}
 .bg-lg{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--bg-muted);white-space:nowrap;overflow:hidden}
+
+/* ---------- 阶段 B：真实数据 ---------- */
+#bg .ico-img.xs,#bg .ico-mask.xs{width:14px;height:14px}
+#bg .bg-row .bg-rterm{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;color:var(--bg-faint);
+  opacity:0;transition:opacity 120ms;flex:none}
+#bg .bg-row:hover .bg-rterm,#bg .bg-row.docked .bg-rterm{opacity:1}
+#bg .bg-row .bg-rterm:hover{background:var(--bg-hov);color:var(--bg-fg)}
+#bg .bg-row.docked{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--lane) 45%,transparent)}
+.bg-lempty{padding:12px 6px}
+/* 阶段 C 才接通的动作：做灰不做禁（title 要能弹出来说为什么）。灰用颜色，不用 opacity。 */
+.bg-btn.na{color:var(--bg-faint);border-style:dashed;cursor:default}
+.bg-btn.na:hover{background:transparent;color:var(--bg-faint)}
+.bg-dot[data-state="off"]{background:transparent;border:1.5px solid var(--bg-faint);opacity:.7}
+.bg-dot[data-state="pending"]{background:transparent;border:1.5px dashed var(--bg-faint)}
+.bg-dot[data-state="failed"]{background:var(--bg-bad)}
+.bg-lt-s[data-state="working"]{color:var(--bg-ok)}
+.bg-lt-s[data-state="failed"]{color:var(--bg-bad)}
+.bg-lane-l{min-width:0}
+.bg-ev-text{font-size:12px;line-height:1.6;color:var(--bg-fg2);white-space:pre-wrap;overflow-wrap:anywhere}
+.bg-ev:not(.has-body) > .bg-ev-h{cursor:default}
+.bg-title .bg-proj{min-width:0}
+
+/* 空态 */
+.bg-hero{display:grid;place-items:center}
+.bg-hero-in{max-width:420px;text-align:center;padding:24px}
+.bg-hero-ico{width:44px;height:44px;margin:0 auto 14px;border-radius:12px;display:grid;place-items:center;
+  border:1px solid var(--bg-line);background:var(--bg-raise);color:var(--bg-muted)}
+.bg-hero h2{margin:0 0 8px;font-size:15px;font-weight:600}
+.bg-hero p{margin:0;font-size:12.5px;line-height:1.7;color:var(--bg-muted)}
+.bg-hero-acts{display:flex;justify-content:center;gap:8px;margin:16px 0 12px}
+.bg-hero-acts .bg-btn{height:30px;padding:0 13px}
+.bg-hero .bg-hero-hint{font-size:11.5px;color:var(--bg-faint)}
+
+/* ---------- 终端坞（抽屉） ----------
+   平时也在排版（visibility:hidden，不 display:none）：Bot 格要拿到首帧尺寸 PTY 才起。
+   只在 Bot Group 页可见时、且 .open 才露出来；总览 / 设置盖上来时一起让位。 */
+#bg-dock{position:fixed;top:var(--titlebar-h);right:4px;bottom:24px;width:min(860px,64vw);z-index:40;
+  display:flex;flex-direction:column;visibility:hidden;opacity:0;transform:translateX(28px);pointer-events:none;
+  background:var(--s-deep,#0a0a0a);border-left:1px solid var(--b-2,rgba(255,255,255,.1));
+  box-shadow:-18px 0 50px rgb(var(--shade) / calc(.45 * var(--shade-k)));
+  transition:transform 200ms cubic-bezier(.2,.8,.2,1),opacity 160ms ease,visibility 0s linear 200ms}
+#app.botgroup:not(.dash):not(.settings) #bg-dock.open{visibility:visible;opacity:1;transform:none;pointer-events:auto;
+  transition:transform 220ms cubic-bezier(.2,.8,.2,1),opacity 160ms ease,visibility 0s}
+.bgd-head{display:flex;align-items:center;gap:10px;height:38px;padding:0 8px 0 14px;flex:none;
+  border-bottom:1px solid var(--b-1,rgba(255,255,255,.07));font-size:12px;color:var(--t-2,#d4d4d8);min-width:0}
+.bgd-lane{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--fg);white-space:nowrap}
+.bgd-lane i{width:7px;height:7px;border-radius:50%;background:var(--lane)}
+.bgd-agent{display:inline-flex;align-items:center;gap:5px;color:var(--muted);min-width:0;white-space:nowrap}
+.bgd-st{display:inline-flex;align-items:center;gap:6px;color:var(--muted);white-space:nowrap}
+.bgd-st[data-state="waiting"]{color:var(--ask)}
+.bgd-cwd{flex:1;min-width:0;font-size:11px;color:var(--faint);text-align:right}
+.bgd-head .bg-btn{height:24px}
+.bgd-head .bg-dot{width:7px;height:7px;border-radius:50%;background:var(--faint)}
+.bgd-head .bg-dot[data-state="working"]{background:var(--green,#16a34a)}
+.bgd-head .bg-dot[data-state="waiting"]{background:var(--ask)}
+.bgd-head .bg-dot[data-state="failed"]{background:var(--red)}
+#bg-dock-body{position:relative;flex:1;min-height:0}
+#bg-dock-body > .cell{position:absolute;inset:0;visibility:hidden}
+#bg-dock-body > .cell.bot-on{visibility:inherit}
+#bg-dock-body > .cell > .cellhead{display:none}
+
+/* ---------- 新建 / 衍生对话框（外壳复用 #add-project 的 .ap-*） ---------- */
+#bg-create{position:fixed;inset:0;z-index:120;display:grid;place-items:center;
+  background:rgb(var(--shade) / calc(.58 * var(--shade-k)));padding:24px;animation:cfFade .14s ease-out}
+#bg-create[hidden]{display:none}
+.bgc-card{width:min(600px,calc(100vw - 48px))}
+.bgc-goal{height:auto;min-height:52px;padding:8px 10px;resize:vertical;line-height:1.55;font-family:inherit}
+.bgc-projs{display:flex;flex-wrap:wrap;gap:6px}
+.bgc-proj,.bgc-ag,.bgc-preset{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;max-width:220px;
+  border:1px solid var(--b-2);border-radius:7px;background:transparent;color:var(--fg2);font-size:11.5px;cursor:pointer}
+.bgc-proj:hover,.bgc-ag:hover,.bgc-preset:hover{border-color:var(--b-3);color:var(--fg)}
+.bgc-proj.on,.bgc-ag.on{border-color:color-mix(in srgb,var(--accent) 60%,var(--line));
+  background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--fg)}
+.bgc-proj svg{width:13px;height:13px;flex:none}
+.bgc-agents{display:flex;flex-wrap:wrap;gap:5px}
+.bgc-ag{height:26px;padding:0 8px 0 6px}
+.bgc-ag .ico-img,.bgc-ag .ico-mask,.bgc-ag svg{width:14px;height:14px;flex:none}
+.bgc-src{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--b-2);border-radius:7px;
+  background:var(--s-pop);font-size:12px;min-width:0}
+.bgc-src b{font-weight:600;color:var(--fg);min-width:0}
+.bgc-src span{margin-left:auto;font-size:11px;color:var(--muted);white-space:nowrap}
+.bgc-bots{display:flex;flex-direction:column;gap:8px}
+.bgc-bot{padding:8px 8px 9px 10px;border:1px solid var(--line);border-radius:9px;background:rgb(var(--fx) / .02);
+  box-shadow:inset 2px 0 0 var(--lane)}
+.bgc-bot-h{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.bgc-bot-h i{width:7px;height:7px;border-radius:50%;background:var(--lane);flex:none}
+.bgc-bot-h .ap-input{height:28px;flex:1}
+.bgc-add{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:9px}
+.bgc-add .ap-change{height:28px;display:inline-flex;align-items:center;gap:4px}
+.bgc-preset{height:24px;padding:0 8px;font-size:11px;color:var(--muted);border-style:dashed}
+.bgc-preset.na,.bgc-add .ap-change.na{color:var(--faint);cursor:default}
+.bgc-note{font-size:11px;color:var(--faint);min-width:0}
+
+/* ---------- 群聊 / 单聊（Grok Bot 式，2026-10-28） ----------
+   一条发言 = 头像（agent 图标，底色是车道色的淡染）+ 名字 + 时间，正文和名字左对齐。
+   我说的话：同一套版式，淡底区分（不做左右气泡：多人对话里左右分只分得出"我/别人"）。 */
+#bg-feed-list,#bg-live,#bg-cards{display:flex;flex-direction:column}
+.bg-feed{padding:4px 14px 10px;scroll-behavior:auto}
+.bg-msg{position:relative;padding:8px 10px 9px;border-radius:9px;margin:1px 0;transition:background 120ms}
+.bg-msg:hover{background:var(--bg-hov)}
+.bg-msg.me{background:color-mix(in srgb,var(--bg-fg) 2.6%,transparent)}
+.bg-msg.me:hover{background:color-mix(in srgb,var(--bg-fg) 5.5%,transparent)}
+.bg-msg-h{display:flex;align-items:center;gap:8px;min-width:0;font-size:12px;color:var(--bg-muted);line-height:20px}
+.bg-msg-h b{font-weight:600;color:var(--bg-fg);white-space:nowrap}
+.bg-msg-ico{width:22px;height:22px;flex:none;border-radius:6px;display:grid;place-items:center;
+  background:color-mix(in srgb,var(--lane,var(--bg-muted)) 15%,transparent);color:var(--bg-muted)}
+.bg-msg-ico .ico-img,.bg-msg-ico .ico-mask,.bg-msg-ico svg{width:13px;height:13px}
+.bg-you-ico{display:grid;place-items:center;color:var(--bg-fg2)}
+.bg-msg-to{font-size:11px;color:var(--bg-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.bg-msg-ag{font-size:11px;color:var(--bg-faint);white-space:nowrap}
+.bg-msg-t{margin-left:auto;font:10.5px var(--mono);color:var(--bg-faint);flex:none}
+.bg-msg-b{margin:2px 0 0 30px;font-size:13px;line-height:1.62;color:var(--bg-fg);overflow-wrap:anywhere;min-width:0}
+.bg-msg-b.you{white-space:pre-wrap}
+.bg-msg.long:not(.open) .bg-msg-b{max-height:16.2em;overflow:hidden;
+  -webkit-mask-image:linear-gradient(#000 72%,transparent);mask-image:linear-gradient(#000 72%,transparent)}
+.bg-more{margin:4px 0 0 30px;height:22px;padding:0 8px;border-radius:5px;font-size:11px;color:var(--bg-muted)}
+.bg-more:hover{background:var(--bg-hov);color:var(--bg-fg)}
+/* markdown 正文 */
+.bg-msg-b.md > :first-child{margin-top:0}
+.bg-msg-b.md > :last-child{margin-bottom:0}
+.bg-msg-b.md p{margin:0 0 .55em}
+.bg-msg-b.md ul,.bg-msg-b.md ol{margin:.2em 0 .6em;padding-left:1.35em}
+.bg-msg-b.md li{margin:.15em 0}
+.bg-msg-b.md h1,.bg-msg-b.md h2,.bg-msg-b.md h3,.bg-msg-b.md h4{font-size:13px;font-weight:600;margin:.8em 0 .35em}
+.bg-msg-b.md code{font:12px var(--mono);padding:1px 5px;border-radius:4px;background:color-mix(in srgb,var(--bg-fg) 7%,transparent)}
+.bg-msg-b.md pre{margin:.4em 0 .7em;padding:9px 11px;border-radius:8px;overflow:auto;border:1px solid var(--bg-line2);
+  background:color-mix(in srgb,var(--bg-fg) 4%,transparent);font:11.5px/1.55 var(--mono)}
+.bg-msg-b.md pre code{padding:0;background:none;font:inherit}
+.bg-msg-b.md a{color:var(--accent);text-decoration:none}
+.bg-msg-b.md a:hover{text-decoration:underline}
+.bg-msg-b.md blockquote{margin:.4em 0;padding-left:10px;border-left:2px solid var(--bg-line);color:var(--bg-muted)}
+.bg-msg-b.md table{border-collapse:collapse;margin:.4em 0;font-size:12px}
+.bg-msg-b.md th,.bg-msg-b.md td{border:1px solid var(--bg-line);padding:3px 8px;text-align:left}
+/* 群聊里的事件行和发言对齐（头像列的位置放符号） */
+#bg-feed-list > .bg-ev > .bg-ev-h{padding-left:6px;padding-right:10px}
+/* 单聊里的工具行：一行灰字，不抢正文 */
+.bg-tool{display:flex;align-items:center;gap:8px;margin:0 10px 0 40px;height:24px;font-size:11.5px;color:var(--bg-faint);min-width:0}
+.bg-tool-k{flex:none;font:10.5px var(--mono);padding:1px 6px;border-radius:4px;background:var(--bg-chip);border:1px solid var(--bg-line2);color:var(--bg-muted)}
+.bg-tool-v{font:11px var(--mono);min-width:0}
+.bg-tool.bad .bg-tool-k{color:var(--bg-bad)}
+.bg-tool-run{display:grid;place-items:center;color:var(--bg-faint)}
+.bg-sysline{display:flex;align-items:center;gap:12px;margin:10px 12px;font-size:11px;color:var(--bg-faint)}
+.bg-sysline span{display:inline-flex;align-items:baseline;gap:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:80%}
+.bg-sysline i{font:normal 10px var(--mono);opacity:.8}
+.bg-chat-empty{padding:18px 24px;font-size:12px;line-height:1.7}
+.bg-sysline::before,.bg-sysline::after{content:"";flex:1;height:1px;background:var(--bg-line2)}
+/* 正在发生：排队中 / 正在回复 */
+.bg-typing{display:flex;align-items:center;gap:8px;min-width:0;padding:7px 10px;font-size:12px;color:var(--bg-muted);
+  animation:bg-in 180ms ease-out}
+.bg-typing b{font-weight:600;color:var(--bg-fg2);white-space:nowrap}
+.bg-typing-st{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;color:var(--bg-muted)}
+.bg-typing-p{min-width:0;font-size:11.5px;color:var(--bg-faint)}
+@keyframes bg-in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+/* 「等你」卡 */
+.bg-card{margin:6px 2px 8px;padding:9px 10px 10px;border-radius:10px;border:1px solid color-mix(in srgb,var(--bg-ask) 35%,var(--bg-line));
+  background:color-mix(in srgb,var(--bg-ask) 5%,var(--bg-panel));animation:bg-in 180ms ease-out}
+.bg-card-h{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--bg-ask)}
+.bg-card-h b{color:var(--bg-fg);font-weight:600}
+.bg-card .gperm,.bg-card .gask{margin:8px 0 0}
+/* 输入框 */
+.bg-composer{position:relative;padding:6px 16px 14px}
+.bg-cbox{border:1px solid var(--bg-line);border-radius:12px;background:var(--bg-raise);padding:10px 10px 7px 13px;cursor:text;
+  transition:border-color 140ms,box-shadow 140ms}
+.bg-cbox:focus-within{border-color:color-mix(in srgb,var(--accent) 55%,var(--bg-line));
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent)}
+#bg-input{display:block;width:100%;min-height:22px;max-height:168px;resize:none;border:0;outline:0;padding:0;background:transparent;
+  color:var(--bg-fg);font:13px/1.62 var(--sans);overflow-y:auto}
+#bg-input::placeholder{color:var(--bg-faint)}
+.bg-cfoot{display:flex;align-items:center;gap:10px;margin-top:6px;font-size:11px;color:var(--bg-faint);min-width:0}
+.bg-to{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:6px;white-space:nowrap;
+  background:var(--bg-chip);border:1px solid var(--bg-line2);color:var(--bg-fg2);min-width:0;overflow:hidden}
+.bg-to span{overflow:hidden;text-overflow:ellipsis}
+.bg-chint{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bg-send{flex:none;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;
+  background:var(--bg-chip);color:var(--bg-faint);transition:background 140ms,color 140ms}
+.bg-send.on{background:var(--bg-fg);color:var(--bg-bg)}
+.bg-send.on:hover{opacity:.9}
+/* @ 提及 */
+.bg-mention{position:absolute;left:16px;width:min(340px,calc(100% - 32px));bottom:calc(100% - 2px);z-index:3;
+  max-height:252px;overflow:auto;padding:4px;border-radius:10px;background:var(--bg-raise);border:1px solid var(--bg-line);
+  box-shadow:0 12px 32px rgb(var(--shade) / calc(.35 * var(--shade-k))),0 2px 6px rgb(var(--shade) / calc(.2 * var(--shade-k)));
+  animation:bg-in 120ms ease-out}
+.bg-mention[hidden]{display:none}
+.bg-mi{display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;border-radius:7px;cursor:pointer;font-size:12.5px;min-width:0}
+.bg-mi b{font-weight:600;color:var(--bg-fg);white-space:nowrap}
+.bg-mi-s{margin-left:auto;font-size:11px;color:var(--bg-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.bg-mi.on,.bg-mi:hover{background:var(--bg-sel)}
+.bg-fh .bg-ghost{flex:none}

@@ -118,6 +118,11 @@ let activeTab = null;
 let soloTab = null;
 let term = null;                 // 激活标签的 xterm（视图，见上）
 const TAB_LIST = [];             // 标签模型，按创建顺序
+/* Workspaces 看得见的格子：Bot Group 的成员格（t.group）不算。网格、页签、左栏、总览的
+   计数都用它；needModel / 状态点 / 会话守卫这类「每一格都要管」的仍然遍历 TAB_LIST。 */
+function wsTabs() { return TAB_LIST.filter((t) => !t.group); }
+/* Bot 格的挂载点：Bot Group 的格子坞（index.html 里常驻、永远有尺寸）。 */
+function botDockBody() { return document.getElementById("bg-dock-body") || $("termbody"); }
 // 正在用 WebGL 的格子数。**网格把"一个上下文"变成了"每格一个上下文"**：
 // Chromium 对同时存在的 WebGL 上下文有硬上限（约 16），超了会**静默丢掉最早
 // 那些**，表现是从某个格子开始整片变糊 —— 像是渲染坏了，其实是名额用光了。
@@ -379,6 +384,10 @@ async function createTab(spec, opts) {
   T.focus = () => {};   // 同上（焦点由 setActive 负责，见文件末尾那段注释）
   T.ctrl  = () => {};   // 流还没开：消息丢掉（和上面 `ready` 那条闸同一个语义）
   TAB_LIST.push(T);
+  // Bot Group 成员格（2026-10-28）：照样是真实的 agent 格，只是挂在 Bot Group 的格子坞里，
+  // 不进 Workspaces 的网格 / 列表 / 页签（那些地方都用 wsTabs() 取格子）。
+  T.group = (T.spec && T.spec.group) || "";
+  T.bot = (T.spec && T.spec.bot) || "";
 
   /* ⚠️ `ready` 必须**在这里**声明，不能留到 stream 建好那段（原位置）——
      它的原位置在 `await spawnTab(T)`（下面）之后，而 createTab 在这个 await
@@ -409,7 +418,7 @@ async function createTab(spec, opts) {
   // 按这个 id 找宿主（历史上是 cellWidthPx 量格子宽用的；现在没有读者了，
   // 但"谁是当前格"这条约定留着，见 .termhost 那段 CSS 注释）。
   // 之后这个 id 跟着"当前格"走，见 setActive。
-  if (!activeTab) T.host.id = "termhost";
+  if (!activeTab && !T.group) T.host.id = "termhost";
   T.cellBody.appendChild(T.host);
 
   // —— 格子的头（**建一次就不重建**：重命名会把 .nm 换成输入框，
@@ -446,7 +455,7 @@ async function createTab(spec, opts) {
 
   T.cellEl.appendChild(T.tabEl);
   T.cellEl.appendChild(T.cellBody);
-  $("termbody").appendChild(T.cellEl);
+  (T.group ? botDockBody() : $("termbody")).appendChild(T.cellEl);
   renderGrid();
 
   // 下面整段原来直接写 $("termhost")（按 id 找唯一宿主）。现在宿主是每个标签
@@ -535,6 +544,8 @@ term.open(host);
 // ---------------------------------------------------------------------------
 const gfx = { addon: null, on: false };
 function attachWebgl() {
+  // Bot 格平时藏在格子坞里，WebGL 名额（12）留给 Workspaces 里看得见的格子。
+  if (T.group) return false;
   // 名额满了就用 DOM 渲染器起来。**不是降级失败** —— xterm 的 DOM 渲染器
   // 画出来的字是对的，只是慢一档；而超上限的后果是"最早那些上下文被静默丢掉"，
   // 那是随机的、会连累已经正常的格子，比慢一档糟得多。
@@ -1091,17 +1102,17 @@ function paintGridStatus() {
     el.classList.toggle("warn", c > 0 && c < PANE_MIN_COLS);
     el.title = c > 0 && c < PANE_MIN_COLS
       ? t("term.grid.soloNarrow", { c, min: PANE_MIN_COLS })
-      : tCount("term.grid.soloWide", TAB_LIST.length - 1);
+      : tCount("term.grid.soloWide", wsTabs().length - 1);
     return;
   }
-  const n = TAB_LIST.length;
+  const n = wsTabs().length;
   if (n <= 1) { el.textContent = ""; el.classList.remove("warn"); return; }
   // **只报实测**：每格 xterm 自己报的 cols。还没 fit 完的那些格子跳过。
   // C6a 之前这里有一个退回值（"主区总列数 ÷ 格数"），它读的是那句已被删掉的
   // 用户偏好。现在退回值是**没有**：一个都没量到时只报"N 格"，
   // 不拿一个算出来的数冒充量出来的数 —— 状态栏上这条读数的全部意义
   // 就是"屏幕上是多少"，不是"本来应该是多少"。
-  const measured = TAB_LIST.map((t) => (t.term && t.term.cols > 0 ? t.term.cols : 0)).filter((c) => c > 0);
+  const measured = wsTabs().map((t) => (t.term && t.term.cols > 0 ? t.term.cols : 0)).filter((c) => c > 0);
   if (!measured.length) {
     el.textContent = tCount("term.grid.panes", n);
     el.classList.remove("warn");
@@ -1753,6 +1764,8 @@ function renderAgentDot(t) {
   const s = cellState(t);
   // 两个落点同源（格子头 + 独立页）—— 见 renderTabTitle 里那段说明。
   for (const el of [t.dotEl, t.pageDotEl]) paintDot(el, s);
+  // Bot 的状态跃迁记进 Bot Group 的过程流（91-botgroup.js）。
+  if (t.group && typeof botStateChanged === "function") botStateChanged(t, s);
   // 群组那一屏里两个同源的点（顶部条一枚、列表行一枚）跟着一起走。它是
   // "一帧一次"的（scheduleGroup 自己挡），所以这里跟着每格调一遍不亏。
   scheduleGroup();

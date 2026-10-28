@@ -686,7 +686,7 @@ const bootTabs = await Promise.all(bootPromises);
    拿一个已经不在模型里的格子去 setActive 就是空指针那一类毛病。
    最后那个 null 也得容下：N 格全被拒 = 主区空着（这是诚实的结局，
    而不是留一堆幽灵格）。 */
-const firstTab = bootTabs.find((t) => TAB_LIST.includes(t)) || null;
+const firstTab = bootTabs.find((t) => TAB_LIST.includes(t) && !t.group) || null;
 if (firstTab) setActive(firstTab);
 // 干净机器上没有可启动的 agent：不建失败格，先把空态画出来（renderGrid 会
 // 同时更新零格空态、页签计数和会话区）。有格子时 createTab 已经画过一遍，
@@ -989,7 +989,7 @@ function groupLatest(v) {
    拿到 undefined，静默不跳），所以既不该占顶部条一枚 chip，也不该占一行。
    另外 spawnTab 超时那条兜底会**故意**把一个没有 PTY 的格留在 TAB_LIST 里
    （见 createTab），那种格更没有可点的地方。 */
-function groupTabs() { return TAB_LIST.filter((t) => t.id > 0); }
+function groupTabs() { return wsTabs().filter((t) => t.id > 0); }
 
 function groupRows() {
   return groupTabs().map((t) => {
