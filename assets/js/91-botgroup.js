@@ -71,6 +71,7 @@ function bgTabOf(bot) {
 function bgBotState(bot) {
   const tab = bgTabOf(bot);
   if (!tab) return bot && bot.paneId ? "off" : "pending";
+  if (BG_BYPASS.has(tab.id)) return "waiting";
   const s = cellState(tab);
   if (s === "working") return "working";
   if (s === "ask") return "waiting";
@@ -908,9 +909,70 @@ function bgAskRowHTML(g, b, tab, perm, ask) {
     + `<div class="bg-ev-body"><div class="bg-gate">${bgIco("shield", 13)}<span>${esc(clamp(gate, 240))}</span></div>${opts}`
     + (note ? `<div class="bg-ev-note">${esc(note)}</div>` : "") + `</div></div>`;
 }
+/* ---------- Claude「完全访问」的确认门（2026-10-28 实测） ----------
+   claude --permission-mode bypassPermissions 第一次启动先停在一屏确认：
+   「❯ No, exit / Yes, I accept · Enter to confirm」，默认选中的是 No。Bot 的终端是收着的 ——
+   这时群里送一条消息，最后那下回车正好选了「No, exit」，claude 直接退出。
+   所以读屏认出它（和登录门同一个做法）：门在时这个 Bot 算「等你」（送达只在空闲时送，回车不会误按），
+   群里出一张确认卡。接受 = ↓ 再回车（实测 ↓ 会把 ❯ 移到 Yes）；Claude 记住之后不再问。 */
+const BG_BYPASS = new Map();   // tab id → 出现的时间
+function bgReadBypass(tab) {
+  if (!tab || tab.connDown || !tab.group || !tab.term) return false;
+  const buf = tab.term.buffer.active;
+  if (!buf) return false;
+  const lo = Math.max(0, buf.viewportY), hi = Math.min(buf.length - 1, lo + (tab.term.rows || 50) - 1);
+  let mode = false, yes = false;
+  for (let i = lo; i <= hi; i++) {
+    const line = buf.getLine(i);
+    if (!line) continue;
+    const s = line.translateToString(true);
+    if (/Bypass Permissions mode/i.test(s)) mode = true;
+    if (/Yes, I accept/i.test(s)) yes = true;
+  }
+  return mode && yes;
+}
+setInterval(() => {
+  if (document.hidden) return;
+  let changed = false;
+  for (const tab of TAB_LIST) {
+    if (!tab.group) continue;
+    const on = bgReadBypass(tab);
+    if (on === BG_BYPASS.has(tab.id)) continue;
+    changed = true;
+    if (on) BG_BYPASS.set(tab.id, Date.now()); else BG_BYPASS.delete(tab.id);
+    sendCtrl({ type: "log", msg: `Bot Group：完全访问确认门 ${on ? "出现" : "消失"} tab=${tab.id} ${tab.group}/${tab.bot}` });
+  }
+  for (const id of [...BG_BYPASS.keys()]) if (!TAB_LIST.some((x) => x.id === id)) { BG_BYPASS.delete(id); changed = true; }
+  if (changed) bgSchedule();
+}, 1000);
+function bgBypassCardHTML(g, b, tab) {
+  const color = bgColor(g, b.id);
+  return `<div class="bg-ev ask open" data-bg-tab="${tab.id}" data-bg-ev="${esc(g.id + ":" + b.id + ":tail")}" style="--lane:${color}">`
+    + `<div class="bg-ev-h"><span class="bg-caret">${bgIco("chev", 11)}</span><span class="bg-ev-g">${bgGlyph("approval", color)}</span>`
+    + bgBadge(g, b.id) + `<span class="bg-ev-t ell">${esc(t("bg.bypass.title"))}</span></div>`
+    + `<div class="bg-ev-body"><div class="bg-gate">${bgIco("shield", 13)}<span>${esc(t("bg.bypass.gate"))}</span></div>`
+    + `<div class="bg-opts"><button type="button" class="bg-opt primary" data-bypass="accept">${esc(t("bg.bypass.accept"))}</button>`
+    + `<button type="button" class="bg-opt" data-bypass="ws">${esc(t("bg.bypass.ws"))}</button>`
+    + `<button type="button" class="bg-opt" data-go="${tab.id}">${esc(t("bg.card.goTerm"))}</button></div></div></div>`;
+}
+function bgBypassAnswer(tab, how) {
+  const g = BOTGROUPS.find((x) => x.id === tab.group);
+  const b = bgBot(g, tab.bot);
+  if (!g || !b) return;
+  sendCtrl({ type: "log", msg: `Bot Group：完全访问确认 ${how} ${g.id}/${b.id} tab=${tab.id}` });
+  if (how === "accept") {
+    if (!tab.stream) return;
+    // ↓ 和回车分两次送（一包里的回车会被当成别的输入），和 stopAgent 同一个手法。
+    tab.stream.send(enc.encode("\x1b[B"));
+    setTimeout(() => { try { if (tab.stream && BG_BYPASS.has(tab.id)) tab.stream.send(enc.encode("\r")); } catch (_) {} }, 250);
+    return;
+  }
+  bgdSave(g, b, { permission: "workspace-write" }, "确认门：改回工作区").then((ok) => { if (ok) bgdRestart(g, bgBot(g, b.id) || b, true); });
+}
 function bgCardsHTML(g, members) {
   return members.map((b) => {
     const tab = bgTabOf(b);
+    if (tab && BG_BYPASS.has(tab.id)) return bgBypassCardHTML(g, b, tab);
     const v = tab ? LIVE.get(tab.id) : null;
     if (!v) return "";
     const perm = pendingPerm(v), ask = perm ? null : pendingAsk(v);
@@ -2032,6 +2094,8 @@ function bgCardClick(e) {
   const tab = TAB_LIST.find((x) => x.id === (wrap.dataset.bgTab | 0));
   if (!tab) return true;
   const selected = () => { const s = window.getSelection(); return !!(s && !s.isCollapsed && s.toString().trim()); };
+  const bp = e.target.closest("[data-bypass]");
+  if (bp) { if (!selected()) { bgBypassAnswer(tab, bp.dataset.bypass); bgSchedule(); } return true; }
   if (e.target.closest("[data-go],[data-go-ask]")) { botOpenTerminal(tab); return true; }
   const pm = e.target.closest("[data-perm-more]");
   if (pm) { if (!selected()) { togglePermOpen(pm.dataset.permMore || ""); bgSchedule(); } return true; }

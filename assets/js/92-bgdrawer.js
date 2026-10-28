@@ -208,7 +208,7 @@ function bgdPermHTML(b) {
     + `</div>`
     + `<div class="bgd-note">${esc(!ok ? t("bg.d.unsupported", { agent: bgAgentName(b.agent) })
       : noAsk && cur !== "read-only" ? t("bg.d.perm.noAsk", { agent: bgAgentName(b.agent) })
-      : cur ? t("bg.d.perm.note." + cur) : t("bg.d.perm.follow"))}</div>`;
+      : cur ? t("bg.d.perm.note." + cur) + (cur === "full-access" && b.agent === "claude" ? " " + t("bg.d.perm.claudeOnce") : "") : t("bg.d.perm.follow"))}</div>`;
 }
 function bgdOverviewHTML(g, b) {
   const ml = bgdModelLabel(g, b);
@@ -318,9 +318,9 @@ function bgdCommitField(inp, revert) {
 /* 「现在重启它」：同一个座位（paneId）重新起，进程级的配置才换得上。
    cwd 没变就接着原来的会话（resume exact），变了只能新开一条会话（agent 的会话按目录存）。
    换了 agent：旧格子按「关掉运行」收掉（记录留在 Workspaces 的「已关闭」里），新起一格。 */
-async function bgdRestart(g, b) {
+async function bgdRestart(g, b, force) {
   const st = bgBotState(b);
-  if (st === "working" || st === "waiting") { showToast(t("bg.d.restartBusy"), "", "err"); return; }
+  if (!force && (st === "working" || st === "waiting")) { showToast(t("bg.d.restartBusy"), "", "err"); return; }
   const tab = bgdTabOf(g, b);
   const cwd = bgdFolder(g, b);
   if (!tab) { bgStartBot(g, b, "配置抽屉"); return; }
