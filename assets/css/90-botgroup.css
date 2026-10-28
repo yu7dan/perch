@@ -27,12 +27,12 @@ body.botgroup #nav-cnt-ws{display:none}
   font-size:12.5px;margin-right:4px}
 /* 浅色跟全局主题走（html.theme-light，方案 C 冷灰）。 */
 html.theme-light #bg{
-  --bg-bg:#f9fafb; --bg-side:#e9ebef; --bg-panel:#f9fafb; --bg-raise:#ffffff;
-  --bg-line:rgba(15,23,42,.09); --bg-line2:rgba(15,23,42,.055);
+  --bg-bg:#eceef1; --bg-side:#dfe2e7; --bg-panel:#eceef1; --bg-raise:#f5f6f8;
+  --bg-line:rgba(15,23,42,.12); --bg-line2:rgba(15,23,42,.075);
   --bg-fg:#111827; --bg-fg2:#374151; --bg-muted:#6b7280; --bg-faint:#9ca3af;
   --bg-hov:rgba(15,23,42,.04); --bg-sel:rgba(15,23,42,.065);
   --bg-ok:#16a34a; --bg-bad:#dc2626; --bg-ask:#ea580c; --bg-work:#ca8a04;
-  --bg-chip:#ffffff}
+  --bg-chip:#f5f6f8}
 #bg .mono{font-family:var(--mono)}
 #bg .ico-img.sm,#bg .ico-mask.sm{width:14px;height:14px}
 #bg .icon-btn{color:var(--bg-muted)}

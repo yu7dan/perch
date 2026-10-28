@@ -68,20 +68,21 @@
   --ease-out:cubic-bezier(.165,.84,.44,1); --ease-swift:cubic-bezier(.16,1,.3,1);
   color-scheme:dark;
 }
-/* 浅色（用户 2026-10-28 选的方案 C「冷灰」）：画布与终端 #f9fafb，侧栏 / 标题栏 /
-   状态栏 #e9ebef，卡片与输入框纯白，叠加和投影换成 slate（15 23 42）。
+/* 浅色（用户 2026-10-28 选的方案 C「冷灰」，同日又要求再暗两档 → D2）：画布与终端
+   #eceef1，侧栏 / 标题栏 / 状态栏 #dfe2e7，卡片 #f5f6f8、输入框 #f8f9fa（都不再是纯白），
+   叠加和投影换成 slate（15 23 42）。
    状态色换深一档（浅底上 #86efac 这类亮绿读不清）。 */
 html.theme-light{
-  --bg:#f9fafb; --rail:#e9ebef; --side:#e9ebef; --panel:#e9ebef; --chrome:#e9ebef;
-  --term-bg:#f9fafb; --term-fg:#2e3434;
-  --card:#e2e5ea; --card-hov:#dcdfe5; --card-sel:rgb(var(--fx) / .07);
-  --line:rgb(var(--fx) / .1); --line-soft:rgb(var(--fx) / .065);
+  --bg:#eceef1; --rail:#dfe2e7; --side:#dfe2e7; --panel:#dfe2e7; --chrome:#dfe2e7;
+  --term-bg:#eceef1; --term-fg:#2e3434;
+  --card:#d6d9df; --card-hov:#d0d3da; --card-sel:rgb(var(--fx) / .08);
+  --line:rgb(var(--fx) / .12); --line-soft:rgb(var(--fx) / .075);
   --fg:#111827; --cream:#1f2937;
   --accent:#2563eb; --green:#15803d; --amber:#ca8a04; --red:#dc2626;
   --ask:#ea580c; --ask-text:#c2410c;
   --fx:15 23 42; --shade:15 23 42; --shade-k:.28;
-  --s-deep:#ffffff; --s-1:#fbfbfc; --s-2:#ffffff; --s-pop:#ffffff; --s-3:#e2e5ea;
-  --b-1:#dfe2e7; --b-2:#d1d5db; --b-3:#b8bdc6;
+  --s-deep:#f8f9fa; --s-1:#f2f3f5; --s-2:#f5f6f8; --s-pop:#f5f6f8; --s-3:#d6dae0;
+  --b-1:#d2d6dc; --b-2:#c3c8d0; --b-3:#adb3bd;
   --t-1:#374151; --t-2:#6b7280; --t-3:#9ca3af; --t-4:#b4bac4;
   --green-rgb:22 163 74; --amber-rgb:202 138 4; --red-rgb:220 38 38;
   --ask-rgb:234 88 12; --accent-rgb:37 99 235;
