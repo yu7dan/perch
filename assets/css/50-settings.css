@@ -270,5 +270,13 @@ textarea.pv-in{height:auto;min-height:52px;padding:7px 10px;resize:vertical;line
 .set-nav-it.dim{color:var(--t-4)}
 .set-nav-it:focus-visible{outline:2px solid rgb(var(--fx) / .3);outline-offset:-2px}
 .set-nav-it .n{margin-left:auto;font:10.5px var(--mono);color:var(--faint)}
-#settings .settings-scroll{scroll-padding-top:24px}
-#settings .settings-wrap{padding-top:28px}
+/* 每个模块一页：非当前页的节收起；全局的「设置」大标题不再需要（侧栏已经说了在哪）。
+   搜索时跨模块列结果，这时把大标题也藏着，结果从顶上开始。 */
+.settings-sec.is-offpage{display:none}
+#settings .settings-head{display:none}
+#settings .settings-wrap{padding-top:30px}
+#settings .settings-sec:not(.is-offpage):not(.is-hidden){margin-top:0}
+#settings.set-searching .settings-sec:not(.is-hidden) ~ .settings-sec:not(.is-hidden){margin-top:34px}
+/* 页内的节标题就是这一页的标题：放大一档。 */
+#settings:not(.set-searching) .settings-sec-head h2{font-size:18px;font-weight:650;letter-spacing:-.01em}
+#settings:not(.set-searching) .settings-sec-head{padding-bottom:16px}

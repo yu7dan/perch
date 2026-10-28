@@ -189,7 +189,7 @@
    2026-10-19 起按**能力**分组：完整状态 / 基础状态 / 仅启动 / 未接入；
    未检测到的收进下面那条 magpie 式的折叠栏。
    行与行、列与列之间只用头发丝线分隔，和上面的操作台是同一层语言。 */
-#dash-agent-list{display:flex;flex-direction:column;min-width:0}
+#dash-agent-list{min-width:0}
 .roster{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));min-width:0}
 .ag-group{display:flex;align-items:center;gap:8px;padding:13px 0 7px;
           font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
@@ -664,3 +664,94 @@ html.theme-light #dash{--mx-1:#2a78d6;--mx-2:#eb6834;--mx-3:#1baf7a;--mx-4:#eda1
 #dash .dash-acts .ws-act.primary:hover{background:var(--fg);color:var(--bg);opacity:.9}
 /* Agent 名单的空态（名单还没到 / 一个都没检测到）。 */
 .ag-empty{padding:18px 0;text-align:center;font-size:12px;color:var(--faint)}
+
+/* ===== 总览 · 方案 A（2026-10-28 用户定稿）=====
+   页头大标题 + 日期；「需要你」卡在最上；4 张 KPI 卡（带 7 天趋势线）；活动柱图 + 模型用量；
+   Agent CLI 卡片网格。卡片 = 圆角 14 的面 + 1px 边；数字用表格数字。 */
+#dash .dash-head{height:auto;padding:22px 28px 14px;border-bottom:0;background:var(--bg);align-items:flex-end}
+#dash .dash-h1{margin:0;font-size:20px;font-weight:650;letter-spacing:-.01em}
+.dash-date{font-size:12px;color:var(--faint);padding-bottom:3px}
+#dash .dash-head #dash-refresh{align-self:center}
+.ov{display:flex;flex-direction:column;gap:14px;padding:0 28px 32px;max-width:1480px}
+.ov .lbl{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.ov-sec-h{display:flex;align-items:baseline;gap:10px;margin-top:4px}
+.ov-sec-h .sub{font-size:11.5px;color:var(--faint)}
+.ov-sec-h .note{margin-left:auto;font-size:11px;color:var(--t-4)}
+.ov-card{background:var(--s-1);border:1px solid var(--line);border-radius:14px;min-width:0}
+.ov-chip{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:999px;border:1px solid var(--line);
+  font-size:10.5px;color:var(--muted);white-space:nowrap;flex:none}
+.ov-chip.ok{color:var(--green);border-color:rgb(var(--green-rgb) / .3)}
+.ov-chip.ask{color:var(--ask);border-color:rgb(var(--ask-rgb) / .35);background:rgb(var(--ask-rgb) / .08)}
+.ov-btn{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:8px;
+  font-size:12.5px;color:var(--fg2);white-space:nowrap}
+.ov-btn.sm{height:26px;padding:0 10px;font-size:12px}
+.ov-btn:hover{background:rgb(var(--fx) / .05);color:var(--fg)}
+.ov-btn.p{background:var(--fg);color:var(--bg);border-color:transparent;font-weight:550}
+.ov-btn.p:hover{background:var(--fg);color:var(--bg);opacity:.9}
+/* 需要你 */
+.ov-need{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.ov-need.quiet{display:block}
+.ov-need-none{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--faint)}
+.ov-need-none .dot{width:7px;height:7px;border-radius:50%;background:var(--green);opacity:.8}
+.ov-needcard{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;cursor:pointer;
+  border-color:rgb(var(--ask-rgb) / .35);background:linear-gradient(rgb(var(--ask-rgb) / .06),transparent 60%),var(--s-1)}
+.ov-needcard:hover{border-color:rgb(var(--ask-rgb) / .55)}
+.ov-need-ico{flex:none;width:28px;height:28px;display:grid;place-items:center}
+.ov-need-ico .ico-img,.ov-need-ico .ico-mask{width:26px;height:26px}
+.ov-need-m{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.ov-need-m .hd{display:flex;align-items:center;gap:8px;min-width:0}
+.ov-need-m .hd b{font-size:13px;font-weight:600;min-width:0}
+.ov-need-m .tm{margin-left:auto;font:10.5px var(--mono);color:var(--faint);flex:none}
+.ov-need-m .tx{font-size:12.5px;color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ov-need-m .pj{font-size:11px;color:var(--faint)}
+.ov-needcard .ov-btn{align-self:center;flex:none}
+/* KPI */
+.ov-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.ov-kpi{position:relative;overflow:hidden;padding:14px 16px;display:flex;flex-direction:column;gap:6px;min-height:104px}
+.ov-kpi .v{font-size:26px;font-weight:650;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.15}
+.ov-kpi .v small{font-size:13px;font-weight:500;color:var(--faint);margin-left:3px}
+.ov-kpi .s{font-size:11.5px;color:var(--faint);position:relative;z-index:1}
+.ov-kpi .s.up{color:var(--green)}
+.ov-kpi .s.down{color:var(--muted)}
+.ov-kpi .s.ask{color:var(--ask)}
+.ov-spark{position:absolute;right:12px;bottom:12px}
+/* 活动 + 模型 */
+.ov-row{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:14px}
+.ov-ch{display:flex;align-items:center;gap:8px;padding:14px 16px 0}
+.ov-ch b{font-size:13px;font-weight:600}
+.ov-ch > span{font-size:11.5px;color:var(--faint)}
+.ov-seg{margin-left:auto}
+.ov-bars{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:6px;height:190px;padding:14px 16px 12px}
+.ov-bar{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0}
+.ov-bar-t{flex:1;width:62%;display:flex;align-items:flex-end;min-height:0}
+.ov-bar-t i{display:block;width:100%;border-radius:4px 4px 2px 2px;background:var(--fg);opacity:.16;min-height:0;
+  transition:opacity var(--dur-2) var(--ease-out)}
+.ov-bar:hover .ov-bar-t i{opacity:.32}
+.ov-bar.today .ov-bar-t i{background:var(--mx-1);opacity:1}
+.ov-bar span{height:12px;font:9.5px var(--mono);color:var(--faint)}
+.ov-mbars{padding:10px 16px 14px;display:flex;flex-direction:column}
+.ov-mrow{display:grid;grid-template-columns:minmax(0,150px) minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 0}
+.ov-mrow .nm{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--fg2);min-width:0}
+.ov-mrow .nm i{width:8px;height:8px;border-radius:2px;flex:none}
+.ov-mrow .tr{height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.ov-mrow .tr i{display:block;height:100%;border-radius:3px}
+.ov-mrow .vv{font:11px var(--mono);color:var(--muted);text-align:right;white-space:nowrap}
+.ov-mrow i.s1{background:var(--mx-1)}.ov-mrow i.s2{background:var(--mx-2)}.ov-mrow i.s3{background:var(--mx-3)}
+.ov-mrow i.s4{background:var(--mx-4)}.ov-mrow i.so{background:var(--mx-o)}
+.ov-empty{padding:24px 0;text-align:center;font-size:12px;color:var(--faint)}
+/* Agent CLI */
+.ov-agents{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.ov-agent{padding:14px;display:flex;flex-direction:column;gap:10px}
+.ov-agent .hd{display:flex;align-items:center;gap:10px;min-width:0}
+.ov-agent .hd .ico-img,.ov-agent .hd .ico-mask{width:28px;height:28px}
+.ov-agent .who{display:flex;flex-direction:column;min-width:0;flex:1}
+.ov-agent .who b{font-size:13px;font-weight:600}
+.ov-agent .who span{font-size:11px;color:var(--faint)}
+.ov-agent .ln{font-size:11.5px;color:var(--muted);min-height:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ov-agent .ln .k{color:var(--faint);margin-right:6px}
+.ov-agent .acts{display:flex;gap:6px;margin-top:auto;flex-wrap:wrap}
+.ov-agent.missing .ln{color:var(--faint)}
+.ov-busy{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);height:26px}
+.ov-busy .spin{width:11px;height:11px;border-radius:50%;border:1.5px solid var(--line);border-top-color:var(--fg2);animation:spin 1s linear infinite}
+@media (max-width:1180px){.ov-agents{grid-template-columns:repeat(3,minmax(0,1fr))}.ov-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:900px){.ov-row{grid-template-columns:1fr}.ov-need{grid-template-columns:1fr}.ov-agents{grid-template-columns:repeat(2,minmax(0,1fr))}}

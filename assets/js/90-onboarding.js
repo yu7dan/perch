@@ -325,10 +325,7 @@
     stopTicker();
     if (resume) resume.hidden = false;
     if (typeof setNavView === "function") setNavView("settings");
-    setTimeout(() => {
-      const sec = document.getElementById("set-sec-providers");
-      if (sec) sec.scrollIntoView({ block: "start", behavior: "smooth" });
-    }, 60);
+    if (typeof setSettingsPage === "function") setSettingsPage("set-sec-providers");
     sendCtrl({ type: "log", msg: "首次设置：打开设置 › 模型提供商（返回后继续）" });
   }
 

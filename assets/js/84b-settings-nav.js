@@ -1,12 +1,9 @@
 "use strict";
-/* 84b-settings-nav.js —— 设置页左侧导航（2026-10-28，照 Orca 的 SettingsSidebar）。
-   右边仍是一整页滚动（Orca 也是：settings-page-renderer 把所有分区排成一列，
-   侧栏点一项 = scrollToSection）。这里只做三件事：
-     · 按 SET_NAV 画分组导航；
-     · 点一项滚到那一节（scroll-margin 留出呼吸）；
-     · 滚动时高亮当前节（最后一个顶边越过视口上沿 + 余量的那一节）。
-   搜索仍由 85-settings.js 管：被搜索收起的节在导航里**做灰不做隐**（还能点，点了
-   会先清空搜索再跳过去 —— 灰的意思是"这次搜索里它没有命中"）。 */
+/* 84b-settings-nav.js —— 设置页左侧导航（2026-10-28，形态照 Orca 的 SettingsSidebar）。
+   用户定的：**每个模块一页**，不做一整页滚动 + 定位锚点（模块一多会乱）。
+     · 导航选哪一项，右边就只显示那一节（其余 .is-offpage）；记住上次停在哪一页。
+     · 搜索时例外：结果跨模块列出（否则搜不到别页的东西），清空搜索回到当前页。
+     · 被搜索收起的节在导航里**做灰不做隐**（灰 = 这次搜索里它没有命中）。 */
 
 const SET_NAV = [
   { group: "settings.nav.general", items: [
@@ -24,54 +21,61 @@ const SET_NAV = [
     { id: "set-sec-about", key: "settings.section.about", icon: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>' },
   ] },
 ];
-let SET_NAV_ON = "";
+let SET_PAGE = (() => {
+  try { return localStorage.getItem("perch.settingsPage") || ""; } catch (_) { return ""; }
+})();
+function setPageIds() { return SET_NAV.flatMap((g) => g.items.map((it) => it.id)); }
+function setPageCur() {
+  const ids = setPageIds();
+  return ids.includes(SET_PAGE) && $(SET_PAGE) ? SET_PAGE : ids[0];
+}
+function setSearching() {
+  const q = $("set-search");
+  return !!(q && q.value.trim());
+}
+
+/* 把「当前页」落到 DOM 上：非当前页的节收起（搜索时不收）。 */
+function applySetPage() {
+  const cur = setPageCur();
+  const searching = setSearching();
+  for (const id of setPageIds()) {
+    const sec = $(id);
+    if (sec) sec.classList.toggle("is-offpage", !searching && id !== cur);
+  }
+  const root = $("settings");
+  if (root) root.classList.toggle("set-searching", searching);
+}
 
 function renderSetNav() {
   const host = $("set-nav-list");
   if (!host) return;
+  const cur = setPageCur();
+  const searching = setSearching();
   host.innerHTML = SET_NAV.map((g) =>
     `<div class="set-nav-grp"><p>${esc(t(g.group))}</p>` +
     g.items.map((it) => {
       const sec = $(it.id);
-      const dim = sec && sec.classList.contains("is-hidden");
-      return `<button type="button" class="set-nav-it${it.id === SET_NAV_ON ? " on" : ""}${dim ? " dim" : ""}" data-setnav="${it.id}"` +
-        `${it.id === SET_NAV_ON ? ' aria-current="true"' : ""}>${lucide(it.icon, 15)}<span>${esc(t(it.key))}</span></button>`;
+      const dim = searching && sec && sec.classList.contains("is-hidden");
+      const on = it.id === cur;
+      return `<button type="button" class="set-nav-it${on ? " on" : ""}${dim ? " dim" : ""}" data-setnav="${it.id}"` +
+        `${on ? ' aria-current="page"' : ""}>${lucide(it.icon, 15)}<span>${esc(t(it.key))}</span></button>`;
     }).join("") + `</div>`).join("");
+  applySetPage();
 }
 
-function setNavSync() {
-  const sc = $("set-scroll");
-  if (!sc) return;
-  const top = sc.getBoundingClientRect().top;
-  let on = "";
-  for (const g of SET_NAV) for (const it of g.items) {
-    const sec = $(it.id);
-    if (!sec || sec.classList.contains("is-hidden")) continue;
-    if (!on) on = it.id;                         // 第一节兜底（滚到顶时）
-    if (sec.getBoundingClientRect().top - top <= 96) on = it.id;
-  }
-  // 滚到底时最后一节可能永远越不过上沿 —— 到底就算最后一节。
-  if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4) {
-    const vis = SET_NAV.flatMap((g) => g.items).filter((it) => { const s = $(it.id); return s && !s.classList.contains("is-hidden"); });
-    if (vis.length) on = vis[vis.length - 1].id;
-  }
-  if (on === SET_NAV_ON) return;
-  SET_NAV_ON = on;
-  for (const b of document.querySelectorAll("#set-nav-list .set-nav-it")) {
-    const yes = b.dataset.setnav === on;
-    b.classList.toggle("on", yes);
-    if (yes) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current");
-  }
-}
-
-function setNavGo(id) {
-  const sec = $(id);
-  if (!sec) return;
-  if (sec.classList.contains("is-hidden") && typeof clearSettingsSearch === "function") clearSettingsSearch(false);
-  SET_NAV_ON = id;
+/* 切到某一页（导航点击 / 总览 Agent 行 / 引导「管理提供商」都走这里）。 */
+function setSettingsPage(id) {
+  if (!$(id)) return;
+  SET_PAGE = id;
+  try { localStorage.setItem("perch.settingsPage", id); } catch (_) {}
+  if (setSearching() && typeof clearSettingsSearch === "function") clearSettingsSearch(false);
   renderSetNav();
-  sec.scrollIntoView({ block: "start", behavior: "smooth" });
+  const sc = $("set-scroll");
+  if (sc) sc.scrollTop = 0;
 }
+// 旧名字留着：别处（85b / 90）可能还在调。
+function setNavGo(id) { setSettingsPage(id); }
+function setNavSync() { applySetPage(); }
 
 {
   const host = $("set-nav-list");
@@ -79,13 +83,11 @@ function setNavGo(id) {
     host.dataset.bound = "1";
     host.addEventListener("click", (e) => {
       const b = e.target.closest("[data-setnav]");
-      if (b) setNavGo(b.dataset.setnav);
+      if (b) setSettingsPage(b.dataset.setnav);
     });
-    const sc = $("set-scroll");
-    if (sc) sc.addEventListener("scroll", () => requestAnimationFrame(setNavSync), { passive: true });
-    // 搜索改变了哪些节可见：导航的灰态跟着刷新。
+    // 搜索改变了哪些节可见：导航的灰态和分页跟着刷新。
     const search = $("set-search");
-    if (search) search.addEventListener("input", () => requestAnimationFrame(() => { renderSetNav(); setNavSync(); }));
+    if (search) search.addEventListener("input", () => requestAnimationFrame(renderSetNav));
   }
   renderSetNav();
 }

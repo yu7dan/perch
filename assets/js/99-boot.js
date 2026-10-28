@@ -11,7 +11,7 @@ $("dash-refresh").addEventListener("click", () => {
 });
 
 // 点「运行中」的一行 = 回到工作区 + 跳到那一格（行是左栏同款 .arow）。
-$("dash-live").addEventListener("click", (e) => {
+$("dash-live")?.addEventListener("click", (e) => {
   const row = e.target.closest(".arow");
   if (!row) return;
   const t = liveTab(row.dataset.tab | 0);
@@ -31,7 +31,7 @@ $("dash-need").addEventListener("click", (e) => {
 });
 
 // 热力图悬停：日期 + 轮次 + 会话数（magpie 的 .heat-tip 同一套做法）。
-$("dash-heat").addEventListener("mouseover", (e) => {
+$("dash-heat")?.addEventListener("mouseover", (e) => {
   const cell = e.target.closest("i[data-day]");
   if (!cell) return;
   const tip = $("dash-heat-tip");
@@ -58,7 +58,7 @@ $("dash-heat").addEventListener("mouseover", (e) => {
   tip.style.left = x + "px";
   tip.style.top = y + "px";
 });
-$("dash-heat").addEventListener("mouseleave", () => {
+$("dash-heat")?.addEventListener("mouseleave", () => {
   const tip = $("dash-heat-tip");
   if (tip) tip.hidden = true;
 });

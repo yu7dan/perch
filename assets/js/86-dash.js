@@ -177,6 +177,8 @@ function setNavView(view) {
   if (view === "dash") {
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     renderDashboard("进入总览");
+    // Agent 卡要显示每个 agent 现在用哪个提供商（设置 › Agents 里配的）。
+    if (typeof provRequest === "function") provRequest();
   } else if (view === "settings") {
     // 配置抽屉属于总览的 Agent 名单；离开总览就收起（见 89-agent-cfg.js）。
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -236,55 +238,99 @@ function tokCacheRate(u) {
   const prompt = u ? (u.in || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0) : 0;
   return prompt ? Math.round((100 * (u.cacheRead || 0)) / prompt) : null;
 }
+/* 最近 n 天（含今天）的日活，旧 → 新；查不到的日子补 0。 */
+function ovDays(n) {
+  const byDay = new Map((STATE?.activity || []).map((a) => [a.day, a]));
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = dashAddDays(today, -i);
+    out.push(Object.assign({ date: d }, byDay.get(dashDay(d)) || { day: dashDay(d) }));
+  }
+  return out;
+}
+/* 7 天趋势线（KPI 卡右下角）。纯形状，不画轴；最后一点是今天。 */
+function ovSpark(vals, color) {
+  const w = 92, h = 30, max = Math.max(1, ...vals), step = w / Math.max(1, vals.length - 1);
+  const pts = vals.map((v, i) => `${(i * step).toFixed(1)},${(h - 2 - (v / max) * (h - 4)).toFixed(1)}`);
+  return `<svg class="ov-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">` +
+    `<path d="M0,${h} L${pts.join(" L")} L${w},${h} Z" fill="${color}" opacity=".12"/>` +
+    `<polyline points="${pts.join(" ")}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+}
 
 function renderDashKpis() {
   const host = $("dash-kpi");
   if (!host) return;
-  const act = STATE?.activity || [];
-  const byDay = new Map(act.map((a) => [a.day, a]));
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const td = byDay.get(dashDay(today)) || {};
-  const todayN = td.turns || 0;
-  let week = 0, weekTok = 0, weekDays = 0;
-  for (let i = 0; i < 7; i++) {
-    const a = byDay.get(dashDay(dashAddDays(today, -i))) || {};
-    week += a.turns || 0;
-    weekTok += tokTotal(a.tokens);
-    if ((a.turns || 0) > 0) weekDays++;
-  }
+  const d7 = ovDays(7);
+  const td = d7[6];
+  const turns7 = d7.map((a) => a.turns || 0);
+  const tok7 = d7.map((a) => tokTotal(a.tokens));
+  const cache7 = d7.map((a) => tokCacheRate(a.tokens) || 0);
+  const avgPrev = turns7.slice(0, 6).reduce((a, b) => a + b, 0) / 6;
+  const delta = avgPrev > 0 ? Math.round((100 * ((td.turns || 0) - avgPrev)) / avgPrev) : null;
   const live = TAB_LIST.filter((t) => t.id > 0);
   const running = live.filter((t) => !t.connDown).length;
   const need = needModel();
+  const working = live.filter((t) => cellState(t) === "working").length;
   const tok = td.tokens || null;
   const cache = tokCacheRate(tok);
-  const projs = (STATE?.projects || []).filter((p) => !p.synthetic).length;
-  let dateLabel = "";
-  try {
-    dateLabel = new Intl.DateTimeFormat(PERCH_LOCALE === "zh" ? "zh-CN" : "en",
-      { month: "short", day: "numeric" }).format(today);
-  } catch (_) {}
-  const kpi = (n, label, sub, cls) =>
-    `<div class="ck${cls ? " " + cls : ""}"><b>${esc(n)}</b><span>${esc(label)}</span>` +
-    `<small>${esc(sub)}</small></div>`;
+  const cacheWeek = (() => {
+    const u = d7.reduce((a, x) => {
+      const t = x.tokens || {};
+      a.in += t.in || 0; a.cacheRead += t.cacheRead || 0; a.cacheWrite += t.cacheWrite || 0;
+      return a;
+    }, { in: 0, cacheRead: 0, cacheWrite: 0 });
+    return tokCacheRate(u);
+  })();
+  const date = $("dash-date");
+  if (date) {
+    try {
+      date.textContent = new Intl.DateTimeFormat(PERCH_LOCALE === "zh" ? "zh-CN" : "en",
+        { month: "short", day: "numeric", weekday: "short" }).format(new Date());
+    } catch (_) { date.textContent = ""; }
+  }
+  const card = (label, value, unit, sub, cls, spark) =>
+    `<div class="ov-card ov-kpi"><span class="lbl">${esc(label)}</span>` +
+    `<div class="v">${esc(value)}${unit ? `<small>${esc(unit)}</small>` : ""}</div>` +
+    `<div class="s${cls ? " " + cls : ""}">${esc(sub)}</div>${spark || ""}</div>`;
   const inp = tok ? (tok.in || 0) + (tok.cacheRead || 0) + (tok.cacheWrite || 0) : 0;
   host.innerHTML =
-    `<div class="today-head"><span class="today-kicker">${esc(t("dash.today"))}</span>` +
-      `${dateLabel ? `<span class="today-date">${esc(dateLabel)}</span>` : ""}</div>` +
-    `<div class="kpi-strip">` +
-      kpi(tCount("dash.kpi.panes", running), t("dash.kpi.running"),
-        tCount("dash.kpi.runningSub", live.length, { panes: live.length, need: need.wait.length }),
-        need.wait.length ? "ask" : "") +
-      kpi(dashNum(todayN), t("dash.kpi.turnsToday"),
-        t("dash.kpi.turnsSub", { week: dashNum(week), days: weekDays })) +
-      kpi(tok ? mgCompact(tokTotal(tok)) : "0", t("dash.kpi.tokensToday"),
-        tok ? t("dash.kpi.tokensSub", { inp: mgCompact(inp), out: mgCompact(tok.out || 0) })
-          : t("dash.kpi.tokensNone")) +
-      kpi(cache == null ? "—" : cache + "%", t("dash.kpi.cacheHit"),
-        cache == null ? t("dash.kpi.tokensNone") : t("dash.kpi.cacheLocal", { read: mgCompact(tok.cacheRead || 0) })) +
-      kpi(dashNum(projs), t("dash.kpi.projects"),
-        t("dash.kpi.weekTokens", { n: mgCompact(weekTok) })) +
-    `</div>`;
+    card(t("dash.kpi.running"), dashNum(running), t("ov.kpi.ofPanes", { n: live.length }),
+      t("ov.kpi.runningSub", { need: need.wait.length, working }), need.wait.length ? "ask" : "") +
+    card(t("dash.kpi.turnsToday"), dashNum(td.turns || 0), "",
+      delta == null ? t("ov.kpi.noBaseline") : t(delta >= 0 ? "ov.kpi.up" : "ov.kpi.down", { n: Math.abs(delta) }),
+      delta == null ? "" : (delta >= 0 ? "up" : "down"), ovSpark(turns7, "var(--mx-1)")) +
+    card(t("dash.kpi.tokensToday"), tok ? mgCompact(tokTotal(tok)) : "0", "",
+      tok ? t("dash.kpi.tokensSub", { inp: mgCompact(inp), out: mgCompact(tok.out || 0) }) : t("dash.kpi.tokensNone"),
+      "", ovSpark(tok7, "var(--mx-2)")) +
+    card(t("dash.kpi.cacheHit"), cache == null ? "—" : String(cache), cache == null ? "" : "%",
+      cacheWeek == null ? t("dash.kpi.tokensNone") : t("ov.kpi.cacheWeek", { n: cacheWeek }),
+      "", ovSpark(cache7, "var(--mx-3)"));
+}
+
+/* 活动：近 14 天一根一柱（轮次 / token 两种口径，和原来的热力图共用 heatMetric）。
+   今天那根用强调色，其余是前景色 16%；悬停给日期和数值。 */
+function renderOvActivity() {
+  const host = $("ov-bars");
+  if (!host) return;
+  const days = ovDays(14);
+  const val = (a) => heatMetric === "tokens" ? tokTotal(a.tokens) : (a.turns || 0);
+  const vals = days.map(val);
+  const max = Math.max(1, ...vals);
+  const sub = $("ov-activity-sub");
+  const total = vals.reduce((a, b) => a + b, 0);
+  if (sub) sub.textContent = heatMetric === "tokens"
+    ? t("ov.activity.subTokens", { n: mgCompact(total) })
+    : t("ov.activity.subTurns", { n: dashNum(total) });
+  host.innerHTML = days.map((a, i) => {
+    const v = vals[i], last = i === days.length - 1;
+    const h = v ? Math.max(3, Math.round((100 * v) / max)) : 0;
+    const label = heatMetric === "tokens" ? mgCompact(v) + " token" : tCount("dash.heat.tip.turns", v, { n: dashNum(v), sessions: dashNum(a.sessions || 0) });
+    return `<div class="ov-bar${last ? " today" : ""}" title="${esc(a.day + " · " + label)}">` +
+      `<div class="ov-bar-t"><i style="height:${h}%"></i></div>` +
+      `<span>${i % 2 === 1 || last ? a.date.getDate() : ""}</span></div>`;
+  }).join("");
 }
 
 /* 53 周 × 7 天。周一在最上、月份在顶行 —— 和 magpie 的 Usage 热力图同一副骨架。
@@ -304,6 +350,8 @@ function heatPoints() {
 const HEAT_WEEKS = 53;
 
 function renderHeat() {
+  // 方案 A 的「活动」柱图和热力图共用口径（heatMetric）；页面上现在只有柱图。
+  renderOvActivity();
   const grid = $("dash-heat");
   if (!grid) return;
   const pts = heatPoints();
@@ -392,12 +440,11 @@ function renderHeat() {
   }
 }
 
-/* 近 14 天 token · 按模型：每天一根堆叠柱，前 4 个模型各占一色、其余并成「其他」。
-   配色走 dataviz 参考调色板的前四个分类槽（已跑校验：深浅两档相邻对 CVD ΔE ≥ 8.4），
-   「其他」用中性灰。**颜色跟着模型走，不跟名次走**：一个模型第一次领到槽之后，
-   整段会话都用它（MIX_SLOT），数据变化不会把已有的柱子重新上色。
-   浅色下黄 / 青两槽对白底不足 3:1 —— 图例带数值、每根柱有悬停明细，满足"可读替代"。 */
-const MIX_DAYS = 14, MIX_SLOTS = 4;
+/* 模型用量：近 30 天每个模型经手的 token（横条，按总量排序；前 4 个各占一色，其余并成「其他」）。
+   配色走 dataviz 参考调色板的前四个分类槽（深浅两档都跑过校验），「其他」是中性灰。
+   **颜色跟着模型走，不跟名次走**：一个模型第一次领到槽之后整段会话都用它（MIX_SLOT）。
+   横条旁边永远带数值和占比 —— 浅色下黄 / 青两槽对底色不足 3:1，数值是"可读替代"。 */
+const MIX_DAYS = 30, MIX_SLOTS = 4;
 const MIX_SLOT = new Map();
 function mixSlotOf(model) {
   if (!MIX_SLOT.has(model)) {
@@ -407,26 +454,15 @@ function mixSlotOf(model) {
   return MIX_SLOT.get(model) || 0;
 }
 function renderDashMix() {
-  const host = $("dash-mix-bar"), leg = $("dash-mix-legend");
-  if (!host || !leg) return;
-  const act = STATE?.activity || [];
-  const byDay = new Map(act.map((a) => [a.day, a]));
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const days = [];
-  for (let i = MIX_DAYS - 1; i >= 0; i--) {
-    const d = dashAddDays(today, -i);
-    const a = byDay.get(dashDay(d)) || {};
-    days.push({ day: dashDay(d), models: a.models || {} });
-  }
+  const host = $("dash-mix-bar");
+  if (!host) return;
+  const days = ovDays(MIX_DAYS);
   // <synthetic> 是本地合成的占位回复（不经过任何模型），不进图。
-  const real = (m) => m && !m.startsWith("<");
   const totals = new Map();
-  for (const d of days) for (const [m, n] of Object.entries(d.models)) {
-    if (real(m)) totals.set(m, (totals.get(m) || 0) + n);
+  for (const d of days) for (const [m, n] of Object.entries(d.models || {})) {
+    if (m && !m.startsWith("<")) totals.set(m, (totals.get(m) || 0) + n);
   }
   const ranked = [...totals.entries()].filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
-  // 窗口里排前四的模型各占一槽；已经领过槽的模型保持原色。
   const series = [];
   for (const [m] of ranked) {
     if (series.length >= MIX_SLOTS) break;
@@ -436,36 +472,19 @@ function renderDashMix() {
   const otherSum = ranked.filter(([m]) => !inSeries.has(m)).reduce((n, [, v]) => n + v, 0);
   const sum = ranked.reduce((n, [, v]) => n + v, 0);
   const sub = $("dash-mix-sub");
-  if (sub) sub.textContent = sum ? t("dash.mix.sub14", { n: mgCompact(sum) }) : t("dash.mix.empty14");
+  if (sub) sub.textContent = sum ? t("ov.models.sub", { n: mgCompact(sum) }) : "";
   if (!sum) {
-    host.innerHTML = `<div class="mix-empty">${esc(t("dash.mix.empty14"))}</div>`;
-    leg.innerHTML = "";
+    host.innerHTML = `<div class="ov-empty">${esc(t("ov.models.empty"))}</div>`;
     return;
   }
-  const dayTotal = (d) => Object.entries(d.models).filter(([m]) => real(m)).reduce((n, [, v]) => n + v, 0);
-  const max = Math.max(1, ...days.map(dayTotal));
-  host.innerHTML = days.map((d) => {
-    const parts = new Map();
-    for (const [m, n] of Object.entries(d.models)) {
-      if (!real(m) || !n) continue;
-      const k = inSeries.has(m) ? m : "__other";
-      parts.set(k, (parts.get(k) || 0) + n);
-    }
-    const tot = dayTotal(d);
-    const order = series.filter((m) => parts.has(m)).concat(parts.has("__other") ? ["__other"] : []);
-    const tip = [`${d.day} · ${mgCompact(tot)}`]
-      .concat(order.map((k) => `${k === "__other" ? t("dash.mix.other") : k}  ${mgCompact(parts.get(k))}`))
-      .join("\n");
-    // 堆叠从底往上：第一个系列贴着基线（column-reverse 在 CSS 里）。
-    const segs = order.map((k) =>
-      `<i class="s${k === "__other" ? "o" : MIX_SLOT.get(k)}" style="flex:${parts.get(k)} 0 0"></i>`).join("");
-    const h = tot ? Math.max(3, Math.round((100 * tot) / max)) : 0;
-    return `<div class="mx-col" title="${esc(tip)}"><div class="mx-track"><div class="mx-bar" style="height:${h}%">${segs}</div></div>` +
-      `<span class="mx-day">${esc(d.day.slice(5).replace("-", "/"))}</span></div>`;
-  }).join("");
-  leg.innerHTML = series.map((m) =>
-      `<span><i class="s${MIX_SLOT.get(m)}"></i>${esc(m)} <b>${mgCompact(totals.get(m))}</b></span>`).join("") +
-    (otherSum ? `<span><i class="so"></i>${esc(t("dash.mix.other"))} <b>${mgCompact(otherSum)}</b></span>` : "");
+  const top = Math.max(1, ...series.map((m) => totals.get(m)), otherSum);
+  const row = (name, v, cls) =>
+    `<div class="ov-mrow" title="${esc(name + " · " + mgCompact(v))}">` +
+    `<span class="nm"><i class="${cls}"></i><span class="ell">${esc(name)}</span></span>` +
+    `<span class="tr"><i class="${cls}" style="width:${Math.max(1, (100 * v) / top).toFixed(1)}%"></i></span>` +
+    `<span class="vv">${esc(mgCompact(v))} · ${Math.max(v ? 1 : 0, Math.round((100 * v) / sum))}%</span></div>`;
+  host.innerHTML = series.map((m) => row(m, totals.get(m), "s" + MIX_SLOT.get(m))).join("") +
+    (otherSum ? row(t("dash.mix.other"), otherSum, "so") : "");
 }
 
 /* 顶部是**工作区入口**，不是网关状态条。
@@ -503,23 +522,45 @@ $("dash-status").addEventListener("click", (e) => {
 
 /* 「在等你」读的是右栏「需要你」同一个模型（needModel），不是另算一份。
    右栏在这个视图里退场，所以同一份数据不会在同一屏说两遍。 */
+/* 「需要你」：页面最上面一排卡（方案 A）。读的是右栏「需要你」同一个模型（needModel），
+   不另算一份。卡就是 99-boot 里那个点击委托认的 `.need[data-tab]`：点卡 / 点「去处理」=
+   回工作区并跳到那一格。没有待办时不占一排：只留一行安静的说明。 */
+function ovProjectOf(tab) {
+  const cwd = String((typeof effCwd === "function" ? effCwd(tab) : "") || "").replace(/[\\/]+$/, "").toLowerCase();
+  let best = null;
+  for (const p of (STATE?.projects || [])) {
+    const root = String(p.path || "").replace(/[\\/]+$/, "").toLowerCase();
+    if (root && (cwd === root || cwd.startsWith(root + "\\") || cwd.startsWith(root + "/"))) {
+      if (!best || root.length > best.root.length) best = { root, p };
+    }
+  }
+  if (best) return typeof projectName === "function" ? projectName(best.p) : (best.p.name || "");
+  return cwd ? cwd.split(/[\\/]/).pop() : "";
+}
 function renderDashNeed() {
   const host = $("dash-need");
   if (!host) return;
   const M = needModel();
-  const cnt = $("dash-need-cnt");
-  if (cnt) cnt.textContent = String(M.wait.length);
-  if (!M.rows.length) {
-    host.innerHTML = `<div class="empty">${t("dash.need.empty")}</div>`;
+  const title = $("ov-need-title");
+  if (title) title.textContent = t("ov.need.title", { n: M.wait.length });
+  if (!M.wait.length) {
+    host.classList.add("quiet");
+    host.innerHTML = `<div class="ov-need-none"><span class="dot"></span>${esc(t("ov.need.none"))}</div>`;
     return;
   }
-  const rows = M.wait.length ? M.wait : M.quiet;
-  // 标题固定叫「在等你」，所以没有待办时不能说「在等你 · 3」——那三行是空闲。
-  const cap = M.wait.length
-    ? t("dash.need.capWaiting", { n: M.wait.length })
-    : tCount("dash.need.capIdle", M.quiet.length, { n: M.quiet.length });
-  host.innerHTML = `<div class="cap">${cap}</div>` +
-    rows.slice(0, 8).map(needRowHTML).join("");
+  host.classList.remove("quiet");
+  host.innerHTML = M.wait.slice(0, 4).map((r) => {
+    const typ = (r.t.spec && r.t.spec.agent) || "";
+    const proj = ovProjectOf(r.t);
+    return `<div class="ov-card ov-needcard need k-${esc(r.kind)}" data-tab="${r.t.id}" role="button" tabindex="0">` +
+      `<span class="ov-need-ico">${typeof agentMarkHTML === "function" ? agentMarkHTML(typ) : ""}</span>` +
+      `<span class="ov-need-m"><span class="hd"><b class="ell">${esc(currentTabTitle(r.t))}</b>` +
+      `<span class="ov-chip ask">${esc(needWhy(r.kind))}</span>` +
+      `<span class="tm">${esc(rel(r.at))}</span></span>` +
+      (r.text ? `<span class="tx">${esc(r.text)}</span>` : "") +
+      (proj ? `<span class="pj">${esc(t("ov.need.project", { name: proj }))}</span>` : "") + `</span>` +
+      `<span class="ov-btn sm">${esc(t("ov.need.go"))} →</span></div>`;
+  }).join("");
 }
 
 /* Agent 接线台。清单由 Go 侧的 agentCatalogDefs 给（用户 2026-10-17 点名的那份），
@@ -550,130 +591,61 @@ function renderDashAgents() {
     launch: !!a.adapter, status: !!a.adapter, waiting: !!a.adapter,
   };
   const installed = list.filter((a) => a.installed);
-  const full = installed.filter((a) => capsOf(a).waiting);
-  const basic = installed.filter((a) => capsOf(a).status && !capsOf(a).waiting);
-  const launchOnly = installed.filter((a) => capsOf(a).launch && !capsOf(a).status);
-  const noLaunch = installed.filter((a) => !capsOf(a).launch);
   const missing = list.filter((a) => !a.installed);
   if (sub) {
-    const bits = [];
-    if (full.length) bits.push(t("dash.agents.sumFull", { n: full.length }));
-    if (basic.length) bits.push(t("dash.agents.sumBasic", { n: basic.length }));
-    if (launchOnly.length) bits.push(t("dash.agents.sumLaunch", { n: launchOnly.length }));
-    if (noLaunch.length) bits.push(t("dash.agents.sumNone", { n: noLaunch.length }));
-    bits.push(t("dash.agents.sumMissing", { n: missing.length }));
     sub.textContent = list.length
-      ? bits.join(" · ")
+      ? t("ov.agents.sub", { inst: installed.length, miss: missing.length })
       : t("dash.agents.scanning");
   }
   if (!list.length) {
     host.innerHTML = `<div class="ag-empty">${esc(t("dash.agents.listPending"))}</div>`;
     return;
   }
-
-  const row = (a, gid) => {
+  /* 一张卡 = 一个 agent（方案 A）。已安装的：状态等级 + 它现在用哪个模型提供商（设置 ›
+     Agents 里配的；没配 = 自己的登录）+ 打开 / 配置。没检测到的：安装（有配方）或安装说明。
+     按钮的 data-* 和原来的名单一样，行为仍由 88-install.js 的委托处理。 */
+  const card = (a) => {
     const c = capsOf(a);
-    const level = c.waiting ? t("dash.agents.levelFull")
-      : c.status ? t("dash.agents.levelBasic")
-      : c.launch ? t("dash.agents.levelLaunch")
-      : t("dash.agents.levelNone");
-    // 没探测到 ≠ 没装：GUI 进程的 PATH 常常比终端里短，有的 agent 也把配置
-    // 放在别处。所以写「未检测到」，不写「未安装」——前者说的是我们的证据。
-    const st = gid === "missing"
-      ? (a.windows === false ? t("dash.agents.macOnly") : t("dash.agents.notDetected"))
-      : level;
-    const stClass = c.status ? " ok" : (gid === "missing" || !c.launch) ? " off" : "";
-    // 这份名单只列 CLI agent：每行副标题都带 CLI，和网关层的桌面客户端分开。
-    const detail = gid === "missing"
-      ? t("dash.agents.detailCli", { vendor: a.vendor || "" })
-      : t("dash.agents.detailPath", { path: a.path || a.vendor || "" });
     const inst = INSTALLS[a.id];
     const busy = inst && inst.state === "running";
-    // 没有安装配方 ≠ 桌面应用：这份名单是**使用层**，只认 CLI 能不能装。
-    // 没配方就给官方安装说明的出口；桌面客户端不在这份名单里
-    // （见 internal/agentcatalog）。
-    const busySpan = busy
-      ? `<span class="st">${esc(inst.phase === "scanning"
-          ? t("dash.agents.installScanning")
-          : inst.phase === "queued" ? t("dash.agents.installQueued")
-          : t("dash.agents.installBusy"))}</span>`
-      : "";
-    const installBtn = a.install
-      ? (busy
-          ? busySpan
-          : `<button type="button" class="dl" data-install="${esc(a.id)}"` +
-            ` title="${esc(t("dash.agents.installTitle", { name: a.name || "" }))}">${esc(t("dash.agents.install"))}</button>`)
-      : a.url
-        ? `<button type="button" class="dl" data-docs="${esc(a.id)}"` +
-          ` title="${esc(t("dash.agents.docsTitle", { name: a.name || "" }))}">${esc(t("dash.agents.docs"))}</button>`
-        : "";
-    /* “只启动”那一类如果 Perch 知道怎么补状态（目前是 dsh），就在这里给一个
-       明确的入口。它和「打开」并排：点打开仍然只是开格，点接入状态才动用户
-       的 DSH 配置 —— 两个动作不混。 */
-    const setupBtn = (gid !== "missing" && a.setup && !busy)
-      ? `<button type="button" class="dl" data-setup="${esc(a.id)}"` +
-        ` title="${esc(t("dash.agents.setupTitle", { name: a.name || "" }))}">${esc(t("dash.agents.setup"))}</button>`
-      : "";
-    const openBtn = c.launch
-      ? `<button type="button" class="dl" data-launch="${esc(a.id)}"` +
-        ` title="${esc(t("dash.agents.openTitle", { name: a.name || "" }))}">${esc(t("dash.agents.open"))}</button>`
-      : "";
-    const action = gid === "missing"
-      ? installBtn
-      : c.launch
-        ? (busy && a.setup ? busySpan : setupBtn + openBtn)
-        // 已安装但还起不来：给安装配方一个出口（dsh 就是缺 dsh-tui profile）。
-        : installBtn;
-    const stTitle = gid === "missing"
-      ? t("dash.agents.stTitleMissing")
-      : c.waiting
-        ? t("dash.agents.stTitleFull")
-        : c.status
-          ? t("dash.agents.stTitleBasic")
-          : c.launch
-            ? t("dash.agents.stTitleLaunch")
-            : t("dash.agents.stTitleNone");
-    // 已检测到的行可以点开设置 › Agents 的那一行（85b-providers.js）。
-    const cfg = gid !== "missing";
-    const gdot = "";
-    return `<div class="ag${cfg ? " cfg" : ""}"` +
-      (cfg ? ` data-agentcfg="${esc(a.id)}" role="button" tabindex="0"` +
-        ` aria-label="${esc(t("dash.agents.configAria", { name: a.name || "" }))}"` : "") + `>` +
-      iconHTML(a.icon) +
-      `<span class="who"><span class="nm">${esc(a.name)}${gdot}</span>` +
-      `<span class="sub" title="${esc(detail)}">${esc(detail)}</span></span>` +
-      `<span class="st${stClass}"` +
-      (stTitle ? ` title="${esc(stTitle)}"` : "") +
-      `>${st}</span>` +
-      action +
-      (cfg ? `<span class="ag-cfg-chev" aria-hidden="true">›</span>` : "") +
-      `</div>`;
+    const isIn = !!a.installed;
+    const level = !isIn
+      ? (a.windows === false ? t("dash.agents.macOnly") : a.install ? t("ov.agents.installable") : t("dash.agents.notDetected"))
+      : c.waiting ? t("dash.agents.levelFull")
+        : c.status ? t("dash.agents.levelBasic")
+          : c.launch ? t("dash.agents.levelLaunch") : t("dash.agents.levelNone");
+    const lvCls = isIn ? (c.status ? " ok" : "") : "";
+    let line;
+    if (isIn) {
+      const cfg = (typeof provAgentCfg === "function") ? provAgentCfg(a.id) : {};
+      const p = cfg.provider && typeof provById === "function" ? provById(cfg.provider) : null;
+      line = `<span class="k">${esc(t("ov.agents.model"))}</span>` +
+        esc(p ? (cfg.model ? `${p.name} · ${cfg.model}` : p.name) : t("ov.agents.ownLogin"));
+    } else {
+      line = esc(a.install ? t("ov.agents.installHint") : t("dash.agents.detailCli", { vendor: a.vendor || "" }));
+    }
+    const busyTx = busy ? (inst.phase === "scanning" ? t("dash.agents.installScanning")
+      : inst.phase === "queued" ? t("dash.agents.installQueued") : t("dash.agents.installBusy")) : "";
+    let acts = "";
+    if (busy) {
+      acts = `<span class="ov-busy"><span class="spin"></span>${esc(busyTx)}</span>`;
+    } else if (isIn && c.launch) {
+      acts = `<button type="button" class="ov-btn sm p" data-launch="${esc(a.id)}" title="${esc(t("dash.agents.openTitle", { name: a.name || "" }))}">${esc(t("dash.agents.open"))}</button>` +
+        (a.setup ? `<button type="button" class="ov-btn sm" data-setup="${esc(a.id)}" title="${esc(t("dash.agents.setupTitle", { name: a.name || "" }))}">${esc(t("dash.agents.setup"))}</button>` : "") +
+        `<button type="button" class="ov-btn sm" data-agentcfg="${esc(a.id)}" aria-label="${esc(t("dash.agents.configAria", { name: a.name || "" }))}">${esc(t("ov.agents.config"))}</button>`;
+    } else if (a.install) {
+      acts = `<button type="button" class="ov-btn sm${isIn ? "" : " p"}" data-install="${esc(a.id)}" title="${esc(t("dash.agents.installTitle", { name: a.name || "" }))}">${esc(t("dash.agents.install"))}</button>`;
+    } else if (a.url) {
+      acts = `<button type="button" class="ov-btn sm" data-docs="${esc(a.id)}" title="${esc(t("dash.agents.docsTitle", { name: a.name || "" }))}">${esc(t("dash.agents.docs"))}</button>`;
+    }
+    return `<div class="ov-card ov-agent${isIn ? "" : " missing"}">` +
+      `<div class="hd">${iconHTML(a.icon, "lg")}<span class="who"><b class="ell">${esc(a.name || a.id)}</b>` +
+      `<span class="ell" title="${esc(a.path || a.vendor || "")}">${esc(isIn ? (a.vendor || "") : t("dash.agents.notDetected"))}</span></span>` +
+      `<span class="ov-chip${lvCls}">${esc(level)}</span></div>` +
+      `<div class="ln">${line}</div><div class="acts">${acts}</div></div>`;
   };
-  const group = (label, items, gid) =>
-    `<div class="ag-group">${esc(label)}<span>${items.length}</span></div>` +
-    `<div class="roster">${items.map((a) => row(a, gid)).join("")}</div>`;
-
-  let html = "";
-  if (full.length) html += group(t("dash.agents.levelFull"), full, "full");
-  if (basic.length) html += group(t("dash.agents.levelBasic"), basic, "basic");
-  if (launchOnly.length) html += group(t("dash.agents.levelLaunch"), launchOnly, "launch");
-  if (noLaunch.length) html += group(t("dash.agents.levelNone"), noLaunch, "nolaunch");
-  if (!installed.length) {
-    html += `<div class="ag-empty">${esc(t("dash.agents.emptyAll"))}</div>`;
-  }
-  if (missing.length) {
-    html +=
-      `<button type="button" class="agent-more${agentsFoldOpen ? " open" : ""}"` +
-      ` id="dash-agent-more" data-agents-fold>` +
-      `<span id="dash-agent-more-label">${esc(agentsFoldOpen
-        ? t("dash.agents.foldHide")
-        : t("dash.agents.foldShow", { n: missing.length }))}</span>` +
-      `<span class="chev" aria-hidden="true">▾</span></button>` +
-      `<div class="agent-fold${agentsFoldOpen ? " open" : ""}" id="dash-agent-fold"><div>` +
-      group(t("dash.agents.notDetected"), missing, "missing") +
-      `</div></div>`;
-  }
-  host.innerHTML = html;
+  host.innerHTML = installed.map(card).join("") + missing.map(card).join("") +
+    (installed.length ? "" : `<div class="ag-empty">${esc(t("dash.agents.emptyAll"))}</div>`);
 }
 
 /* 总览：本机读数（会话库扫描 + 格子状态）+ Agent CLI 名单。2026-10-28 起不再有网关读数。 */

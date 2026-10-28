@@ -36,6 +36,7 @@ function applyProviders(m) {
   PROV.protocols = m.protocols || {};
   PROV.efforts = m.efforts || [];
   if (NAV_HERE === "settings") renderProviderSettings();
+  if (NAV_HERE === "dash" && typeof renderDashAgents === "function") renderDashAgents();
 }
 function provResult(m) {
   if (m.op === "provider.save") {
@@ -251,6 +252,7 @@ function renderProviderSettings() {
 function openAgentSettings(id) {
   PROV.flashAgent = id;
   setNavView("settings");
+  if (typeof setSettingsPage === "function") setSettingsPage("set-sec-agents");
   renderProviderSettings();
 }
 

@@ -479,6 +479,7 @@
          它住在页面里，不再占窗口标题栏 —— 层级只有「左栏 总览 → 页内子页」。 -->
     <div class="dash-head">
       <h1 class="dash-h1" data-i18n="nav.overview">总览</h1>
+      <span class="dash-date" id="dash-date"></span>
       <div class="segs" id="dash-tabs" role="tablist" aria-label="总览分区" data-i18n-aria-label="dash.tabs.aria" hidden></div>
       <div class="dash-acts" id="dash-status"></div>
       <button class="icon-btn" id="dash-refresh" title="重扫会话库（轮次、活跃天数随之刷新）" data-i18n-title="dash.refresh.title">
@@ -488,67 +489,37 @@
     <div class="dash-scroll">
       <div class="dash-wrap">
         <section class="dash-pane" id="dash-overview">
-          <!-- 操作台：一整块面 + 头发丝分隔。顶部是工作区入口 + 六个读数
-               （网关状态条已按用户评审撤掉 —— 用不用网关是另一件事），
-               中间左边是三个月的活动、右边是**正在发生的事**（请求 + 在等你），
-               底部是 Agent 接线表。 -->
-          <section class="console" id="dash-console">
-            <div class="console-kpis" id="dash-kpi"></div>
-            <div class="console-cols">
-              <div class="console-main">
-                <div class="mod-head">
-                  <div><b data-i18n="dash.heat.title">每日活动</b><span class="sub" id="dash-heat-sub"></span></div>
-                  <div class="mini-segs" id="heat-metric" role="tablist" aria-label="热力图口径" data-i18n-aria-label="dash.heat.metricAria">
+          <!-- 总览（2026-10-28 方案 A，用户定稿）：先看要处理的 → 读数 → 活动与模型 → Agent CLI。
+               全部读数来自本机（会话库扫描 + 格子状态），不依赖任何网关。 -->
+          <div class="ov">
+            <div class="ov-sec-h" id="ov-need-h"><span class="lbl" id="ov-need-title"></span></div>
+            <div class="ov-need" id="dash-need"></div>
+            <div class="ov-kpis" id="dash-kpi"></div>
+            <div class="ov-row">
+              <section class="ov-card" id="ov-activity">
+                <div class="ov-ch">
+                  <b data-i18n="ov.activity.title">活动</b><span id="ov-activity-sub"></span>
+                  <div class="mini-segs ov-seg" id="heat-metric" role="tablist" aria-label="活动口径" data-i18n-aria-label="dash.heat.metricAria">
                     <button type="button" class="mini on" data-hm="turns" role="tab" data-i18n="dash.heat.turns">轮次</button>
                     <button type="button" class="mini" data-hm="tokens" role="tab" data-i18n="dash.heat.tokens">token</button>
                   </div>
                 </div>
-                <div class="heat-scroll"><div class="heat-grid" id="dash-heat"></div></div>
-                <div class="heat-tip" id="dash-heat-tip" hidden></div>
-                <div class="heat-foot">
-                  <span data-i18n="dash.heat.less">少</span>
-                  <span class="sw"></span><span class="sw lv1"></span><span class="sw lv2"></span><span class="sw lv3"></span><span class="sw lv4"></span>
-                  <span data-i18n="dash.heat.more">多</span>
-                </div>
-
-    <section class="console-sub" id="dash-mix-card">
-                  <div class="mod-head">
-                    <div><b data-i18n="dash.mix.title14">近 14 天 token · 按模型</b><span class="sub" id="dash-mix-sub"></span></div>
-                  </div>
-                  <div class="mx-chart" id="dash-mix-bar" role="img" aria-label="近 14 天 token · 按模型" data-i18n-aria-label="dash.mix.title14"></div>
-                  <div class="mix-legend" id="dash-mix-legend"></div>
-                </section>
-              </div>
-              <aside class="console-side">
-                <section class="side-block" id="dash-need-card">
-                  <div class="mod-head">
-                    <b data-i18n="dash.need.title">在等你</b><span class="pill" id="dash-need-cnt">0</span>
-                  </div>
-                  <div class="vlist" id="dash-need"></div>
-                </section>
-                <section class="side-block">
-                  <div class="mod-head">
-                    <div><b data-i18n="dash.run.title">运行中</b><span class="sub" id="dash-live-sub"></span></div>
-                  </div>
-                  <div id="dash-live"></div>
-                </section>
-
-              </aside>
+                <div class="ov-bars" id="ov-bars"></div>
+              </section>
+              <section class="ov-card" id="ov-models">
+                <div class="ov-ch"><b data-i18n="ov.models.title">模型用量</b><span id="dash-mix-sub"></span></div>
+                <div class="ov-mbars" id="dash-mix-bar"></div>
+                <div class="mix-legend" id="dash-mix-legend" hidden></div>
+              </section>
             </div>
-
-            <!-- Agent CLI 接线表：只列本机能在终端里跑的 CLI agent（已接入 /
-                 未接入两组）；未检测到的收进折叠栏，点「安装」在 Perch
-                 里跑官方 CLI 命令。点一行 = 跳到设置 › Agents 的那一行
-                 （提供商、模型、推理强度、环境变量，见 85b-providers.js）。 -->
-            <section class="console-foot" id="dash-agent-card">
-              <div class="mod-head">
-                <div><b data-i18n="dash.agents.title">Agent CLI</b><span class="sub" id="dash-agent-sub"></span></div>
-                <span class="note" data-i18n="dash.agents.note">本机的 CLI agent · 安装、打开、接入状态 · 图标来自 lobe-icons</span>
-              </div>
-              <div class="roster" id="dash-agent-list"></div>
-            </section>
-          </section>
-        </section>      </div>
+            <div class="ov-sec-h">
+              <span class="lbl" data-i18n="dash.agents.title">Agent CLI</span><span class="sub" id="dash-agent-sub"></span>
+              <span class="note" data-i18n="dash.agents.note">本机的 CLI agent · 安装、打开、接入状态 · 图标来自 lobe-icons</span>
+            </div>
+            <div class="ov-agents" id="dash-agent-list"></div>
+          </div>
+        </section>
+      </div>
     </div>
 
     <!-- 安装进度台：固定在总览底部（#dash 的 flex 子项），不随 Agent 名单滚动。
