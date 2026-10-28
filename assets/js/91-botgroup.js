@@ -433,14 +433,13 @@ function bgChainHTML(g) {
   }).join("");
 }
 
-/* ---------- 中：群聊 / 单聊 ----------
-   群聊（BG.focus === "all"）= 组的过程流里「人说的话」+ 要紧的事件（上线、等你、失败、交接…），
-   working / idle 这种一轮里来回跳的状态不进群聊（泳道图里有），否则每句话都夹着两行噪音。
-   单聊（BG.focus = 某个成员）= 那一格自己的完整对话（LIVE.acts；没在跑就退回盘上记录），
-   和右栏对话流同一个来源。 */
-const BG_CHAT_HIDE = new Set(["working", "idle"]);
-const BG_CLAMP_CH = 900;   // 超过这么多字先收起（点「展开」看全文）
-
+/* ---------- 中：过程流（= 群聊）/ 单聊 ----------
+   版式就是定稿的那一套（用户 2026-10-28 明确要求还原，别另起一套聊天皮）：
+     · 发言 = .bg-msg（图标 + 名字 + 车道标 + 时间，下面正文）；
+     · 事件 = .bg-ev 行（符号 + 车道标 + 标题 + 时间）；
+     · 正在处理 = .bg-ev.run；等你确认 = .bg-ev.ask 展开态（盾牌一行 + .bg-opt 选项）。
+   全部车道 = 群聊：组的过程流（你说的、成员回的、状态事件）按时间交错。
+   聚焦一个成员 = 和它单聊：那一格自己的对话（LIVE.acts；没在跑就退回盘上记录）。 */
 function bgEventRow(g, e, showBadge) {
   const key = g.id + ":" + e.id;
   const open = BG.open.has(key);
@@ -449,7 +448,7 @@ function bgEventRow(g, e, showBadge) {
   const cls = "bg-ev" + (e.kind === "waiting" || e.kind === "approval" ? " ask" : "")
     + (e.kind === "fail" ? " bad" : "") + (open ? " open" : "") + (e.text ? " has-body" : "");
   const caret = e.text ? `<span class="bg-caret">${bgIco("chev", 11)}</span>` : `<span class="bg-caret blank"></span>`;
-  const body = open && e.text ? `<div class="bg-ev-body"><div class="bg-ev-text">${esc(e.text)}</div></div>` : "";
+  const body = open && e.text ? `<div class="bg-ev-body"><div class="bg-ev-sum">${esc(e.text)}</div></div>` : "";
   return `<div class="${cls}" data-bg-ev="${esc(key)}" style="--lane:${color}">`
     + `<div class="bg-ev-h">${caret}<span class="bg-ev-g">${bgGlyph(e.kind, color)}</span>`
     + (showBadge ? bgBadge(g, lane) : "")
@@ -457,22 +456,6 @@ function bgEventRow(g, e, showBadge) {
     + `<span class="bg-ev-r">${esc(bgTime(e.ts))}</span></div>${body}</div>`;
 }
 
-/* 一条发言。you = 我说的（纯文本，保留换行）；否则是成员说的（markdown）。
-   很长的先收起：群里一条长报告不该把别人的话挤出屏幕。 */
-function bgBubble(o) {
-  const long = (o.text || "").length > BG_CLAMP_CH;
-  const open = long && BG.open.has(o.key);
-  const body = o.you ? `<div class="bg-msg-b you">${esc(o.text || "")}</div>`
-    : `<div class="bg-msg-b md">${bgMd(o.text)}</div>`;
-  return `<div class="bg-msg${o.you ? " me" : ""}${long ? " long" : ""}${open ? " open" : ""}" style="--lane:${o.color}">`
-    + `<div class="bg-msg-h"><span class="bg-msg-ico">${o.icon}</span><b>${esc(o.who)}</b>`
-    + (o.to ? `<span class="bg-msg-to">${esc(o.to)}</span>` : "")
-    + (o.badge || "")
-    + `<span class="bg-msg-t">${esc(o.time || "")}</span></div>`
-    + body
-    + (long ? `<button type="button" class="bg-more" data-bg-more="${esc(o.key)}">${esc(t(open ? "bg.chat.collapse" : "bg.chat.expand"))}</button>` : "")
-    + `</div>`;
-}
 /* 聊天正文的 markdown：比对话流那份 md() 多认块级结构（段落、列表、标题、引用、表格）——
    群里的回复多半是"结论 + 清单"，挤成一段读不了。仍然先转义、只认最常见的写法。 */
 function bgMd(src) {
@@ -517,133 +500,147 @@ function bgMd(src) {
   });
   return out.join("");
 }
-function bgYouIco() { return `<span class="bg-you-ico">${bgIco("user", 12)}</span>`; }
+/* 一条发言（定稿的 .bg-msg）。you = 我说的：纯文本保留换行；成员说的走 bgMd。 */
+function bgMsgRow(o) {
+  return `<div class="bg-msg" style="--lane:${o.color}">`
+    + `<div class="bg-msg-h">${o.icon}<b>${esc(o.who)}</b>${o.badge || ""}`
+    + (o.to ? `<span class="bg-ev-meta">${esc(o.to)}</span>` : "")
+    + `<span class="bg-msg-t">${esc(o.time || "")}</span></div>`
+    + (o.you ? `<div class="bg-msg-b you">${esc(o.text || "")}</div>` : `<div class="bg-msg-b">${bgMd(o.text)}</div>`)
+    + `</div>`;
+}
+const bgYouIco = () => bgIco("user", 14);
 function bgMsgHTML(g, e, showBadge) {
   if (e.bot === "you") {
-    return bgBubble({ key: g.id + ":" + e.id, you: true, who: t("bg.chain.you"), icon: bgYouIco(), color: "var(--bg-muted)",
+    return bgMsgRow({ you: true, who: t("bg.chain.you"), icon: bgYouIco(), color: "var(--bg-muted)",
       to: e.title ? "→ " + e.title : "", time: bgTime(e.ts).slice(0, 5), text: e.text });
   }
   const lane = bgEvLane(e);
   const b = bgBot(g, lane);
-  return bgBubble({ key: g.id + ":" + e.id, who: bgRoleName(g, lane), icon: bgAgentIco(b && b.agent), color: bgColor(g, lane),
-    badge: showBadge && b ? `<span class="bg-msg-ag">${esc(bgAgentName(b.agent))}</span>` : "",
+  return bgMsgRow({ who: lane === "manager" ? "Manager" : bgAgentName(b && b.agent), icon: bgAgentIco(b && b.agent),
+    color: bgColor(g, lane), badge: showBadge && lane !== "manager" ? bgBadge(g, lane) : "",
     time: bgTime(e.ts).slice(0, 5), text: e.text });
 }
-/* 群聊里的生命周期（建组 / 上线 / 停了 / 等过你）收成居中的一行灰字：它们是背景，不是发言。
-   连着的几条「上线」并成一行（每次重启 Perch 都会整组上线一遍，逐条列就是刷屏）。
-   「等你」也只是历史 —— 现在还在等的那个由下面的卡片说，历史行不再标橙。 */
-const BG_SYS = new Set(["created", "started", "stopped", "waiting"]);
-function bgSysLine(text, ts) {
-  return `<div class="bg-sysline"><span>${esc(text)}<i>${esc(bgTime(ts).slice(0, 5))}</i></span></div>`;
-}
 function bgGroupFeedHTML(g) {
-  const evs = bgEvents(g).filter((e) => !BG_CHAT_HIDE.has(e.kind));
-  const out = [];
-  for (let i = 0; i < evs.length; i++) {
-    const e = evs[i];
-    if (e.kind === "started") {
-      const who = [bgRoleName(g, e.bot)];
-      while (i + 1 < evs.length && evs[i + 1].kind === "started") {
-        i++;
-        const n = bgRoleName(g, evs[i].bot);
-        if (!who.includes(n)) who.push(n);
-      }
-      out.push(bgSysLine(t("bg.chat.online", { who: who.join(t("bg.chat.sep")) }), evs[i].ts));
-    } else if (BG_SYS.has(e.kind)) out.push(bgSysLine(bgEvTitle(g, e), e.ts));
-    else if (e.kind === "msg") out.push(bgMsgHTML(g, e, true));
-    else out.push(bgEventRow(g, e, true));
-  }
-  // 还没人说过话：在流的末尾告诉人怎么开始（不是整屏空态，上面还有建组/上线）。
-  if (!evs.some((e) => e.kind === "msg")) out.push(`<div class="bg-empty bg-chat-empty">${esc(t("bg.chat.emptyGroup"))}</div>`);
-  return out.join("");
+  const evs = bgEvents(g);
+  if (!evs.length) return `<div class="bg-empty">${esc(t("bg.feed.empty"))}</div>`;
+  return evs.map((e) => e.kind === "msg" ? bgMsgHTML(g, e, true) : bgEventRow(g, e, true)).join("");
 }
 
-/* 单聊：那一格的对话。tool 收成一行灰字（谁在用什么工具），thinking 不出。 */
+/* 单聊：那一格的对话。工具调用是一行 .bg-ev（图例里的「工具调用」小点），thinking 不出。
+   第一条消息前面那段身份说明（bgWrite 加的）是给 agent 看的，这里不显示。 */
 function bgConvHTML(g, b) {
   const tab = bgTabOf(b);
   const v = tab ? LIVE.get(tab.id) : null;
   const acts = (v && v.acts) || [];
   const color = bgColor(g, b.id);
+  const who = b.manager ? "Manager" : bgAgentName(b.agent);
   const ico = bgAgentIco(b.agent);
+  const you = (text, at) => {
+    let s = text || "";
+    if (/^\[Perch Bot Group/.test(s)) { const cut = s.indexOf("\n\n"); s = cut >= 0 ? s.slice(cut + 2) : ""; }
+    return s.trim() ? bgMsgRow({ you: true, who: t("bg.chain.you"), icon: bgYouIco(), color: "var(--bg-muted)", time: bgTime(at).slice(0, 5), text: s }) : "";
+  };
   const rows = [];
   if (acts.length) {
     for (const a of acts) {
-      const key = g.id + ":" + b.id + ":" + (a.id || "");
-      if (a.kind === "prompt") {
-        // 第一条消息前面那段身份说明（bgWrite 加的）是给 agent 看的：这里收成一行灰字。
-        let text = a.text || "";
-        if (/^\[Perch Bot Group/.test(text)) {
-          const cut = text.indexOf("\n\n");
-          rows.push(bgSysLine(t("bg.chat.introSent", { role: b.manager ? "Manager" : b.role }), a.at));
-          text = cut >= 0 ? text.slice(cut + 2) : "";
-        }
-        if (text.trim()) rows.push(bgBubble({ key, you: true, who: t("bg.chain.you"), icon: bgYouIco(), color: "var(--bg-muted)", time: bgTime(a.at).slice(0, 5), text }));
-      }
-      else if (a.kind === "text") rows.push(bgBubble({ key, who: b.role, icon: ico, color, time: bgTime(a.at).slice(0, 5), text: a.text }));
+      if (a.kind === "prompt") rows.push(you(a.text, a.at));
+      else if (a.kind === "text") rows.push(bgMsgRow({ who, icon: ico, color, time: bgTime(a.at).slice(0, 5), text: a.text }));
       else if (a.kind === "tool") {
-        rows.push(`<div class="bg-tool${a.ok === false ? " bad" : ""}"><span class="bg-tool-k">${esc(a.tool || "tool")}</span>`
-          + `<span class="bg-tool-v ell">${esc(a.rel || a.text || "")}</span>${a.ok == null ? `<span class="bg-tool-run">${bgGlyph("running")}</span>` : ""}</div>`);
-      } else if (a.kind === "compact") rows.push(`<div class="bg-sysline">${esc(t("flow.tag.compact"))}</div>`);
+        const k = a.ok === false ? "fail" : a.ok == null ? "running" : "dot";
+        rows.push(`<div class="bg-ev${a.ok === false ? " bad" : ""}${a.ok == null ? " run" : ""}" style="--lane:${color}"><div class="bg-ev-h">`
+          + `<span class="bg-caret blank"></span><span class="bg-ev-g">${bgGlyph(k, color)}</span>`
+          + `<span class="bg-ev-t">${esc(a.tool || "tool")}</span><span class="bg-ev-meta ell">${esc(a.rel || a.text || "")}</span>`
+          + `<span class="bg-ev-r">${esc(bgTime(a.at))}</span></div></div>`);
+      }
     }
   } else {
     const hist = (tab && tab.sessionID && STATE && STATE.history && STATE.history[tab.sessionID]) || [];
-    hist.forEach((it, i) => {
-      const key = g.id + ":" + b.id + ":h" + i;
-      rows.push(it.role === "user"
-        ? bgBubble({ key, you: true, who: t("bg.chain.you"), icon: bgYouIco(), color: "var(--bg-muted)", time: bgTime(it.at).slice(0, 5), text: it.text })
-        : bgBubble({ key, who: b.role, icon: ico, color, time: bgTime(it.at).slice(0, 5), text: it.text }));
-    });
+    for (const it of hist) {
+      rows.push(it.role === "user" ? you(it.text, it.at)
+        : bgMsgRow({ who, icon: ico, color, time: bgTime(it.at).slice(0, 5), text: it.text }));
+    }
   }
-  if (!rows.length) {
-    const st = bgBotState(b);
-    return `<div class="bg-empty">${esc(t(st === "pending" || st === "off" ? "bg.chat.emptyOff" : "bg.chat.emptyDirect", { role: b.role }))}</div>`;
-  }
-  return rows.join("");
+  const html = rows.join("");
+  return html || `<div class="bg-empty">${esc(t("bg.feed.empty"))}</div>`;
 }
 
-/* 正在发生的：排队中 / 正在回复（带最新一段话的预览）。群聊里列所有被派了活的成员，
-   单聊里只列这一个。 */
+/* 正在发生：排队中 / 正在启动 / 正在回复（定稿里的 .bg-ev.run 那一行）。 */
 function bgLiveHTML(g, members) {
   return members.map((b) => {
     const tab = bgTabOf(b);
     const q = BG_Q.get(g.id + "/" + b.id) || [];
     const st = bgBotState(b);
     const route = tab && tab.bgRoute && tab.bgRoute.gid === g.id ? tab.bgRoute : null;
-    const direct = BG.focus === b.id;
     let line = "";
     if (q.length) line = t(st === "pending" || st === "off" ? "bg.chat.starting" : "bg.chat.queued", { n: q.length });
-    else if ((route || direct) && st === "working") line = t("bg.chat.typing");
-    else if (tab && tab.bgSentAt && Date.now() - tab.bgSentAt < 6000 && st === "idle") line = t("bg.chat.sent");
+    else if ((route || BG.focus === b.id) && st === "working") line = t("bg.chat.typing");
     if (!line) return "";
-    let preview = "";
-    if (st === "working" && route) {
+    let meta = "";
+    if (st === "working" && tab) {
+      const since = route ? route.at - 1500 : (tab.bgSentAt || 0) - 1500;
       const acts = (LIVE.get(tab.id) || {}).acts || [];
       for (let i = acts.length - 1; i >= 0; i--) {
         const a = acts[i];
-        if (Date.parse(a.at) < route.at - 1500) break;
-        if (a.kind === "text" && a.text) { preview = a.text; break; }
-        if (a.kind === "tool" && !preview) preview = (a.tool || "") + " · " + (a.rel || a.text || "");
+        if (Date.parse(a.at) < since) break;
+        if (a.kind === "tool") { meta = (a.tool || "") + " · " + (a.rel || a.text || ""); break; }
+        if (a.kind === "text" && a.text) { meta = a.text; break; }
       }
     }
-    return `<div class="bg-typing" style="--lane:${bgColor(g, b.id)}"><span class="bg-msg-ico">${bgAgentIco(b.agent)}</span>`
-      + `<b>${esc(b.role)}</b><span class="bg-typing-st">${st === "working" ? bgGlyph("running") : ""}${esc(line)}</span>`
-      + (preview ? `<span class="bg-typing-p ell">${esc(preview.replace(/\s+/g, " ").slice(0, 160))}</span>` : "") + `</div>`;
+    return `<div class="bg-ev run" style="--lane:${bgColor(g, b.id)}"><div class="bg-ev-h"><span class="bg-caret blank"></span>`
+      + `<span class="bg-ev-g">${bgGlyph(st === "working" ? "running" : "wait")}</span>${bgBadge(g, b.id)}`
+      + `<span class="bg-ev-t">${esc(line)}</span>`
+      + (meta ? `<span class="bg-ev-meta ell">${esc(meta.replace(/\s+/g, " ").slice(0, 120))}</span>` : "")
+      + `</div></div>`;
   }).join("");
 }
 
-/* 「等你」卡：批权限 / 提问。卡片和闸都是 Workspaces 群组看板那一套（55-perm / 50-ask），
-   点击也走那几条函数 —— 这里只是换了个地方挂。 */
+/* 等你确认（定稿里 .bg-ev.ask 的展开态：盾牌一行 + 一排 .bg-opt）。
+   作答走 Workspaces 群组看板那几条函数和它们的闸（55-perm / 50-ask）：外面包一层
+   .gperm / .gask 只是让那几条函数认得出是哪一件事。屏上对不上就做灰（不做禁）。 */
+function bgAskRowHTML(g, b, tab, perm, ask) {
+  const color = bgColor(g, b.id);
+  let title, gate, opts = "", note = "";
+  if (perm) {
+    const ps = permState(perm, tab) || {};
+    const ok = !!ps.ok && !ps.busy;
+    const why = ps.busy ? t("perm.why.busy") : (ps.why || "");
+    title = t("bg.card.perm", { x: clamp(perm.text || perm.tool || "", 60) });
+    gate = ps.q || perm.text || perm.tool || "";
+    const btn = (cls, attrs, label, on, tip) => `<button type="button" class="bg-opt${cls}${on ? "" : " na"}" ${attrs} title="${esc(on ? tip : (why || t("perm.cantNow")))}">${esc(label)}</button>`;
+    opts = btn(" primary", `data-perm="allow"`, t("perm.allow"), ok && !!ps.yesN, t("perm.yes.title", { n: ps.yesN }))
+      + (ps.opts || []).filter((o) => o.label !== "Yes" && o.label !== "No").map((o) =>
+        btn("", `data-perm="opt" data-n="${o.n}" data-h="${permHash(o.label)}"`, permLabel(o.label), ok, o.label)).join("")
+      + btn("", `data-perm="deny"`, t("perm.deny"), !!ps.deny && !ps.busy, t("perm.deny.title"));
+    opts = `<div class="gperm" data-pi="${esc(perm.id || "")}"><div class="bg-opts">${opts}</div></div>`;
+    const err = permErr.get(perm.id);
+    if (err) note = err.text;
+  } else {
+    const q = (ask.qs || [])[0] || {};
+    title = t("bg.card.ask", { x: clamp(q.q || "", 60) });
+    gate = q.q || "";
+    const simple = (ask.qs || []).length === 1 && !q.multi;
+    opts = simple
+      ? `<div class="gask" data-ai="${esc(ask.id || "")}"><div class="bg-opts">` + (q.opts || []).map((o, i) =>
+        `<button type="button" class="bg-opt gopt${i === 0 ? " primary" : ""}" data-aopt="${i + 1}" data-qidx="0" title="${esc(o.description || o.label || "")}">${esc(o.label || "")}</button>`).join("") + `</div></div>`
+      : `<div class="bg-opts"><button type="button" class="bg-opt primary" data-go="${tab.id}">${esc(t("bg.card.goTerm"))}</button></div>`;
+    const err = typeof answerErr !== "undefined" ? answerErr.get(ask.id) : null;
+    if (err) note = err.text;
+  }
+  const a = perm || ask;
+  return `<div class="bg-ev ask open" data-bg-tab="${tab.id}" style="--lane:${color}">`
+    + `<div class="bg-ev-h"><span class="bg-caret">${bgIco("chev", 11)}</span><span class="bg-ev-g">${bgGlyph("approval", color)}</span>`
+    + bgBadge(g, b.id) + `<span class="bg-ev-t ell">${esc(title)}</span><span class="bg-ev-r">${esc(bgTime(a.at))}</span></div>`
+    + `<div class="bg-ev-body"><div class="bg-gate">${bgIco("shield", 13)}<span>${esc(clamp(gate, 240))}</span></div>${opts}`
+    + (note ? `<div class="bg-ev-note">${esc(note)}</div>` : "") + `</div></div>`;
+}
 function bgCardsHTML(g, members) {
   return members.map((b) => {
     const tab = bgTabOf(b);
     const v = tab ? LIVE.get(tab.id) : null;
     if (!v) return "";
     const perm = pendingPerm(v), ask = perm ? null : pendingAsk(v);
-    if (!perm && !ask) return "";
-    const inner = perm ? permHTML(perm, tab, permState(perm, tab)) : askHTML(ask, tab, true);
-    return `<div class="bg-card" data-bg-tab="${tab.id}" style="--lane:${bgColor(g, b.id)}">`
-      + `<div class="bg-card-h"><span class="bg-msg-ico">${bgAgentIco(b.agent)}</span><b>${esc(b.role)}</b>`
-      + `<span>${esc(t("bg.chat.needsYou"))}</span></div>${inner}</div>`;
+    return perm || ask ? bgAskRowHTML(g, b, tab, perm, ask) : "";
   }).join("");
 }
 
@@ -655,14 +652,12 @@ function bgTermBtn(b) {
 }
 function bgFeedHeadHTML(g) {
   if (BG.focus === "all") {
-    return `<span class="bg-fh-t"><b>${esc(t("bg.chat.group"))}</b><span class="bg-fh-s">${esc(t("bg.chat.groupSub", { n: (g.bots || []).length }))}</span></span>`;
+    return `<span class="bg-fh-t"><b>${esc(t("bg.feed.allLanes"))}</b><span class="bg-fh-s">${esc(t("bg.feed.allSub", { n: (g.bots || []).length }))}</span></span>`
+      + `<span class="bg-fh-r">${esc(t("bg.feed.clickHint"))}</span>`;
   }
   const b = bgBot(g, BG.focus);
   if (!b) return "";
-  const st = bgBotState(b);
-  return `<span class="bg-fh-t">${bgBadge(g, b.id)}<b>${esc(bgAgentName(b.agent))}${b.task ? " · " + esc(b.task) : ""}</b>`
-    + `<span class="bg-fh-s">${esc(t("bg.chat.direct"))} · ${esc(t(BG_STATE_KEY[st]))}</span></span>`
-    + `<button type="button" class="bg-ghost" data-bg-focus="all" title="${esc(t("bg.chat.backGroup"))}"><span>${esc(t("bg.chat.backGroup"))}</span></button>`
+  return `<span class="bg-fh-t">${bgBadge(g, b.id)}<b>${esc(bgAgentName(b.agent))}${b.task ? " · " + esc(b.task) : ""}</b></span>`
     + bgTermBtn(b);
 }
 
@@ -801,13 +796,9 @@ function bgSkeleton(root, has) {
     +   `<div id="bg-top"></div>`
     +   `<div class="bg-fh" id="bg-fh"></div>`
     +   `<div class="bg-feed" id="bg-feed"><div id="bg-feed-list"></div><div id="bg-live"></div><div id="bg-cards"></div></div>`
-    +   `<div class="bg-composer">`
-    +     `<div class="bg-mention" id="bg-mention" role="listbox" hidden></div>`
-    +     `<div class="bg-cbox" id="bg-cbox">`
-    +       `<textarea id="bg-input" rows="1" spellcheck="false"></textarea>`
-    +       `<div class="bg-cfoot"><span class="bg-to" id="bg-to"></span><span class="bg-chint" id="bg-chint"></span>`
-    +         `<button type="button" class="bg-send" id="bg-send">${bgIco("send", 13)}</button></div>`
-    +     `</div>`
+    +   `<div class="bg-composer"><div class="bg-mention" id="bg-mention" role="listbox" hidden></div>`
+    +     `<div class="bg-cbox" id="bg-cbox"><textarea class="bg-cin" id="bg-input" rows="1" spellcheck="false"></textarea>`
+    +     `<div class="bg-cfoot"><span id="bg-chint"></span><button type="button" class="bg-send" id="bg-send" aria-label="send">${bgIco("send", 13)}</button></div></div>`
     +   `</div>`
     + `</section>`
     + `<aside class="bg-tree" id="bg-tree"></aside>`;
@@ -1225,25 +1216,16 @@ function bgComposerSync(g) {
   const ta = $("bg-input");
   if (!ta) return;
   const direct = BG.focus !== "all" ? bgBot(g, BG.focus) : null;
-  const ph = direct ? t("bg.chat.phDirect", { role: direct.manager ? "Manager" : direct.role }) : t("bg.chat.phGroup");
+  const ph = direct ? t("bg.composer.phDirect", { role: direct.manager ? "Manager" : direct.role }) : t("bg.composer.ph");
   if (ta.placeholder !== ph) ta.placeholder = ph;
   bgComposerTo(g);
 }
+// 脚注那一行：原来的提示字。
 function bgComposerTo(g) {
-  const to = $("bg-to"), hint = $("bg-chint"), ta = $("bg-input");
-  if (!to || !ta) return;
-  const direct = BG.focus !== "all" ? bgBot(g, BG.focus) : null;
-  let label;
-  if (direct) label = t("bg.chat.toDirect", { who: direct.manager ? "Manager" : direct.role });
-  else {
-    const r = bgTargets(g, ta.value);
-    label = t(r.dflt ? "bg.chat.toDefault" : "bg.chat.to", { who: bgTargetLabel(g, r) });
-  }
-  const html = `${bgIco("send", 11)}<span>${esc(label)}</span>`;
-  if (to.__html !== html) { to.__html = html; to.innerHTML = html; }
-  const h = direct ? t("bg.chat.hintDirect") : t("bg.chat.hintGroup");
+  const hint = $("bg-chint");
+  if (!hint) return;
+  const h = BG.focus !== "all" ? t("bg.chat.hintDirect") : t("bg.composer.hint");
   if (hint.textContent !== h) hint.textContent = h;
-  $("bg-send").classList.toggle("on", !!ta.value.trim());
 }
 function bgAutosize(ta) {
   ta.style.height = "auto";
@@ -1268,7 +1250,7 @@ function bgMentionUpdate() {
   box.innerHTML = items.map((it, i) => {
     const st = it.b ? bgBotState(it.b) : "";
     return `<div class="bg-mi${i === BGM.idx ? " on" : ""}" role="option" data-mi="${i}" style="--lane:${it.b ? bgColor(g, it.b.id) : "var(--bg-muted)"}">`
-      + `<span class="bg-msg-ico">${it.b ? bgAgentIco(it.b.agent) : bgIco("user", 12)}</span><b>${esc(it.name)}</b>`
+      + `<span class="bg-ri">${it.b ? bgAgentIco(it.b.agent) : bgIco("user", 12)}</span><b>${esc(it.name)}</b>`
       + `<span class="bg-mi-s">${esc(it.b ? bgAgentName(it.b.agent) + " · " + t(BG_STATE_KEY[st]) : t("bg.chat.everyoneSub"))}</span></div>`;
   }).join("");
 }
@@ -1430,9 +1412,14 @@ function bgFocus(gid, focus, why) {
         renderBotGroup();
         return;
       }
-      // 左栏点成员 = 切到和它的单聊；点组头 = 回群聊（不再是「再点一次取消聚焦」）。
+      // 左栏点成员 = 聚焦它（和它单聊）；再点一次 = 回到全部车道（定稿的交互）。
       const f = e.target.closest("[data-bg-focus]");
-      if (f) { bgFocus(f.dataset.bgGroup || BG.group, f.dataset.bgFocus, "切会话"); return; }
+      if (f) {
+        const want = f.dataset.bgFocus;
+        const same = BG.focus === want && want !== "all" && (!f.dataset.bgGroup || f.dataset.bgGroup === BG.group);
+        bgFocus(f.dataset.bgGroup || BG.group, same ? "all" : want, "选车道");
+        return;
+      }
       const gh = e.target.closest(".bg-gh");
       if (gh) bgFocus(gh.dataset.bgGroup, "all", "选组");
     });
