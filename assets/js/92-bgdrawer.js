@@ -136,7 +136,7 @@ function bgdModelLabel(g, b) {
   if (seen) return { name: seen, sub: t("bg.d.model.followSeen") };
   return { name: t("bg.d.model.default"), sub: t("bg.d.model.follow") };
 }
-function bgdFolder(g, b) { return b.folder || g.project; }
+function bgdFolder(g, b) { return b.folder || b.worktree || g.project; }
 function bgdStats(g, b) {
   const d = bgDerive(g, b);
   const turns = d.items.filter((x) => x.type === "prompt").length;
@@ -234,8 +234,9 @@ function bgdOverviewHTML(g, b) {
     +   bgdRestartHTML(g, b)
     +   sec(t("bg.d.sec.model"), bgdTrigger("model", ml.name, ok ? ml.sub : t("bg.d.unsupportedShort"), { wide: true, grey: !ok, title: ok ? "" : t("bg.d.unsupported", { agent: bgAgentName(b.agent) }) }))
     +   sec(t("bg.d.sec.perm"), bgdPermHTML(b))
-    +   sec(t("bg.d.sec.folder"), bgdTrigger("folder", bgBase(folder), b.folder ? folder : t("bg.d.folder.followSub", { path: folder }), { wide: true, ico: bgdIco("folder", 14) }))
+    +   sec(t("bg.d.sec.folder"), bgdTrigger("folder", bgBase(folder), b.folder ? folder : b.worktree ? t("bg.d.folder.wt", { b: b.branch || "" }) : t("bg.d.folder.followSub", { path: folder }), { wide: true, ico: bgdIco("folder", 14) }))
     +   about
+    +   sec(t("bg.d.sec.circles"), `<div class="bgd-kv"><span>${esc(g.memoryMode === "dispatch" ? ((b.manager ? t("bg.d.mem.mgrAll") : (b.circles || []).length ? t("bg.d.mem.in", { c: b.circles.join("、") }) : t("bg.d.mem.none"))) : t("bg.d.mem.shared"))}</span><span></span></div>`)
     +   (g.brief ? sec(t("bg.d.sec.memory"), `<button type="button" class="bgd-mem" data-bgd-act="brief">${bgdIco("file", 14)}<span class="bgd-mem-copy ell">brief.md</span><span class="bgd-mem-go">${esc(t("bg.d.open"))}${bgdIco("right", 13)}</span></button>`) : "")
     +   (d.cum ? sec(t("bg.d.sec.usage"), `<div class="bgd-kv"><span>${esc(bgdName(b))}</span><span>${esc(t("bg.d.stat.tok", { n: (d.cum / 1000).toFixed(1) }))}</span></div>`) : "")
     +   todo
@@ -294,6 +295,8 @@ function bgdSettingsHTML(g, b) {
           + bgdRow(t("bg.d.sec.perm"), "", bgdPermHTML(b), { stack: true }))
     +   bgdCard(t("bg.d.sec.folder"),
           bgdRow(t("bg.d.f.folder"), b.folder ? folder : t("bg.d.folder.followSub", { path: folder }), bgdTrigger("folder", bgBase(folder), "", { ico: bgdIco("folder", 13) })))
+    +   (g.memoryMode === "dispatch" && !b.manager ? bgdCard(t("bg.d.sec.circles"),
+          bgdRow(t("bg.d.f.circles"), t("bg.d.f.circlesHint"), `<input class="bgd-in" data-bgd-circles="1" spellcheck="false" maxlength="80" placeholder="${esc(t("bg.d.ph.circles"))}" value="${esc((b.circles || []).join(", "))}">`)) : "")
     +   bgdCard(t("bg.d.sec.about"),
           bgdRow(t("bg.d.f.about"), t("bg.d.f.aboutHint"), bgdInput("instructions", b.instructions, t("bg.d.ph.about"), { multi: true }), { stack: true }))
     +   manage
@@ -518,10 +521,17 @@ function bgdBind(wrap) {
       bgdCommitField(inp, !!inp.dataset.revert);
       delete inp.dataset.revert;
     }
+    if (inp.dataset && inp.dataset.bgdCircles) {
+      const g = bgdGroup(), b = bgdBot();
+      if (!g || !b || inp.dataset.revert) { delete inp.dataset.revert; bgDrawerSync(true); return; }
+      const circles = inp.value.split(/[,，、\s]+/).map((x) => x.trim()).filter(Boolean);
+      if (circles.join(",") === (b.circles || []).join(",")) return;
+      bgRequest({ type: "botgroup.circles", id: g.id, botId: b.id, circles }).then((r) => { if (!r.ok) showToast(t("bg.d.saveFailed"), r.err || "", "err"); });
+    }
   });
   el.addEventListener("keydown", (e) => {
     const inp = e.target;
-    if (!(inp.id === "bgd-name-in" || (inp.dataset && inp.dataset.bgdField))) return;
+    if (!(inp.id === "bgd-name-in" || (inp.dataset && (inp.dataset.bgdField || inp.dataset.bgdCircles)))) return;
     if (e.key === "Escape") { e.stopPropagation(); inp.dataset.revert = "1"; inp.blur(); }
     else if (e.key === "Enter" && inp.tagName === "INPUT" && !e.isComposing) { e.preventDefault(); inp.blur(); }
   });

@@ -588,3 +588,7 @@ textarea.bg-cin::placeholder{color:var(--bg-faint)}
 .bg-chain .bg-chips.ovf-r{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent)}
 .bg-chain .bg-chips.ovf-l{-webkit-mask-image:linear-gradient(to right,transparent,#000 28px);mask-image:linear-gradient(to right,transparent,#000 28px)}
 .bg-chain .bg-chips.ovf-l.ovf-r{-webkit-mask-image:linear-gradient(to right,transparent,#000 28px,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(to right,transparent,#000 28px,#000 calc(100% - 28px),transparent)}
+
+/* 编排：组暂停时页头的小标签 */
+.bg-paused{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:6px;font-size:11px;color:var(--bg-ask);
+  background:color-mix(in srgb,var(--bg-ask) 10%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--bg-ask) 28%,transparent)}

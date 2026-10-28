@@ -31,6 +31,10 @@ const BG_MAX_BOTS = BG_LANE_PALETTE.length;
 /* ---------- 数据（Go 推来的） ---------- */
 let BOTGROUPS = [];
 const BG_EVENTS = new Map();   // gid → [event]（id 升序）
+// Bot Group C（编排）：Go 的任务账本、Go 生成的开场说明、Go 汇总的已用 k tokens。
+const BG_TASKS = new Map();    // gid → [task]
+let BG_INTROS = {};            // gid → bot id → 开场说明
+let BG_USEDK = {};             // gid → k tokens
 let BG_LOADED = false;
 
 const BG = {
@@ -90,6 +94,10 @@ function applyBotGroups(m) {
   BG_EVENTS.clear();
   const ev = m.events || {};
   for (const g of BOTGROUPS) BG_EVENTS.set(g.id, Array.isArray(ev[g.id]) ? ev[g.id] : []);
+  BG_TASKS.clear();
+  for (const [gid, list] of Object.entries(m.tasks || {})) BG_TASKS.set(gid, Array.isArray(list) ? list : []);
+  BG_INTROS = m.intros || {};
+  BG_USEDK = m.usedK || {};
   BG_LOADED = true;
   if (!BOTGROUPS.some((g) => g.id === BG.group)) {
     BG.group = BOTGROUPS.length ? BOTGROUPS[0].id : "";
@@ -99,6 +107,39 @@ function applyBotGroups(m) {
   // 单聊页要每个 Bot 的完整对话：页面刚加载时只有当前格补过快照，Bot 格一格都没有。
   if (typeof askAllSnapshots === "function") askAllSnapshots("Bot Group");
   bgSchedule();
+}
+/* ---------- Bot Group C：Go 的投递和任务账本 ----------
+   投递归 Go（架构页第十一节第 3 条）：Go 推 bg.deliver，这里在对方空闲时粘贴进它的终端、回执 bg.delivered。
+   送过的 key 记在 localStorage：页面重载后 Go 会把没回执的再推一遍，送过的只补回执、不重复粘贴。 */
+function bgTaskUpdate(m) {
+  if (!m || !m.task) return;
+  const list = BG_TASKS.get(m.group) || [];
+  const i = list.findIndex((x) => x.id === m.task.id);
+  if (i >= 0) list[i] = m.task; else list.push(m.task);
+  BG_TASKS.set(m.group, list);
+  bgSchedule();
+}
+function bgTasks(g) { return (g && BG_TASKS.get(g.id)) || []; }
+const BG_SENT_KEY = "perch.bg.sent";
+function bgSentKeys() { try { return JSON.parse(localStorage.getItem(BG_SENT_KEY) || "{}") || {}; } catch (_) { return {}; } }
+function bgMarkSent(gid, key) {
+  const m = bgSentKeys();
+  m[gid + "|" + key] = Date.now();
+  const ks = Object.keys(m);
+  if (ks.length > 400) ks.sort((a, b) => m[a] - m[b]).slice(0, ks.length - 400).forEach((k) => delete m[k]);
+  try { localStorage.setItem(BG_SENT_KEY, JSON.stringify(m)); } catch (_) {}
+}
+function bgDeliverFromGo(d) {
+  if (!d || !d.key || !d.group) return;
+  if (bgSentKeys()[d.group + "|" + d.key]) { sendCtrl({ type: "bg.delivered", id: d.group, key: d.key }); return; }
+  const k = d.group + "/" + d.bot;
+  const q = BG_Q.get(k) || [];
+  if (q.some((x) => x.key === d.key)) return;
+  q.push({ text: d.text, origin: "go", key: d.key });
+  BG_Q.set(k, q);
+  sendCtrl({ type: "log", msg: `Bot Group：收到投递 ${d.key} → ${d.group}/${d.bot}` });
+  bgPumpAll();
+  bgSchedule(true);
 }
 function applyBotGroupEvent(m) {
   const list = BG_EVENTS.get(m.group);
@@ -242,7 +283,8 @@ async function bgStartBot(g, bot, why) {
   const sid = rec && rec.sessionId && rec.onDisk ? rec.sessionId : "";
   const spec = {
     agent: bot.agent || (rec && rec.agent) || defaultAgentId(),
-    cwd: bot.folder || g.project,
+    // 接回原会话：用它原来的目录（agent 的会话按目录存）；新开：自定义文件夹 > 自己的 worktree > 项目目录
+    cwd: sid && rec && rec.cwd ? rec.cwd : (bot.folder || bot.worktree || g.project),
     target: sid ? "legacy" : "directory",
     resume: sid ? { kind: "exact", id: sid } : { kind: "new", id: "" },
     paneId: bot.paneId || undefined,
@@ -306,6 +348,10 @@ function bgGlyph(kind, color) {
     case "working": return `<svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="4.2" fill="none" stroke="${c}" stroke-width="1.3"/><path d="M6 1.8a4.2 4.2 0 0 1 0 8.4Z" fill="${c}"/></svg>`;
     case "idle": return `<svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="3.6" fill="none" stroke="var(--bg-faint)" stroke-width="1.3"/></svg>`;
     case "fork": return `<svg width="12" height="12" viewBox="0 0 12 12"><circle cx="4" cy="3" r="1.6" fill="none" stroke="${c}" stroke-width="1.3"/><circle cx="4" cy="9.4" r="1.6" fill="none" stroke="${c}" stroke-width="1.3"/><circle cx="9" cy="5" r="1.6" fill="none" stroke="${c}" stroke-width="1.3"/><path d="M4 4.6v3.2M9 6.6c0 1.6-1.4 2.2-3.4 2.6" fill="none" stroke="${c}" stroke-width="1.3"/></svg>`;
+    case "return": return `<svg width="12" height="12" viewBox="0 0 12 12"><path d="M6 1.5 10.5 6 6 10.5 1.5 6Z" fill="none" stroke="${c}" stroke-width="1.5"/><path d="M7.4 4.3 5.4 6l2 1.7" fill="none" stroke="${c}" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    case "blocked": return `<svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="4.4" fill="none" stroke="var(--bg-ask)" stroke-width="1.6"/><path d="M3.4 8.6 8.6 3.4" stroke="var(--bg-ask)" stroke-width="1.4"/></svg>`;
+    case "paused": return `<svg width="12" height="12" viewBox="0 0 12 12"><rect x="3" y="2.5" width="2" height="7" rx=".6" fill="var(--bg-faint)"/><rect x="7" y="2.5" width="2" height="7" rx=".6" fill="var(--bg-faint)"/></svg>`;
+    case "resumed": return `<svg width="12" height="12" viewBox="0 0 12 12"><path d="M3.5 2.2v7.6L10 6Z" fill="var(--bg-ok)"/></svg>`;
     case "compact": return `<svg width="12" height="12" viewBox="0 0 12 12"><path d="M2.5 2 6 4.6 9.5 2M2.5 10 6 7.4 9.5 10" fill="none" stroke="${c}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     case "stopped": return `<svg width="12" height="12" viewBox="0 0 12 12"><rect x="3" y="3" width="6" height="6" rx="1" fill="var(--bg-faint)"/></svg>`;
     default: return `<svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="2" fill="${c}"/></svg>`;
@@ -420,7 +466,11 @@ function bgChainHTML(g) {
     const did = bgDerive(g, b).items.some((x) => x.type === "proc" || x.type === "text");
     const chips = [];
     const fromYou = bgDerive(g, b).items.some((x) => x.type === "prompt");
-    if (fromYou) chips.push(bgChip({ who: t("bg.chain.you"), you: true, ok: true, ck: "src" }, color));
+    // 编排：它最近那件任务是谁派的（Manager 或另一个 Bot），交接链就从谁开始
+    const lastTask = bgTasks(g).filter((tk) => tk.to === b.id).pop();
+    const src = lastTask ? bgBot(g, lastTask.from) : null;
+    if (src) chips.push(bgChip({ who: src.manager ? "Manager" : src.role, agent: src.agent, ok: true, ck: "src" }, color));
+    else if (fromYou) chips.push(bgChip({ who: t("bg.chain.you"), you: true, ok: true, ck: "src" }, color));
     else if (mgr) chips.push(bgChip({ who: "Manager", agent: mgr.agent, ok: true, ck: "src" }, color));
     chips.push(bgChip({ ck: "agent", who: bgAgentName(b.agent), agent: b.agent, cur: st === "working", ok: did && st !== "working" && st !== "waiting", dim: st === "pending" }, color));
     if (st === "waiting") chips.push(bgChip({ who: t("bg.chain.you"), you: true, cur: true, ck: "you" }, color));
@@ -636,9 +686,18 @@ function bgDerive(g, b) {
         items.push({ type: "prompt", id: a.id, at: a.at, text, lane: b.id, groupTurn });
         // 每交给它一件事 = 一次交接（定稿里的「交接 → Codex」）：车道从这里开始。
         const who = b.manager ? "Manager" : bgAgentName(b.agent);
-        items.push({ type: "proc", kind: "handoff", id: a.id + ":h", at: a.at, end: a.at, lane: b.id,
-          title: t("bg.p.handoff", { x: who }), short: "→ " + who, meta: bgSize(text), sub: [], steps: 0, dur: 0,
-          from: groupTurn ? "group" : "you", groupTurn });
+        // Perch 送来的任务包 / 结果（编排）：标题带任务号和派活人 / 交回的人
+        const tm = /^\[Perch · (?:任务|task) (T\d+) · (?:来自|from) ([^\]]+)\]/.exec(text);
+        const rm = !tm && /^\[Perch · (T\d+) [^\]]*?· (?:来自|from) ([^\]]+)\]/.exec(text);
+        if (rm) {
+          items.push({ type: "proc", kind: "return", id: a.id + ":h", at: a.at, end: a.at, lane: b.id,
+            title: t("bg.p.return", { x: rm[2], t: rm[1] }), short: "← " + rm[2], meta: bgSize(text), sub: [], steps: 0, dur: 0, from: "task", task: rm[1] });
+        } else {
+          items.push({ type: "proc", kind: "handoff", id: a.id + ":h", at: a.at, end: a.at, lane: b.id,
+            title: tm ? t("bg.p.handoffTask", { x: who, t: tm[1] }) : t("bg.p.handoff", { x: who }), short: "→ " + who,
+            meta: tm ? t("bg.p.taskFrom", { x: tm[2] }) : bgSize(text), sub: [], steps: 0, dur: 0,
+            from: tm ? "task" : groupTurn ? "group" : "you", groupTurn, task: tm ? tm[1] : "" });
+        }
       }
     } else if (a.kind === "text") {
       items.push({ type: "text", id: a.id, at: a.at, text: a.text, lane: b.id, groupTurn });
@@ -678,7 +737,7 @@ function bgEventRow(g, e, showBadge) {
   const open = BG.open.has(key);
   const lane = bgEvLane(e);
   const color = bgColor(g, lane);
-  const cls = "bg-ev" + (e.kind === "approval" ? " ask" : "") + (e.kind === "fail" ? " bad" : "") + (open ? " open" : "");
+  const cls = "bg-ev" + (e.kind === "approval" || e.kind === "blocked" ? " ask" : "") + (e.kind === "fail" ? " bad" : "") + (open ? " open" : "");
   const caret = e.text ? `<span class="bg-caret">${bgIco("chev", 11)}</span>` : `<span class="bg-caret blank"></span>`;
   const body = open && e.text ? `<div class="bg-ev-body"><div class="bg-ev-sum">${esc(e.text)}</div></div>` : "";
   return `<div class="${cls}" data-bg-ev="${esc(key)}" style="--lane:${color}">`
@@ -787,7 +846,9 @@ function bgGroupFeedHTML(g) {
       // 早先版本把回复也落过盘；现在回复从转录里来，这种旧记录只在那个 Bot 一条对话都没有时才显示。
       if (e.bot !== "you") { const b = bgBot(g, bgEvLane(e)); if (b && bgDerive(g, b).hasActs) continue; }
       rows.push({ at: e.ts, html: bgMsgHTML(g, e, true) });
-    } else if (e.kind === "created" || e.kind === "handoff" || e.kind === "approval" || e.kind === "artifact" || e.kind === "review") {
+    } else if (e.kind === "created" || e.kind === "approval" || e.kind === "artifact" || e.kind === "review"
+      // 编排：交回 / 被拦 / 暂停 / 恢复 / 记忆更新（转录里没有）。交接不在这里：转录推出来的那一行就是它（光迹和节点都认那一行）。
+      || e.kind === "return" || e.kind === "blocked" || e.kind === "paused" || e.kind === "resumed" || e.kind === "memory") {
       rows.push({ at: e.ts, html: bgEventRow(g, e, true) });
     }
   }
@@ -984,8 +1045,22 @@ function bgGateAnswer(tab, how) {
   }
   bgdSave(g, b, { permission: "workspace-write" }, "启动门：改回工作区").then((ok) => { if (ok) bgdRestart(g, bgBot(g, b.id) || b, true); });
 }
+/* 被拦的任务（策略守卫「问你」那几种）：群里一张卡，放行 / 取消。 */
+function bgBlockedCardsHTML(g, members) {
+  const ids = new Set(members.map((b) => b.id));
+  return bgTasks(g).filter((tk) => tk.status === "blocked" && (ids.has(tk.from) || ids.has(tk.to))).map((tk) => {
+    const color = bgColor(g, tk.to);
+    const why = t("bg.block." + String(tk.reason || "").replace(/^ask:/, ""), { t: tk.id }) || "";
+    return `<div class="bg-ev ask open" data-bg-ev="${esc(g.id + ":block:" + tk.id)}" style="--lane:${color}">`
+      + `<div class="bg-ev-h"><span class="bg-caret">${bgIco("chev", 11)}</span><span class="bg-ev-g">${bgGlyph("blocked", color)}</span>`
+      + bgBadge(g, tk.from) + `<span class="bg-ev-t ell">${esc(t("bg.card.blocked", { t: tk.id, x: bgRoleName(g, tk.to) }))}</span></div>`
+      + `<div class="bg-ev-body"><div class="bg-gate">${bgIco("shield", 13)}<span>${esc(why)}　${esc(clamp(tk.text || "", 160))}</span></div>`
+      + `<div class="bg-opts"><button type="button" class="bg-opt primary" data-bg-answer="allow" data-task="${esc(tk.id)}">${esc(t("bg.block.allow"))}</button>`
+      + `<button type="button" class="bg-opt" data-bg-answer="cancel" data-task="${esc(tk.id)}">${esc(t("bg.block.cancel"))}</button></div></div></div>`;
+  }).join("");
+}
 function bgCardsHTML(g, members) {
-  return members.map((b) => {
+  return bgBlockedCardsHTML(g, members) + members.map((b) => {
     const tab = bgTabOf(b);
     if (tab && BG_GATES.has(tab.id)) return bgGateCardHTML(g, b, tab, BG_GATES.get(tab.id).kind);
     const v = tab ? LIVE.get(tab.id) : null;
@@ -1072,6 +1147,7 @@ function bgTreeSVG(g, width, lay) {
       case "running": return `<circle cx="${x}" cy="${y}" r="5" fill="var(--bg-panel)" stroke="${c}" stroke-width="1.4" stroke-dasharray="2.4 2"/>`;
       case "idle": return `<circle cx="${x}" cy="${y}" r="4.5" fill="var(--bg-panel)" stroke="var(--bg-faint)" stroke-width="1.3" stroke-dasharray="2.2 2"/>`;
       case "fork": return `<circle cx="${x}" cy="${y}" r="4.6" fill="var(--bg-panel)" stroke="${c}" stroke-width="1.6"/><circle cx="${x}" cy="${y}" r="1.6" fill="${c}"/>`;
+      case "return": return `<path d="M${x} ${y - 5.5} L${x + 5.5} ${y} L${x} ${y + 5.5} L${x - 5.5} ${y} Z" fill="var(--bg-panel)" stroke="${c}" stroke-width="1.6"/>`;
       case "compact": return `<path d="M${x - 4} ${y - 4.5} L${x} ${y - 1} L${x + 4} ${y - 4.5} M${x - 4} ${y + 4.5} L${x} ${y + 1} L${x + 4} ${y + 4.5}" fill="none" stroke="${c}" stroke-width="1.5" stroke-linecap="round"/>`;
       default: return `<circle cx="${x}" cy="${y}" r="3" fill="${c}"/>`;
     }
@@ -1233,6 +1309,7 @@ function bgSkeleton(root, has) {
 /* 页头的「预算 已用/上限」（A 定稿）：已用 = 各 Bot 会话真实的 token 累计（输入 + 输出 + 写缓存，
    转录里有），上限是建组时填的（k tokens，默认 500）。 */
 function bgUsedK(g) {
+  if (BG_USEDK[g.id] != null && BG_USEDK[g.id] > 0) return BG_USEDK[g.id];
   let n = 0;
   for (const b of bgMembers(g)) n += bgDerive(g, b).cum || 0;
   return Math.round(n / 1000);
@@ -1323,7 +1400,8 @@ function bgTopHTML(g, waiting) {
     +   `<div class="bg-acts">`
     +     bgBudgetHTML(g)
     +     (waiting ? `<button type="button" class="bg-needbtn" data-bg-act="need">${bgDot("waiting")}${esc(t("bg.head.needYou", { n: waiting }))}</button>` : "")
-    +     `<button type="button" class="bg-btn" data-bg-act="na" title="${esc(t("bg.head.laterC"))}">${bgIco("pause", 12)}<span>${esc(t("bg.head.pauseAll"))}</span></button>`
+    +     (g.paused ? `<span class="bg-paused">${bgIco("pause", 11)}${esc(t("bg.head.paused"))}</span>` : "")
+    +     `<button type="button" class="bg-btn" data-bg-act="pause" title="${esc(t(g.paused ? "bg.head.resumeTitle" : "bg.head.pauseTitle"))}">${bgIco(g.paused ? "play" : "pause", 12)}<span>${esc(t(g.paused ? "bg.head.resume" : "bg.head.pauseAll"))}</span></button>`
     +     `<button type="button" class="bg-btn primary" data-bg-act="addbot">${bgIco("plus", 12)}<span>${esc(t("bg.head.addBot"))}</span></button>`
     +     `<button type="button" class="icon-btn bg-theme" data-bg-act="theme" title="${esc(t(light ? "bg.head.toDark" : "bg.head.toLight"))}">${bgIco(light ? "moon" : "sun", 14)}</button>`
     +   `</div>`
@@ -1803,14 +1881,23 @@ function bgGroupMenu(gid, anchor) {
       const grp = BOTGROUPS.find((x) => x.id === pop.dataset.gid);
       bgGroupMenuClose();
       if (!grp) return;
-      if (it.dataset.gact === "brief" && grp.brief) sendCtrl({ type: "open", mode: "open", path: grp.brief });
+      const ga = it.dataset.gact;
+      if (ga === "mem-shared" || ga === "mem-dispatch" || ga === "wt-on" || ga === "wt-off") {
+        const patch = ga.startsWith("mem") ? { memoryMode: ga === "mem-dispatch" ? "dispatch" : "shared" } : { worktrees: ga === "wt-on" };
+        bgRequest({ type: "botgroup.settings", id: grp.id, groupPatch: patch }).then((r) => { if (!r.ok) showToast(t("bg.d.saveFailed"), r.err || "", "err"); });
+        return;
+      }
+      if (ga === "brief" && grp.brief) sendCtrl({ type: "open", mode: "open", path: grp.brief });
       else if (it.dataset.gact === "delete") bgDeleteGroup(grp);
     });
     document.addEventListener("mousedown", (e) => { if (!e.target.closest("#bg-gpop,[data-bg-gmenu]")) bgGroupMenuClose(); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") bgGroupMenuClose(); });
   }
   pop.dataset.gid = gid;
-  pop.innerHTML = (g.brief ? `<button type="button" class="bg-gi" data-gact="brief">${bgIco("file", 13)}<span>${esc(t("bg.head.brief"))}</span></button>` : "")
+  const memDispatch = g.memoryMode === "dispatch";
+  pop.innerHTML = `<button type="button" class="bg-gi" data-gact="${memDispatch ? "mem-shared" : "mem-dispatch"}">${bgIco("file", 13)}<span>${esc(t(memDispatch ? "bg.gm.toShared" : "bg.gm.toDispatch"))}</span></button>`
+    + `<button type="button" class="bg-gi" data-gact="${g.worktrees ? "wt-off" : "wt-on"}">${bgIco("split", 13)}<span>${esc(t(g.worktrees ? "bg.gm.wtOff" : "bg.gm.wtOn"))}</span></button>`
+    + (g.brief ? `<button type="button" class="bg-gi" data-gact="brief">${bgIco("file", 13)}<span>${esc(t("bg.head.brief"))}</span></button>` : "")
     + `<button type="button" class="bg-gi danger" data-gact="delete">${bgIco("trash", 13)}<span>${esc(t("bg.head.delete"))}</span></button>`;
   const r = anchor.getBoundingClientRect();
   pop.style.left = Math.round(r.right - 168) + "px";
@@ -2134,7 +2221,15 @@ function bgPumpAll() {
     if (!tab || tab.connDown) {
       if (!BG_STARTING.has(k)) {
         BG_STARTING.add(k);
-        bgStartBot(g, b, "有消息要送").finally(() => BG_STARTING.delete(k));
+        bgStartBot(g, b, "有消息要送").then((tab) => {
+          if (tab) return;
+          // 起不来：Go 的投递报回去（它记次数，两次就让任务失败、告诉派活人），从队列里拿掉等它重推
+          const rest = (BG_Q.get(k) || []).filter((it) => {
+            if (it.key) sendCtrl({ type: "bg.failed", id: gid, key: it.key, msg: "start failed" });
+            return !it.key;
+          });
+          BG_Q.set(k, rest);
+        }).finally(() => BG_STARTING.delete(k));
       }
       continue;
     }
@@ -2147,6 +2242,11 @@ function bgPumpAll() {
 
 function bgWrite(g, b, tab, item) {
   let body = item.text;
+  if (!tab.bgIntro && BG_INTROS[g.id] && BG_INTROS[g.id][b.id]) {
+    // 开场说明由 Go 生成（团队、分工、工作目录、记忆位置、perch-bg 用法）—— 一份来源
+    tab.bgIntro = true;
+    body = BG_INTROS[g.id][b.id] + "\n\n" + body;
+  }
   if (!tab.bgIntro) {
     tab.bgIntro = true;
     body = t("bg.chat.intro", { group: g.name, role: b.manager ? "Manager" : b.role, goal: g.goal || "—",
@@ -2159,7 +2259,11 @@ function bgWrite(g, b, tab, item) {
   // 粘贴和回车分开送：同一包里的 \r 会被一些 TUI 当成粘贴内容里的换行。
   setTimeout(() => { try { if (tab.stream) tab.stream.send(enc.encode("\r")); } catch (_) {} }, 160);
   tab.bgSentAt = Date.now();
-  sendCtrl({ type: "log", msg: `Bot Group：送达 ${g.id}/${b.id} tab=${tab.id} ${bp ? "bracketed" : "单行"} ${body.length} 字（${item.origin}）` });
+  if (item.key) {
+    bgMarkSent(g.id, item.key);
+    sendCtrl({ type: "bg.delivered", id: g.id, key: item.key });
+  }
+  sendCtrl({ type: "log", msg: `Bot Group：送达 ${g.id}/${b.id} tab=${tab.id} ${bp ? "bracketed" : "单行"} ${body.length} 字（${item.origin}${item.key ? " " + item.key : ""}）` });
   bgSchedule(true);
 }
 
@@ -2316,6 +2420,12 @@ function bgFocus(gid, focus, why) {
       if (e.target.id === "bg-q") { BG.query = e.target.value; renderBotGroup(); }
     });
     root.addEventListener("click", (e) => {
+      const ans = e.target.closest("[data-bg-answer]");
+      if (ans) {
+        const g = bgGroup();
+        if (g) bgRequest({ type: "bg.answer", id: g.id, task: ans.dataset.task, action: ans.dataset.bgAnswer }).then((r) => { if (!r.ok) showToast(t("bg.d.saveFailed"), r.err || "", "err"); });
+        return;
+      }
       if (bgCardClick(e)) return;
       const more = e.target.closest("[data-bg-more]");
       if (more) {
@@ -2357,6 +2467,8 @@ function bgFocus(gid, focus, why) {
           bgDeleteGroup(g);
         } else if (a === "brief") {
           if (g && g.brief) sendCtrl({ type: "open", mode: "open", path: g.brief });
+        } else if (a === "pause") {
+          if (g) bgRequest({ type: "botgroup.pause", id: g.id, paused: !g.paused }).then((r) => { if (!r.ok) showToast(t("bg.d.saveFailed"), r.err || "", "err"); });
         } else if (a === "na") {
           showToast(act.textContent.trim(), act.title, "err");
         } else if (a === "need" || a === "focus-cur") {

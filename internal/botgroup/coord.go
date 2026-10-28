@@ -583,7 +583,7 @@ func (c *Coordinator) review(g Group, me Bot, body map[string]string) Reply {
 			x.Text = x.Text + "\n\n" + c.tr("【退回】", "[returned] ") + reason
 			x.Sent = false
 		})
-		c.event(g.ID, Event{Bot: me.ID, Kind: "handoff", Title: c.tr("退回 → "+c.role(g, t.To)+" · "+t.ID, "rejected → "+t.ID), Text: reason})
+		c.event(g.ID, Event{Bot: me.ID, Kind: "review", Title: c.tr("退回 → "+c.role(g, t.To)+" · "+t.ID, "rejected → "+t.ID), Text: reason})
 		c.Pump(g.ID)
 		return Reply{"ok:rejected", c.tr(t.ID+" 退回给「"+c.role(g, t.To)+"」重做", t.ID+" sent back"), nil}
 	}

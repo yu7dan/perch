@@ -549,6 +549,9 @@ function dispatchCtl(m) {
     case "botgroups": if (typeof applyBotGroups === "function") applyBotGroups(m); return;
     case "botgroup.event": if (typeof applyBotGroupEvent === "function") applyBotGroupEvent(m); return;
     case "botgroup.result": if (typeof botGroupResult === "function") botGroupResult(m); return;
+    // Bot Group C：Go 的投递（前端只执行：对方空闲时粘贴，送完回执 bg.delivered）、任务账本的变化
+    case "bg.deliver": if (typeof bgDeliverFromGo === "function") bgDeliverFromGo(m.delivery); return;
+    case "task.update": if (typeof bgTaskUpdate === "function") bgTaskUpdate(m); return;
     case "provider.test": provTestResult(m); return;
     case "catalog":
       if (m.catalog) setCatalog(m.catalog, "catalog 推送");
