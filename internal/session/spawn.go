@@ -167,6 +167,13 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 			env[k] = v
 		}
 	}
+	// Bot Group C：成员格拿到口令 + 总线地址，PATH 里有 perch-bg。
+	if extra := m.orchestrationEnv(tab, env); len(extra) > 0 {
+		for k, v := range extra {
+			env[k] = v
+		}
+		log.Printf("[startup t%d] Bot %s/%s 接上总线（perch-bg 可用）", tab.ID, tab.Spec.Group, tab.Spec.Bot)
+	}
 	t2 := time.Now()
 	sess, err := term.Start(exe, args, cwd, agent.BuildEnv(env), cols, rows)
 	ptyTook := time.Since(t2)

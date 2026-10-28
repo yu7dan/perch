@@ -24,6 +24,7 @@ import (
 	"github.com/yu7dan/perch/internal/agent"
 	"github.com/yu7dan/perch/internal/agentcatalog"
 	"github.com/yu7dan/perch/internal/appdir"
+	"github.com/yu7dan/perch/internal/botbus"
 	"github.com/yu7dan/perch/internal/botgroup"
 	"github.com/yu7dan/perch/internal/ctl"
 	"github.com/yu7dan/perch/internal/dsh"
@@ -53,6 +54,7 @@ type perchApp struct {
 	prefs     *settings.Store
 	providers *providers.Store
 	botgroups *botgroup.Store
+	coord     *botgroup.Coordinator
 	pool      *project.Pool
 	panes     *panes.Store
 	tabs      *session.Manager
@@ -138,11 +140,25 @@ func main() {
 		a.providers = providers.Load("")
 	}
 	// Bot Group 的组清单与过程流：%APPDATA%Perchotgroups.json + botgroups<组>。
+	bgDir := ""
 	if pd, err := appdir.PerchDir(); err == nil {
-		a.botgroups = botgroup.Load(pd)
-	} else {
-		a.botgroups = botgroup.Load("")
+		bgDir = pd
 	}
+	a.botgroups = botgroup.Load(bgDir)
+	// Bot Group C（编排）：任务账本 + 协调器 + 本机总线（perch-bg 连这里）。
+	a.coord = botgroup.NewCoordinator(botgroup.CoordDeps{Store: a.botgroups, Ledger: botgroup.NewLedger(bgDir), Push: a.push.Push,
+		Lang: func() string {
+			if a.prefs != nil && a.prefs.Snapshot().Language == "en" {
+				return "en"
+			}
+			return "zh"
+		}})
+	if bus, err := botbus.Start(a.coord); err == nil {
+		a.coord.SetBusURL(bus.URL)
+	} else {
+		log.Printf("[botbus] 起不来（Bot Group 的派活命令不可用）：%v", err)
+	}
+	a.coord.Run()
 	a.pool = project.Load()
 	// 「安装即存在」：默认工作区那个目录由我们建出来，因为新格没挑项目时会
 	// 落在它里面（claude 起不来一个不存在的 cwd）。它不写进 projects.json ——
@@ -221,12 +237,14 @@ func main() {
 			}
 			for _, b := range g.Bots {
 				if b.ID == bid {
-					return agent.BotConfig{Model: b.Model, Effort: b.Effort, Permission: b.Permission}, true
+					return agent.BotConfig{Model: b.Model, Effort: b.Effort, Permission: b.Permission, InGroup: true}, true
 				}
 			}
 		}
 		return agent.BotConfig{}, false
 	})
+	// Bot Group C：成员格起来时拿口令 + 总线地址、PATH 里放 perch-bg；忙闲变化和关格告诉协调器。
+	a.tabs.SetOrchestration(a.coord.BotEnv, session.InstallBgCLI(embeddedBgCLI), a.coord.OnStatus, a.coord.TabClosed)
 	// dsh 的“状态”不是启动时顺手能做的：它要写用户的 DSH home patch，
 	// 还要把官方 hook 桥和 peer 装进 dsh-tui profile。所以只放在两个
 	// **用户明确点下**的动作里（安装完成 / 名单里的「接入状态」），不静默跑。
@@ -426,6 +444,7 @@ func main() {
 		Prefs:          a.prefs,
 		Providers:      a.providers,
 		BotGroups:      a.botgroups,
+		Coordinator:    a.coord,
 		Installer:      a.installer,
 		Transcript:     a.follower,
 		DefaultCWD:     a.defaultCWD,

@@ -64,6 +64,15 @@ try {
   New-Item -ItemType Directory -Force $embedDir | Out-Null
   Copy-Item (Join-Path $outDir "perch-hook.exe") (Join-Path $embedDir "perch-hook.exe") -Force
 
+  # Bot Group 的派活命令 perch-bg：agent 在自己的终端里跑它、读它的输出，所以它必须是
+  # 控制台程序 —— 不能带 -H windowsgui（那样输出没有地方去）。和 hook 接收器一起内嵌。
+  $bgFlags = @($ldflags | Where-Object { $_ -ne "-H" -and $_ -ne "windowsgui" })
+  $bgArgs = @("build", "-trimpath")
+  if ($bgFlags.Count -gt 0) { $bgArgs += @("-ldflags", ($bgFlags -join " ")) }
+  & go @bgArgs -o (Join-Path $outDir "perch-bg.exe") ./cmd/perch-bg
+  if ($LASTEXITCODE -ne 0) { throw "构建 cmd/perch-bg 失败（exit $LASTEXITCODE）" }
+  Copy-Item (Join-Path $outDir "perch-bg.exe") (Join-Path $embedDir "perch-bg.exe") -Force
+
   & go @common -tags perch_embedded_hook -o (Join-Path $outDir "perch.exe") ./cmd/perch
   if ($LASTEXITCODE -ne 0) { throw "构建 cmd/perch 失败（exit $LASTEXITCODE）" }
 }

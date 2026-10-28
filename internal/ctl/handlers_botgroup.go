@@ -26,6 +26,10 @@ func (s *Server) handleBotGroup(m *Msg) {
 	switch m.Type {
 	case "botgroups.get":
 		s.pushBotGroups()
+		// 页面刚连上 / 重载了：没回执的投递全部再推一遍（投递归 Go，前端只执行）。
+		if co := s.deps.Coordinator; co != nil {
+			go co.Resend()
+		}
 	case "botgroup.create":
 		if m.BotGroup == nil {
 			return
@@ -47,6 +51,7 @@ func (s *Server) handleBotGroup(m *Msg) {
 			if g.Source.Kind == "derived" && s.deps.Panes != nil {
 				s.deps.Panes.SetGroup(g.Source.PaneID, g.ID, "manager", "衍生 Bot Group")
 			}
+			s.prepareWorktrees(g.ID)
 		}
 		s.Push(res)
 		s.pushBotGroups()
@@ -62,6 +67,7 @@ func (s *Server) handleBotGroup(m *Msg) {
 		} else {
 			res["bot"] = b
 			log.Printf("[botgroup] 组 %s 加 Bot %s「%s」(%s)", m.ID, b.ID, b.Role, b.Agent)
+			s.prepareWorktrees(m.ID)
 		}
 		s.Push(res)
 		s.pushBotGroups()
@@ -91,6 +97,64 @@ func (s *Server) handleBotGroup(m *Msg) {
 				s.deps.Panes.SetGroup(b.PaneID, "", "", "从 Bot Group 移除")
 			}
 			log.Printf("[botgroup] 组 %s 移除 Bot %s「%s」pane=%d", m.ID, b.ID, b.Role, b.PaneID)
+		}
+		s.Push(res)
+		s.pushBotGroups()
+	case "bg.delivered":
+		if co := s.deps.Coordinator; co != nil {
+			co.Delivered(m.ID, m.Key)
+		}
+	case "bg.failed":
+		if co := s.deps.Coordinator; co != nil {
+			co.DeliverFailed(m.ID, m.Key, m.Msg)
+		}
+	case "bg.answer":
+		// 被拦的那件：你在群里点了「放行」/「取消」
+		if co := s.deps.Coordinator; co != nil {
+			err := co.Answer(m.ID, m.Task, m.Action)
+			res := map[string]any{"type": "botgroup.result", "req": m.Req, "op": m.Type, "ok": err == nil, "id": m.ID}
+			if err != nil {
+				res["err"] = err.Error()
+			}
+			s.Push(res)
+		}
+	case "botgroup.pause":
+		if co := s.deps.Coordinator; co != nil && m.Paused != nil {
+			err := co.SetPaused(m.ID, *m.Paused)
+			res := map[string]any{"type": "botgroup.result", "req": m.Req, "op": m.Type, "ok": err == nil, "id": m.ID}
+			if err != nil {
+				res["err"] = err.Error()
+			}
+			s.Push(res)
+			s.pushBotGroups()
+		}
+	case "botgroup.settings":
+		if m.GroupPatch == nil {
+			return
+		}
+		g, err := st.UpdateGroup(m.ID, *m.GroupPatch)
+		res := map[string]any{"type": "botgroup.result", "req": m.Req, "op": m.Type, "ok": err == nil, "id": m.ID}
+		if err != nil {
+			res["err"] = err.Error()
+		} else {
+			log.Printf("[botgroup] 组 %s 设置：记忆=%q worktree=%v 预算=%d", g.ID, g.MemoryMode, g.Worktrees, g.Budget)
+			if m.GroupPatch.Worktrees != nil && *m.GroupPatch.Worktrees {
+				s.prepareWorktrees(g.ID)
+			}
+		}
+		s.Push(res)
+		s.pushBotGroups()
+	case "botgroup.circles":
+		for _, c := range m.Circles {
+			if !botgroup.ValidCircle(c) {
+				s.Push(map[string]any{"type": "botgroup.result", "req": m.Req, "op": m.Type, "ok": false, "id": m.ID, "err": "圈名只能用文字、数字、- 和 _（最多 24 个字）"})
+				return
+			}
+		}
+		_, err := st.SetCircles(m.ID, m.BotID, m.Circles)
+		res := map[string]any{"type": "botgroup.result", "req": m.Req, "op": m.Type, "ok": err == nil, "id": m.ID, "botId": m.BotID}
+		if err != nil {
+			res["err"] = err.Error()
 		}
 		s.Push(res)
 		s.pushBotGroups()
@@ -125,6 +189,9 @@ func (s *Server) handleBotGroup(m *Msg) {
 			}
 		}
 		err := st.Delete(m.ID)
+		if err == nil && s.deps.Coordinator != nil {
+			s.deps.Coordinator.DropGroup(m.ID)
+		}
 		res := map[string]any{"type": "botgroup.result", "req": m.Req, "op": m.Type, "ok": err == nil, "id": m.ID}
 		if err != nil {
 			res["err"] = err.Error()
@@ -144,7 +211,38 @@ func (s *Server) pushBotGroups() {
 	for _, g := range groups {
 		events[g.ID] = st.Events(g.ID, 0, botEventsPerGroup)
 	}
-	s.Push(map[string]any{"type": "botgroups", "groups": groups, "events": events})
+	msg := map[string]any{"type": "botgroups", "groups": groups, "events": events}
+	// C 阶段：每个组的任务账本、每个 Bot 的开场说明、已用的 k tokens（策略守卫和页头预算同一个数）。
+	if co := s.deps.Coordinator; co != nil {
+		tasks := make(map[string][]botgroup.Task, len(groups))
+		intros := make(map[string]map[string]string, len(groups))
+		used := make(map[string]int, len(groups))
+		for _, g := range groups {
+			tasks[g.ID] = co.Tasks(g.ID, botTasksPerGroup)
+			intros[g.ID] = map[string]string{}
+			for _, b := range g.Bots {
+				intros[g.ID][b.ID] = co.Intro(g, b)
+			}
+			used[g.ID] = co.UsedK(g.ID)
+		}
+		msg["tasks"], msg["intros"], msg["usedK"] = tasks, intros, used
+	}
+	s.Push(msg)
+}
+
+const botTasksPerGroup = 200
+
+// prepareWorktrees：给组里该有 worktree 的 Bot 建好（后台跑 git，建完再推一次组清单）。
+func (s *Server) prepareWorktrees(gid string) {
+	co := s.deps.Coordinator
+	if co == nil {
+		return
+	}
+	go func() {
+		if co.PrepareWorktrees(gid) > 0 {
+			s.pushBotGroups()
+		}
+	}()
 }
 
 func pickStr(a, b string) string {

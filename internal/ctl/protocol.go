@@ -69,7 +69,15 @@ type Msg struct {
 	BotGroup *botgroup.CreateInput `json:"botgroup,omitempty"`
 	BotID    string                `json:"botId,omitempty"`
 	// botgroup.updatebot 用：抽屉里的一次修改（nil 字段不动）。
-	BotPatch *botgroup.BotPatch    `json:"botPatch,omitempty"`
-	Event    *botgroup.Event       `json:"event,omitempty"`
-	Config   *providers.AgentInput `json:"config,omitempty"`
+	BotPatch *botgroup.BotPatch `json:"botPatch,omitempty"`
+	Event    *botgroup.Event    `json:"event,omitempty"`
+	// Bot Group C（编排）：投递回执（Key = task:T7 / result:T7）、被拦任务的决定（Task + Action）、
+	// 全部暂停、组设置、记忆圈。
+	Key        string                `json:"key,omitempty"`
+	Task       string                `json:"task,omitempty"`
+	Action     string                `json:"action,omitempty"`
+	Paused     *bool                 `json:"paused,omitempty"`
+	GroupPatch *botgroup.GroupPatch  `json:"groupPatch,omitempty"`
+	Circles    []string              `json:"circles,omitempty"`
+	Config     *providers.AgentInput `json:"config,omitempty"`
 }

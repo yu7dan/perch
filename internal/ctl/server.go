@@ -61,15 +61,17 @@ type Deps struct {
 	// Version 是构建时注入的版本号（main.buildVersion）；设置页「关于」显示它。
 	Version string
 
-	Tabs       *session.Manager
-	Panes      *panes.Store
-	Titles     *session.TitleStore
-	Pool       *project.Pool
-	Prefs      *settings.Store
-	Providers  *providers.Store
-	BotGroups  *botgroup.Store
-	Installer  *install.Installer
-	Transcript *transcript.Follower
+	Tabs      *session.Manager
+	Panes     *panes.Store
+	Titles    *session.TitleStore
+	Pool      *project.Pool
+	Prefs     *settings.Store
+	Providers *providers.Store
+	BotGroups *botgroup.Store
+	// Coordinator 是 Bot Group C 的协调器（派活 / 送达 / 自动交回）。nil = 编排没开。
+	Coordinator *botgroup.Coordinator
+	Installer   *install.Installer
+	Transcript  *transcript.Follower
 
 	DefaultCWD    func() string
 	SessionExists func(agentName, cwd, id string) bool
@@ -189,7 +191,8 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		s.handleProviders(m)
 
 	// Bot Group（阶段 B：数据与创建）
-	case "botgroups.get", "botgroup.create", "botgroup.bind", "botgroup.addbot", "botgroup.updatebot", "botgroup.removebot", "botgroup.event", "botgroup.delete":
+	case "botgroups.get", "botgroup.create", "botgroup.bind", "botgroup.addbot", "botgroup.updatebot", "botgroup.removebot", "botgroup.event", "botgroup.delete",
+		"bg.delivered", "bg.failed", "bg.answer", "botgroup.pause", "botgroup.settings", "botgroup.circles":
 		s.handleBotGroup(m)
 
 	// 工作区共享 brief（Beta.3）
@@ -220,6 +223,10 @@ func (s *Server) send(c Conn, b []byte) error {
 // 加锁是因为这里有**两个写者**（链路轮询的 goroutine 和可能的其它 goroutine），
 // 而 Send 内部是不是线程安全我们没验过；一把锁比一个未知数便宜。
 func (s *Server) Push(v any) {
+	// 协调器旁听所有推送（只认 acts：每格最后一段回复、token 累计）—— 所有 agent 的流水都从这里出去。
+	if co := s.deps.Coordinator; co != nil {
+		co.Observe(v)
+	}
 	b, err := json.Marshal(v)
 	if err != nil {
 		return

@@ -8,6 +8,9 @@ type BotConfig struct {
 	Model      string
 	Effort     string
 	Permission string // "" | read-only | workspace-write | full-access
+	// InGroup：这一格是 Bot Group 的成员。跑 perch-bg 不该每次都弹「允许运行吗」，
+	// 能按格放行的 agent 只放行这一条命令（2026-10-28 实测：Qoder 不放行会停在确认上）。
+	InGroup bool
 }
 
 // 能按格设的项（前端 BG_CFG_CAPS 照这张表把不支持的项做灰，两边要一起改）：
@@ -31,6 +34,9 @@ func BotLaunch(agentID string, c BotConfig) (env map[string]string, args []strin
 	env = map[string]string{}
 	switch agentID {
 	case "claude":
+		if c.InGroup {
+			args = append(args, "--allowedTools", "Bash(perch-bg:*)")
+		}
 		if c.Model != "" {
 			env["ANTHROPIC_MODEL"] = c.Model
 		}
@@ -66,6 +72,9 @@ func BotLaunch(agentID string, c BotConfig) (env map[string]string, args []strin
 			args = append(args, "--tools", "read,grep,find,ls")
 		}
 	case "qoder":
+		if c.InGroup {
+			args = append(args, "--allowed-tools", "Bash(perch-bg:*)")
+		}
 		if c.Model != "" {
 			args = append(args, "-m", c.Model)
 		}

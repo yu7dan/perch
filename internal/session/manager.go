@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -51,6 +52,12 @@ type Manager struct {
 	wireProfile func(id string) (map[string]string, []string, bool, error)
 	// botConfig：Bot Group 里角色自己的模型 / 权限（角色配置抽屉），按 Spec.Group/Bot 现查。
 	botConfig func(group, bot string) (agent.BotConfig, bool)
+	// Bot Group C（编排）：起格时给成员格发口令 + 总线地址（botEnv），perch-bg 所在目录（bgBin）
+	// 放进它的 PATH；忙闲变化（statusHook）和格子关掉（closedHook）告诉协调器。
+	botEnv     func(tabID int, group, bot string) map[string]string
+	bgBin      string
+	statusHook func(tabID int, prev, now string)
+	closedHook func(tabID int)
 }
 
 // New 构造空的会话表。Defs 在 agent.SetHost 之后由 SetDefs 填 —— 顺序见
@@ -86,6 +93,39 @@ func (m *Manager) SetWireProfile(fn func(id string) (map[string]string, []string
 	m.profileMu.Lock()
 	m.wireProfile = fn
 	m.profileMu.Unlock()
+}
+
+// SetOrchestration 由组合根注入 Bot Group C 的几个钩子（见 Manager 里同名字段的注释）。
+func (m *Manager) SetOrchestration(botEnv func(tabID int, group, bot string) map[string]string, bgBin string,
+	statusHook func(tabID int, prev, now string), closedHook func(tabID int)) {
+	m.profileMu.Lock()
+	m.botEnv, m.bgBin, m.statusHook, m.closedHook = botEnv, bgBin, statusHook, closedHook
+	m.profileMu.Unlock()
+}
+
+// orchestrationEnv：成员格的额外环境（口令、总线地址、PATH 里加 perch-bg）。不是成员格返回 nil。
+func (m *Manager) orchestrationEnv(tab *Tab, base map[string]string) map[string]string {
+	if tab.Spec.Group == "" || tab.Spec.Bot == "" {
+		return nil
+	}
+	m.profileMu.RLock()
+	fn, bin := m.botEnv, m.bgBin
+	m.profileMu.RUnlock()
+	if fn == nil {
+		return nil
+	}
+	out := fn(tab.ID, tab.Spec.Group, tab.Spec.Bot)
+	if out == nil {
+		return nil
+	}
+	if bin != "" {
+		path := base["PATH"]
+		if path == "" {
+			path = os.Getenv("PATH")
+		}
+		out["PATH"] = bin + string(os.PathListSeparator) + path
+	}
+	return out
 }
 
 // SetBotConfig 由组合根注入：Bot Group 成员格每次起来时现查它的角色配置
@@ -246,6 +286,12 @@ func (m *Manager) Drop(id int) {
 	}
 	delete(m.tabs, id)
 	m.mu.Unlock()
+	m.profileMu.RLock()
+	closed := m.closedHook
+	m.profileMu.RUnlock()
+	if closed != nil {
+		closed(id) // 成员格关了：口令作废
+	}
 	// 转录认领是 agent 包的进程内状态（agy/cursor 没有会话 id，只能按文件认）。
 	// 放掉之后，冷恢复的下一格才能接上同一个文件。
 	agent.ReleaseTranscripts(id)
@@ -546,6 +592,9 @@ func (m *Manager) SetStatus(id int, st string) (string, bool) {
 	}
 	prev := h.status
 	h.status = st
+	if hook := m.statusHook; hook != nil {
+		go hook(id, prev, st) // 锁外、异步：协调器要读账本、可能推消息
+	}
 	return prev, true
 }
 

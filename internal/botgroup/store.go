@@ -54,6 +54,12 @@ type Bot struct {
 	Effort       string `json:"effort,omitempty"`
 	Permission   string `json:"permission,omitempty"` // "" | read-only | workspace-write | full-access
 	Folder       string `json:"folder,omitempty"`     // 空 = 组的项目目录
+	// C 阶段（编排）：
+	// Circles 是它在纯调度模式下加入的记忆圈（共享记忆模式下全组一个圈，不看这个）；
+	// Worktree 是 Perch 给它建的 git worktree（空 = 没建：不是 git 仓库 / 只读 / Manager / 自定义了文件夹）。
+	Circles  []string `json:"circles,omitempty"`
+	Worktree string   `json:"worktree,omitempty"`
+	Branch   string   `json:"branch,omitempty"`
 }
 
 // Group 是一个 Bot Group。
@@ -67,6 +73,11 @@ type Group struct {
 	CreatedAt string `json:"createdAt"`
 	Brief     string `json:"brief,omitempty"`  // 共享记忆文件的路径
 	Budget    int    `json:"budget,omitempty"` // 预算上限（k tokens）；0 = 默认 DefaultBudget
+	// C 阶段（编排）：记忆模式（"" / shared = 全组一个圈；dispatch = 纯调度，默认不共享）、
+	// 全部暂停、每个 Bot 一个 git worktree。
+	MemoryMode string `json:"memoryMode,omitempty"`
+	Paused     bool   `json:"paused,omitempty"`
+	Worktrees  bool   `json:"worktrees,omitempty"`
 }
 
 // Event 是过程流里的一条。ID 在组内单调递增。
@@ -84,6 +95,8 @@ var EventKinds = map[string]bool{
 	"created": true, "started": true, "working": true, "waiting": true, "idle": true,
 	"stopped": true, "msg": true, "handoff": true, "artifact": true, "commit": true,
 	"test": true, "fail": true, "retry": true, "review": true, "approval": true, "memory": true,
+	// C 阶段：交回 / 被拦 / 暂停 / 恢复
+	"return": true, "blocked": true, "paused": true, "resumed": true,
 }
 
 type file struct {
@@ -183,6 +196,8 @@ func (s *Store) Create(in CreateInput) (Group, error) {
 	if g.Budget <= 0 {
 		g.Budget = DefaultBudget
 	}
+	// 新建的组：项目是 git 仓库就默认每个 Bot 一个 worktree（不互相踩）。
+	g.Worktrees = IsGitRepo(proj)
 	mgr := Bot{ID: "manager", Role: "Manager", Manager: true, CreatedAt: now}
 	if in.SourcePane > 0 {
 		if in.SourceAgent == "" {
@@ -644,3 +659,111 @@ func (s *Store) RemoveBot(gid, botID string) (Bot, error) {
 	}
 	return Bot{}, fmt.Errorf("找不到组 %s", gid)
 }
+
+// ---- C 阶段：组设置、单个组 / Bot 的读取 ----
+
+// Get 返回一个组的拷贝。
+func (s *Store) Get(gid string) (Group, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, g := range s.f.Groups {
+		if g.ID == gid {
+			g.Bots = append([]Bot(nil), g.Bots...)
+			return g, true
+		}
+	}
+	return Group{}, false
+}
+
+// GroupPatch 是组设置的一次修改：nil = 这一项不动。
+type GroupPatch struct {
+	MemoryMode *string `json:"memoryMode,omitempty"`
+	Paused     *bool   `json:"paused,omitempty"`
+	Worktrees  *bool   `json:"worktrees,omitempty"`
+	Budget     *int    `json:"budget,omitempty"`
+}
+
+// UpdateGroup 改组设置（记忆模式 / 全部暂停 / worktree / 预算）。
+func (s *Store) UpdateGroup(gid string, p GroupPatch) (Group, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken {
+		return Group{}, fmt.Errorf("botgroups.json 解析失败，为了不覆盖它，这次没有保存")
+	}
+	for gi := range s.f.Groups {
+		g := &s.f.Groups[gi]
+		if g.ID != gid {
+			continue
+		}
+		old := *g
+		if p.MemoryMode != nil {
+			switch *p.MemoryMode {
+			case "", "shared", "dispatch":
+				g.MemoryMode = *p.MemoryMode
+			default:
+				return Group{}, fmt.Errorf("不认识的记忆模式：%s", *p.MemoryMode)
+			}
+		}
+		if p.Paused != nil {
+			g.Paused = *p.Paused
+		}
+		if p.Worktrees != nil {
+			g.Worktrees = *p.Worktrees
+		}
+		if p.Budget != nil && *p.Budget > 0 {
+			g.Budget = *p.Budget
+		}
+		if err := s.saveLocked(); err != nil {
+			*g = old
+			return Group{}, err
+		}
+		out := *g
+		out.Bots = append([]Bot(nil), g.Bots...)
+		return out, nil
+	}
+	return Group{}, fmt.Errorf("找不到组 %s", gid)
+}
+
+// SetWorktree 记下 Perch 给某个 Bot 建好的 worktree（空 = 清掉）。
+func (s *Store) SetWorktree(gid, botID, path, branch string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for gi := range s.f.Groups {
+		g := &s.f.Groups[gi]
+		if g.ID != gid {
+			continue
+		}
+		for bi := range g.Bots {
+			if g.Bots[bi].ID == botID {
+				g.Bots[bi].Worktree, g.Bots[bi].Branch = path, branch
+				return s.saveLocked()
+			}
+		}
+	}
+	return fmt.Errorf("找不到 %s/%s", gid, botID)
+}
+
+// SetCircles 改一个 Bot 加入的记忆圈（纯调度模式下用）。
+func (s *Store) SetCircles(gid, botID string, circles []string) (Bot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for gi := range s.f.Groups {
+		g := &s.f.Groups[gi]
+		if g.ID != gid {
+			continue
+		}
+		for bi := range g.Bots {
+			if g.Bots[bi].ID == botID {
+				g.Bots[bi].Circles = append([]string(nil), circles...)
+				if err := s.saveLocked(); err != nil {
+					return Bot{}, err
+				}
+				return g.Bots[bi], nil
+			}
+		}
+	}
+	return Bot{}, fmt.Errorf("找不到 %s/%s", gid, botID)
+}
+
+// Dir 是 Perch 数据目录（任务账本和事件流放在它下面）；空 = 只活在内存里。
+func (s *Store) Dir() string { return s.dir }
