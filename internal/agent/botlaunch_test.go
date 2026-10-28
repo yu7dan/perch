@@ -19,9 +19,17 @@ func TestBotLaunch(t *testing.T) {
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("codex args = %v", args)
 	}
-	env, args = BotLaunch("pi", BotConfig{Model: "x", Permission: "read-only"})
+	_, args = BotLaunch("opencode", BotConfig{Model: "anthropic/claude-sonnet-4", Effort: "high", Permission: "full-access"})
+	if !reflect.DeepEqual(args, []string{"-m", "anthropic/claude-sonnet-4", "--auto"}) {
+		t.Fatalf("opencode args = %v", args)
+	}
+	_, args = BotLaunch("pi", BotConfig{Model: "x", Effort: "high", Permission: "read-only"})
+	if !reflect.DeepEqual(args, []string{"--model", "x", "--thinking", "high", "--tools", "read,grep,find,ls"}) {
+		t.Fatalf("pi args = %v", args)
+	}
+	env, args = BotLaunch("qoder", BotConfig{Model: "x", Permission: "read-only"})
 	if len(env) != 0 || len(args) != 0 {
-		t.Fatalf("pi should get nothing, got %v %v", env, args)
+		t.Fatalf("qoder should get nothing, got %v %v", env, args)
 	}
 	if env, args := BotLaunch("claude", BotConfig{}); len(env) != 0 || len(args) != 0 {
 		t.Fatalf("empty config should inject nothing, got %v %v", env, args)

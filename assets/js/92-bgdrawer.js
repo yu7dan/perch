@@ -9,7 +9,15 @@
    模型 / 强度 / 权限只有 Claude、Codex 有按格设的口子（Go：agent.BotLaunch），别的 agent 那几项做灰。
    要重启才生效的项（agent / 模型 / 强度 / 权限 / 文件夹）存完挂一条「下次启动生效」，空闲时可以立刻重启。 */
 
-const BG_CFG_AGENTS = new Set(["claude", "codex"]);
+/* 每个 agent 能按角色设的项（m 模型 / e 强度 / p 权限；Go：agent.BotLaunch，两边一起改）。
+   pAsk=false：这个 agent 本来就不问（Pi），工作区 = 完全访问，只有「只读」真有区别。 */
+const BG_CFG_CAPS = {
+  claude: { m: true, e: true, p: true, pAsk: true },
+  codex: { m: true, e: true, p: true, pAsk: true },
+  opencode: { m: true, e: false, p: true, pAsk: true, mHint: "provider/model" },
+  pi: { m: true, e: true, p: true, pAsk: false },
+};
+function bgdCan(agent, k) { const c = BG_CFG_CAPS[agent]; return !!(c && c[k]); }
 const BG_CLAUDE_ALIASES = ["opus", "sonnet", "haiku"];
 const BG_PERMS = [["read-only", "bg.d.perm.ro"], ["workspace-write", "bg.d.perm.ws"], ["full-access", "bg.d.perm.full"]];
 const BGD_W_KEY = "perch.bg.drawerW";
@@ -172,7 +180,7 @@ function bgdIdHTML(g, b) {
     : b.manager
       ? `<span class="bgd-name static">${esc(bgdName(b))}</span>`
       : `<button type="button" class="bgd-name" data-bgd-act="rename" title="${esc(t("bg.d.rename"))}">${esc(bgdName(b))}</button>`;
-  return `<div class="bgd-id">${bgdAvatar(g, b, 64)}${name}`
+  return `<div class="bgd-id">${bgdAvatar(g, b, 48)}${name}`
     + `<span class="bgd-role">${esc(bgAgentName(b.agent))}${model ? " · " + esc(model) : ""}</span>`
     + `<span class="bgd-st" data-state="${esc(st)}">${bgDot(st)}<span class="ell">${esc(t(BG_STATE_KEY[st]))}${task ? " · " + esc(task) : ""}</span></span>`
     + `</div>`;
@@ -192,16 +200,19 @@ function bgdTrigger(act, name, sub, opts) {
     + `<span class="bgd-caret">${bgdIco("down", 14)}</span></button>`;
 }
 function bgdPermHTML(b) {
-  const ok = BG_CFG_AGENTS.has(b.agent);
+  const ok = bgdCan(b.agent, "p");
+  const noAsk = ok && !BG_CFG_CAPS[b.agent].pAsk;
   const cur = b.permission || "";
   return `<div class="bgd-seg${ok ? "" : " grey"}" role="group" aria-label="${esc(t("bg.d.sec.perm"))}"${ok ? "" : ` title="${esc(t("bg.d.unsupported", { agent: bgAgentName(b.agent) }))}"`}>`
     + BG_PERMS.map(([v, k]) => `<button type="button" data-bgd-perm="${esc(v)}" aria-pressed="${ok && cur === v}"${v === "full-access" ? ` class="danger"` : ""}>${esc(t(k))}</button>`).join("")
     + `</div>`
-    + `<div class="bgd-note">${esc(ok ? (cur ? t("bg.d.perm.note." + cur) : t("bg.d.perm.follow")) : t("bg.d.unsupported", { agent: bgAgentName(b.agent) }))}</div>`;
+    + `<div class="bgd-note">${esc(!ok ? t("bg.d.unsupported", { agent: bgAgentName(b.agent) })
+      : noAsk && cur !== "read-only" ? t("bg.d.perm.noAsk", { agent: bgAgentName(b.agent) })
+      : cur ? t("bg.d.perm.note." + cur) : t("bg.d.perm.follow"))}</div>`;
 }
 function bgdOverviewHTML(g, b) {
   const ml = bgdModelLabel(g, b);
-  const ok = BG_CFG_AGENTS.has(b.agent);
+  const ok = bgdCan(b.agent, "m");
   const folder = bgdFolder(g, b);
   const stats = bgdStats(g, b);
   const d = bgDerive(g, b);
@@ -241,7 +252,7 @@ function bgdInput(field, value, ph, opts) {
     : `<input class="bgd-in" data-bgd-field="${esc(field)}" spellcheck="false" maxlength="${opts.max || 60}" placeholder="${esc(ph || "")}" value="${esc(value || "")}">`;
 }
 function bgdEffortHTML(b) {
-  const ok = BG_CFG_AGENTS.has(b.agent);
+  const ok = bgdCan(b.agent, "e");
   const efforts = (typeof PROV !== "undefined" && PROV.efforts && PROV.efforts.length) ? PROV.efforts : ["low", "medium", "high", "max"];
   const cur = b.effort || "";
   return `<div class="bgd-seg sm${ok ? "" : " grey"}" role="group"${ok ? "" : ` title="${esc(t("bg.d.unsupported", { agent: bgAgentName(b.agent) }))}"`}>`
@@ -251,7 +262,7 @@ function bgdEffortHTML(b) {
 }
 function bgdSettingsHTML(g, b) {
   const ml = bgdModelLabel(g, b);
-  const ok = BG_CFG_AGENTS.has(b.agent);
+  const ok = bgdCan(b.agent, "m");
   const folder = bgdFolder(g, b);
   const lockAgent = b.manager && g.source && g.source.kind === "derived";
   const manage = bgdCard(t("bg.d.card.manage"),
@@ -262,7 +273,7 @@ function bgdSettingsHTML(g, b) {
     + `<button type="button" class="bgd-icon" data-bgd-act="close" aria-label="${esc(t("bg.d.close"))}" title="${esc(t("bg.d.close"))}">${bgdIco("x", 15)}</button></div>`
     + `<div class="bgd-body set">`
     +   bgdRestartHTML(g, b)
-    +   `<div class="bgd-hero">${bgdAvatar(g, b, 52)}<span class="bgd-who"><span class="bgd-hname ell">${esc(bgdName(b))}</span><span class="bgd-hsub ell">${esc(g.name)} · ${esc(b.manager ? t("bg.d.mgrSub") : (b.task || t("bg.d.botSub")))}</span></span></div>`
+    +   `<div class="bgd-hero">${bgdAvatar(g, b, 40)}<span class="bgd-who"><span class="bgd-hname ell">${esc(bgdName(b))}</span><span class="bgd-hsub ell">${esc(g.name)} · ${esc(b.manager ? t("bg.d.mgrSub") : (b.task || t("bg.d.botSub")))}</span></span></div>`
     +   bgdCard(t("bg.d.card.profile"),
           (b.manager ? bgdRow(t("bg.d.f.name"), t("bg.d.mgrFixed"), `<span class="bgd-val">Manager</span>`)
                      : bgdRow(t("bg.d.f.name"), "", bgdInput("role", b.role, t("bg.d.ph.name"), { max: 24 })))
@@ -383,7 +394,7 @@ function bgdMenu(kind, anchor) {
       html += models.slice(0, 40).map((m) => item(m, m, "", b.model === m)).join("");
     }
     if (b.model && !models.includes(b.model)) html += item(b.model, b.model, t("bg.d.model.custom"), true);
-    html += `<div class="bgd-mg">${esc(t("bg.d.model.customHead"))}</div><input class="bgd-pop-in" id="bgd-pop-in" spellcheck="false" placeholder="${esc(t("bg.d.model.customPh"))}">`;
+    html += `<div class="bgd-mg">${esc(t("bg.d.model.customHead"))}</div><input class="bgd-pop-in" id="bgd-pop-in" spellcheck="false" placeholder="${esc(BG_CFG_CAPS[b.agent] && BG_CFG_CAPS[b.agent].mHint ? t("bg.d.model.customPhFmt", { fmt: BG_CFG_CAPS[b.agent].mHint }) : t("bg.d.model.customPh"))}">`;
   } else if (kind === "agent") {
     html += bgLaunchable().map((a) => item(a.id, a.name || a.id, "", a.id === b.agent, `<span class="bgd-mi-ico">${bgAgentIco(a.id)}</span>`)).join("");
     html += `<div class="bgd-mnote">${esc(t("bg.d.agentNote"))}</div>`;
@@ -451,14 +462,14 @@ function bgdBind(wrap) {
     if (!g || !b) return;
     const perm = e.target.closest("[data-bgd-perm]");
     if (perm) {
-      if (!BG_CFG_AGENTS.has(b.agent)) return;
+      if (!bgdCan(b.agent, "p")) return;
       const v = perm.dataset.bgdPerm;
       bgdSave(g, b, { permission: v === (b.permission || "") ? "" : v }, "权限");
       return;
     }
     const eff = e.target.closest("[data-bgd-effort]");
     if (eff) {
-      if (!BG_CFG_AGENTS.has(b.agent)) return;
+      if (!bgdCan(b.agent, "e")) return;
       if (eff.dataset.bgdEffort !== (b.effort || "")) bgdSave(g, b, { effort: eff.dataset.bgdEffort }, "强度");
       return;
     }
@@ -473,7 +484,7 @@ function bgdBind(wrap) {
     else if (act === "restart") bgdRestart(g, b);
     else if (act === "brief") { if (g.brief) sendCtrl({ type: "open", mode: "open", path: g.brief }); }
     else if (act === "model") {
-      if (!BG_CFG_AGENTS.has(b.agent)) { showToast(t("bg.d.unsupported", { agent: bgAgentName(b.agent) }), "", "info"); return; }
+      if (!bgdCan(b.agent, "m")) { showToast(t("bg.d.unsupported", { agent: bgAgentName(b.agent) }), "", "info"); return; }
       bgdMenu("model", a);
     }
     else if (act === "agent") bgdMenu("agent", a);

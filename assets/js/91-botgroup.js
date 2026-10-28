@@ -406,7 +406,7 @@ function bgListHTML() {
 function bgChip(c, laneColor) {
   const cls = "bg-chip" + (c.cur ? " cur" : "") + (c.dim ? " dim" : "") + (c.you ? " you" : "");
   const ico = c.you ? `<span class="bg-ci">${bgIco("user", 12)}</span>` : `<span class="bg-ci">${bgAgentIco(c.agent)}</span>`;
-  return `<span class="${cls}" style="--lane:${laneColor}">${ico}<span>${esc(c.who)}</span>${c.ok ? `<span class="bg-ok">✓</span>` : ""}</span>`;
+  return `<span class="${cls}"${c.ck ? ` data-ck="${c.ck}"` : ""} style="--lane:${laneColor}">${ico}<span>${esc(c.who)}</span>${c.ok ? `<span class="bg-ok">✓</span>` : ""}</span>`;
 }
 /* 每条车道的交接链：Manager 把活交给这个 Bot；它卡在等你时链尾是「你」。
    ✓ = 这一段做完了；描边高亮 = 当前在谁手上；虚线 = 还没轮到。 */
@@ -419,10 +419,10 @@ function bgChainHTML(g) {
     const did = bgDerive(g, b).items.some((x) => x.type === "proc" || x.type === "text");
     const chips = [];
     const fromYou = bgDerive(g, b).items.some((x) => x.type === "prompt");
-    if (fromYou) chips.push(bgChip({ who: t("bg.chain.you"), you: true, ok: true }, color));
-    else if (mgr) chips.push(bgChip({ who: "Manager", agent: mgr.agent, ok: true }, color));
-    chips.push(bgChip({ who: bgAgentName(b.agent), agent: b.agent, cur: st === "working", ok: did && st !== "working" && st !== "waiting", dim: st === "pending" }, color));
-    if (st === "waiting") chips.push(bgChip({ who: t("bg.chain.you"), you: true, cur: true }, color));
+    if (fromYou) chips.push(bgChip({ who: t("bg.chain.you"), you: true, ok: true, ck: "src" }, color));
+    else if (mgr) chips.push(bgChip({ who: "Manager", agent: mgr.agent, ok: true, ck: "src" }, color));
+    chips.push(bgChip({ ck: "agent", who: bgAgentName(b.agent), agent: b.agent, cur: st === "working", ok: did && st !== "working" && st !== "waiting", dim: st === "pending" }, color));
+    if (st === "waiting") chips.push(bgChip({ who: t("bg.chain.you"), you: true, cur: true, ck: "you" }, color));
     return `<div class="bg-chain-row" data-bg-focus="${esc(b.id)}">`
       + `<span class="bg-lane-l" style="--lane:${color}"><i></i>${esc(b.role)}</span>`
       + `<span class="bg-chips">${chips.join(`<span class="bg-arrow">→</span>`)}</span></div>`;
@@ -1225,17 +1225,23 @@ function bgPickGroup(gid) {
   try { localStorage.setItem("perch.bg.group", BG.group); } catch (_) {}
 }
 
-/* ---------- 动效（第 2 步，2026-10-28；效果以桌面参考视频为准，节点长出的手感参考 LayerFS） ----------
-   1. 聚焦：选中 / 变淡只切类，不重画 —— 元素还是那几个，CSS 过渡才动得起来
-      （以前聚焦一换就整块 innerHTML，变淡是"啪"一下）。
-   2. 连线：鼠标停在过程流的一行上（或者刚展开一行），从这一行拉一条曲线到工作树里对应的节点，
-      节点套一圈环；反过来停在节点上也一样。「正在处理 / 等你确认」那一行连到车道末尾的节点。
-      曲线是描出来的（stroke-dashoffset），不是一下子出现。
-   3. 节点长出：工作树里新出现的节点从 0 弹到 1（带一点过冲），标签随后淡入；第一次画不弹。
-   4. 行进场：过程流里新出现的行轻轻上浮淡入；第一次画、切会话时不逐行进场（整块淡入）。 */
+/* ---------- 动效（2026-10-28 重做；照桌面参考视频逐帧对的） ----------
+   参考视频里三块区域是靠「事件」串起来的，不是靠鼠标：
+   1. 光迹：某条车道出了一件新事（交接 / 产物 / 提交 / 测试 / 等你 …），一道车道色的光
+      （亮头 + 渐隐的尾巴）从顶部交接链里这条车道的芯片出发，弯下来扎进过程流里新出现的那一行
+      （这一行同时被框亮），沿着这一行划过去，再拐进右边工作树这条车道，到达时新节点才弹出来。
+      交接时先从上一个芯片划一道弧到下一个芯片（下一个芯片亮起），再往下走。
+      卡在等你时：从 agent 芯片划到链尾的「你」，再落到「等你确认」那一行和车道末尾的节点。
+   2. 悬停：只做强调 —— 行框亮、工作树上对应的节点套一圈环；不拉线（视频里悬停没有线）。
+   3. 聚焦：选中 / 变淡只切类，不重画（交接链、工作树一起变淡）。
+   4. 节点长出 / 行进场：没有光迹可走时（第一次画、切会话、节点不在可视区）直接弹出 / 上浮。
+   光迹只在看得见的地方走：起点 / 中段 / 终点哪个不在可视区就跳过那一段；抽屉开着时工作树被盖住，
+   光迹到这一行的右边就停（绝不画进抽屉）。 */
 const BG_SEEN = new Map();      // gid → Set(工作树节点 key)
 const BG_ROWS_SEEN = new Map(); // gid|focus → Set(过程流行 key)
-const BGL = { hover: "", open: "", drawn: "" };
+const BG_LANE_ST = new Map();   // gid:bot → 上一次的车道状态（等你的那一刻要走一道光）
+const BGL = { hover: "", open: "" };
+const BGF = { await: new Set(), live: 0, queue: [] };
 
 function bgApplyFocus(g, switched) {
   const root = $("bg");
@@ -1261,21 +1267,9 @@ function bgApplyFocus(g, switched) {
 
 function bgMotionAfterRender(g, switched) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  // 节点长出
-  const seen = BG_SEEN.get(g.id);
-  const nodes = [...document.querySelectorAll("#bg-tscroll g[data-bg-node]")];
-  if (!seen) BG_SEEN.set(g.id, new Set(nodes.map((n) => n.dataset.bgNode)));
-  else {
-    for (const n of nodes) {
-      const k = n.dataset.bgNode;
-      if (seen.has(k)) continue;
-      seen.add(k);
-      if (!reduce) n.classList.add("pop");
-    }
-  }
   // 行进场
   const rk = g.id + "|" + BG.focus;
-  const rows = [...document.querySelectorAll("#bg-feed-list > [data-bg-ev], #bg-live > [data-bg-ev]")];
+  const rows = [...document.querySelectorAll("#bg-feed-list > [data-bg-ev], #bg-live > [data-bg-ev], #bg-cards > [data-bg-ev]")];
   const rs = BG_ROWS_SEEN.get(rk);
   if (!rs || switched) BG_ROWS_SEEN.set(rk, new Set(rows.map((r) => r.dataset.bgEv)));
   else {
@@ -1286,70 +1280,229 @@ function bgMotionAfterRender(g, switched) {
       if (!reduce) r.classList.add("enter");
     }
   }
-  bgLinkDraw(false);
+  // 新节点：有路可走就排一道光，到了再弹出来；没有就直接弹
+  const seen = BG_SEEN.get(g.id);
+  const nodes = [...document.querySelectorAll("#bg-tscroll g[data-bg-node]")];
+  const first = !seen;
+  if (first) BG_SEEN.set(g.id, new Set(nodes.map((n) => n.dataset.bgNode)));
+  else {
+    let n = 0;
+    for (const el of nodes) {
+      const k = el.dataset.bgNode;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      if (reduce) continue;
+      const it = bgFlowItem(g, k);
+      if (it && it.kind !== "dot" && n < 6) { n++; BGF.await.add(k); bgFlowQueue({ g, key: k, lane: it.lane, kind: it.kind }); }
+      else el.classList.add("pop");
+    }
+  }
+  // 等你：agent → 你 → 等你确认那一行 → 车道末尾
+  for (const b of bgLanes(g)) {
+    const sk = g.id + ":" + b.id, now = bgBotState(b), was = BG_LANE_ST.get(sk);
+    BG_LANE_ST.set(sk, now);
+    if (!first && !reduce && was && was !== "waiting" && now === "waiting") bgFlowQueue({ g, key: sk + ":tail", lane: b.id, kind: "approval" });
+  }
+  // 重画会换掉节点元素：还在等光到的那几个重新藏起来
+  for (const k of BGF.await) {
+    const el = document.querySelector(`#bg-tscroll g[data-bg-node="${CSS.escape(k)}"]`);
+    if (el) el.classList.add("await");
+  }
+  bgHoverApply();
+}
+function bgFlowItem(g, key) {
+  const [, bid, ...rest] = key.split(":");
+  const b = bgBot(g, bid);
+  if (!b) return null;
+  const id = rest.join(":");
+  return bgDerive(g, b).items.find((x) => x.id === id) || null;
 }
 
-/* 连线：目标 = 鼠标停着的那一行 / 节点，没有就用最近展开的那一行。 */
-function bgLinkKey() { return BGL.hover || BGL.open || ""; }
-function bgLinkLayer() {
-  let svg = $("bg-link");
+/* ---------- 光迹 ---------- */
+function bgFlowLayer() {
+  let svg = $("bg-flow");
   const root = $("bg");
   if (!svg && root) {
     svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.id = "bg-link";
+    svg.id = "bg-flow";
     svg.setAttribute("aria-hidden", "true");
     root.appendChild(svg);
   }
   return svg;
 }
-function bgLinkClear() {
-  const svg = $("bg-link");
-  if (svg) svg.innerHTML = "";
-  document.querySelectorAll("#bg .bg-ev.linked").forEach((el) => el.classList.remove("linked"));
-  document.querySelectorAll("#bg-tscroll g.hl").forEach((el) => el.classList.remove("hl"));
-  BGL.drawn = "";
+function bgFlowQueue(job) {
+  BGF.queue.push(job);
+  bgFlowPump();
 }
-function bgLinkDraw(animate) {
-  const key = bgLinkKey();
+function bgFlowPump() {
+  while (BGF.live < 2 && BGF.queue.length) {
+    const job = BGF.queue.shift();
+    BGF.live++;
+    setTimeout(() => bgFlowRun(job).finally(() => { BGF.live--; bgFlowPump(); }), BGF.live > 1 ? 260 : 0);
+  }
+}
+const bgVis = (r, box) => r && r.width > 0 && r.bottom > box.top + 4 && r.top < box.bottom - 4 && r.right > box.left && r.left < box.right;
+function bgFlowPoints(g, job) {
   const root = $("bg");
-  if (!root || !document.body.classList.contains("botgroup")) return;
-  if (!key) { bgLinkClear(); return; }
-  const row = root.querySelector(`#bg-feed [data-bg-ev="${CSS.escape(key)}"]`);
-  const node = root.querySelector(`#bg-tscroll g[data-bg-node="${CSS.escape(key)}"]`);
-  document.querySelectorAll("#bg .bg-ev.linked").forEach((el) => { if (el !== row) el.classList.remove("linked"); });
-  document.querySelectorAll("#bg-tscroll g.hl").forEach((el) => { if (el !== node) el.classList.remove("hl"); });
+  const base = root.getBoundingClientRect();
+  const P = (x, y) => [x - base.left, y - base.top];
+  const chainRow = root.querySelector(`.bg-chain-row[data-bg-focus="${CSS.escape(job.lane)}"]`);
+  const chainBox = root.querySelector(".bg-chain") ? root.querySelector(".bg-chain").getBoundingClientRect() : null;
+  const chip = (ck) => {
+    const el = chainRow && chainRow.querySelector(`[data-ck="${ck}"]`);
+    const r = el && el.getBoundingClientRect();
+    return r && chainBox && bgVis(r, chainBox) ? { el, r } : null;
+  };
+  const feedBox = $("bg-feed") ? $("bg-feed").getBoundingClientRect() : null;
+  const rowEl = root.querySelector(`#bg-feed [data-bg-ev="${CSS.escape(job.key)}"]`);
+  const rowH = rowEl ? (rowEl.querySelector(".bg-ev-h") || rowEl) : null;
+  const rr = rowH && feedBox && bgVis(rowH.getBoundingClientRect(), feedBox) ? rowH.getBoundingClientRect() : null;
+  const tsBox = $("bg-tscroll") ? $("bg-tscroll").getBoundingClientRect() : null;
+  const nodeEl = root.querySelector(`#bg-tscroll g[data-bg-node="${CSS.escape(job.key)}"]`);
+  const shape = nodeEl ? (nodeEl.querySelector(":scope > :not(.bg-node-ring):not(text)") || nodeEl) : null;
+  const drawerOpen = root.classList.contains("bgd-on");
+  const nr = shape && tsBox && !drawerOpen && bgVis(shape.getBoundingClientRect(), tsBox) ? shape.getBoundingClientRect() : null;
+  return { P, chip, rowEl, rr, nodeEl, nr };
+}
+/* 一段曲线：竖着出发、横着到达（芯片往下扎进行里 / 行尾拐进工作树）。 */
+function bgCurve(a, b, mode) {
+  const [x1, y1] = a, [x2, y2] = b;
+  if (mode === "arc") {                 // 芯片 → 芯片：从上面划过去
+    const lift = Math.max(16, Math.abs(x2 - x1) * 0.28);
+    return `C ${x1.toFixed(1)} ${(y1 - lift).toFixed(1)}, ${x2.toFixed(1)} ${(y2 - lift).toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+  }
+  if (mode === "down") {                // 芯片 → 行头：先往下，再横着进
+    return `C ${x1.toFixed(1)} ${(y1 + (y2 - y1) * 0.75).toFixed(1)}, ${(x2 - Math.min(120, Math.abs(x2 - x1) * 0.5)).toFixed(1)} ${y2.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+  }
+  const dx = Math.max(50, (x2 - x1) * 0.45);  // 行尾 → 节点：横着出、横着进
+  return `C ${(x1 + dx).toFixed(1)} ${y1.toFixed(1)}, ${(x2 - dx).toFixed(1)} ${y2.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+}
+function bgPathLen(d) {
+  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  p.setAttribute("d", d);
+  const svg = bgFlowLayer();
+  svg.appendChild(p);
+  const L = p.getTotalLength();
+  p.remove();
+  return L;
+}
+/* 沿一条路径走一道光：三层同头的虚线（亮头 / 中段 / 长尾），头走到哪、尾巴就跟到哪。
+   events = [{at: 路径长度, fn}]：光头走到那里时触发（框亮那一行 / 弹出节点 / 点亮芯片）。 */
+function bgStreak(d, color, events) {
+  return new Promise((done) => {
+    const svg = bgFlowLayer();
+    if (!svg) { done(); return; }
+    const L = bgPathLen(d);
+    if (!(L > 4)) { events.forEach((e) => e.fn()); done(); return; }
+    const tail = Math.min(240, L * 0.55);
+    const dur = Math.max(520, Math.min(1150, L / 1.25));
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("class", "bg-streak");
+    g.style.color = color;
+    const layers = [[tail, 2.6, 0.22], [tail * 0.45, 2.8, 0.55], [Math.min(38, tail * 0.3), 3.4, 1]];
+    const anims = [];
+    for (const [seg, w, op] of layers) {
+      const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      p.setAttribute("d", d);
+      p.style.stroke = color;
+      p.setAttribute("stroke-width", w);
+      p.setAttribute("stroke-opacity", op);
+      p.style.strokeDasharray = `${seg} ${L + tail + 40}`;
+      p.style.strokeDashoffset = String(seg);
+      g.appendChild(p);
+      anims.push(p.animate([{ strokeDashoffset: seg }, { strokeDashoffset: seg - (L + tail) }], { duration: dur * (L + tail) / L, easing: "linear", fill: "forwards" }));
+    }
+    svg.appendChild(g);
+    const t0 = performance.now();
+    for (const e of events) setTimeout(e.fn, Math.max(0, (e.at / L) * dur));
+    anims[0].finished.catch(() => {}).then(() => { g.remove(); done(); });
+    // 页面换走了 / 被清掉：最多这么久也一定收尾
+    setTimeout(() => { if (g.isConnected) g.remove(); done(); }, dur * 2 + 400 + (performance.now() - t0));
+  });
+}
+function bgPopNode(key) {
+  BGF.await.delete(key);
+  const el = document.querySelector(`#bg-tscroll g[data-bg-node="${CSS.escape(key)}"]`);
+  if (!el) return;
+  el.classList.remove("await");
+  el.classList.remove("pop"); void el.getBoundingClientRect(); el.classList.add("pop");
+}
+function bgFlashRow(el) {
+  if (!el) return;
+  el.classList.remove("flow"); void el.offsetWidth; el.classList.add("flow");
+  setTimeout(() => el.classList.remove("flow"), 1500);
+}
+function bgPulseChip(el) {
+  if (!el) return;
+  el.classList.remove("pulse"); void el.offsetWidth; el.classList.add("pulse");
+  setTimeout(() => el.classList.remove("pulse"), 900);
+}
+async function bgFlowRun(job) {
+  const { g, key } = job;
+  const fallback = () => bgPopNode(key);
+  if (!document.body.classList.contains("botgroup") || BG.group !== g.id) { fallback(); return; }
+  const color = bgColor(g, job.lane);
+  let pts = bgFlowPoints(g, job);
+  // ① 交接：上一个芯片 → 这个 agent 的芯片（划一道弧，到了它亮起来）
+  if (job.kind === "handoff") {
+    const src = pts.chip("src"), dst = pts.chip("agent");
+    if (src && dst) {
+      const a = pts.P(src.r.left + src.r.width / 2, src.r.top + 2), b = pts.P(dst.r.left + dst.r.width / 2, dst.r.top + 2);
+      await bgStreak(`M ${a[0].toFixed(1)} ${a[1].toFixed(1)} ` + bgCurve(a, b, "arc"), color, []);
+      bgPulseChip(dst.el);
+      pts = bgFlowPoints(g, job);
+    }
+  }
+  // 等你：agent 芯片 → 链尾「你」
+  if (job.kind === "approval") {
+    const src = pts.chip("agent"), dst = pts.chip("you");
+    if (src && dst) {
+      const a = pts.P(src.r.left + src.r.width / 2, src.r.top + 2), b = pts.P(dst.r.left + dst.r.width / 2, dst.r.top + 2);
+      await bgStreak(`M ${a[0].toFixed(1)} ${a[1].toFixed(1)} ` + bgCurve(a, b, "arc"), "var(--bg-ask)", []);
+      bgPulseChip(dst.el);
+      pts = bgFlowPoints(g, job);
+    }
+  }
+  // ② 芯片 → 这一行 → 工作树节点
+  const from = pts.chip(job.kind === "approval" ? "you" : "agent");
+  const parts = [], events = [];
+  let cur = null, len = 0;
+  const seg = (d) => { parts.push(d); len = bgPathLen(parts.join(" ")); };
+  if (from) { cur = pts.P(from.r.left + from.r.width / 2, from.r.bottom - 1); parts.push(`M ${cur[0].toFixed(1)} ${cur[1].toFixed(1)}`); }
+  if (pts.rr) {
+    const inPt = pts.P(pts.rr.left + 10, pts.rr.top + pts.rr.height / 2), outPt = pts.P(pts.rr.right - 8, pts.rr.top + pts.rr.height / 2);
+    if (cur) seg(bgCurve(cur, inPt, "down")); else { parts.push(`M ${inPt[0].toFixed(1)} ${inPt[1].toFixed(1)}`); }
+    const rowEl = pts.rowEl;
+    events.push({ at: len, fn: () => bgFlashRow(rowEl) });
+    seg(`L ${outPt[0].toFixed(1)} ${outPt[1].toFixed(1)}`);
+    cur = outPt;
+  }
+  if (pts.nr && cur) {
+    const end = pts.P(pts.nr.left + pts.nr.width / 2, pts.nr.top + pts.nr.height / 2);
+    seg(pts.rr ? bgCurve(cur, end, "side") : bgCurve(cur, end, "down"));
+    events.push({ at: len, fn: () => bgPopNode(key) });
+  } else {
+    events.push({ at: len, fn: fallback });
+  }
+  if (parts.length < 2) { events.forEach((e) => e.fn()); return; }
+  await bgStreak(parts.join(" "), color, events);
+}
+
+/* ---------- 悬停：只做强调（行框亮 + 节点套环），不拉线 ---------- */
+function bgHoverApply() {
+  const key = BGL.hover || BGL.open || "";
+  const root = $("bg");
+  if (!root) return;
+  const row = key ? root.querySelector(`#bg-feed [data-bg-ev="${CSS.escape(key)}"]`) : null;
+  const node = key ? root.querySelector(`#bg-tscroll g[data-bg-node="${CSS.escape(key)}"]`) : null;
+  root.querySelectorAll(".bg-ev.linked").forEach((el) => { if (el !== row) el.classList.remove("linked"); });
+  root.querySelectorAll("#bg-tscroll g.hl").forEach((el) => { if (el !== node) el.classList.remove("hl"); });
   if (row) row.classList.add("linked");
   if (node) node.classList.add("hl");
-  const svg = bgLinkLayer();
-  if (!svg) return;
-  if (!row || !node) { svg.innerHTML = ""; BGL.drawn = ""; return; }
-  const base = root.getBoundingClientRect();
-  const feed = $("bg-feed").getBoundingClientRect(), ts = $("bg-tscroll").getBoundingClientRect();
-  const h = (row.querySelector(".bg-ev-h") || row).getBoundingClientRect();
-  const shape = node.querySelector(":scope > :not(.bg-node-ring)") || node;
-  const n = shape.getBoundingClientRect();
-  const y1 = h.top + h.height / 2, y2 = n.top + n.height / 2;
-  // 两头都要在各自的可视区里，否则不画（行被滚走 / 节点被滚走时不拉一条穿出去的线）
-  if (y1 < feed.top || y1 > feed.bottom || y2 < ts.top || y2 > ts.bottom) { svg.innerHTML = ""; BGL.drawn = ""; return; }
-  const x1 = h.right - base.left - 6, x2 = n.left - base.left + n.width / 2;
-  const a = y1 - base.top, b = y2 - base.top, dx = Math.max(60, (x2 - x1) * 0.5);
-  const color = getComputedStyle(row).getPropertyValue("--lane").trim() || "var(--bg-muted)";
-  const d = `M${x1.toFixed(1)} ${a.toFixed(1)} C ${(x1 + dx).toFixed(1)} ${a.toFixed(1)}, ${(x2 - dx).toFixed(1)} ${b.toFixed(1)}, ${x2.toFixed(1)} ${b.toFixed(1)}`;
-  const fresh = BGL.drawn !== key;
-  svg.innerHTML = `<path class="bg-link-path" d="${d}" stroke="${color}"/><circle class="bg-link-dot" cx="${x1.toFixed(1)}" cy="${a.toFixed(1)}" r="2.6" fill="${color}"/>`;
-  const p = svg.firstChild;
-  if (fresh && animate !== false && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    const len = p.getTotalLength();
-    p.style.strokeDasharray = `${len} ${len}`;
-    p.style.strokeDashoffset = String(len);
-    p.getBoundingClientRect();
-    p.style.transition = "stroke-dashoffset 420ms cubic-bezier(.2,.8,.2,1)";
-    p.style.strokeDashoffset = "0";
-  }
-  BGL.drawn = key;
 }
-/* 展开一行时把工作树滚到它的节点（平滑），滚完再画线。 */
+/* 展开一行时把工作树滚到它的节点（平滑）；抽屉盖着工作树时不滚。 */
 function bgRevealNode(key) {
+  if ($("bg") && $("bg").classList.contains("bgd-on")) return;
   const node = document.querySelector(`#bg-tscroll g[data-bg-node="${CSS.escape(key)}"]`);
   const ts = $("bg-tscroll");
   if (!node || !ts) return;
@@ -1366,10 +1519,9 @@ function bgRevealNode(key) {
       const k = el ? (el.dataset.bgEv || el.dataset.bgNode) : "";
       if (k === BGL.hover) return;
       BGL.hover = k;
-      bgLinkDraw(true);
+      bgHoverApply();
     });
-    root.addEventListener("mouseleave", () => { if (BGL.hover) { BGL.hover = ""; bgLinkDraw(true); } });
-    // 展开 / 收起一行：记成「最近展开的」，并把工作树滚到它的节点
+    root.addEventListener("mouseleave", () => { if (BGL.hover) { BGL.hover = ""; bgHoverApply(); } });
     root.addEventListener("click", (e) => {
       const h = e.target.closest(".bg-ev.has-body > .bg-ev-h");
       if (!h) return;
@@ -1377,13 +1529,9 @@ function bgRevealNode(key) {
       requestAnimationFrame(() => {
         BGL.open = BG.open.has(k) ? k : (BGL.open === k ? "" : BGL.open);
         if (BGL.open) bgRevealNode(BGL.open);
-        bgLinkDraw(true);
+        bgHoverApply();
       });
     }, true);
-    let raf = 0;
-    const redraw = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; bgLinkDraw(false); }); };
-    root.addEventListener("scroll", redraw, true);
-    window.addEventListener("resize", redraw);
   }
 }
 

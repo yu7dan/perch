@@ -354,12 +354,22 @@ textarea.bg-cin::placeholder{color:var(--bg-faint)}
 /* 新出现的行：上浮淡入 */
 #bg .bg-ev.enter{animation:bg-enter 260ms var(--ease-swift) both}
 @keyframes bg-enter{from{opacity:0;transform:translateY(5px)}}
-/* 被连上的那一行：淡淡的车道色底 */
-#bg .bg-ev.linked > .bg-ev-h{background:color-mix(in srgb,var(--lane) 9%,transparent)}
-/* 连线层 */
-#bg-link{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:8;overflow:visible}
-#bg-link .bg-link-path{fill:none;stroke-width:1.5;stroke-linecap:round;opacity:.85}
-#bg-link .bg-link-dot{opacity:.9}
+/* 悬停 / 展开的那一行：框亮 + 左边一道车道色（参考视频的悬停只有强调，没有线） */
+#bg .bg-ev.linked > .bg-ev-h{background:color-mix(in srgb,var(--lane) 8%,transparent);box-shadow:inset 2px 0 0 var(--lane)}
+/* 光迹经过的那一行：车道色描框，慢慢淡掉 */
+#bg .bg-ev.flow > .bg-ev-h{animation:bg-flow-row 1.4s var(--ease-out) both}
+@keyframes bg-flow-row{0%{box-shadow:inset 0 0 0 1.5px var(--lane),0 0 0 3px color-mix(in srgb,var(--lane) 16%,transparent);background:color-mix(in srgb,var(--lane) 7%,transparent)}
+  100%{box-shadow:inset 0 0 0 1.5px transparent,0 0 0 3px transparent;background:transparent}}
+/* 光迹层：亮头 + 渐隐尾巴，画在整页上，不挡点击 */
+#bg-flow{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:8;overflow:visible}
+#bg-flow .bg-streak path{fill:none;stroke-linecap:round}
+#bg-flow .bg-streak{filter:drop-shadow(0 0 3px currentColor)}
+/* 交接到的芯片：亮一下（环往外扩） */
+#bg .bg-chip.pulse{animation:bg-chip-pulse .8s var(--ease-out)}
+@keyframes bg-chip-pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--lane) 55%,transparent);transform:scale(1.04)}
+  100%{box-shadow:0 0 0 7px transparent;transform:none}}
+/* 等光到的节点先藏着 */
+#bg-tscroll g.await{opacity:0}
 /* 节点：被连上时套一圈环；新节点弹出来（带一点过冲），标签随后淡入 */
 #bg .bg-node-ring{fill:none;stroke-width:1.4;opacity:0;transition:opacity var(--dur-2) var(--ease-out)}
 #bg-tscroll g.hl .bg-node-ring{opacity:.7}
@@ -370,7 +380,7 @@ textarea.bg-cin::placeholder{color:var(--bg-faint)}
 @keyframes bg-pop{from{transform:scale(0)}to{transform:scale(1)}}
 @keyframes bg-fade{from{opacity:0}}
 @media (prefers-reduced-motion: reduce){
-  #bg .bg-ev.enter,#bg-feed-list.bg-swap,#bg-tscroll g.pop > *{animation:none}
+  #bg .bg-ev.enter,#bg-feed-list.bg-swap,#bg-tscroll g.pop > *,#bg .bg-ev.flow > .bg-ev-h,#bg .bg-chip.pulse{animation:none}
 }
 .bg-stage{display:inline-flex;align-items:center;gap:4px;margin-top:6px;height:20px;padding:0 7px;border-radius:6px;font-size:11px;
   color:var(--bg-ok);background:color-mix(in srgb,var(--bg-ok) 9%,transparent)}
@@ -427,9 +437,9 @@ textarea.bg-cin::placeholder{color:var(--bg-faint)}
 
 /* 身份 */
 .bgd-id{display:flex;flex-direction:column;align-items:center;padding:6px 16px 0;flex:none;min-width:0}
-.bgd-ava{width:var(--s);height:var(--s);flex:none;border-radius:50%;display:grid;place-items:center;
-  background:color-mix(in srgb,var(--lane) 12%,var(--bg-raise));box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--lane) 45%,transparent)}
-.bgd-ava>*{width:46%!important;height:46%!important}
+/* 头像就是 agent 的 logo 本身，不垫圆底（用户 2026-10-28）。 */
+.bgd-ava{width:var(--s);height:var(--s);flex:none;display:grid;place-items:center}
+.bgd-ava>*{width:100%!important;height:100%!important}
 .bgd-id>.bgd-ava{margin-bottom:14px}
 .bgd-name{font-size:17px;line-height:24px;font-weight:500;padding:0 6px;border-radius:6px;max-width:100%;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--bg-fg);cursor:text}
