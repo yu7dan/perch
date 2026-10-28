@@ -185,7 +185,9 @@ html:not(.theme-light) #bg .bg-badge{color:var(--lane);background:color-mix(in s
 .bg-th{display:flex;align-items:baseline;justify-content:space-between;padding:14px 14px 8px}
 .bg-th b{font-size:12.5px;font-weight:600}
 .bg-th span{font-size:11px;color:var(--bg-faint)}
-.bg-lts{display:grid;border-top:1px solid var(--bg-line);border-bottom:1px solid var(--bg-line)}
+.bg-ltsw{flex:none;overflow:hidden;border-top:1px solid var(--bg-line);border-bottom:1px solid var(--bg-line)}
+.bg-ltsw[hidden]{display:none}
+.bg-lts{display:grid}
 .bg-lt{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:8px 8px 7px;text-align:left;
   border-right:1px solid var(--bg-line2);min-width:0;position:relative}
 .bg-lt:last-child{border-right:0}
@@ -206,7 +208,7 @@ html:not(.theme-light) #bg .bg-badge{color:var(--lane);background:color-mix(in s
 .segs-mini button{height:22px;padding:0 8px;border-radius:5px;font-size:11px;color:var(--bg-muted)}
 .segs-mini button.on{background:var(--bg-fg);color:var(--bg-bg);font-weight:500}
 .bg-now{font-size:10.5px;color:var(--bg-faint)}
-.bg-tscroll{flex:1;min-height:0;overflow:auto;padding:0 0 0 2px}
+.bg-tscroll{flex:1;min-height:0;overflow:auto;padding:0 0 0 2px;scrollbar-width:thin}
 .bg-tree-svg{display:block}
 .bg-tree-svg text{font:10.5px var(--mono);fill:var(--bg-fg2)}
 .bg-tree-svg text.sub{font-size:9.5px;fill:var(--bg-faint)}
@@ -565,12 +567,14 @@ textarea.bg-cin::placeholder{color:var(--bg-faint)}
 }
 
 /* ---------- 车道多了：细轨 + 交接链两列（2026-10-28） ---------- */
-.bg-lt.rail{align-items:center;padding:8px 0 7px;gap:5px;min-width:0}
-.bg-lt.rail .bg-lt-n{justify-content:center}
-.bg-lt.rail .bg-lt-a{justify-content:center}
-.bg-lt.rail .bg-dot{margin-top:1px}
-#bg-tscroll .bg-rail-hit{fill:transparent;cursor:pointer}
-#bg-tscroll g.bg-rail:hover .bg-rail-hit{fill:var(--bg-hov)}
+/* 车道多了横着滚：车道头边缘渐隐，提示左右还有车道 */
+.bg-ltsw.ovf-r{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 32px),transparent)}
+.bg-ltsw.ovf-l{-webkit-mask-image:linear-gradient(to right,transparent,#000 32px);mask-image:linear-gradient(to right,transparent,#000 32px)}
+.bg-ltsw.ovf-l.ovf-r{-webkit-mask-image:linear-gradient(to right,transparent,#000 32px,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(to right,transparent,#000 32px,#000 calc(100% - 32px),transparent)}
+/* 光迹从这一行的芯片出发：这一行先亮一下（车道色），再淡掉 */
+#bg .bg-chain-row.flow{animation:bg-flow-chainrow 1.6s var(--ease-out)}
+@keyframes bg-flow-chainrow{0%{background:color-mix(in srgb,var(--lane) 15%,transparent);box-shadow:inset 2px 0 0 var(--lane)}
+  100%{background:transparent;box-shadow:inset 2px 0 0 transparent}}
 /* 交接链：一任务一行；一行放不下横着翻（滚轮），超过 4 行整块上下翻；名字不截短 */
 .bg-chain{max-height:calc(4 * 29px + 20px);overflow-y:auto;scrollbar-width:thin;overscroll-behavior:contain}
 .bg-chain-row{min-width:0;flex:none}

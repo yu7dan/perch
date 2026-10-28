@@ -424,7 +424,7 @@ function bgChainHTML(g) {
     else if (mgr) chips.push(bgChip({ who: "Manager", agent: mgr.agent, ok: true, ck: "src" }, color));
     chips.push(bgChip({ ck: "agent", who: bgAgentName(b.agent), agent: b.agent, cur: st === "working", ok: did && st !== "working" && st !== "waiting", dim: st === "pending" }, color));
     if (st === "waiting") chips.push(bgChip({ who: t("bg.chain.you"), you: true, cur: true, ck: "you" }, color));
-    return `<div class="bg-chain-row" data-bg-focus="${esc(b.id)}">`
+    return `<div class="bg-chain-row" data-bg-focus="${esc(b.id)}" style="--lane:${color}">`
       + `<span class="bg-lane-l" style="--lane:${color}"><i></i>${esc(b.role)}</span>`
       + `<span class="bg-chips">${chips.join(`<span class="bg-arrow">→</span>`)}</span></div>`;
   }).join("");
@@ -1013,51 +1013,32 @@ function bgFeedHeadHTML(g) {
     + bgTermBtn(b);
 }
 /* ---------- 右：工作树 · 泳道 ---------- */
-/* 任务进程里车道多了怎么排（2026-10-28）：右栏只有 352 宽，6 条车道平分每列只剩 56px，标签全被截成「Co…」。
-   做法：车道顺序永远不变（不跳来跳去）；放得下几列就展开几列（每列至少 BG_LANE_MIN，标签读得出来），
-   优先展开 聚焦的 → 等你的 → 在干活的；其余收成 BG_RAIL_W 宽的细轨 —— 只留竖线和节点小点，
-   并行的形态还在、光迹照样落得上去；悬停说是谁在干什么，点一下聚焦它（它随即展开）。
-   车道头跟着同一套宽度，收起的只留车道色点和 agent 图标。 */
-const BG_LANE_MIN = 104, BG_RAIL_W = 20;
-function bgLaneRank(b) {
-  if (BG.focus === b.id) return 0;
-  const s = bgBotState(b);
-  return s === "waiting" ? 1 : s === "working" ? 2 : 3;
-}
+/* 任务进程的车道一律完整显示，不收、不挤（用户 2026-10-28：压缩成细轨很难看）。
+   每列至少 BG_LANE_MIN：放得下就平分整列，放不下就横着滚（车道头和画布一起滚、边缘渐隐提示还有）；
+   哪条车道有动静，就先滚到那条再走光迹（bgRevealPlan）。BG_LAY 是这一帧的列位置，滚动时要量。 */
+const BG_LANE_MIN = 108;   // 3 条车道正好放满 352 宽的右栏（和 A 定稿一样），第 4 条起横着滚
+let BG_LAY = [];
 function bgLaneLayout(g, width) {
   const lanes = bgLanes(g);
-  if (!lanes.length) return [];
   const avail = Math.max(120, width - 16);
-  let full = lanes.length;
-  while (full > 1 && full * BG_LANE_MIN + (lanes.length - full) * BG_RAIL_W > avail) full--;
-  const open = new Set(lanes.map((b, i) => ({ b, i, r: bgLaneRank(b) }))
-    .sort((a, c) => a.r - c.r || a.i - c.i).slice(0, full).map((o) => o.b.id));
-  const colW = Math.floor((avail - (lanes.length - full) * BG_RAIL_W) / full);
-  let x = 0;
-  return lanes.map((b) => {
-    const w = open.has(b.id) ? colW : BG_RAIL_W;
-    const o = { b, left: x, w, open: open.has(b.id) };
-    x += w;
-    return o;
-  });
+  const colW = lanes.length ? Math.max(BG_LANE_MIN, Math.floor(avail / lanes.length)) : 0;
+  const out = lanes.map((b, i) => ({ b, left: i * colW, w: colW, open: true }));
+  out.total = colW * lanes.length;
+  return out;
 }
 function bgLaneTip(g, b) {
   const cur = bgCurrent(g, b);
   return [b.role, bgAgentName(b.agent), t(BG_STATE_KEY[bgBotState(b)]), cur ? cur.title : ""].filter(Boolean).join(" · ");
 }
 function bgLaneTabsHTML(g, lay) {
-  return lay.map(({ b, open }) => {
-    if (!open) {
-      return `<button type="button" class="bg-lt rail" data-bg-focus="${esc(b.id)}" style="--lane:${bgColor(g, b.id)}" title="${esc(bgLaneTip(g, b))}">`
-        + `<span class="bg-lt-n"><i></i></span><span class="bg-lt-a">${bgAgentIco(b.agent)}</span>${bgDot(bgBotState(b))}</button>`;
-    }
+  return lay.map(({ b }) => {
     const st = bgBotState(b);
     const d = bgDerive(g, b);
     const cur = bgCurrent(g, b);
     const pct = d.todo && d.todo.total ? Math.round(100 * d.todo.done / d.todo.total) : 0;
     const head = d.todo && d.todo.total ? `${d.todo.done}/${d.todo.total}` : t(BG_STATE_KEY[st]);
     const note = st === "waiting" ? t("bg.state.waiting") : (cur ? cur.title : "");
-    return `<button type="button" class="bg-lt" data-bg-focus="${esc(b.id)}" style="--lane:${bgColor(g, b.id)}">`
+    return `<button type="button" class="bg-lt" data-bg-focus="${esc(b.id)}" style="--lane:${bgColor(g, b.id)}" title="${esc(bgLaneTip(g, b))}">`
       + `<span class="bg-lt-n"><i></i>${esc(b.role)}</span>`
       + `<span class="bg-lt-a">${bgAgentIco(b.agent)}<span class="ell">${esc(bgAgentName(b.agent))}</span></span>`
       + `<span class="bg-lt-bar"><span style="width:${pct}%"></span></span>`
@@ -1095,9 +1076,9 @@ function bgTreeSVG(g, width, lay) {
       default: return `<circle cx="${x}" cy="${y}" r="3" fill="${c}"/>`;
     }
   };
-  lay.forEach(({ b, left, w, open }, li) => {
+  lay.forEach(({ b, left, w }, li) => {
     const c = bgColor(g, b.id);
-    const x = open ? left + x0 : left + BG_RAIL_W / 2 + 4;
+    const x = left + x0;
     const right = li === lay.length - 1 ? width - 4 : left + x0 + w - 20;
     const st = bgBotState(b);
     const agent = bgAgentName(b.agent);
@@ -1124,27 +1105,6 @@ function bgTreeSVG(g, width, lay) {
     // 竖线：实线贯穿已发生的部分，末尾那段（正在处理 / 等你）是虚线
     const y1 = shown.length ? shown[0].cy : (tail ? tail.cy : top);
     const y2 = shown.length ? shown[shown.length - 1].cy : y1;
-    if (!open) {
-      // 细轨：同样的节点位置（光迹照样落得上去），只是不写字；整条可点 = 聚焦它
-      parts.push(`<g data-lane="${esc(b.id)}" class="bg-rail"><title>${esc(bgLaneTip(g, b))}</title>`
-        + `<rect class="bg-rail-hit" data-bg-focus="${esc(b.id)}" x="${left + 2}" y="0" width="${BG_RAIL_W}" height="4000"/>`);
-      if (shown.length > 1) parts.push(`<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="${c}" stroke-width="1.6"/>`);
-      if (tail) parts.push(`<line x1="${x}" y1="${shown.length ? y2 : top - 10}" x2="${x}" y2="${shown.length ? tail.cy : tail.cy + 30}" stroke="${c}" stroke-width="1.6" stroke-dasharray="3 3" opacity=".85"/>`);
-      parts.push(`</g>`);
-      shown.forEach((e) => {
-        const key = esc(g.id + ":" + b.id + ":" + e.it.id);
-        const bad = e.it.kind === "fail";
-        parts.push(`<g data-lane="${esc(b.id)}" data-bg-node="${key}"><circle class="bg-node-ring" cx="${x}" cy="${e.cy}" r="7" stroke="${c}"/>`
-          + `<circle cx="${x}" cy="${e.cy}" r="${e.dot ? 1.8 : 3.2}" fill="${bad ? "var(--bg-bad)" : c}"/></g>`);
-      });
-      if (tail) {
-        parts.push(`<g data-lane="${esc(b.id)}" data-bg-node="${esc(g.id + ":" + b.id + ":tail")}"><circle class="bg-node-ring" cx="${x}" cy="${tail.cy}" r="7" stroke="${c}"/>`
-          + (tail.kind === "approval" ? `<circle cx="${x}" cy="${tail.cy}" r="4.2" fill="var(--bg-panel)" stroke="var(--bg-ask)" stroke-width="2"/>`
-            : `<circle cx="${x}" cy="${tail.cy}" r="3.6" fill="var(--bg-panel)" stroke="${tail.kind === "idle" ? "var(--bg-faint)" : c}" stroke-width="1.2" stroke-dasharray="2 1.8"/>`)
-          + `</g>`);
-      }
-      return;
-    }
     parts.push(`<g data-lane="${esc(b.id)}">`);
     if (shown.length > 1) parts.push(`<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="${c}" stroke-width="2"/>`);
     // 末尾那段虚线；空车道（刚加进来、还没干活）从顶上拉一小段虚线穿过「待命」，一眼看得出这也是一条车道
@@ -1256,7 +1216,7 @@ function bgSkeleton(root, has) {
   }
   root.innerHTML = `<aside class="bg-list" id="bg-list"></aside>`
     + `<section class="bg-center">`
-    +   `<div id="bg-top"></div>`
+    +   `<div id="bg-top"></div><div class="bg-chain" id="bg-chain"></div>`
     +   `<div class="bg-fh" id="bg-fh"></div>`
     +   `<div class="bg-feed" id="bg-feed"><div id="bg-feed-list"></div><div id="bg-live"></div><div id="bg-cards"></div></div>`
     +   `<div class="bg-composer"><div class="bg-mention" id="bg-mention" role="listbox" hidden></div>`
@@ -1264,7 +1224,10 @@ function bgSkeleton(root, has) {
     +     `<div class="bg-cfoot"><span id="bg-chint"></span><button type="button" class="bg-send" id="bg-send" aria-label="send">${bgIco("send", 13)}</button></div></div>`
     +   `</div>`
     + `</section>`
-    + `<aside class="bg-tree" id="bg-tree"></aside>`;
+    + `<aside class="bg-tree" id="bg-tree"><div class="bg-th" id="bg-th"></div>`
+    +   `<div class="bg-ltsw" id="bg-ltsw"><div class="bg-lts" id="bg-lts"></div></div>`
+    +   `<div class="bg-tseg" id="bg-tseg"></div><div class="bg-tscroll" id="bg-tscroll"></div>`
+    +   `<div class="bg-legend" id="bg-legend"></div></aside>`;
   bgBindComposer();
 }
 /* 页头的「预算 已用/上限」（A 定稿）：已用 = 各 Bot 会话真实的 token 累计（输入 + 输出 + 写缓存，
@@ -1285,14 +1248,14 @@ function bgBudgetHTML(g) {
    没被手动翻过的行停在最新那一端（当前交接永远露在外面）。 */
 const BG_CHAIN_MANUAL = new Set();   // 被用户手动横向翻过的车道
 function bgChainSave() {
-  const box = document.querySelector("#bg-top .bg-chain");
+  const box = $("bg-chain");
   if (!box) return null;
   const rows = {};
   box.querySelectorAll(".bg-chain-row").forEach((r) => { const c = r.querySelector(".bg-chips"); if (c) rows[r.dataset.bgFocus] = c.scrollLeft; });
   return { top: box.scrollTop, rows };
 }
 function bgChainRestore(keep) {
-  const box = document.querySelector("#bg-top .bg-chain");
+  const box = $("bg-chain");
   if (!box) return;
   if (keep) box.scrollTop = keep.top;
   bgChainVEdges(box);
@@ -1320,6 +1283,16 @@ function bgChainEdges(c) {
     root.dataset.chainWheel = "1";
     // 竖着滚的滚轮在一行放不下的交接链上 = 横着翻这一行；翻到头了才让整块上下滚。
     root.addEventListener("wheel", (e) => {
+      // 记下用户手动滚过哪里：5 秒内自动滚动不抢那一块（bgRevealPlan）
+      if (e.target.closest("#bg-chain")) BG_USER_AT.chain = Date.now();
+      if (e.target.closest("#bg-tscroll, #bg-ltsw")) BG_USER_AT.tree = Date.now();
+      if (e.target.closest("#bg-feed")) BG_USER_AT.feed = Date.now();
+      const lw = e.target.closest("#bg-ltsw");
+      if (lw) {
+        const ts = $("bg-tscroll");
+        if (ts && ts.scrollWidth > ts.clientWidth + 1) { e.preventDefault(); ts.scrollLeft += Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY; }
+        return;
+      }
       const c = e.target.closest(".bg-chain .bg-chips");
       if (!c || c.scrollWidth <= c.clientWidth + 1) return;
       const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
@@ -1336,6 +1309,7 @@ function bgChainEdges(c) {
       if (!el.classList) return;
       if (el.classList.contains("bg-chips")) bgChainEdges(el);
       else if (el.classList.contains("bg-chain")) bgChainVEdges(el);
+      else if (el.id === "bg-tscroll") bgTreeSync();
     }, true);
   }
 }
@@ -1354,18 +1328,32 @@ function bgTopHTML(g, waiting) {
     +     `<button type="button" class="icon-btn bg-theme" data-bg-act="theme" title="${esc(t(light ? "bg.head.toDark" : "bg.head.toLight"))}">${bgIco(light ? "moon" : "sun", 14)}</button>`
     +   `</div>`
     + `</header>`
-    + `<div class="bg-goal">${srcLine}${g.goal ? `<span class="bg-sep">·</span><span class="bg-goal-k">${esc(t("bg.head.goal"))}</span><span class="ell">${esc(g.goal)}</span>` : ""}</div>`
-    + `<div class="bg-chain">${bgChainHTML(g) || `<div class="bg-empty sm">${esc(t("bg.chain.noBots"))}</div>`}</div>`;
+    + `<div class="bg-goal">${srcLine}${g.goal ? `<span class="bg-sep">·</span><span class="bg-goal-k">${esc(t("bg.head.goal"))}</span><span class="ell">${esc(g.goal)}</span>` : ""}</div>`;
 }
-function bgTreeHTML(g, waiting, lay) {
+function bgTreeRender(g, waiting, lay, svgW) {
   const lanes = bgLanes(g);
-  const cols = lay.map((o, i) => (i === lay.length - 1 ? "minmax(0,1fr)" : o.w + "px")).join(" ");
-  return `<div class="bg-th"><b>${esc(t("bg.tree.title"))}</b><span>${esc(t("bg.tree.sub", { n: lanes.length, w: waiting }))}</span></div>`
-    + (lanes.length ? `<div class="bg-lts" style="grid-template-columns:${cols}">${bgLaneTabsHTML(g, lay)}</div>` : "")
-    + `<div class="bg-tseg"><span class="segs-mini"><button type="button" data-bg-act="focus-cur">${esc(t("bg.tree.focus"))}</button>`
-    +   `<button type="button" data-bg-focus="all">${esc(t("bg.tree.all"))}</button></span><span class="mono bg-now">${esc(bgTime(new Date().toISOString()).slice(0, 5))}</span></div>`
-    + `<div class="bg-tscroll" id="bg-tscroll"></div>`
-    + `<div class="bg-legend"><div class="bg-lg-h">${esc(t("bg.legend.title"))}</div><div class="bg-lg-grid">${bgLegendHTML()}</div></div>`;
+  bgSet($("bg-th"), `<b>${esc(t("bg.tree.title"))}</b><span>${esc(t("bg.tree.sub", { n: lanes.length, w: waiting }))}</span>`);
+  const w = $("bg-ltsw"), lts = $("bg-lts");
+  if (w && lts) {
+    w.hidden = !lanes.length;
+    lts.style.gridTemplateColumns = lay.map((o, i) => (i === lay.length - 1 ? `minmax(${o.w}px,1fr)` : o.w + "px")).join(" ");
+    lts.style.width = svgW + "px";
+    bgSet(lts, bgLaneTabsHTML(g, lay));
+  }
+  bgSet($("bg-tseg"), `<span class="segs-mini"><button type="button" data-bg-act="focus-cur">${esc(t("bg.tree.focus"))}</button>`
+    + `<button type="button" data-bg-focus="all">${esc(t("bg.tree.all"))}</button></span><span class="mono bg-now">${esc(bgTime(new Date().toISOString()).slice(0, 5))}</span>`);
+  bgSet($("bg-legend"), `<div class="bg-lg-h">${esc(t("bg.legend.title"))}</div><div class="bg-lg-grid">${bgLegendHTML()}</div>`);
+  bgSet($("bg-tscroll"), bgTreeSVG(g, svgW, lay) || `<div class="bg-empty sm">${esc(t("bg.tree.empty"))}</div>`);
+  bgTreeSync();
+}
+/* 车道头跟着画布横着滚（它自己不滚，只跟）。 */
+function bgTreeSync() {
+  const ts = $("bg-tscroll"), w = $("bg-ltsw");
+  if (!ts || !w) return;
+  w.scrollLeft = ts.scrollLeft;
+  const over = ts.scrollWidth > ts.clientWidth + 4;
+  w.classList.toggle("ovf-l", over && ts.scrollLeft > 1);
+  w.classList.toggle("ovf-r", over && ts.scrollLeft + ts.clientWidth < ts.scrollWidth - 1);
 }
 function renderBotGroup(why) {
   const root = $("bg");
@@ -1389,8 +1377,9 @@ function renderBotGroup(why) {
   } else {
     if (BG.focus !== "all" && !bgBot(g, BG.focus)) BG.focus = "all";
     const waiting = (g.bots || []).filter((b) => bgBotState(b) === "waiting").length;
+    bgSet($("bg-top"), bgTopHTML(g, waiting));
     const chainKeep = bgChainSave();
-    if (bgSet($("bg-top"), bgTopHTML(g, waiting))) bgChainRestore(chainKeep);
+    if (bgSet($("bg-chain"), bgChainHTML(g) || `<div class="bg-empty sm">${esc(t("bg.chain.noBots"))}</div>`)) bgChainRestore(chainKeep);
     bgSet($("bg-fh"), bgFeedHeadHTML(g));
     const feed = $("bg-feed");
     const atEnd = feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 40;
@@ -1404,12 +1393,10 @@ function renderBotGroup(why) {
     // 在看最新的（贴着底）就继续贴底；往上翻着看历史时不抢滚动条。切了会话一律到底。
     if (switched || ((a || b || c) && (atEnd || BG_STICK))) feed.scrollTop = feed.scrollHeight;
     const ts0 = $("bg-tscroll");
-    const tsTop = ts0 ? ts0.scrollTop : 0;
-    const tw = Math.max(260, (ts0 && ts0.clientWidth) || (($("bg-tree") && $("bg-tree").clientWidth) || 352) - 2);
-    const lay = bgLaneLayout(g, tw);
-    bgSet($("bg-tree"), bgTreeHTML(g, waiting, lay));
-    const ts = $("bg-tscroll");
-    if (bgSet(ts, bgTreeSVG(g, Math.max(260, ts.clientWidth || tw), lay) || `<div class="bg-empty sm">${esc(t("bg.tree.empty"))}</div>`)) ts.scrollTop = tsTop;
+    const tw = Math.max(240, (ts0 && ts0.clientWidth) || (($("bg-tree") && $("bg-tree").clientWidth) || 352) - 2);
+    BG_LAY = bgLaneLayout(g, tw);
+    // 画布左边有 2px 内边距：宽度按可视宽减掉它，3 条车道时不出现假的「右边还有」。
+    bgTreeRender(g, waiting, BG_LAY, Math.max(tw - 2, BG_LAY.total + 16));
     bgComposerSync(g);
     bgApplyFocus(g, switched);
     bgMotionAfterRender(g, switched);
@@ -1530,14 +1517,77 @@ function bgFlowLayer() {
   return svg;
 }
 function bgFlowQueue(job) {
+  // 排太长就让最早的那件直接长出来（不走光迹），免得光迹越积越晚、和过程流对不上
+  while (BGF.queue.length >= 6) bgPopNode(BGF.queue.shift().key);
   BGF.queue.push(job);
   bgFlowPump();
 }
+/* 光迹出发前先把看不见的地方滚出来（用户 2026-10-28）：
+     交接链滚到这一行（这一行高亮）、行里滚到那颗芯片；过程流滚到那一行；任务进程滚到那条车道 / 那个节点。
+   滚完再走光迹 —— 动效永远发生在看得见的地方。用户 5 秒内手动滚过的那一块不抢（BG_USER_AT）。
+   要滚的那一道光独占：别的等它走完，否则几处同时滚会来回乱跳。 */
+const BG_USER_AT = { chain: 0, tree: 0, feed: 0 };
+const bgUserBusy = (k) => Date.now() - BG_USER_AT[k] < 5000;
+function bgRevealPlan(g, job) {
+  const plan = [];
+  const root = $("bg");
+  if (!root || !document.body.classList.contains("botgroup") || BG.group !== g.id) return plan;
+  const box = $("bg-chain");
+  const row = box && box.querySelector(`.bg-chain-row[data-bg-focus="${CSS.escape(job.lane)}"]`);
+  if (row && !bgUserBusy("chain")) {
+    const rb = row.getBoundingClientRect(), bb = box.getBoundingClientRect();
+    if (rb.top < bb.top + 2 || rb.bottom > bb.bottom - 2) {
+      const top = box.scrollTop + (rb.top - bb.top) - Math.max(0, (bb.height - rb.height) / 2);
+      plan.push(() => box.scrollTo({ top, behavior: "smooth" }));
+    }
+    const chips = row.querySelector(".bg-chips");
+    const chip = row.querySelector(`[data-ck="${job.kind === "approval" ? "you" : "agent"}"]`);
+    if (chips && chip) {
+      const cb = chip.getBoundingClientRect(), hb = chips.getBoundingClientRect();
+      if (cb.left < hb.left || cb.right > hb.right) {
+        const left = chips.scrollLeft + (cb.left < hb.left ? cb.left - hb.left - 24 : cb.right - hb.right + 24);
+        plan.push(() => { chips.scrollTo({ left, behavior: "smooth" }); });
+      }
+    }
+  }
+  const feed = $("bg-feed");
+  const frow = feed && feed.querySelector(`[data-bg-ev="${CSS.escape(job.key)}"]`);
+  if (frow && !bgUserBusy("feed")) {
+    const r = frow.getBoundingClientRect(), fb = feed.getBoundingClientRect();
+    if (r.top < fb.top || r.bottom > fb.bottom) {
+      const top = feed.scrollTop + (r.top - fb.top) - fb.height * 0.6;
+      plan.push(() => feed.scrollTo({ top, behavior: "smooth" }));
+    }
+  }
+  const ts = $("bg-tscroll");
+  const col = BG_LAY.find((o) => o.b.id === job.lane);
+  if (ts && col && !root.classList.contains("bgd-on") && !bgUserBusy("tree")) {
+    let left = ts.scrollLeft, top = ts.scrollTop;
+    if (col.left < ts.scrollLeft) left = Math.max(0, col.left - 4);
+    else if (col.left + col.w > ts.scrollLeft + ts.clientWidth) left = col.left + col.w + 16 - ts.clientWidth;
+    const node = ts.querySelector(`g[data-bg-node="${CSS.escape(job.key)}"]`);
+    if (node) {
+      const r = node.getBoundingClientRect(), tb = ts.getBoundingClientRect();
+      if (r.top < tb.top + 4 || r.bottom > tb.bottom - 4) top = ts.scrollTop + (r.top - tb.top) - tb.height / 2;
+    }
+    if (left !== ts.scrollLeft || top !== ts.scrollTop) plan.push(() => ts.scrollTo({ left, top, behavior: "smooth" }));
+  }
+  return plan;
+}
 function bgFlowPump() {
-  while (BGF.live < 2 && BGF.queue.length) {
-    const job = BGF.queue.shift();
+  while (BGF.queue.length && !BGF.excl) {
+    const job = BGF.queue[0];
+    const plan = bgRevealPlan(job.g, job);
+    if (plan.length) { if (BGF.live > 0) return; BGF.excl = true; }
+    else if (BGF.live >= 2) return;
+    BGF.queue.shift();
     BGF.live++;
-    setTimeout(() => bgFlowRun(job).finally(() => { BGF.live--; bgFlowPump(); }), BGF.live > 1 ? 260 : 0);
+    const excl = plan.length > 0;
+    const go = async () => {
+      if (excl) { plan.forEach((f) => f()); await new Promise((r) => setTimeout(r, 480)); }
+      await bgFlowRun(job);
+    };
+    setTimeout(() => go().finally(() => { BGF.live--; if (excl) BGF.excl = false; bgFlowPump(); }), BGF.live > 1 ? 260 : 0);
   }
 }
 const bgVis = (r, box) => r && r.width > 0 && r.bottom > box.top + 4 && r.top < box.bottom - 4 && r.right > box.left && r.left < box.right;
@@ -1639,6 +1689,8 @@ function bgPulseChip(el) {
 }
 async function bgFlowRun(job) {
   const { g, key } = job;
+  const crow = $("bg-chain") && $("bg-chain").querySelector(`.bg-chain-row[data-bg-focus="${CSS.escape(job.lane)}"]`);
+  if (crow) { crow.classList.remove("flow"); void crow.offsetWidth; crow.classList.add("flow"); setTimeout(() => crow.classList.remove("flow"), 1700); }
   const fallback = () => bgPopNode(key);
   if (!document.body.classList.contains("botgroup") || BG.group !== g.id) { fallback(); return; }
   const color = bgColor(g, job.lane);
