@@ -57,7 +57,8 @@ type Group struct {
 	Source    Source `json:"source"`
 	Bots      []Bot  `json:"bots"`
 	CreatedAt string `json:"createdAt"`
-	Brief     string `json:"brief,omitempty"` // 共享记忆文件的路径
+	Brief     string `json:"brief,omitempty"`  // 共享记忆文件的路径
+	Budget    int    `json:"budget,omitempty"` // 预算上限（k tokens）；0 = 默认 DefaultBudget
 }
 
 // Event 是过程流里的一条。ID 在组内单调递增。
@@ -143,6 +144,7 @@ type CreateInput struct {
 	SourceAgent  string     `json:"sourceAgent,omitempty"`
 	SourceTitle  string     `json:"sourceTitle,omitempty"`
 	ManagerAgent string     `json:"managerAgent,omitempty"`
+	Budget       int        `json:"budget,omitempty"`
 	Bots         []BotInput `json:"bots"`
 }
 
@@ -162,7 +164,10 @@ func (s *Store) Create(in CreateInput) (Group, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	g := Group{
 		ID: "g" + strconv.FormatInt(time.Now().UnixMilli(), 36), Name: name,
-		Goal: strings.TrimSpace(in.Goal), Project: proj, CreatedAt: now,
+		Goal: strings.TrimSpace(in.Goal), Project: proj, CreatedAt: now, Budget: in.Budget,
+	}
+	if g.Budget <= 0 {
+		g.Budget = DefaultBudget
 	}
 	mgr := Bot{ID: "manager", Role: "Manager", Manager: true, CreatedAt: now}
 	if in.SourcePane > 0 {
@@ -474,3 +479,6 @@ func (s *Store) AddBot(gid string, in BotInput) (Bot, error) {
 	}
 	return Bot{}, fmt.Errorf("找不到组 %s", gid)
 }
+
+// DefaultBudget 是建组时没填预算上限时的默认值（k tokens）。
+const DefaultBudget = 500

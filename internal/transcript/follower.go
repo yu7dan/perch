@@ -68,6 +68,10 @@ type trace struct {
 	// 上一个压缩点的回合号（0 = 还没有过）。只为了算出"距上次压缩几个回合"，
 	// 见 consumeCompact。**不是**"吞了几回合"。
 	lastCompactTurn int
+
+	// 用量台账：message id → 这条 message 的 token（最后一行为准），cum 是总和。
+	msgTok map[string]int
+	cum    int
 }
 
 func newTrace(path, cwd, agent, format string) *trace {

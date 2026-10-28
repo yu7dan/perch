@@ -270,6 +270,7 @@ const BG_I = {
   play: '<path d="M6 4.5v15l13-7.5z"/>',
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
+  dots: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
   bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
 };
 function bgIco(name, size) { return lucide(BG_I[name], size || 14); }
@@ -350,7 +351,7 @@ function bgRowHTML(g, b, on) {
   return `<div class="bg-row${b.manager ? " bg-mgr" : ""}${docked ? " docked" : ""}" data-bg-group="${esc(g.id)}" data-bg-focus="${esc(b.id)}" style="--lane:${bgColor(g, b.id)}">`
     + `<span class="bg-ri">${bgAgentIco(b.agent)}</span>`
     + `<span class="bg-rmain"><span class="bg-rt ell"><b>${esc(b.manager ? "Manager" : b.role)}</b> · ${esc(task)}</span>`
-    + `<span class="bg-rs ell">${esc(bgAgentName(b.agent))} · ${esc(bgWhere(g, b))}</span></span>`
+    + `<span class="bg-rs ell">${esc(bgAgentName(b.agent))} · ${esc(bgModelShort(bgDerive(g, b).model) || bgWhere(g, b))}</span></span>`
     + `<button type="button" class="bg-rterm" data-bg-term="${esc(b.id)}" data-bg-group="${esc(g.id)}" title="${esc(t(st === "pending" || st === "off" ? "bg.feed.startTitle" : "bg.feed.openTermTitle"))}">${bgIco(st === "pending" || st === "off" ? "play" : "term", 12)}</button>`
     + `${bgDot(st)}</div>`;
 }
@@ -369,6 +370,7 @@ function bgListHTML() {
     const mgr = bgManager(g);
     return `<section class="bg-grp${on ? " on" : ""}">`
       + `<div class="bg-gh" data-bg-group="${esc(g.id)}"><span class="bg-gn ell">${esc(g.name)}</span>`
+      + `<button type="button" class="bg-gmore" data-bg-gmenu="${esc(g.id)}" title="${esc(t("bg.list.more"))}" aria-label="${esc(t("bg.list.more"))}">${bgIco("dots", 13)}</button>`
       + `<span class="bg-gc">${active}/${lanes.length}</span></div>`
       + `<div class="bg-gsrc">${src}</div>`
       + (mgr ? bgRowHTML(g, mgr, on) : "") + lanes.map((b) => bgRowHTML(g, b, on)).join("")
@@ -385,7 +387,7 @@ function bgListHTML() {
     : (!shown.length ? `<div class="bg-empty sm bg-lempty">${esc(t("bg.list.noMatch"))}</div>` : "");
   return `<div class="bg-lhead"><h1>${esc(t("chrome.mode.botgroup"))}</h1>`
     + `<button class="icon-btn" type="button" title="${esc(t("bg.list.new"))}" data-bg-act="new">${bgIco("plus", 15)}</button></div>`
-    + `<label class="search bg-search">${bgIco("search", 13)}<input id="bg-q" placeholder="${esc(t("bg.list.search"))}" spellcheck="false" value="${esc(BG.query || "")}"></label>`
+    + `<label class="search bg-search">${bgIco("search", 13)}<input id="bg-q" placeholder="${esc(t("bg.list.search"))}" spellcheck="false" value="${esc(BG.query || "")}"><span class="kbd">Ctrl K</span></label>`
     + `<div class="bg-lscroll">${groups}${empty}</div>`
     + `<div class="bg-lfoot"><span>${esc(t("bg.list.running", { n: working }))}</span>`
     + `<span class="${waiting ? "bg-ask-t" : ""}">${esc(t("bg.list.waiting", { n: waiting }))}</span></div>`;
@@ -409,7 +411,9 @@ function bgChainHTML(g) {
     const color = bgColor(g, b.id);
     const did = bgDerive(g, b).items.some((x) => x.type === "proc" || x.type === "text");
     const chips = [];
-    if (mgr) chips.push(bgChip({ who: "Manager", agent: mgr.agent, ok: true }, color));
+    const fromYou = bgDerive(g, b).items.some((x) => x.type === "prompt");
+    if (fromYou) chips.push(bgChip({ who: t("bg.chain.you"), you: true, ok: true }, color));
+    else if (mgr) chips.push(bgChip({ who: "Manager", agent: mgr.agent, ok: true }, color));
     chips.push(bgChip({ who: bgAgentName(b.agent), agent: b.agent, cur: st === "working", ok: did && st !== "working" && st !== "waiting", dim: st === "pending" }, color));
     if (st === "waiting") chips.push(bgChip({ who: t("bg.chain.you"), you: true, cur: true }, color));
     return `<div class="bg-chain-row" data-bg-focus="${esc(b.id)}">`
@@ -439,6 +443,7 @@ function bgBlockEnd(tools) {
   for (const a of tools) { const d = Date.parse(a.done || ""); if (!isNaN(d) && d > m) m = d; }
   return m;
 }
+const BG_MEMORY_RE = /[\\/]\.perch[\\/]botgroups[\\/]|(^|[\\/])brief\.md$/i;
 function bgBase(p) { return String(p || "").split(/[\\/]/).filter(Boolean).pop() || ""; }
 function bgDur(ms) {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -446,8 +451,23 @@ function bgDur(ms) {
   const m = Math.floor(s / 60);
   return m < 60 ? `${m}m ${s % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
+function bgSize(text) {
+  const n = String(text || "").length;
+  return n >= 1000 ? t("bg.p.chars", { n: (n / 1000).toFixed(1) + "k" }) : t("bg.p.chars", { n });
+}
 function bgAtMs(a) { const t = Date.parse(a && a.at); return isNaN(t) ? 0 : t; }
 
+/* 工作树上的短标签（A 定稿的写法）：类型由节点形状说，标签只写对象 ——
+   「ime-probe.png」「81b-new-agent.js」「测试 2 失败」「→ Codex」。 */
+function bgShort(kind, title, retry, isTest) {
+  const obj = String(title || "").replace(/^[^·]*·\s*/, "");
+  if (kind === "test") return retry ? t("bg.s.retry", { n: retry }) + " ✓" : t("bg.s.testOk");
+  if (kind === "fail") return isTest ? (retry ? t("bg.s.retry", { n: retry }) + " ✗" : t("bg.s.testFail")) : title;
+  if (kind === "memory") return t("bg.s.memory");
+  if (kind === "compact") return t("bg.p.compact");
+  if (kind === "dot") return "";
+  return obj || title;
+}
 /* 一段工具调用 → 一行过程。返回 null = 这段里没有值得成行的东西。 */
 function bgBlock(b, acts, prevTestFailed, endAt) {
   const tools = acts.filter((a) => a.kind === "tool" && a.tool !== "TodoWrite" && a.tool !== "AskUserQuestion");
@@ -465,7 +485,7 @@ function bgBlock(b, acts, prevTestFailed, endAt) {
     const names = [...new Set(list.map((a) => bgBase(a.rel || a.path)).filter(Boolean))];
     return names.length > 1 ? `${names[0]} ×${names.length}` : (names[0] || "");
   };
-  let kind, title, meta = "", retry = 0;
+  let kind, title, meta = "", retry = 0, look = false;
   if (forks.length) {
     kind = "fork";
     title = t("bg.p.fork", { x: forks.map((a) => a.agent || a.text.replace(/^子代理：/, "")).join("、") });
@@ -479,6 +499,10 @@ function bgBlock(b, acts, prevTestFailed, endAt) {
   } else if (commits.length) {
     const m = /-m\s+["']([^"']+)/.exec(cmd(commits[0]));
     kind = "commit"; title = t("bg.p.commit", { x: m ? clamp(m[1], 48) : "" });
+  } else if ([...writes, ...edits].some((a) => BG_MEMORY_RE.test(a.path || a.rel || ""))) {
+    // 改的是这个组的共享记忆（.perch/botgroups/<gid>/brief.md）= 记忆更新（定稿里那一行）
+    const mem = [...writes, ...edits].filter((a) => BG_MEMORY_RE.test(a.path || a.rel || ""));
+    kind = "memory"; title = t("bg.p.memory", { x: files(mem) });
   } else if (writes.length) {
     kind = "artifact"; title = t("bg.p.artifact", { x: files(writes) });
   } else if (edits.length) {
@@ -488,6 +512,7 @@ function bgBlock(b, acts, prevTestFailed, endAt) {
   } else {
     // 剩下的：跑了命令就是「运行 · 它说要干什么」，只读 / 只搜才是「查看」。
     const run = tools.find((a) => a.tool === "Bash" || a.tool === "PowerShell");
+    look = !run;
     kind = "dot";
     title = run ? t("bg.p.run", { x: clamp(run.text || run.cmd || "", 48) })
       : t("bg.p.look", { x: clamp(tools[0].rel || tools[0].text || tools[0].tool, 48) });
@@ -511,6 +536,8 @@ function bgBlock(b, acts, prevTestFailed, endAt) {
     steps: tools.length, dur: bgBlockEnd(tools) ? Math.max(0, bgBlockEnd(tools) - bgAtMs(first)) : -1,
     fork: forks.length ? { done: forks.every((a) => a.ok != null) } : null,
     testFailed: kind === "fail" && tests.length > 0,
+    look,
+    short: bgShort(kind, title, retry, tests.length > 0),
   };
 }
 
@@ -569,17 +596,25 @@ function bgDerive(g, b) {
     if (!block.length) return;
     const segs = bgSplit(block);
     block = [];
-    segs.forEach((seg, si) => {
+    let carry = [];
+    segs.forEach((seg0, si) => {
+      // 只是读 / 搜的那一段不单独成行：并进它后面那件事的步骤里（定稿里没有「查看」行）
+      const seg = carry.concat(seg0);
+      carry = [];
       const end = si + 1 < segs.length ? bgAtMs(segs[si + 1][0]) : nextAt;
       const p = bgBlock(b, seg, prevTestFailed, end);
       if (!p) return;
+      if (p.look && si + 1 < segs.length) { carry = seg; return; }
       if (p.testFailed) prevTestFailed++;
       else if (p.kind === "test") prevTestFailed = 0;
       p.groupTurn = groupTurn;
       items.push(p);
     });
   };
+  let model = "", cum = 0;
   for (const a of acts) {
+    if (a.model) model = a.model;
+    if (a.cum > cum) cum = a.cum;
     if (a.kind === "tool" || a.kind === "thinking") {
       if (a.tool === "TodoWrite" && a.todo) todo = a.todo;
       block.push(a);
@@ -589,7 +624,14 @@ function bgDerive(g, b) {
     if (a.kind === "prompt") {
       const text = bgStripIntro(a.text).trim();
       groupTurn = !!text && asks.some((q) => q && (text === q || text.endsWith(q)));
-      if (text) items.push({ type: "prompt", id: a.id, at: a.at, text, lane: b.id, groupTurn });
+      if (text) {
+        items.push({ type: "prompt", id: a.id, at: a.at, text, lane: b.id, groupTurn });
+        // 每交给它一件事 = 一次交接（定稿里的「交接 → Codex」）：车道从这里开始。
+        const who = b.manager ? "Manager" : bgAgentName(b.agent);
+        items.push({ type: "proc", kind: "handoff", id: a.id + ":h", at: a.at, end: a.at, lane: b.id,
+          title: t("bg.p.handoff", { x: who }), short: "→ " + who, meta: bgSize(text), sub: [], steps: 0, dur: 0,
+          from: groupTurn ? "group" : "you", groupTurn });
+      }
     } else if (a.kind === "text") {
       items.push({ type: "text", id: a.id, at: a.at, text: a.text, lane: b.id, groupTurn });
     } else if (a.kind === "compact") {
@@ -605,7 +647,7 @@ function bgDerive(g, b) {
     else if (it.type === "text") lastText = it;
   }
   if (lastText && st !== "working" && st !== "waiting") lastText.turnEnd = true;
-  const out = { items, todo, hasActs: acts.length > 0 };
+  const out = { items, todo, hasActs: acts.length > 0, model, cum };
   if (tab) BG_DERIVED.set(tab, { key, out });
   return out;
 }
@@ -643,7 +685,8 @@ function bgProcRow(g, p, showBadge) {
   const open = BG.open.has(key);
   const color = bgColor(g, p.lane);
   const glyphKind = p.kind === "compact" ? "compact" : p.kind;
-  const cls = "bg-ev has-body" + (p.kind === "fail" ? " bad" : "") + (open ? " open" : "");
+  const expandable = p.sub && p.sub.length > 0;
+  const cls = "bg-ev" + (expandable ? " has-body" : "") + (p.kind === "fail" ? " bad" : "") + (open && expandable ? " open" : "");
   const right = !p.steps ? bgTime(p.at).slice(0, 5)
     : p.dur >= 0 ? t("bg.feed.steps", { n: p.steps, d: bgDur(p.dur) }) : t("bg.feed.stepsOnly", { n: p.steps });
   let body = "";
@@ -655,7 +698,7 @@ function bgProcRow(g, p, showBadge) {
       + `</div>`;
   }
   return `<div class="${cls}" data-bg-ev="${esc(key)}" style="--lane:${color}">`
-    + `<div class="bg-ev-h"><span class="bg-caret">${bgIco("chev", 11)}</span><span class="bg-ev-g">${bgGlyph(glyphKind, color)}</span>`
+    + `<div class="bg-ev-h">${expandable ? `<span class="bg-caret">${bgIco("chev", 11)}</span>` : `<span class="bg-caret blank"></span>`}<span class="bg-ev-g">${bgGlyph(glyphKind, color)}</span>`
     + (showBadge ? bgBadge(g, p.lane) : "")
     + `<span class="bg-ev-t ell">${esc(p.title)}</span>`
     + (p.meta ? `<span class="bg-ev-meta">${esc(p.meta)}</span>` : "")
@@ -791,6 +834,10 @@ function bgTaskOf(g, b) {
   return cur ? cur.title : "";
 }
 /* 它在哪儿干活：会话记录里的 git 分支，没有就是项目文件夹名（定稿里那一栏是 wt/xxx）。 */
+/* 「claude-opus-5-5」→「opus-5.5」（A 定稿里成员第二行就是这么写的）。 */
+function bgModelShort(m) {
+  return String(m || "").replace(/^claude-/, "").replace(/-(\d+)-(\d+)(?=$|-)/, "-$1.$2");
+}
 function bgWhere(g, b) {
   const tab = bgTabOf(b);
   const s = tab && tab.sessionID && STATE && Array.isArray(STATE.sessions) ? STATE.sessions.find((x) => x.id === tab.sessionID) : null;
@@ -898,103 +945,117 @@ function bgLaneTabsHTML(g) {
       + `<span class="bg-lt-s ell" data-state="${esc(st)}">${esc(head)}${note ? " · " + esc(note) : ""}</span></button>`;
   }).join("");
 }
-/* 泳道图：每条车道一列竖线，事件按时间往下排（所有车道共享一条时间轴，
-   同一时刻发生的事在同一高度上）。Manager 的事件和对话不进图（它在过程流里）。
-   只画最近 60 条：再往前的在过程流里翻。 */
-/* 泳道图（定稿那一张）：每条车道一列竖线，节点是归纳出来的过程，所有车道共享一条时间轴。
-   分叉（子代理）= 从节点往右拐出一条支线，子代理做完在下一个节点处合回来（合并 ⊙）；
-   还没做完 = 支线虚线一直拖到底。车道还在干活 / 等你时，末尾拖一段虚线和一个「正在处理 / 等你」节点。
-   只画最近 60 个节点：再往前的在过程流里翻。 */
+/* 泳道图（A 定稿 + 参考视频的画法）：
+     · 每条车道一列，所有车道从顶部一起开始、并行往下 —— 车道之间不再共用"一事一行"的全局时间轴
+       （那样会排成一条斜着往下的台阶，看起来是一行一行的陈列）；
+     · 每条车道里，节点按它自己的先后紧凑排；只是读 / 搜 / 跑命令的步骤画成竖线上的小点，不带标签；
+     · 标签只写对象（类型由节点形状说），第二行「agent · 时间」，都只在本列宽度里，超了截断；
+     · 分叉（子代理）：在本车道里往右拐出一根平行支线，子代理做完在下一个节点处合回来（双圈）；
+     · 还在干活 / 在等你：接着最后一个节点虚线往下，末尾一个「正在处理 / 等你确认」节点。
+   每条车道只画最近 40 个节点：再往前的在过程流里翻。 */
 function bgTreeSVG(g, width) {
   const lanes = bgLanes(g);
   if (!lanes.length) return "";
-  const nodes = [];
-  for (const b of lanes) for (const it of bgDerive(g, b).items) if (it.type === "proc" && !it.running) nodes.push(it);
-  nodes.sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
-  const evs = nodes.slice(-60);
-  const tails = lanes.map((b) => {
-    const st = bgBotState(b);
-    if (st === "working") { const cur = bgCurrent(g, b); return { b, kind: "running", title: t("bg.feed.running", { x: cur && cur.running ? cur.title : t("bg.feed.thinking") }) }; }
-    if (st === "waiting") return { b, kind: "approval", title: t("bg.tree.waitYou") };
-    return null;
-  }).filter(Boolean);
-  if (!evs.length && !tails.length) return "";
-  const colW = Math.max(70, Math.floor((width - 16) / lanes.length));
-  const x0 = 14;
-  const xOf = (id) => { const i = lanes.findIndex((b) => b.id === id); return x0 + (i < 0 ? 0 : i) * colW; };
-  const rowH = 34, top = 18;
-  const ys = evs.map((_, i) => top + i * rowH);
-  // 末尾节点（正在处理 / 等你）各占一行，免得几条车道的标签挤在同一高度上打架。
-  const tailY0 = top + evs.length * rowH + 8;
-  tails.forEach((tl, i) => { tl.y = tailY0 + i * rowH; });
-  const tailY = tailY0;
-  const H = tailY0 + tails.length * rowH + 16;
+  const colW = Math.max(80, Math.floor((width - 16) / lanes.length));
+  const x0 = 14, top = 22, rowH = 34, dotH = 12;
   const parts = [];
-  // 竖线：从这条车道第一个节点画到最后一个；还在干活 / 等你就再虚线拖到末尾那个节点。
-  for (const b of lanes) {
-    const idx = evs.map((e, i) => (e.lane === b.id ? i : -1)).filter((i) => i >= 0);
-    const tail = tails.find((x) => x.b === b);
-    if (!idx.length && !tail) continue;
-    const x = xOf(b.id), c = bgColor(g, b.id);
-    const y1 = idx.length ? ys[idx[0]] : (tail ? tail.y : tailY), y2 = idx.length ? ys[idx[idx.length - 1]] : (tail ? tail.y : tailY);
-    parts.push(`<g data-lane="${esc(b.id)}"><line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="${c}" stroke-width="2"/>`);
-    if (tail && idx.length) parts.push(`<line x1="${x}" y1="${y2}" x2="${x}" y2="${tail.y}" stroke="${c}" stroke-width="1.4" stroke-dasharray="3 3" opacity=".55"/>`);
-    parts.push(`</g>`);
-  }
-  // 分叉：子代理那一支。
-  const branchUntil = new Map();   // 节点下标 → 它在某条支线的跨度里（标签往右让一让）
-  evs.forEach((e, i) => {
-    if (e.kind !== "fork") return;
-    const x = xOf(e.lane), y = ys[i], c = bgColor(g, e.lane), bx = x + 11;
-    const j = e.fork && e.fork.done ? evs.findIndex((f, k) => k > i && f.lane === e.lane) : -1;
-    const tl0 = tails.find((tt) => tt.b.id === e.lane);
-    const yEnd = j >= 0 ? ys[j] : (tl0 ? tl0.y : y + rowH);
-    for (let k = i + 1; k < evs.length && ys[k] <= yEnd; k++) if (evs[k].lane === e.lane) branchUntil.set(k, true);
-    const dashed = !(e.fork && e.fork.done);
-    parts.push(`<g data-lane="${esc(e.lane)}"><path d="M${x} ${y} C ${x} ${y + 8}, ${bx} ${y + 4}, ${bx} ${y + 14} L ${bx} ${yEnd - 14}`
-      + (j >= 0 ? ` C ${bx} ${yEnd - 4}, ${x} ${yEnd - 8}, ${x} ${yEnd}` : "")
-      + `" fill="none" stroke="${c}" stroke-width="1.5"${dashed ? ` stroke-dasharray="3 2.5"` : ""} opacity=".85"/></g>`);
-    if (j >= 0) evs[j] = Object.assign({}, evs[j], { merged: true });
-  });
-  // 节点 + 标签
+  let H = top + 20;
   const nodeSVG = (kind, x, y, c) => {
     switch (kind) {
       case "commit": return `<circle cx="${x}" cy="${y}" r="4.5" fill="${c}"/>`;
       case "handoff": return `<path d="M${x} ${y - 5.5} L${x + 5.5} ${y} L${x} ${y + 5.5} L${x - 5.5} ${y} Z" fill="${c}"/>`;
       case "artifact": return `<rect x="${x - 4.5}" y="${y - 4.5}" width="9" height="9" rx="1.5" fill="var(--bg-panel)" stroke="${c}" stroke-width="1.6"/>`;
+      case "memory": return `<circle cx="${x}" cy="${y}" r="5" fill="var(--bg-panel)" stroke="${c}" stroke-width="1.6"/><circle cx="${x}" cy="${y}" r="1.8" fill="${c}"/>`;
       case "test": case "review": return `<circle cx="${x}" cy="${y}" r="6" fill="var(--bg-ok)"/><path d="M${x - 2.6} ${y} l1.8 1.8 l3.4 -3.6" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`;
       case "fail": return `<circle cx="${x}" cy="${y}" r="6" fill="var(--bg-bad)"/><path d="M${x - 2.2} ${y - 2.2} l4.4 4.4 M${x + 2.2} ${y - 2.2} l-4.4 4.4" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>`;
       case "approval": return `<circle cx="${x}" cy="${y}" r="6.5" fill="var(--bg-panel)" stroke="var(--bg-ask)" stroke-width="2.2"/><circle cx="${x}" cy="${y}" r="2.2" fill="var(--bg-ask)"/>`;
       case "running": return `<circle cx="${x}" cy="${y}" r="5" fill="var(--bg-panel)" stroke="${c}" stroke-width="1.4" stroke-dasharray="2.4 2"/>`;
+      case "idle": return `<circle cx="${x}" cy="${y}" r="4.5" fill="var(--bg-panel)" stroke="var(--bg-faint)" stroke-width="1.3" stroke-dasharray="2.2 2"/>`;
       case "fork": return `<circle cx="${x}" cy="${y}" r="4.6" fill="var(--bg-panel)" stroke="${c}" stroke-width="1.6"/><circle cx="${x}" cy="${y}" r="1.6" fill="${c}"/>`;
       case "compact": return `<path d="M${x - 4} ${y - 4.5} L${x} ${y - 1} L${x + 4} ${y - 4.5} M${x - 4} ${y + 4.5} L${x} ${y + 1} L${x + 4} ${y + 4.5}" fill="none" stroke="${c}" stroke-width="1.5" stroke-linecap="round"/>`;
       default: return `<circle cx="${x}" cy="${y}" r="3" fill="${c}"/>`;
     }
   };
-  evs.forEach((e, i) => {
-    const x = xOf(e.lane), y = ys[i], c = bgColor(g, e.lane);
-    const b = bgBot(g, e.lane);
-    const lx = x + (branchUntil.has(i) ? 21 : 10);
-    const strong = e.kind === "fail" ? ` class="bad"` : "";
-    parts.push(`<g data-lane="${esc(e.lane)}" data-bg-node="${esc(g.id + ":" + e.lane + ":" + e.id)}"><circle class="bg-node-ring" cx="${x}" cy="${y}" r="10" stroke="${c}"/>${nodeSVG(e.kind, x, y, c)}`
-      + (e.merged ? `<circle cx="${x}" cy="${y}" r="8" fill="none" stroke="${c}" stroke-width="1.2" opacity=".6"/>` : "")
-      + `<text x="${lx}" y="${y - 1}"${strong}>${esc(bgFit(e.title, width - lx - 4))}</text>`
-      + `<text x="${lx}" y="${y + 10}" class="sub">${esc(bgFit(`${bgAgentName(b && b.agent)} · ${bgTime(e.at).slice(0, 5)}`, width - lx - 4))}</text></g>`);
+  lanes.forEach((b, li) => {
+    const x = x0 + li * colW, c = bgColor(g, b.id);
+    const right = li === lanes.length - 1 ? width - 4 : x + colW - 6;
+    const st = bgBotState(b);
+    const agent = bgAgentName(b.agent);
+    // 这条车道的元素：节点 / 小点（连着的小点并成一个）
+    const els = [];
+    for (const it of bgDerive(g, b).items) {
+      if (it.type !== "proc" || it.running) continue;
+      if (it.kind === "dot") { if (!els.length || els[els.length - 1].dot !== true) els.push({ dot: true, it }); continue; }
+      els.push({ dot: false, it });
+    }
+    const shown = els.slice(-40);
+    let cur = top - 10;
+    for (const e of shown) {
+      if (e.dot) { e.cy = cur + 4; cur += dotH; } else { e.cy = cur + 10; cur += rowH; }
+    }
+    let tail = null;
+    if (st === "working" || st === "waiting") {
+      const cr = bgCurrent(g, b);
+      tail = { kind: st === "waiting" ? "approval" : "running",
+        title: st === "waiting" ? t("bg.tree.waitYou") : t("bg.feed.running", { x: cr && cr.running ? (cr.short || cr.title) : t("bg.feed.thinking") }) };
+    } else if (!shown.length) tail = { kind: "idle", title: t("bg.tree.standby") };
+    if (tail) { tail.cy = cur + (shown.length ? 14 : 10); cur = tail.cy + rowH - 10; }
+    H = Math.max(H, cur + 24);
+    // 竖线：实线贯穿已发生的部分，末尾那段（正在处理 / 等你）是虚线
+    const y1 = shown.length ? shown[0].cy : (tail ? tail.cy : top);
+    const y2 = shown.length ? shown[shown.length - 1].cy : y1;
+    parts.push(`<g data-lane="${esc(b.id)}">`);
+    if (shown.length > 1) parts.push(`<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="${c}" stroke-width="2"/>`);
+    if (tail && shown.length) parts.push(`<line x1="${x}" y1="${y2}" x2="${x}" y2="${tail.cy}" stroke="${c}" stroke-width="1.4" stroke-dasharray="3 3" opacity=".6"/>`);
+    // 分叉：本车道里往右拐出一根平行支线
+    const inBranch = new Set();
+    shown.forEach((e, i) => {
+      if (e.dot || e.it.kind !== "fork") return;
+      const bx = x + 11, yf = e.cy;
+      let j = -1;
+      if (e.it.fork && e.it.fork.done) j = shown.findIndex((f, k) => k > i && !f.dot);
+      const yEnd = j >= 0 ? shown[j].cy : (tail ? tail.cy : yf + rowH);
+      for (let k = i + 1; k < shown.length && shown[k].cy <= yEnd; k++) inBranch.add(k);
+      const dashed = j < 0;
+      parts.push(`<path d="M${x} ${yf} C ${x} ${yf + 7}, ${bx} ${yf + 4}, ${bx} ${yf + 13} L ${bx} ${Math.max(yf + 13, yEnd - 13)}`
+        + (j >= 0 ? ` C ${bx} ${yEnd - 4}, ${x} ${yEnd - 7}, ${x} ${yEnd}` : "")
+        + `" fill="none" stroke="${c}" stroke-width="1.6"${dashed ? ` stroke-dasharray="3 2.5"` : ""} opacity=".9"/>`);
+      if (j >= 0) shown[j].merged = true;
+    });
+    parts.push(`</g>`);
+    shown.forEach((e, i) => {
+      const key = esc(g.id + ":" + b.id + ":" + e.it.id);
+      if (e.dot) {
+        parts.push(`<g data-lane="${esc(b.id)}" data-bg-node="${key}"><circle class="bg-node-ring" cx="${x}" cy="${e.cy}" r="7" stroke="${c}"/>`
+          + `<circle cx="${x}" cy="${e.cy}" r="2.2" fill="${c}"/></g>`);
+        return;
+      }
+      const lx = x + (inBranch.has(i) ? 21 : 10);
+      const room = right - lx;
+      const label = e.it.short || e.it.title;
+      parts.push(`<g data-lane="${esc(b.id)}" data-bg-node="${key}"><circle class="bg-node-ring" cx="${x}" cy="${e.cy}" r="10" stroke="${c}"/>`
+        + nodeSVG(e.it.kind, x, e.cy, c)
+        + (e.merged ? `<circle cx="${x}" cy="${e.cy}" r="8.5" fill="none" stroke="${c}" stroke-width="1.4"/>` : "")
+        + `<text x="${lx}" y="${e.cy - 1}"${e.it.kind === "fail" ? ` class="bad"` : ""}>${esc(bgFit(label, room))}</text>`
+        + `<text x="${lx}" y="${e.cy + 10}" class="sub">${esc(bgFit(agent + " · " + bgTime(e.it.at).slice(0, 5), room))}</text></g>`);
+    });
+    if (tail) {
+      const room = right - (x + 10);
+      parts.push(`<g data-lane="${esc(b.id)}" data-bg-node="${esc(g.id + ":" + b.id + ":tail")}"><circle class="bg-node-ring" cx="${x}" cy="${tail.cy}" r="10" stroke="${c}"/>`
+        + nodeSVG(tail.kind, x, tail.cy, c)
+        + `<text x="${x + 10}" y="${tail.cy - 1}"${tail.kind === "approval" ? ` class="ask"` : ""}>${esc(bgFit(tail.title, room))}</text>`
+        + `<text x="${x + 10}" y="${tail.cy + 10}" class="sub">${esc(bgFit(agent, room))}</text></g>`);
+    }
   });
-  for (const tl of tails) {
-    const x = xOf(tl.b.id), c = bgColor(g, tl.b.id);
-    parts.push(`<g data-lane="${esc(tl.b.id)}" data-bg-node="${esc(g.id + ":" + tl.b.id + ":tail")}"><circle class="bg-node-ring" cx="${x}" cy="${tl.y}" r="10" stroke="${c}"/>${nodeSVG(tl.kind, x, tl.y, c)}`
-      + `<text x="${x + 10}" y="${tl.y - 1}"${tl.kind === "approval" ? ` class="ask"` : ""}>${esc(bgFit(tl.title, width - x - 14))}</text>`
-      + `<text x="${x + 10}" y="${tl.y + 10}" class="sub">${esc(bgFit(bgAgentName(tl.b.agent), width - x - 14))}</text></g>`);
-  }
   return `<svg class="bg-tree-svg" width="${width}" height="${H}" viewBox="0 0 ${width} ${H}">${parts.join("")}</svg>`;
 }
+
 /* 等宽 10.5px：ASCII ≈ 6.3px，CJK ≈ 10.5px。按可用宽度截断，免得最后一列压出边。 */
 function bgFit(s, room) {
   let w = 0, out = "";
   for (const ch of String(s)) {
     const cw = ch.codePointAt(0) > 0x2e80 ? 10.5 : 6.3;
-    if (w + cw > room - 7) return out + "…";
+    if (w + cw > room - 3) return out + "…";
     w += cw; out += ch;
   }
   return out;
@@ -1064,6 +1125,19 @@ function bgSkeleton(root, has) {
     + `<aside class="bg-tree" id="bg-tree"></aside>`;
   bgBindComposer();
 }
+/* 页头的「预算 已用/上限」（A 定稿）：已用 = 各 Bot 会话真实的 token 累计（输入 + 输出 + 写缓存，
+   转录里有），上限是建组时填的（k tokens，默认 500）。 */
+function bgUsedK(g) {
+  let n = 0;
+  for (const b of bgMembers(g)) n += bgDerive(g, b).cum || 0;
+  return Math.round(n / 1000);
+}
+function bgBudgetHTML(g) {
+  const used = bgUsedK(g), cap = g.budget || 500;
+  const pct = Math.min(100, Math.round(100 * used / cap));
+  return `<span class="bg-budget${pct >= 90 ? " hot" : ""}" title="${esc(t("bg.head.budgetTitle"))}">${esc(t("bg.head.budget", { used, cap }))}`
+    + `<span class="bg-bbar"><span style="width:${pct}%"></span></span></span>`;
+}
 function bgTopHTML(g, waiting) {
   const light = document.documentElement.classList.contains("theme-light");
   const srcLine = g.source && g.source.kind === "derived"
@@ -1072,11 +1146,10 @@ function bgTopHTML(g, waiting) {
   return `<header class="bg-head">`
     +   `<div class="bg-title"><h2>${esc(g.name)}</h2><span class="bg-proj mono ell" title="${esc(g.project)}">${esc(bgBase(g.project))}</span></div>`
     +   `<div class="bg-acts">`
+    +     bgBudgetHTML(g)
     +     (waiting ? `<button type="button" class="bg-needbtn" data-bg-act="need">${bgDot("waiting")}${esc(t("bg.head.needYou", { n: waiting }))}</button>` : "")
     +     `<button type="button" class="bg-btn" data-bg-act="na" title="${esc(t("bg.head.laterC"))}">${bgIco("pause", 12)}<span>${esc(t("bg.head.pauseAll"))}</span></button>`
     +     `<button type="button" class="bg-btn primary" data-bg-act="addbot">${bgIco("plus", 12)}<span>${esc(t("bg.head.addBot"))}</span></button>`
-    +     (g.brief ? `<button type="button" class="icon-btn" data-bg-act="brief" title="${esc(t("bg.head.brief"))}" aria-label="${esc(t("bg.head.brief"))}">${bgIco("file", 14)}</button>` : "")
-    +     `<button type="button" class="icon-btn" data-bg-act="delete" title="${esc(t("bg.head.delete"))}" aria-label="${esc(t("bg.head.delete"))}">${bgIco("trash", 14)}</button>`
     +     `<button type="button" class="icon-btn bg-theme" data-bg-act="theme" title="${esc(t(light ? "bg.head.toDark" : "bg.head.toLight"))}">${bgIco(light ? "moon" : "sun", 14)}</button>`
     +   `</div>`
     + `</header>`
@@ -1307,6 +1380,46 @@ function bgRevealNode(key) {
   }
 }
 
+/* ---------- 组名旁的 ⋯：共享记忆 / 删除（A 定稿的页头里没有这两颗，收到这里） ---------- */
+function bgGroupMenu(gid, anchor) {
+  const g = BOTGROUPS.find((x) => x.id === gid);
+  if (!g) return;
+  let pop = $("bg-gpop");
+  if (!pop) {
+    pop = document.createElement("div");
+    pop.id = "bg-gpop";
+    pop.setAttribute("role", "menu");
+    document.body.appendChild(pop);
+    pop.addEventListener("click", (e) => {
+      const it = e.target.closest("[data-gact]");
+      if (!it) return;
+      const grp = BOTGROUPS.find((x) => x.id === pop.dataset.gid);
+      bgGroupMenuClose();
+      if (!grp) return;
+      if (it.dataset.gact === "brief" && grp.brief) sendCtrl({ type: "open", mode: "open", path: grp.brief });
+      else if (it.dataset.gact === "delete") bgDeleteGroup(grp);
+    });
+    document.addEventListener("mousedown", (e) => { if (!e.target.closest("#bg-gpop,[data-bg-gmenu]")) bgGroupMenuClose(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") bgGroupMenuClose(); });
+  }
+  pop.dataset.gid = gid;
+  pop.innerHTML = (g.brief ? `<button type="button" class="bg-gi" data-gact="brief">${bgIco("file", 13)}<span>${esc(t("bg.head.brief"))}</span></button>` : "")
+    + `<button type="button" class="bg-gi danger" data-gact="delete">${bgIco("trash", 13)}<span>${esc(t("bg.head.delete"))}</span></button>`;
+  const r = anchor.getBoundingClientRect();
+  pop.style.left = Math.round(r.right - 168) + "px";
+  pop.style.top = Math.round(r.bottom + 4) + "px";
+  pop.hidden = false;
+}
+function bgGroupMenuClose() { const p = $("bg-gpop"); if (p) p.hidden = true; }
+document.addEventListener("keydown", (e) => {
+  if (!document.body.classList.contains("botgroup") || !(e.ctrlKey && (e.key === "k" || e.key === "K"))) return;
+  const q = $("bg-q");
+  if (!q) return;
+  e.preventDefault();
+  q.focus();
+  q.select();
+}, true);
+
 /* ---------- 删除 ----------
    Bot 的格子随组一起关掉并忘掉（它们只为这个组而生）；衍生来的 Manager
    是用户原来的 Agent —— 放回 Workspaces，接着用。 */
@@ -1354,6 +1467,7 @@ function bgOpenCreate(opts) {
     add, source: src,
     name: src ? currentTabTitle(src) : "",
     goal: "",
+    budget: 500,
     project,
     manager: src ? ((src.spec && src.spec.agent) || def) : def,
     bots: [{ role: t("bg.role.dev"), agent: def }],
@@ -1426,7 +1540,8 @@ function bgRenderCreate() {
     +   (addG ? "" : `<div class="ap-lab">${esc(t("bg.c.name"))}</div><input class="ap-input" id="bgc-name" value="${esc(BGC.name)}" spellcheck="false" maxlength="60" placeholder="${esc(t("bg.c.namePh"))}">`
     +   `<div class="ap-lab">${esc(t("bg.c.goal"))}</div><textarea class="ap-input bgc-goal" id="bgc-goal" rows="2" spellcheck="false" placeholder="${esc(t("bg.c.goalPh"))}">${esc(BGC.goal)}</textarea>`
     +   `<div class="ap-lab">${esc(t("bg.c.project"))}</div>${projHTML}`
-    +   `<div class="ap-lab">Manager</div>${mgrHTML}`)
+    +   `<div class="ap-lab">Manager</div>${mgrHTML}`
+    +   `<div class="ap-lab">${esc(t("bg.c.budget"))}</div><input class="ap-input bgc-budget" id="bgc-budget" type="number" min="10" step="10" value="${esc(String(BGC.budget))}">`)
     +   `<div class="ap-lab bgc-lab">${esc(t("bg.c.bots", { n: BGC.bots.length, max: cap }))}</div>`
     +   `<div class="bgc-bots">${bots}</div>`
     +   `<div class="bgc-add">`
@@ -1445,6 +1560,7 @@ function bgBindCreate(el) {
     if (!BGC) return;
     const x = e.target;
     if (x.id === "bgc-name") BGC.name = x.value;
+    else if (x.id === "bgc-budget") BGC.budget = Math.max(0, parseInt(x.value, 10) || 0);
     else if (x.id === "bgc-goal") BGC.goal = x.value;
     else if (x.classList.contains("bgc-role")) BGC.bots[+x.dataset.bot].role = x.value;
     // 只刷新「创建」那颗的灰态：整卡重画会把正在打的字连输入框一起换掉。
@@ -1514,7 +1630,7 @@ async function bgSubmitCreate() {
     return;
   }
   const input = {
-    name: BGC.name.trim(), goal: BGC.goal.trim(), project: BGC.project,
+    name: BGC.name.trim(), goal: BGC.goal.trim(), project: BGC.project, budget: BGC.budget || 0,
     bots: BGC.bots.map((b) => ({ role: b.role.trim(), agent: b.agent })),
   };
   if (src) Object.assign(input, { sourcePane: src.paneID | 0, sourceAgent: (src.spec && src.spec.agent) || "", sourceTitle: currentTabTitle(src) });
@@ -1849,6 +1965,8 @@ function bgFocus(gid, focus, why) {
         bgFocus(f.dataset.bgGroup || BG.group, same ? "all" : want, "选车道");
         return;
       }
+      const gm = e.target.closest("[data-bg-gmenu]");
+      if (gm) { bgGroupMenu(gm.dataset.bgGmenu, gm); return; }
       const gh = e.target.closest(".bg-gh");
       if (gh) bgFocus(gh.dataset.bgGroup, "all", "选组");
     });

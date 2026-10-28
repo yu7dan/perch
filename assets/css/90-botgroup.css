@@ -374,3 +374,17 @@ textarea.bg-cin::placeholder{color:var(--bg-faint)}
 }
 .bg-stage{display:inline-flex;align-items:center;gap:4px;margin-top:6px;height:20px;padding:0 7px;border-radius:6px;font-size:11px;
   color:var(--bg-ok);background:color-mix(in srgb,var(--bg-ok) 9%,transparent)}
+
+/* ---------- 回到 A 定稿：组名 ⋯ 菜单 / 预算 / 搜索快捷键 ---------- */
+.bg-gmore{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;color:var(--bg-faint);opacity:0;transition:opacity var(--dur-2) var(--ease-out)}
+.bg-gh:hover .bg-gmore,.bg-gmore:focus-visible{opacity:1}
+.bg-gmore:hover{background:var(--bg-hov);color:var(--bg-fg)}
+.bg-budget.hot{color:var(--bg-ask)}
+.bg-budget.hot .bg-bbar span{background:var(--bg-ask)}
+#bg-gpop{position:fixed;z-index:130;width:168px;padding:4px;border-radius:9px;background:var(--s-pop);
+  box-shadow:0 0 0 1px rgb(var(--fx) / .1),0 10px 28px rgb(var(--shade) / calc(.35 * var(--shade-k)));animation:feel-pop-in var(--dur-3) var(--ease-swift)}
+#bg-gpop[hidden]{display:none}
+.bg-gi{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 9px;border-radius:6px;font-size:12.5px;color:var(--fg2);text-align:left}
+.bg-gi:hover{background:rgb(var(--fx) / .06);color:var(--fg)}
+.bg-gi.danger:hover{color:var(--red)}
+.bg-search .kbd{margin-left:auto}

@@ -84,6 +84,13 @@ func (tr *trace) consumeClaudeLine(line string) *ActItem {
 
 func (tr *trace) consumeAssistant(raw json.RawMessage, at string) *ActItem {
 	var msg struct {
+		ID    string `json:"id"`
+		Model string `json:"model"`
+		Usage struct {
+			In  int `json:"input_tokens"`
+			Out int `json:"output_tokens"`
+			CW  int `json:"cache_creation_input_tokens"`
+		} `json:"usage"`
 		Content []struct {
 			Type  string          `json:"type"`
 			Text  string          `json:"text"`
@@ -95,6 +102,17 @@ func (tr *trace) consumeAssistant(raw json.RawMessage, at string) *ActItem {
 	if json.Unmarshal(raw, &msg) != nil {
 		return nil
 	}
+	// 用量：同一条 message 会拆成好几行落盘、每行都带 usage，以**最后一行**为准
+	// （和 internal/history 的口径一致）。累计的是 输入 + 输出 + 写缓存，不含读缓存 ——
+	// Bot Group 的「预算」条读它（cum 只增不减，前端取最大值）。
+	if msg.ID != "" {
+		if tr.msgTok == nil {
+			tr.msgTok = map[string]int{}
+		}
+		u := msg.Usage.In + msg.Usage.Out + msg.Usage.CW
+		tr.cum += u - tr.msgTok[msg.ID]
+		tr.msgTok[msg.ID] = u
+	}
 	var last *ActItem
 	for _, b := range msg.Content {
 		switch b.Type {
@@ -103,13 +121,13 @@ func (tr *trace) consumeAssistant(raw json.RawMessage, at string) *ActItem {
 				continue
 			}
 			txt, full := msgText(b.Text)
-			last = tr.append(ActItem{Kind: "text", Text: txt, FullLen: full, At: at})
+			last = tr.append(ActItem{Kind: "text", Text: txt, FullLen: full, At: at, Model: msg.Model, Cum: tr.cum})
 		case "thinking":
 			// 思考过程也是流水的一部分（用户能看出"它在想"还是在"卡着"）
-			last = tr.append(ActItem{Kind: "thinking", Text: "思考…", At: at})
+			last = tr.append(ActItem{Kind: "thinking", Text: "思考…", At: at, Model: msg.Model, Cum: tr.cum})
 		case "tool_use":
 			in := decodeInput(b.Input)
-			it := ActItem{ID: b.ID, Kind: "tool", Tool: b.Name, At: at}
+			it := ActItem{ID: b.ID, Kind: "tool", Tool: b.Name, At: at, Model: msg.Model, Cum: tr.cum}
 			it.Text, it.Path = describeTool(b.Name, in)
 			if it.Path != "" {
 				it.Rel = tr.rel(it.Path)

@@ -186,6 +186,10 @@ type ActItem struct {
 	/* **只有 Bash / PowerShell 会有**：命令本身的第一行（Text 优先放 description，
 	   给人看；这里留原命令，给 Bot Group 归类用 —— 跑测试 / git commit / push 要从命令认）。 */
 	Cmd string `json:"cmd,omitempty"`
+	// 这条所属的那次回答用的模型，以及到这条为止整个会话累计的 token（输入 + 输出 + 写缓存）。
+	// 只有 Claude 形状的转录会有；Bot Group 的成员行和「预算」条读它。
+	Model string `json:"model,omitempty"`
+	Cum   int    `json:"cum,omitempty"`
 	/* **只有 TodoWrite 会有**：待办清单的进度（Bot Group 的车道进度条就是它）。 */
 	Todo *TodoSum `json:"todo,omitempty"`
 }
