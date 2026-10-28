@@ -2143,6 +2143,7 @@ function applyPool(m) {
   // 旧版的“靠池子差集猜选择器结果”已退役（见 81a-project-add.js / project.pick）。
   syncPoolBanner();
   renderLists(searchKey());
+  if (typeof bgCreatePoolArrived === "function") bgCreatePoolArrived();
   // 碰过文件的分组（当前项目 / 其他项目 / 工作区外）按项目池算；池子晚于第一份
   // files 到达时，不在这里重画就会把项目内的文件一直显示成「工作区外」。
   if (typeof renderFiles === "function") {

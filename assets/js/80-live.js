@@ -634,6 +634,7 @@ function applyLibrary(p) {
     if (Array.isArray(p.projects)) STATE.projects = p.projects;
     if (p.assign && typeof p.assign === "object") STATE.assign = p.assign;
     if (typeof p.poolRev === "number") STATE.poolRev = p.poolRev;
+    if (typeof bgCreatePoolArrived === "function") bgCreatePoolArrived();
   } else {
     sendCtrl({ type: "log", msg: `整份载荷的旧项目池跳过 rev=${p.poolRev} < ${STATE.poolRev}` });
   }
@@ -982,7 +983,7 @@ function applyHook(m) {
             `未记未读 tab=${t.id} 因=${nt} 迟到（已卡在等你：` +
             (v.st === "waiting" ? "登记表 waiting" : "转录里挂着的工具") + `）` });
         } else {
-          v.note = { kind: isPerm ? "perm" : "ask", text: m.msg || "", at };
+          v.note = { kind: isPerm ? "perm" : "ask", text: m.msg || "", at, ntype: nt };
         }
       }
       // agent_completed / agent_needs_input 里的"子代理"那部分归「子代理」模块，

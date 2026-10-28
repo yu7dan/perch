@@ -707,16 +707,17 @@ func (c *Coordinator) resultText(g Group, t Task) string {
 		auto = c.tr("（自动交回：它这一轮结束了没跑 perch-bg done，下面是它最后的回复）", " (auto-returned: its last reply)")
 	}
 	fmt.Fprintf(&sb, c.tr("[Perch · %s %s · 来自 %s]%s\n", "[Perch · %s %s · from %s]%s\n"), t.ID, head, c.role(g, t.To), auto)
+	if t.Status == "review" {
+		// 放在最前面：结果常常很长，写在末尾的那句「怎么验收」实测会被跳过（Manager 看完只在嘴上说"已验收"）。
+		fmt.Fprintf(&sb, c.tr("要你验收（验收标准：%s）。看完必须跑一条：perch-bg review --task %s --pass yes　或　perch-bg review --task %s --reject \"<意见>\"\n",
+			"Needs your review (acceptance: %s). When done, run one of: perch-bg review --task %s --pass yes   or   perch-bg review --task %s --reject \"<why>\"\n"), t.Accept, t.ID, t.ID)
+	}
 	sb.WriteString(t.Result)
 	if t.Branch != "" {
 		fmt.Fprintf(&sb, c.tr("\n分支：%s · 提交 %s", "\nBranch: %s · commit %s"), t.Branch, t.Commit)
 		if t.Dirty > 0 {
 			fmt.Fprintf(&sb, c.tr("（还有 %d 个没提交的改动）", " (%d uncommitted changes)"), t.Dirty)
 		}
-	}
-	if t.Status == "review" {
-		fmt.Fprintf(&sb, c.tr("\n验收标准：%s\n通过：perch-bg review --task %s --pass yes　退回：perch-bg review --task %s --reject \"<意见>\"",
-			"\nAcceptance: %s\nAccept: perch-bg review --task %s --pass yes   Reject: perch-bg review --task %s --reject \"<why>\""), t.Accept, t.ID, t.ID)
 	}
 	return sb.String()
 }
@@ -745,8 +746,8 @@ func (c *Coordinator) Intro(g Group, b Bot) string {
 			}
 			sb.WriteString("共享记忆：" + strings.Join(ps, "、") + "（开工前读；决定 / 约定用 perch-bg memory add \"…\" 记进去）\n")
 		}
-		sb.WriteString("和团队协作只用 perch-bg 命令：perch-bg team｜perch-bg handoff --to <角色> --task \"…\" [--accept \"验收标准\"]｜perch-bg done --summary \"…\"｜perch-bg tasks｜perch-bg memory add \"…\"\n")
-		sb.WriteString("收到的任务以「[Perch · 任务 T…]」开头，做完运行 perch-bg done；用户直接发给你的消息直接回复即可。")
+		sb.WriteString("和团队协作只用 perch-bg 命令：perch-bg team｜perch-bg handoff --to <角色> --task \"…\" [--accept \"验收标准\"]｜perch-bg done --summary \"…\"｜perch-bg review --task T… --pass yes 或 --reject \"…\"｜perch-bg tasks｜perch-bg memory add \"…\"\n")
+		sb.WriteString("收到的任务以「[Perch · 任务 T…]」开头，做完运行 perch-bg done；交回里写着「要你验收」的，看完用 perch-bg review 给结论（只在对话里说通过，任务会一直挂着）；用户直接发给你的消息直接回复即可。")
 		return sb.String()
 	}
 	fmt.Fprintf(&sb, "[Perch Bot Group %q] You are %s (%s) on this team. Goal: %s\n", g.Name, roleName(b), b.Agent, dash(g.Goal))
@@ -767,7 +768,7 @@ func (c *Coordinator) Intro(g Group, b Bot) string {
 		}
 		sb.WriteString("Shared memory: " + strings.Join(ps, ", ") + " (read before you start; record decisions with perch-bg memory add \"…\")\n")
 	}
-	sb.WriteString("Work with the team only through perch-bg: team | handoff --to <role> --task \"…\" | done --summary \"…\" | tasks | memory add \"…\"")
+	sb.WriteString("Work with the team only through perch-bg: team | handoff --to <role> --task \"…\" | done --summary \"…\" | review --task T… --pass yes or --reject \"…\" | tasks | memory add \"…\". When a return says it needs your review, answer with perch-bg review (saying it passed in chat leaves the task open).")
 	return sb.String()
 }
 
@@ -809,6 +810,10 @@ func (c *Coordinator) tasksText(g Group, me Bot) string {
 			mine = append(mine, line+c.tr("（来自 "+c.role(g, t.From)+"）", " (from "+c.role(g, t.From)+")"))
 		}
 		if t.From == me.ID {
+			if t.Status == "review" {
+				line += c.tr(" ← 等你验收：perch-bg review --task "+t.ID+" --pass yes / --reject \"…\"",
+					" ← needs your review: perch-bg review --task "+t.ID+" --pass yes / --reject \"…\"")
+			}
 			sent = append(sent, line+c.tr("（给 "+c.role(g, t.To)+"）", " (to "+c.role(g, t.To)+")"))
 		}
 	}

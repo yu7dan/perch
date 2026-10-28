@@ -682,6 +682,7 @@ const bootPromises = restoreSeats.length
   ? restoreSeats.map((v) => createTab(seatSpecFrom(v)))
   : (bootSpec ? [createTab(bootSpec)] : []);
 const bootTabs = await Promise.all(bootPromises);
+BOOT_SEATED = true;
 /* 首格要挑一个**还在 TAB_LIST 里**的：被拒的格子会就地 closeTab（见 createTab ③），
    拿一个已经不在模型里的格子去 setActive 就是空指针那一类毛病。
    最后那个 null 也得容下：N 格全被拒 = 主区空着（这是诚实的结局，

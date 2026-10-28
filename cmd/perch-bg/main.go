@@ -36,6 +36,8 @@ const usage = `perch-bg —— 在 Perch Bot Group 里派活、交回、写共�
                                                   把一件事派给某个角色（Perch 在它空闲时送达）
   perch-bg done [--summary "<结果>"] [--task T7] [--files a,b]
                                                   交回当前任务的结果（不交回，这一轮结束时也会自动交回）
+  perch-bg review --task T7 (--pass yes | --reject "<意见>")
+                                                  验收别人交回的任务：通过，或退回重做（只在对话里说通过，任务会一直挂着）
   perch-bg tasks                                  看我手上和我派出去的任务
   perch-bg memory add "<要记的事>" [--circle <圈>]  写进共享记忆
   perch-bg memory show [--circle <圈>]            读共享记忆
@@ -53,7 +55,7 @@ func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, os.Stdin, os.Getenv
 
 func run(args []string, out, errOut io.Writer, in io.Reader, getenv func(string) string) int {
 	setUTF8Console()
-	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+	if len(args) == 0 || isHelp(args[0]) || args[0] == "help" || (len(args) > 1 && isHelp(args[len(args)-1])) {
 		fmt.Fprintln(out, usage)
 		return 0
 	}
@@ -82,6 +84,14 @@ func run(args []string, out, errOut io.Writer, in io.Reader, getenv func(string)
 			return 1
 		}
 	case "done":
+	case "review":
+		if flags["task"] == "" || (flags["pass"] == "" && strings.TrimSpace(flags["reject"]) == "") {
+			fmt.Fprintln(errOut, "用法：perch-bg review --task T7 --pass yes　或　perch-bg review --task T7 --reject \"<意见>\"")
+			return 1
+		}
+		if strings.TrimSpace(flags["reject"]) != "" {
+			delete(body, "pass")
+		}
 	case "memory.add":
 		text := strings.TrimSpace(strings.Join(pos, " "))
 		if text == "-" {
@@ -116,6 +126,8 @@ func run(args []string, out, errOut io.Writer, in io.Reader, getenv func(string)
 	}
 	return exitCode(r.Code)
 }
+
+func isHelp(a string) bool { return a == "-h" || a == "--help" }
 
 // parseFlags：--name value / --name=value；文字参数写 - 从标准输入读。
 func parseFlags(args []string, in io.Reader) (map[string]string, []string, bool, error) {

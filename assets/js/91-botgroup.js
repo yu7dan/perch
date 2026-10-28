@@ -61,6 +61,7 @@ function bgAgentIco(id) { return agentTabIcon(id || "", 14); }
 function bgEvents(g) { return (g && BG_EVENTS.get(g.id)) || []; }
 function bgRoleName(g, id) {
   if (!id || id === "manager") return "Manager";
+  if (id === "you") return t("bg.chain.you");   // Go 记的「你放行了 / 你暂停了」
   const b = bgBot(g, id);
   return b ? b.role : id;
 }
@@ -78,7 +79,13 @@ function bgBotState(bot) {
   if (BG_GATES.has(tab.id)) return "waiting";
   const s = cellState(tab);
   if (s === "working") return "working";
-  if (s === "ask") return "waiting";
+  if (s === "ask") {
+    // Claude 停下 60 秒后会补一条 idle_prompt（「在等你输入」）。对 Bot 来说那只是「这轮完了、空着」——
+    // 当成等你，车道会亮橙、投递也会一直等它（实测：开发交回 T1 一分钟后整条车道变成「等你确认」）。
+    const v = LIVE.get(tab.id);
+    const idleOnly = v && v.note && v.note.ntype === "idle_prompt" && v.st !== "waiting" && !pendingAsk(v) && !LOGIN_GATES.has(tab.id);
+    return idleOnly ? "idle" : "waiting";
+  }
   if (s === "failed") return "failed";
   if (s === "off") return "off";
   return "idle";
@@ -463,11 +470,13 @@ function bgChainHTML(g) {
     const sel = BG.focus === b.id;
     const st = bgBotState(b);
     const color = bgColor(g, b.id);
-    const did = bgDerive(g, b).items.some((x) => x.type === "proc" || x.type === "text");
     const chips = [];
     const fromYou = bgDerive(g, b).items.some((x) => x.type === "prompt");
     // 编排：它最近那件任务是谁派的（Manager 或另一个 Bot），交接链就从谁开始
     const lastTask = bgTasks(g).filter((tk) => tk.to === b.id).pop();
+    // 做完了：账本说交回了（重启后接上的会话，转录里可能还没有这一轮的行），或转录里有它干活的行
+    const did = (lastTask && (lastTask.status === "done" || lastTask.status === "review"))
+      || bgDerive(g, b).items.some((x) => x.type === "proc" || x.type === "text");
     const src = lastTask ? bgBot(g, lastTask.from) : null;
     if (src) chips.push(bgChip({ who: src.manager ? "Manager" : src.role, agent: src.agent, ok: true, ck: "src" }, color));
     else if (fromYou) chips.push(bgChip({ who: t("bg.chain.you"), you: true, ok: true, ck: "src" }, color));
@@ -992,7 +1001,10 @@ function bgReadGate(tab) {
     const s = line.translateToString(true);
     if (/Bypass Permissions mode/i.test(s)) bypass = true;
     if (/Yes, I accept/i.test(s)) accept = true;
-    if (/Do you trust the files in this folder/i.test(s)) trust = true;
+    // Qoder / 老版 Claude：「Do you trust the files in this folder?」（默认选中信任）；
+    // Claude 2.x：「Quick safety check: Is this a project you created or one you trust?」——
+    // 默认选中的是「No, exit」，一包粘贴带回车进去，格子就退了（实测 2026-10-29）。
+    if (/Do you trust the files in this folder|Is this a project you created or one you trust|Yes, I trust this folder/i.test(s)) trust = true;
   }
   if (bypass && accept) return "bypass";
   if (trust) return "trust";
@@ -1030,6 +1042,22 @@ function bgGateCardHTML(g, b, tab, kind) {
     + `<div class="bg-ev-body"><div class="bg-gate">${bgIco("shield", 13)}<span>${esc(gate)}</span></div>`
     + `<div class="bg-opts">${opts}${btn(opts ? "" : " primary", `data-go="${tab.id}"`, t(kind === "login" ? "bg.gate.loginBtn" : "bg.card.goTerm"))}</div></div></div>`;
 }
+/* 启动门的菜单：在可见屏里找光标行（❯ / >）和要选的那一行，返回要按几下 ↓（负数 = ↑）。
+   不同版本默认选中的不一样（Claude 2.x 的信任门默认在「No, exit」上），不能写死按键。 */
+function bgGateMenuMoves(tab, want) {
+  const buf = tab && tab.term && tab.term.buffer.active;
+  if (!buf) return null;
+  const lo = Math.max(0, buf.viewportY), hi = Math.min(buf.length - 1, lo + (tab.term.rows || 50) - 1);
+  let cur = -1, yes = -1;
+  for (let i = lo; i <= hi; i++) {
+    const line = buf.getLine(i);
+    if (!line) continue;
+    const s = line.translateToString(true);
+    if (/^\s*[❯>›]\s*\S/.test(s)) cur = i;
+    if (want.test(s)) yes = i;
+  }
+  return cur >= 0 && yes >= 0 ? yes - cur : null;
+}
 function bgGateAnswer(tab, how) {
   const g = BOTGROUPS.find((x) => x.id === tab.group);
   const b = bgBot(g, tab.bot);
@@ -1037,10 +1065,15 @@ function bgGateAnswer(tab, how) {
   sendCtrl({ type: "log", msg: `Bot Group：启动门 回答 ${how} ${g.id}/${b.id} tab=${tab.id}` });
   if (how === "accept" || how === "trust") {
     if (!tab.stream) return;
-    // 「完全访问」：↓ 再回车（↓ 和回车分两次送，一包里的回车会被当成别的输入，和 stopAgent 同一个手法）；
-    // 「信任文件夹」：默认选中的就是信任，直接回车。
-    if (how === "accept") tab.stream.send(enc.encode("\x1b[B"));
-    setTimeout(() => { try { if (tab.stream && BG_GATES.has(tab.id)) tab.stream.send(enc.encode("\r")); } catch (_) {} }, how === "accept" ? 250 : 0);
+    // 先把光标挪到「是」那一行，再单独送回车（一包里的回车会被当成别的输入，和 stopAgent 同一个手法）。
+    // 找不到光标行时按老规矩：完全访问 = ↓ 一下；信任 = 默认就是信任。
+    const want = how === "accept" ? /Yes, I accept/i : /Yes, I trust|Yes, proceed|^\s*[❯>›]?\s*(1\.\s*)?Trust\b/i;
+    let moves = bgGateMenuMoves(tab, want);
+    if (moves === null) moves = how === "accept" ? 1 : 0;
+    const key = moves > 0 ? "\x1b[B" : "\x1b[A";
+    for (let i = 0; i < Math.abs(moves); i++) setTimeout(() => { try { if (tab.stream) tab.stream.send(enc.encode(key)); } catch (_) {} }, i * 120);
+    setTimeout(() => { try { if (tab.stream && BG_GATES.has(tab.id)) tab.stream.send(enc.encode("\r")); } catch (_) {} }, Math.abs(moves) * 120 + 250);
+    sendCtrl({ type: "log", msg: `Bot Group：启动门 ${how} 挪 ${moves} 行再回车 tab=${tab.id}` });
     return;
   }
   bgdSave(g, b, { permission: "workspace-write" }, "启动门：改回工作区").then((ok) => { if (ok) bgdRestart(g, bgBot(g, b.id) || b, true); });
@@ -2000,6 +2033,14 @@ function bgCreateInvalid() {
   if (BGC.bots.some((b) => !b.role.trim() || !b.agent)) return t("bg.c.needRole");
   return "";
 }
+// 「新建 Bot Group」框开得比项目池早（启动载荷要扫十几秒）：项目那一栏会一直停在
+// 「先添加一个项目」。池子到了就补上默认项目、重画一次。
+function bgCreatePoolArrived() {
+  if (!BGC || BGC.add || BGC.source) return;
+  if (!BGC.project) BGC.project = (naRealProjects()[0] || {}).path || "";
+  bgRenderCreate();
+}
+
 function bgRenderCreate() {
   const el = $("bg-create");
   if (!el || !BGC) return;
@@ -2218,6 +2259,7 @@ function bgPumpAll() {
     const b = bgBot(g, bid);
     if (!g || !b) { BG_Q.delete(k); continue; }
     const tab = bgTabOf(b);
+    if (!tab && !BOOT_SEATED) continue;   // 冷恢复还没把它的格子建出来，别抢着起新会话
     if (!tab || tab.connDown) {
       if (!BG_STARTING.has(k)) {
         BG_STARTING.add(k);
@@ -2235,6 +2277,8 @@ function bgPumpAll() {
     }
     if (!tab.ready || !tab.stream || Date.now() - (tab.bgBorn || Date.now()) < 3000) continue;
     if (bgBotState(b) !== "idle") continue;
+    // Claude 的会话在 SessionStart 才有；之前的那一屏是信任门 / 登录之类，往里粘贴会被当成菜单按键。
+    if (b.agent === "claude" && !tab.sessionID) continue;
     if (tab.bgSentAt && Date.now() - tab.bgSentAt < 1500) continue;
     bgWrite(g, b, tab, q.shift());
   }
@@ -2242,6 +2286,9 @@ function bgPumpAll() {
 
 function bgWrite(g, b, tab, item) {
   let body = item.text;
+  // 接上的旧会话（冷恢复 / 原座位续接）上下文里已经有过开场说明，重启一次就再贴一遍只是噪音。
+  const rk = tab.spec && tab.spec.resume && tab.spec.resume.kind;
+  if (!tab.bgIntro && rk && rk !== "new") tab.bgIntro = true;
   if (!tab.bgIntro && BG_INTROS[g.id] && BG_INTROS[g.id][b.id]) {
     // 开场说明由 Go 生成（团队、分工、工作目录、记忆位置、perch-bg 用法）—— 一份来源
     tab.bgIntro = true;

@@ -51,10 +51,19 @@ func (s *Server) handleBotGroup(m *Msg) {
 			if g.Source.Kind == "derived" && s.deps.Panes != nil {
 				s.deps.Panes.SetGroup(g.Source.PaneID, g.ID, "manager", "衍生 Bot Group")
 			}
-			s.prepareWorktrees(g.ID)
 		}
-		s.Push(res)
-		s.pushBotGroups()
+		// 回执要等 worktree 建好再发：前端拿回执里的 Bot 起格，起早了就落在项目根目录里
+		// （实测：三格都在 worktree 建好前就起了）。git 放在后台跑，不堵 ctl。
+		go func() {
+			if err == nil {
+				s.prepareWorktreesNow(g.ID)
+				if g2, ok := st.Get(g.ID); ok {
+					res["group"] = g2
+				}
+			}
+			s.Push(res)
+			s.pushBotGroups()
+		}()
 	case "botgroup.addbot":
 		// 页头「加 Bot」：先记进组里，前端拿到回执里的 bot 再起它的格子。
 		if m.BotGroup == nil || len(m.BotGroup.Bots) != 1 {
@@ -67,10 +76,19 @@ func (s *Server) handleBotGroup(m *Msg) {
 		} else {
 			res["bot"] = b
 			log.Printf("[botgroup] 组 %s 加 Bot %s「%s」(%s)", m.ID, b.ID, b.Role, b.Agent)
-			s.prepareWorktrees(m.ID)
 		}
-		s.Push(res)
-		s.pushBotGroups()
+		go func() {
+			if err == nil {
+				s.prepareWorktreesNow(m.ID)
+				if g2, ok := st.Get(m.ID); ok {
+					if nb, ok := g2.Bot(b.ID); ok {
+						res["bot"] = nb
+					}
+				}
+			}
+			s.Push(res)
+			s.pushBotGroups()
+		}()
 	case "botgroup.updatebot":
 		// 角色配置抽屉：改完立刻存；要重启才生效的项由前端提示。
 		if m.BotPatch == nil {
@@ -243,6 +261,13 @@ func (s *Server) prepareWorktrees(gid string) {
 			s.pushBotGroups()
 		}
 	}()
+}
+
+// prepareWorktreesNow：同步版（调用方自己在后台 goroutine 里）。
+func (s *Server) prepareWorktreesNow(gid string) {
+	if co := s.deps.Coordinator; co != nil {
+		co.PrepareWorktrees(gid)
+	}
 }
 
 func pickStr(a, b string) string {

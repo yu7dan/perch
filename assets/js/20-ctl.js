@@ -27,6 +27,9 @@ let spawnTabCalls = 0;        // 临时探针：spawnTab 被调了几次
    步 4 把同一批会话**再接一遍**（两个写者写同一份 jsonl —— 这个项目唯一不可逆的失败）。
    ⚠️ 它只是一份**建议**：每一格建的时候照旧走 Go 的 resumeRefusal 那道护栏。 */
 const RESTORE = { state: "init", panes: [], err: "", asked: false };
+// 启动那一批座位（冷恢复的格子）都建完了没有。Bot Group 的投递在这之前不许自己起格：
+// 它会抢在冷恢复前面给同一个 paneId 起一个**新**会话，原来那段对话就接不上了（实测 2026-10-29）。
+let BOOT_SEATED = false;
 /* 冷恢复应答里顺带来的本机 Agent 名单 + 设置里的默认 agent。
    为什么必须跟着 panes.list 走：建第一格发生在 shell 载荷**之前**（见上面那段），
    而“默认用哪个 agent”不能等 shell。名单的权威探测在 Go（internal/agentcatalog），
