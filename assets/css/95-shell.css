@@ -1,0 +1,41 @@
+/* ===========================================================================
+   壳层方向 A「整幅」（用户 2026-10-28 从 现状 / A / B 三套对比图里选定）
+   ---------------------------------------------------------------------------
+   问题：中间被四面合围 —— 上面一条外框色的标题栏、下面一条外框色的状态栏、
+   左右两栏，内容区像一张嵌进灰框里的卡片（"镶嵌感"），而且外框和内容只差一点明度，
+   分不出谁在上层（"灰上灰"）。
+   做法：只留两种明度。
+     · 外框 = 导航 + 列表（--rail / --side），一个色，中间不再画缝；
+     · 内容 = 主区 + 右栏 + 它们正上方那段标题栏（--bg），一个色，一直铺到窗口的右边和下边；
+     · 外框和内容之间一根细线，外框一侧再压一道很淡的阴影（内容压在外框上）。
+   状态栏收掉：连接状态并到导航栏左下角，工作目录放进它的悬停提示；
+   其余读数（格数 / 尺寸 / 字体…）本来就只在日志里有用。
+   对比图与截图环境：_tools/shell-compare/gallery.html（方向 A = shell-A.css 的那一版）。
+   =========================================================================== */
+/* ⚠️ 选择器都带 #app.ui-classic：当前唯一的外观是 Classic（80-classic.css），它的规则特异度更高，
+   这里不带同样的前缀就压不住。这份文件排在它后面，同特异度时以这里为准。 */
+#app{bottom:0}
+/* 标题栏：导航、列表正上方那两段是外框色，其余（页签、右栏正上方、窗口按钮）是内容色 */
+#app.ui-classic #titlebar{background:var(--bg);border-bottom-color:var(--line-soft)}
+#app.ui-classic .tb-rail{background:var(--chrome);border-right-color:transparent}
+#app.ui-classic .tb-list{background:var(--chrome);border-right-color:var(--line-soft)}
+#app.ui-classic .tb-rsb{background:var(--bg)}
+/* 页签条长在内容色上：当前页签不再是一块灰底，只留底部那条 2px 前景色线和加深的字 */
+#app.ui-classic #titlebar .tab.on{background:transparent}
+#app.ui-classic #titlebar .tab{border-right-color:var(--line-soft)}
+/* 外框内部不画缝：导航和列表是同一块 */
+#app.ui-classic #rail{border-right-color:transparent;padding-bottom:36px}
+/* 外框与内容的接缝：一根细线 + 外框一侧一道淡阴影（内容压在外框上） */
+#app.ui-classic #list{box-shadow:inset -16px 0 18px -18px rgb(var(--shade) / calc(.55 * var(--shade-k)))}
+#app #list-divider::after{background:var(--line-soft)}
+/* 状态栏 → 导航栏左下角的一行（只留连接状态；工作目录在悬停提示里） */
+body.ui-classic #status{left:0;right:auto;width:var(--rail-w);height:30px;background:transparent;border-top:0;
+  padding:0 18px;gap:6px;z-index:6;color:var(--faint);font-size:11px}
+body.ui-classic #status > :not(:first-child){display:none}
+/* Bot Group 页：列表压在外框一侧，同一道接缝 */
+#bg .bg-list{box-shadow:inset -16px 0 18px -18px rgb(var(--shade) / calc(.55 * var(--shade-k)))}
+#bg-dock{bottom:0}
+/* 设置页：它自己的导航（232px）也是外框，接缝同上；标题栏在它正上方那一段跟着用外框色。 */
+#app.ui-classic .set-nav{box-shadow:inset -16px 0 18px -18px rgb(var(--shade) / calc(.55 * var(--shade-k)))}
+#app.ui-classic.settings #titlebar{background:linear-gradient(to right, var(--chrome) calc(var(--rail-w) + 232px),
+  var(--line-soft) calc(var(--rail-w) + 232px), var(--line-soft) calc(var(--rail-w) + 233px), var(--bg) calc(var(--rail-w) + 233px))}

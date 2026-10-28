@@ -15,7 +15,7 @@ func TestOSCReplyFollowsTheme(t *testing.T) {
 		reply string
 	}{
 		{false, darkBackground, "15;0", "rgb:0a0a/0a0a/0a0a"},
-		{true, lightBackground, "0;15", "rgb:ecec/eeee/f1f1"},
+		{true, lightBackground, "0;15", "rgb:fbfb/fbfb/fcfc"},
 	} {
 		SetLight(tc.light)
 		if _, bg := Colors(); bg != tc.bg {

@@ -2174,6 +2174,8 @@ function renderShell() {
   // 和 HTML（#p-path 的初始文本）各有一份，而 HTML 那份从来没被更新过。
   $("s-cwd").textContent = STATE.cwd || "";
   $("s-cwd").title = STATE.cwd || "";
+  // 状态栏收进导航栏左下角之后只剩连接状态那一行：工作目录挂在它的悬停提示上（壳层方向 A）。
+  $("status").title = STATE.cwd ? t("status.cwd") + "：" + STATE.cwd : "";
 
   // 导航栏按 NAV_ITEMS 画一次（**两层设计的左层**，见 HTML 那一节的注释）；
   // 之后只有"哪一项亮着"会变（NAV_HERE + setNavView）。

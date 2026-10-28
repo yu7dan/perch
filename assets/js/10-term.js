@@ -179,7 +179,7 @@ const DEFAULT_SPAWN_SPEC = { agent: "claude", cwd: "", target: "scratch",
    只有 background / cursorAccent 跟着画布 #0a0a0a 走（理由见 00-base.css 顶部）。
    浅色（2026-10-28）：ANSI 逐字取自 Orca 的 "Builtin Tango Light"
    （src/shared/terminal-themes/defaults.ts:31-56 —— 它把 Tango 原版近白的 yellow/white
-   压深过，浅底上 agent 的强调色才读得清），底色换成我们的画布 #eceef1（D2）。
+   压深过，浅底上 agent 的强调色才读得清），底色换成我们的内容面 #fbfbfc（壳层方向 A）。
    ⚠️ 底色 / 前景改了要同步 osc_color.go 的 light/dark 常量和 00-base.css 的 --term-*。 */
 const TERM_THEME_DARK = Object.freeze({
   background: "#0a0a0a", foreground: "#ffffff",
@@ -192,8 +192,8 @@ const TERM_THEME_DARK = Object.freeze({
   brightCyan: "#70c0b1", brightWhite: "#eaeaea",
 });
 const TERM_THEME_LIGHT = Object.freeze({
-  background: "#eceef1", foreground: "#2e3434",
-  cursor: "#2e3434", cursorAccent: "#eceef1",
+  background: "#fbfbfc", foreground: "#2e3434",
+  cursor: "#2e3434", cursorAccent: "#fbfbfc",
   selectionBackground: "#accef7", selectionForeground: "#2e3434",
   black: "#2e3436", red: "#cc0000", green: "#4e9a06", yellow: "#8e7700",
   blue: "#3465a4", magenta: "#75507b", cyan: "#05727e", white: "#6a6a6a",

@@ -41,7 +41,7 @@ const (
 // 2026-10-15：深色底由 Orca 的 #282c34 改为与应用画布相同的 #0a0a0a。
 // 2026-10-28：有了浅色主题。前端解析出有效明暗后发 term.theme 过来（SetLight），
 // 这里和 COLORFGBG 一起跟着换；浅色前景取 Orca「Builtin Tango Light」的 #2e3434，
-// 底色是我们的画布 #eceef1（方案 C 调暗两档的 D2）。
+// 底色是我们的内容面 #fbfbfc（2026-10-28 壳层方向 A：外框 #eceef2 / 内容 #fbfbfc）。
 //
 // ⚠️ 探针事实：本机 claude.exe 至今**没有**发过 OSC 10/11 查询
 // （internal/stream/serve.go 里 20 秒后的 `[osc] 这段时间收到的查询统计` 一直是 map[]）。
@@ -51,7 +51,7 @@ const (
 	darkForeground  = "#ffffff"
 	darkBackground  = "#0a0a0a"
 	lightForeground = "#2e3434"
-	lightBackground = "#eceef1"
+	lightBackground = "#fbfbfc"
 )
 
 var termLight atomic.Bool

@@ -15,7 +15,8 @@
 body.botgroup #nav-cnt-ws{display:none}
 
 #bg{
-  --bg-bg:#0a0a0a; --bg-side:#111112; --bg-panel:#0c0c0d; --bg-raise:#161618;
+  /* 壳层方向 A：列表 = 外框（和 Workspaces 的列表同色），中间 + 工作树 = 内容（和终端同色）。 */
+  --bg-bg:#0a0a0a; --bg-side:#171717; --bg-panel:#0a0a0a; --bg-raise:#161618;
   --bg-line:rgba(255,255,255,.07); --bg-line2:rgba(255,255,255,.045);
   --bg-fg:#f4f4f5; --bg-fg2:#d4d4d8; --bg-muted:#a1a1aa; --bg-faint:#71717a;
   --bg-hov:rgba(255,255,255,.045); --bg-sel:rgba(255,255,255,.075);
@@ -27,7 +28,7 @@ body.botgroup #nav-cnt-ws{display:none}
   font-size:12.5px;margin-right:4px}
 /* 浅色跟全局主题走（html.theme-light，方案 C 冷灰）。 */
 html.theme-light #bg{
-  --bg-bg:#eceef1; --bg-side:#dfe2e7; --bg-panel:#eceef1; --bg-raise:#f5f6f8;
+  --bg-bg:#fbfbfc; --bg-side:#eceef2; --bg-panel:#fbfbfc; --bg-raise:#ffffff;
   --bg-line:rgba(15,23,42,.12); --bg-line2:rgba(15,23,42,.075);
   --bg-fg:#111827; --bg-fg2:#374151; --bg-muted:#6b7280; --bg-faint:#9ca3af;
   --bg-hov:rgba(15,23,42,.04); --bg-sel:rgba(15,23,42,.065);
@@ -180,7 +181,7 @@ html:not(.theme-light) #bg .bg-badge{color:var(--lane);background:color-mix(in s
 .bg-send{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;background:var(--bg-fg);color:var(--bg-bg)}
 
 /* ---------- 右：工作树 ---------- */
-.bg-tree{display:flex;flex-direction:column;min-height:0;background:var(--bg-side);border-left:1px solid var(--bg-line)}
+.bg-tree{display:flex;flex-direction:column;min-height:0;background:var(--bg-panel);border-left:1px solid var(--bg-line)}
 .bg-th{display:flex;align-items:baseline;justify-content:space-between;padding:14px 14px 8px}
 .bg-th b{font-size:12.5px;font-weight:600}
 .bg-th span{font-size:11px;color:var(--bg-faint)}
