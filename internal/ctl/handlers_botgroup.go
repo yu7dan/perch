@@ -65,6 +65,35 @@ func (s *Server) handleBotGroup(m *Msg) {
 		}
 		s.Push(res)
 		s.pushBotGroups()
+	case "botgroup.updatebot":
+		// 角色配置抽屉：改完立刻存；要重启才生效的项由前端提示。
+		if m.BotPatch == nil {
+			return
+		}
+		b, err := st.UpdateBot(m.ID, m.BotID, *m.BotPatch)
+		res := map[string]any{"type": "botgroup.result", "req": m.Req, "op": m.Type, "ok": err == nil, "id": m.ID, "botId": m.BotID}
+		if err != nil {
+			res["err"] = err.Error()
+			log.Printf("[botgroup] 改 Bot %s/%s 失败：%v", m.ID, m.BotID, err)
+		} else {
+			res["bot"] = b
+			log.Printf("[botgroup] 改 Bot %s/%s「%s」agent=%s model=%q perm=%q folder=%q", m.ID, b.ID, b.Role, b.Agent, b.Model, b.Permission, b.Folder)
+		}
+		s.Push(res)
+		s.pushBotGroups()
+	case "botgroup.removebot":
+		b, err := st.RemoveBot(m.ID, m.BotID)
+		res := map[string]any{"type": "botgroup.result", "req": m.Req, "op": m.Type, "ok": err == nil, "id": m.ID, "botId": m.BotID}
+		if err != nil {
+			res["err"] = err.Error()
+		} else {
+			if b.PaneID > 0 && s.deps.Panes != nil {
+				s.deps.Panes.SetGroup(b.PaneID, "", "", "从 Bot Group 移除")
+			}
+			log.Printf("[botgroup] 组 %s 移除 Bot %s「%s」pane=%d", m.ID, b.ID, b.Role, b.PaneID)
+		}
+		s.Push(res)
+		s.pushBotGroups()
 	case "botgroup.bind":
 		if err := st.BindPane(m.ID, m.BotID, m.Pane); err != nil {
 			log.Printf("[botgroup] 绑定格子失败：%v", err)

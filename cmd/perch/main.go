@@ -213,6 +213,20 @@ func main() {
 	// （见 agentWireProfile）。没配的 agent 按它自己的登录/配置启动；
 	// 所有 agent 都跑在用户真实的主目录里。
 	a.tabs.SetWireProfile(a.agentWireProfile)
+	// Bot Group 角色配置（抽屉里设的模型 / 强度 / 权限）：成员格每次起来现查。
+	a.tabs.SetBotConfig(func(gid, bid string) (agent.BotConfig, bool) {
+		for _, g := range a.botgroups.List() {
+			if g.ID != gid {
+				continue
+			}
+			for _, b := range g.Bots {
+				if b.ID == bid {
+					return agent.BotConfig{Model: b.Model, Effort: b.Effort, Permission: b.Permission}, true
+				}
+			}
+		}
+		return agent.BotConfig{}, false
+	})
 	// dsh 的“状态”不是启动时顺手能做的：它要写用户的 DSH home patch，
 	// 还要把官方 hook 桥和 peer 装进 dsh-tui profile。所以只放在两个
 	// **用户明确点下**的动作里（安装完成 / 名单里的「接入状态」），不静默跑。

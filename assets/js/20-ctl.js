@@ -560,6 +560,7 @@ function dispatchCtl(m) {
     // project.picked 一条独立应答，不再搭 pool 的车。
     case "pool":  applyPool(m);  return;
     case "project.picked":
+      if (typeof bgFolderPicked === "function" && bgFolderPicked(m)) return;
       if (typeof projectPickedArrived === "function") projectPickedArrived(m);
       return;
     case "project.result":

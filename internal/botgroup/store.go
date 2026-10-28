@@ -46,6 +46,14 @@ type Bot struct {
 	Manager   bool   `json:"manager,omitempty"`
 	Task      string `json:"task,omitempty"`
 	CreatedAt string `json:"createdAt"`
+	// 角色配置抽屉里改的（2026-10-28）。空 = 跟随 agent 自己 / 组的设置。
+	// Instructions 随第一条消息送进去（见前端 bgWrite）；Model / Effort / Permission / Folder
+	// 在下一次起格时生效（见 session.SpawnSpec 的同名字段）。
+	Instructions string `json:"instructions,omitempty"`
+	Model        string `json:"model,omitempty"`
+	Effort       string `json:"effort,omitempty"`
+	Permission   string `json:"permission,omitempty"` // "" | read-only | workspace-write | full-access
+	Folder       string `json:"folder,omitempty"`     // 空 = 组的项目目录
 }
 
 // Group 是一个 Bot Group。
@@ -132,6 +140,12 @@ type BotInput struct {
 	Role  string `json:"role"`
 	Agent string `json:"agent"`
 	Task  string `json:"task,omitempty"`
+	// 「复制」一个 Bot 时带上原来的配置（建组时不填）。
+	Instructions string `json:"instructions,omitempty"`
+	Model        string `json:"model,omitempty"`
+	Effort       string `json:"effort,omitempty"`
+	Permission   string `json:"permission,omitempty"`
+	Folder       string `json:"folder,omitempty"`
 }
 
 // CreateInput 是建组请求。衍生时给 SourcePane / SourceAgent（原 Agent 当 Manager）；
@@ -469,7 +483,16 @@ func (s *Store) AddBot(gid string, in BotInput) (Bot, error) {
 			return Bot{}, fmt.Errorf("每个组最多 %d 个 Bot", MaxBots)
 		}
 		b := Bot{ID: fmt.Sprintf("b%d", top+1), Role: role, Agent: in.Agent,
-			Task: strings.TrimSpace(in.Task), CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+			Task: strings.TrimSpace(in.Task), CreatedAt: time.Now().UTC().Format(time.RFC3339),
+			Instructions: strings.TrimSpace(in.Instructions), Model: strings.TrimSpace(in.Model), Effort: in.Effort}
+		if ValidPermission(in.Permission) {
+			b.Permission = in.Permission
+		}
+		if f := strings.TrimSpace(in.Folder); f != "" {
+			if fi, err := os.Stat(f); err == nil && fi.IsDir() {
+				b.Folder = f
+			}
+		}
 		g.Bots = append(g.Bots, b)
 		if err := s.saveLocked(); err != nil {
 			g.Bots = g.Bots[:len(g.Bots)-1]
@@ -482,3 +505,142 @@ func (s *Store) AddBot(gid string, in BotInput) (Bot, error) {
 
 // DefaultBudget 是建组时没填预算上限时的默认值（k tokens）。
 const DefaultBudget = 500
+
+// ---- 角色配置（配置抽屉） ----
+
+// ValidPermission：Bot 的权限预设（照 DS-Bot 的三档：只读 / 工作区 / 完全访问），空 = 跟随 agent。
+func ValidPermission(p string) bool {
+	switch p {
+	case "", "read-only", "workspace-write", "full-access":
+		return true
+	}
+	return false
+}
+
+// BotPatch 是抽屉里的一次修改：nil = 这一项不动。
+type BotPatch struct {
+	Role         *string `json:"role,omitempty"`
+	Agent        *string `json:"agent,omitempty"`
+	Task         *string `json:"task,omitempty"`
+	Instructions *string `json:"instructions,omitempty"`
+	Model        *string `json:"model,omitempty"`
+	Effort       *string `json:"effort,omitempty"`
+	Permission   *string `json:"permission,omitempty"`
+	Folder       *string `json:"folder,omitempty"`
+}
+
+// UpdateBot 改一个 Bot 的配置。换 agent 会把 PaneID 清零：旧格子是另一个 agent 的会话，
+// 下次起格必须是新的一格（旧格子由前端决定关不关）。
+func (s *Store) UpdateBot(gid, botID string, p BotPatch) (Bot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken {
+		return Bot{}, fmt.Errorf("botgroups.json 解析失败，为了不覆盖它，这次没有保存")
+	}
+	for gi := range s.f.Groups {
+		g := &s.f.Groups[gi]
+		if g.ID != gid {
+			continue
+		}
+		for bi := range g.Bots {
+			b := &g.Bots[bi]
+			if b.ID != botID {
+				continue
+			}
+			next := *b
+			if p.Role != nil {
+				r := strings.TrimSpace(*p.Role)
+				if r == "" {
+					return Bot{}, fmt.Errorf("角色名不能为空")
+				}
+				if b.Manager {
+					return Bot{}, fmt.Errorf("Manager 的角色名不能改")
+				}
+				next.Role = r
+			}
+			if p.Agent != nil && *p.Agent != b.Agent {
+				if *p.Agent == "" {
+					return Bot{}, fmt.Errorf("agent 不能为空")
+				}
+				if b.Manager && g.Source.Kind == "derived" {
+					return Bot{}, fmt.Errorf("衍生组的 Manager 就是原来那个 Agent，不能换")
+				}
+				next.Agent, next.PaneID = *p.Agent, 0
+				// 模型名是上一个 agent 的，换了 agent 就不再适用。
+				next.Model, next.Effort = "", ""
+			}
+			if p.Task != nil {
+				next.Task = strings.TrimSpace(*p.Task)
+			}
+			if p.Instructions != nil {
+				next.Instructions = strings.TrimSpace(*p.Instructions)
+			}
+			if p.Model != nil {
+				next.Model = strings.TrimSpace(*p.Model)
+			}
+			if p.Effort != nil {
+				next.Effort = strings.TrimSpace(*p.Effort)
+			}
+			if p.Permission != nil {
+				if !ValidPermission(*p.Permission) {
+					return Bot{}, fmt.Errorf("不认识的权限预设：%s", *p.Permission)
+				}
+				next.Permission = *p.Permission
+			}
+			if p.Folder != nil {
+				f := strings.TrimSpace(*p.Folder)
+				if f != "" {
+					if fi, err := os.Stat(f); err != nil || !fi.IsDir() {
+						return Bot{}, fmt.Errorf("文件夹不存在：%s", f)
+					}
+				}
+				if f == g.Project {
+					f = ""
+				}
+				next.Folder = f
+			}
+			old := *b
+			*b = next
+			if err := s.saveLocked(); err != nil {
+				*b = old
+				return Bot{}, err
+			}
+			return next, nil
+		}
+		return Bot{}, fmt.Errorf("组 %s 里没有 Bot %s", gid, botID)
+	}
+	return Bot{}, fmt.Errorf("找不到组 %s", gid)
+}
+
+// RemoveBot 把一个 Bot 从组里移除（Manager 不能移除）。返回它的记录，调用方拿 PaneID
+// 去把格子记录上的成员身份摘掉。过程流里它的旧事件留着。
+func (s *Store) RemoveBot(gid, botID string) (Bot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken {
+		return Bot{}, fmt.Errorf("botgroups.json 解析失败，为了不覆盖它，这次没有保存")
+	}
+	for gi := range s.f.Groups {
+		g := &s.f.Groups[gi]
+		if g.ID != gid {
+			continue
+		}
+		for bi, b := range g.Bots {
+			if b.ID != botID {
+				continue
+			}
+			if b.Manager {
+				return Bot{}, fmt.Errorf("Manager 不能从组里移除")
+			}
+			old := g.Bots
+			g.Bots = append(append([]Bot(nil), old[:bi]...), old[bi+1:]...)
+			if err := s.saveLocked(); err != nil {
+				g.Bots = old
+				return Bot{}, err
+			}
+			return b, nil
+		}
+		return Bot{}, fmt.Errorf("组 %s 里没有 Bot %s", gid, botID)
+	}
+	return Bot{}, fmt.Errorf("找不到组 %s", gid)
+}

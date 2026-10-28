@@ -388,3 +388,167 @@ textarea.bg-cin::placeholder{color:var(--bg-faint)}
 .bg-gi:hover{background:rgb(var(--fx) / .06);color:var(--fg)}
 .bg-gi.danger:hover{color:var(--red)}
 .bg-search .kbd{margin-left:auto}
+
+/* ===========================================================================
+   角色配置抽屉（92-bgdrawer.js）—— 照 DS-Bot 的详情抽屉：布局 / 尺寸 / 动效搬它的，颜色用 Perch 的。
+   抽屉占右栏那一列（盖住工作树），从右边滑进；设置子页从右推进、返回从左回来。
+   =========================================================================== */
+#bg > .bg-list{grid-column:1;grid-row:1}
+#bg > .bg-center{grid-column:2;grid-row:1}
+#bg > .bg-tree{grid-column:3;grid-row:1}
+#bg{--bgd-spring:linear(0,.051,.1692,.3153,.4639,.6001,.7163,.8102,.8823,.935,.9717,.9955,1.0098,1.0171,1.0198,1.0195,1.0175,1.0147,1.0117,1.0089,1.0064,1.0044,1.0028,1.0016,1);
+  --bgd-tap:linear(0,.0541,.1776,.3279,.4784,.6141,.7281,.8187,.8874,.9369,.9709,.9928,1.0057,1.0124,1.015,1.0149,1.0134,1.0112,1.0089,1.0067,1.0048,1.0033,1.0021,1.0013,1);
+  transition:grid-template-columns 420ms var(--bgd-spring)}
+#bg.bgd-on{grid-template-columns:var(--list-w) minmax(0,1fr) var(--bg-dw,352px)}
+#bg.bgd-drag{transition:none;cursor:col-resize;user-select:none}
+.bg-dwrap{grid-column:3;grid-row:1;position:relative;min-width:0;min-height:0;overflow:hidden;pointer-events:none;z-index:6}
+.bg-dgrip{position:absolute;left:0;top:0;bottom:0;width:7px;z-index:3;cursor:col-resize;display:none}
+#bg.bgd-on .bg-dgrip{display:block;pointer-events:auto}
+.bg-dgrip:hover,#bg.bgd-drag .bg-dgrip{background:linear-gradient(to right,transparent 2px,var(--bg-line) 2px,var(--bg-line) 4px,transparent 4px)}
+.bg-drawer{position:absolute;inset:0;display:flex;flex-direction:column;min-height:0;background:var(--bg-panel);
+  border-left:1px solid var(--bg-line);color:var(--bg-fg);font-size:13px;line-height:18px;
+  transform:translateX(100%);visibility:hidden;transition:transform .3s cubic-bezier(.2,0,0,1),visibility 0s linear .3s}
+.bg-drawer.open{transform:none;visibility:visible;pointer-events:auto;transition:transform .3s cubic-bezier(.2,0,0,1)}
+@keyframes bgd-page-in{from{transform:translateX(18px)}}
+@keyframes bgd-page-out{from{transform:translateX(-18px)}}
+@keyframes bgd-veil-in{from{opacity:0;filter:blur(6px)}}
+.bg-drawer[data-move=in]>*{animation:bgd-page-in 420ms var(--bgd-spring) backwards,bgd-veil-in .2s ease-out backwards}
+.bg-drawer[data-move=out]>*{animation:bgd-page-out 420ms var(--bgd-spring) backwards,bgd-veil-in .2s ease-out backwards}
+.bg-drawer[data-move=swap]>*{animation:bgd-veil-in .2s ease-out backwards}
+.bg-drawer[data-move]>:nth-child(2){animation-delay:25ms}
+.bg-drawer[data-move]>:nth-child(n+3){animation-delay:50ms}
+
+/* 顶上一排圆按钮 */
+.bgd-top{display:flex;justify-content:flex-end;gap:8px;padding:12px 14px 6px 12px;flex:none}
+.bgd-round{width:32px;height:32px;border-radius:50%;border:1px solid var(--bg-line);background:var(--bg-raise);color:var(--bg-fg2);
+  display:inline-flex;align-items:center;justify-content:center;padding:0;transition:background-color .12s ease,scale 290ms var(--bgd-tap)}
+.bgd-round:hover{background:var(--bg-hov);color:var(--bg-fg)}
+.bgd-round:active{scale:.94}
+
+/* 身份 */
+.bgd-id{display:flex;flex-direction:column;align-items:center;padding:6px 16px 0;flex:none;min-width:0}
+.bgd-ava{width:var(--s);height:var(--s);flex:none;border-radius:50%;display:grid;place-items:center;
+  background:color-mix(in srgb,var(--lane) 12%,var(--bg-raise));box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--lane) 45%,transparent)}
+.bgd-ava>*{width:46%!important;height:46%!important}
+.bgd-id>.bgd-ava{margin-bottom:14px}
+.bgd-name{font-size:17px;line-height:24px;font-weight:500;padding:0 6px;border-radius:6px;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--bg-fg);cursor:text}
+.bgd-name:not(.static):hover{background:var(--bg-hov)}
+.bgd-name-in{font:inherit;font-size:17px;line-height:24px;font-weight:500;text-align:center;width:min(220px,100%);
+  border:1px solid var(--bg-line);border-radius:6px;padding:0 6px;background:var(--bg-raise);color:var(--bg-fg);outline:none;animation:bgd-veil-in .16s ease-out}
+.bgd-role{font-size:12px;line-height:16px;color:var(--bg-faint);margin-top:6px;text-align:center;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bgd-st{display:inline-flex;align-items:center;gap:6px;margin-top:8px;max-width:100%;font-size:12px;color:var(--bg-muted)}
+.bgd-st[data-state=waiting]{color:var(--bg-ask)}
+.bgd-stats{display:flex;flex-wrap:wrap;justify-content:center;gap:0 6px;padding:10px 16px 0;font-size:12px;line-height:18px;color:var(--bg-muted);font-variant-numeric:tabular-nums;flex:none}
+.bgd-stats i{font-style:normal;color:var(--bg-faint)}
+
+/* 正文 */
+.bgd-body{flex:1;min-height:0;overflow-y:auto;padding:18px 16px 16px;display:flex;flex-direction:column;gap:16px;scrollbar-width:thin}
+.bgd-body.set{gap:18px;padding-top:6px}
+.bgd-sec{display:flex;flex-direction:column;min-width:0}
+.bgd-st-t{font-size:12px;color:var(--bg-muted);margin-bottom:6px}
+.bgd-note{font-size:12px;line-height:16px;color:var(--bg-faint);margin-top:6px}
+.bgd-more{align-self:center;font-size:12px;line-height:16px;color:var(--bg-faint);padding:2px 0}
+.bgd-more:hover{color:var(--bg-fg)}
+.bgd-about{white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden;color:var(--bg-fg2)}
+.bgd-kv{display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:20px;color:var(--bg-muted);min-width:0}
+.bgd-kv span:last-child{color:var(--bg-fg);font-variant-numeric:tabular-nums;flex:none}
+
+/* 下拉触发（DS-Bot 的 model trigger；wide = 概览里的整宽卡） */
+.bgd-trigger{display:inline-flex;align-items:center;gap:8px;max-width:58%;min-width:0;min-height:32px;padding:4px 8px 4px 10px;
+  border-radius:8px;background:var(--bg-hov);color:var(--bg-fg);text-align:left;transition:background-color .12s ease;flex:none}
+.bgd-trigger:hover{background:var(--bg-sel)}
+.bgd-trigger.wide{display:flex;width:100%;max-width:none;min-height:48px;padding:7px 12px;justify-content:space-between;border-radius:12px;
+  background:var(--bg-raise);box-shadow:inset 0 0 0 1px var(--bg-line)}
+.bgd-trigger.wide:hover{background:var(--bg-hov)}
+.bgd-trigger.grey,.bgd-trigger.grey .bgd-tname{color:var(--bg-faint)}
+.bgd-tico{flex:none;display:inline-flex;color:var(--bg-muted)}
+.bgd-tcopy{display:flex;flex-direction:column;min-width:0;flex:1}
+.bgd-tname{font-size:13px;line-height:18px;font-weight:500}
+.bgd-tsub{font-size:11px;line-height:14px;color:var(--bg-faint)}
+.bgd-caret{flex:none;display:inline-flex;color:var(--bg-faint)}
+
+/* 分段（权限 / 强度） */
+.bgd-seg{position:relative;display:flex;gap:2px;padding:2px;border-radius:10px;background:var(--bg-hov)}
+.bgd-seg button{flex:1;height:30px;border-radius:8px;font-size:13px;color:var(--bg-muted);white-space:nowrap;
+  transition:background-color .15s ease,color .15s ease,box-shadow .15s ease,scale 290ms var(--bgd-tap)}
+.bgd-seg.sm button{height:26px;font-size:12px}
+.bgd-seg button:hover{color:var(--bg-fg)}
+.bgd-seg button[aria-pressed=true]{background:var(--bg-raise);color:var(--bg-fg);box-shadow:0 1px 3px rgb(0 0 0 / .14)}
+.bgd-seg button:active{scale:.96}
+.bgd-seg button.danger[aria-pressed=true]{color:var(--bg-bad)}
+.bgd-seg.grey button,.bgd-seg.grey button:hover{color:var(--bg-faint);cursor:default}
+
+/* 共享记忆 */
+.bgd-mem{display:flex;align-items:center;gap:8px;width:100%;height:36px;padding:0 8px 0 10px;border-radius:10px;
+  background:var(--bg-raise);box-shadow:inset 0 0 0 1px var(--bg-line);color:var(--bg-fg);transition:background-color .12s ease}
+.bgd-mem:hover{background:var(--bg-hov)}
+.bgd-mem>svg{flex:none;color:var(--bg-muted)}
+.bgd-mem-copy{flex:1;text-align:left}
+.bgd-mem-go{display:inline-flex;align-items:center;gap:2px;color:var(--bg-faint);font-size:12px;flex:none}
+
+/* 要重启才生效 */
+.bgd-restart{display:flex;align-items:center;gap:8px;padding:8px 8px 8px 12px;border-radius:10px;font-size:12px;color:var(--bg-fg2);
+  background:color-mix(in srgb,var(--bg-ask) 9%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--bg-ask) 22%,transparent)}
+.bgd-restart>span{flex:1;min-width:0}
+.bgd-soft{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border-radius:999px;background:var(--bg-raise);
+  box-shadow:inset 0 0 0 1px var(--bg-line);font-size:12px;color:var(--bg-fg);flex:none;transition:background-color .12s ease,scale 290ms var(--bgd-tap)}
+.bgd-soft:hover{background:var(--bg-hov)}
+.bgd-soft:active{scale:.96}
+.bgd-soft.grey{color:var(--bg-faint)}
+
+/* 设置子页 */
+.bgd-sub{display:flex;align-items:center;gap:4px;padding:10px 12px 4px;flex:none}
+.bgd-sub-t{flex:1;font-size:15px;line-height:24px;font-weight:600;padding-left:4px}
+.bgd-icon{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:var(--bg-muted)}
+.bgd-icon:hover{background:var(--bg-hov);color:var(--bg-fg)}
+.bgd-hero{display:flex;align-items:center;gap:14px;padding:2px 4px}
+.bgd-who{display:flex;flex-direction:column;min-width:0;gap:2px}
+.bgd-hname{font-size:17px;line-height:24px;font-weight:600}
+.bgd-hsub{font-size:12.5px;line-height:18px;color:var(--bg-muted)}
+.bgd-card-s h3{font-size:13px;line-height:18px;font-weight:600;margin:0 0 8px;padding:0 4px}
+.bgd-card{border-radius:12px;background:var(--bg-raise);box-shadow:inset 0 0 0 1px var(--bg-line);display:flex;flex-direction:column}
+.bgd-card>*+*{border-top:1px solid var(--bg-line2)}
+.bgd-row{display:flex;align-items:center;gap:12px;min-height:48px;padding:10px 12px;width:100%;text-align:left;color:var(--bg-fg)}
+.bgd-row.stack{flex-direction:column;align-items:stretch;gap:8px}
+.bgd-row.btn:hover{background:var(--bg-hov)}
+.bgd-row:first-child{border-top-left-radius:12px;border-top-right-radius:12px}
+.bgd-row:last-child{border-bottom-left-radius:12px;border-bottom-right-radius:12px}
+.bgd-copy{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.bgd-label{font-size:13px;line-height:18px;font-weight:500}
+.bgd-hint{font-size:12px;line-height:16px;color:var(--bg-faint);overflow-wrap:anywhere}
+.bgd-val{font-size:13px;color:var(--bg-muted)}
+.bgd-chev{color:var(--bg-faint);display:inline-flex;flex:none}
+.bgd-row.danger .bgd-label{color:var(--bg-bad)}
+.bgd-row.danger[data-confirm]{background:color-mix(in srgb,var(--bg-bad) 8%,transparent)}
+.bgd-in{flex:0 1 190px;width:0;min-width:96px;height:30px;margin:-4px -6px -4px 0;padding:0 8px;border:1px solid transparent;border-radius:8px;
+  background:none;color:var(--bg-fg);font:inherit;font-size:13px;text-align:right;outline:none;transition:background-color .12s ease,border-color .12s ease}
+.bgd-in:hover{background:var(--bg-hov)}
+.bgd-in:focus{background:var(--bg-panel);border-color:var(--bg-line);text-align:left}
+.bgd-in::placeholder{color:var(--bg-faint)}
+.bgd-in.area{flex:none;width:auto;min-height:112px;height:auto;margin:0 -6px -4px;padding:8px;line-height:19px;text-align:left;resize:vertical;background:var(--bg-hov)}
+.bgd-in.area:focus{background:var(--bg-panel)}
+
+/* 浮层菜单（模型 / agent / 文件夹） */
+#bgd-pop{position:fixed;z-index:140;max-height:360px;overflow-y:auto;padding:4px;border-radius:10px;background:var(--s-pop);scrollbar-width:thin;
+  box-shadow:0 0 0 1px rgb(var(--fx) / .1),0 10px 28px rgb(var(--shade) / calc(.35 * var(--shade-k)));animation:feel-pop-in var(--dur-3) var(--ease-swift)}
+#bgd-pop[hidden]{display:none}
+.bgd-mi{display:flex;align-items:center;gap:6px;width:100%;min-height:30px;padding:4px 8px 4px 4px;border-radius:6px;text-align:left;font-size:12.5px;color:var(--fg)}
+.bgd-mi:hover,.bgd-mi:focus-visible{background:rgb(var(--fx) / .06);outline:none}
+.bgd-tick{width:16px;flex:none;display:inline-flex;color:var(--fg2)}
+.bgd-mi-ico{flex:none;display:inline-flex;color:var(--fg2)}
+.bgd-mi-copy{display:flex;flex-direction:column;min-width:0}
+.bgd-mi-sub{font-size:11px;color:var(--faint)}
+.bgd-mg{padding:8px 8px 2px 26px;font-size:11px;font-weight:500;color:var(--faint)}
+.bgd-mnote{padding:6px 8px 4px 26px;font-size:11px;color:var(--faint)}
+.bgd-pop-in{display:block;width:calc(100% - 8px);margin:4px;height:28px;padding:0 8px;border-radius:6px;border:1px solid rgb(var(--fx) / .12);
+  background:transparent;color:var(--fg);font:inherit;font-size:12.5px;outline:none}
+.bgd-pop-in:focus{border-color:rgb(var(--fx) / .3)}
+
+/* 左栏：抽屉开着的那一行 */
+#bg .bg-row.cfg-on .bg-rterm{opacity:1;background:var(--bg-sel);color:var(--bg-fg)}
+
+@media (prefers-reduced-motion:reduce){
+  #bg,.bg-drawer,.bg-drawer.open{transition:none}
+  .bg-drawer[data-move]>*,.bgd-name-in{animation:none}
+}

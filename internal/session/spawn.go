@@ -84,6 +84,25 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 	if ok {
 		profEnv, profArgs = e, a
 	}
+	// Bot Group 角色自己的模型 / 强度 / 权限排在提供商之后：同一项以角色的为准。
+	if bc, ok := m.botConfigFor(tab.Spec); ok {
+		be, ba := agent.BotLaunch(tab.Spec.Agent, bc)
+		if len(be) > 0 {
+			merged := make(map[string]string, len(profEnv)+len(be))
+			for k, v := range profEnv {
+				merged[k] = v
+			}
+			for k, v := range be {
+				merged[k] = v
+			}
+			profEnv = merged
+		}
+		profArgs = append(append([]string{}, profArgs...), ba...)
+		if len(be)+len(ba) > 0 {
+			log.Printf("[startup t%d] Bot %s/%s 角色配置：model=%q effort=%q perm=%q（%d env, %d 参数）",
+				tab.ID, tab.Spec.Group, tab.Spec.Bot, bc.Model, bc.Effort, bc.Permission, len(be), len(ba))
+		}
+	}
 	profileTook := time.Since(t0)
 	// Prepare 是“这一格才有的”启动准备（OpenCode 的端口/口令、Codex 的
 	// app-server 都是它给的）。

@@ -82,6 +82,43 @@ func TestEventsAnchorByID(t *testing.T) {
 	}
 }
 
+func TestUpdateRemoveBot(t *testing.T) {
+	dir, proj, other := t.TempDir(), t.TempDir(), t.TempDir()
+	s := Load(dir)
+	g, _ := s.Create(CreateInput{Name: "g", Project: proj, ManagerAgent: "claude", Bots: []BotInput{{Role: "开发", Agent: "codex"}}})
+	str := func(v string) *string { return &v }
+	if err := s.BindPane(g.ID, "b1", 7); err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.UpdateBot(g.ID, "b1", BotPatch{Role: str(" 维护 "), Model: str("gpt-5"), Permission: str("workspace-write"), Folder: str(other)})
+	if err != nil || b.Role != "维护" || b.Model != "gpt-5" || b.Permission != "workspace-write" || b.Folder != other || b.PaneID != 7 {
+		t.Fatalf("UpdateBot = %+v %v", b, err)
+	}
+	if _, err := s.UpdateBot(g.ID, "b1", BotPatch{Permission: str("root")}); err == nil {
+		t.Fatal("bad permission accepted")
+	}
+	if _, err := s.UpdateBot(g.ID, "b1", BotPatch{Folder: str(filepath.Join(other, "nope"))}); err == nil {
+		t.Fatal("missing folder accepted")
+	}
+	// 文件夹改回项目目录 = 清空（跟随组）；换 agent 清掉格子和模型。
+	b, _ = s.UpdateBot(g.ID, "b1", BotPatch{Folder: str(proj), Agent: str("claude")})
+	if b.Folder != "" || b.PaneID != 0 || b.Model != "" || b.Agent != "claude" {
+		t.Fatalf("after agent switch = %+v", b)
+	}
+	if _, err := s.UpdateBot(g.ID, "manager", BotPatch{Role: str("x")}); err == nil {
+		t.Fatal("manager rename accepted")
+	}
+	if _, err := s.RemoveBot(g.ID, "manager"); err == nil {
+		t.Fatal("manager removed")
+	}
+	if _, err := s.RemoveBot(g.ID, "b1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(Load(dir).List()[0].Bots); got != 1 {
+		t.Fatalf("after remove bots=%d", got)
+	}
+}
+
 func TestAddBot(t *testing.T) {
 	dir, proj := t.TempDir(), t.TempDir()
 	s := Load(dir)

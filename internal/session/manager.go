@@ -49,6 +49,8 @@ type Manager struct {
 	// 没配的 agent 返回 ok=false，按它自己的配置启动。
 	profileMu   sync.RWMutex
 	wireProfile func(id string) (map[string]string, []string, bool, error)
+	// botConfig：Bot Group 里角色自己的模型 / 权限（角色配置抽屉），按 Spec.Group/Bot 现查。
+	botConfig func(group, bot string) (agent.BotConfig, bool)
 }
 
 // New 构造空的会话表。Defs 在 agent.SetHost 之后由 SetDefs 填 —— 顺序见
@@ -84,6 +86,27 @@ func (m *Manager) SetWireProfile(fn func(id string) (map[string]string, []string
 	m.profileMu.Lock()
 	m.wireProfile = fn
 	m.profileMu.Unlock()
+}
+
+// SetBotConfig 由组合根注入：Bot Group 成员格每次起来时现查它的角色配置
+// （冷恢复、原座位接上、新起一格都走这里，所以前端不用每条路都带一遍）。
+func (m *Manager) SetBotConfig(fn func(group, bot string) (agent.BotConfig, bool)) {
+	m.profileMu.Lock()
+	m.botConfig = fn
+	m.profileMu.Unlock()
+}
+
+func (m *Manager) botConfigFor(spec SpawnSpec) (agent.BotConfig, bool) {
+	if spec.Group == "" || spec.Bot == "" {
+		return agent.BotConfig{}, false
+	}
+	m.profileMu.RLock()
+	fn := m.botConfig
+	m.profileMu.RUnlock()
+	if fn == nil {
+		return agent.BotConfig{}, false
+	}
+	return fn(spec.Group, spec.Bot)
 }
 
 // HookSettings 给 Qoder 这类 Claude 形状但走 --settings 的 agent 用。

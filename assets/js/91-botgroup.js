@@ -176,6 +176,11 @@ const BG_EV_OF = { working: "working", ask: "waiting", idle: "idle", unread: "id
 function botStateChanged(tab, s) {
   const k = BG_EV_OF[s] || "idle";
   if (!tab.bgBorn) tab.bgBorn = Date.now();
+  if (!tab.bgCfg && typeof bgdNoteLaunch === "function") {
+    const g = BOTGROUPS.find((x) => x.id === tab.group);
+    const b = bgBot(g, tab.bot);
+    if (g && b) bgdNoteLaunch(tab, g, b);
+  }
   if (tab.botShown === k) return;
   tab.botShown = k;
   bgSchedule();
@@ -236,7 +241,7 @@ async function bgStartBot(g, bot, why) {
   const sid = rec && rec.sessionId && rec.onDisk ? rec.sessionId : "";
   const spec = {
     agent: bot.agent || (rec && rec.agent) || defaultAgentId(),
-    cwd: g.project,
+    cwd: bot.folder || g.project,
     target: sid ? "legacy" : "directory",
     resume: sid ? { kind: "exact", id: sid } : { kind: "new", id: "" },
     paneId: bot.paneId || undefined,
@@ -244,6 +249,7 @@ async function bgStartBot(g, bot, why) {
   };
   sendCtrl({ type: "log", msg: `Bot Group：起格 ${g.id}/${bot.id} agent=${spec.agent} pane=${bot.paneId || 0} resume=${spec.resume.kind}（${why || ""}）` });
   const nt = await createTab(spec);
+  if (nt && TAB_LIST.includes(nt) && typeof bgdLaunchCfg === "function") nt.bgCfg = bgdLaunchCfg(g, bot);
   if (!nt || !TAB_LIST.includes(nt)) {
     const r = nt && nt.resumeRefused;
     showToast(t("bg.toast.startFailed", { role: bot.role }), (r && r.msg) || t("bg.toast.startFailedNote"), "err");
@@ -271,6 +277,7 @@ const BG_I = {
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   dots: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
+  sliders: '<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>',
   bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
 };
 function bgIco(name, size) { return lucide(BG_I[name], size || 14); }
@@ -352,7 +359,7 @@ function bgRowHTML(g, b, on) {
     + `<span class="bg-ri">${bgAgentIco(b.agent)}</span>`
     + `<span class="bg-rmain"><span class="bg-rt ell"><b>${esc(b.manager ? "Manager" : b.role)}</b> · ${esc(task)}</span>`
     + `<span class="bg-rs ell">${esc(bgAgentName(b.agent))} · ${esc(bgModelShort(bgDerive(g, b).model) || bgWhere(g, b))}</span></span>`
-    + `<button type="button" class="bg-rterm" data-bg-term="${esc(b.id)}" data-bg-group="${esc(g.id)}" title="${esc(t(st === "pending" || st === "off" ? "bg.feed.startTitle" : "bg.feed.openTermTitle"))}">${bgIco(st === "pending" || st === "off" ? "play" : "term", 12)}</button>`
+    + `<button type="button" class="bg-rterm" data-bg-cfg="${esc(b.id)}" data-bg-group="${esc(g.id)}" title="${esc(t("bg.d.openTitle", { name: b.manager ? "Manager" : b.role }))}">${bgIco("sliders", 12)}</button>`
     + `${bgDot(st)}</div>`;
 }
 function bgListHTML() {
@@ -911,11 +918,10 @@ function bgCardsHTML(g, members) {
   }).join("");
 }
 
+/* 聚焦一个 Bot 时页头右边那颗：打开它的角色配置抽屉（终端收进了抽屉顶上）。 */
 function bgTermBtn(b) {
-  const st = bgBotState(b);
-  const start = st === "pending" || st === "off";
-  return `<button type="button" class="bg-ghost" data-bg-term="${esc(b.id)}" title="${esc(t(start ? "bg.feed.startTitle" : "bg.feed.openTermTitle"))}">`
-    + `${bgIco(start ? "play" : "term", 13)}<span>${esc(t(start ? (st === "off" ? "bg.feed.resume" : "bg.feed.start") : "bg.feed.openTerm"))}</span></button>`;
+  return `<button type="button" class="bg-ghost" data-bg-cfg="${esc(b.id)}" title="${esc(t("bg.d.openTitle", { name: b.manager ? "Manager" : b.role }))}">`
+    + `${bgIco("sliders", 13)}<span>${esc(t("bg.d.config"))}</span></button>`;
 }
 function bgFeedHeadHTML(g) {
   if (BG.focus === "all") {
@@ -1210,6 +1216,7 @@ function renderBotGroup(why) {
     bgMotionAfterRender(g, switched);
   }
   BG_STICK = false;
+  if (typeof bgDrawerSync === "function") bgDrawerSync();
   if (why) sendCtrl({ type: "log", msg: `Bot Group 渲染（${why}）组=${BOTGROUPS.length} 当前=${g ? g.id : "-"} focus=${BG.focus} theme=${light ? "light" : "dark"}` });
 }
 
@@ -1743,7 +1750,8 @@ function bgWrite(g, b, tab, item) {
   if (!tab.bgIntro) {
     tab.bgIntro = true;
     body = t("bg.chat.intro", { group: g.name, role: b.manager ? "Manager" : b.role, goal: g.goal || "—",
-      team: bgMembers(g).map((x) => (x.manager ? "Manager" : x.role) + "(" + bgAgentName(x.agent) + ")").join("、") }) + "\n\n" + body;
+      team: bgMembers(g).map((x) => (x.manager ? "Manager" : x.role) + "(" + bgAgentName(x.agent) + ")").join("、") })
+      + (b.instructions ? "\n" + t("bg.chat.introAbout", { text: b.instructions }) : "") + "\n\n" + body;
   }
   const bp = !!(tab.term && tab.term.modes && tab.term.modes.bracketedPasteMode);
   const payload = bp ? "\x1b[200~" + body.replace(/\r?\n/g, "\r") + "\x1b[201~" : body.replace(/\s*\r?\n\s*/g, " ");
@@ -1912,6 +1920,13 @@ function bgFocus(gid, focus, why) {
         const k = more.dataset.bgMore;
         if (BG.open.has(k)) BG.open.delete(k); else BG.open.add(k);
         renderBotGroup();
+        return;
+      }
+      const cfgBtn = e.target.closest("[data-bg-cfg]");
+      if (cfgBtn) {
+        const g = BOTGROUPS.find((x) => x.id === (cfgBtn.dataset.bgGroup || BG.group)) || bgGroup();
+        if (g && g.id !== BG.group) { bgPickGroup(g.id); BG.focus = "all"; renderBotGroup("选组"); }
+        if (g) bgOpenDrawer(g.id, cfgBtn.dataset.bgCfg);
         return;
       }
       const termBtn = e.target.closest("[data-bg-term]");
