@@ -1037,14 +1037,22 @@ window.addEventListener("resize", refit);
   T.applyAppearance = () => {
     try {
       const th = termThemeNow();
-      if (term.options.theme !== th) term.options.theme = th;
-      term.options.minimumContrastRatio = termContrastNow();
+      const contrast = termContrastNow();
       const stack = termFontStack();
       const size = SETTINGS.termFontSize;
-      if (term.options.fontFamily !== stack) term.options.fontFamily = stack;
-      if (term.options.fontSize !== size) term.options.fontSize = size;
-      resetGlyphAtlas();
-      term.refresh(0, Math.max(0, term.rows - 1));
+      // 每次设置推送（进一次设置页就有一次）都会走到这里。什么都没变就什么都不碰：
+      // 原来无条件写 minimumContrastRatio 再清图集，WebGL 每次都重建一份字形图集，
+      // 旧图集的隐藏临时 canvas 还会留在终端元素里（实测进一次设置页多一个）。
+      const same = term.options.theme === th && term.options.minimumContrastRatio === contrast &&
+        term.options.fontFamily === stack && term.options.fontSize === size;
+      if (!same) {
+        if (term.options.theme !== th) term.options.theme = th;
+        if (term.options.minimumContrastRatio !== contrast) term.options.minimumContrastRatio = contrast;
+        if (term.options.fontFamily !== stack) term.options.fontFamily = stack;
+        if (term.options.fontSize !== size) term.options.fontSize = size;
+        resetGlyphAtlas();
+        term.refresh(0, Math.max(0, term.rows - 1));
+      }
     } catch (e) {
       jserr("applyAppearance", e);
     }
