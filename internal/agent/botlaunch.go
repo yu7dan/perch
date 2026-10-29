@@ -105,6 +105,13 @@ func BotLaunch(agentID string, c BotConfig) (env map[string]string, args []strin
 			args = append(args, "--dangerously-skip-permissions")
 		}
 	case "codex":
+		if c.InGroup {
+			// 启动时的「Update available」选择屏默认选中「1. Update now」：投递一粘贴回车，
+			// 就替用户跑了安装器（2026-10-29 实测 0.164 在 Perch 里弹它）。它只在
+			// check_for_update_on_startup = true 时出现（Orca 的 codex-0158-update-available-dialog
+			// 固定样本的说明），Bot 这一格用 -c 关掉，不碰用户的 config.toml。
+			args = append(args, "-c", "check_for_update_on_startup=false")
+		}
 		if c.Model != "" {
 			args = append(args, "-c", "model="+strconv.Quote(c.Model))
 		}

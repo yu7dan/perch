@@ -19,6 +19,11 @@ func TestBotLaunch(t *testing.T) {
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("codex args = %v", args)
 	}
+	// 群组里的 Codex 关掉启动更新屏（它默认选中「Update now」，投递的回车会替用户装更新）
+	_, args = BotLaunch("codex", BotConfig{InGroup: true})
+	if !reflect.DeepEqual(args, []string{"-c", "check_for_update_on_startup=false"}) {
+		t.Fatalf("codex in-group args = %v", args)
+	}
 	_, args = BotLaunch("opencode", BotConfig{Model: "anthropic/claude-sonnet-4", Effort: "high", Permission: "full-access"})
 	if !reflect.DeepEqual(args, []string{"-m", "anthropic/claude-sonnet-4", "--auto"}) {
 		t.Fatalf("opencode args = %v", args)
