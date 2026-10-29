@@ -500,11 +500,11 @@ const term = new Terminal({
   // 我们在 Windows 上跑，但这是 Orca 的默认值，留着以免以后移植时漏掉。
   macOptionIsMeta: false,
   macOptionClickForcesSelection: true,
-  // 【关键】声明支持 kitty 键盘协议，让**会用 `CSI ? u` 探测**的 CLI 知道
-  // 我们能收增强按键上报。Claude Code 就探测这个：没有这个握手，
-  // 它会退回传统编码，Shift+Enter 之类的按键就丢了。
-  // Orca 原注释：Matches VS Code's xtermTerminal.ts。
-  vtExtensions: { kittyKeyboard: true },
+  // kitty 键盘协议：本机 Windows ConPTY 下**不声明**（照 Orca terminal-keyboard-protocol.ts：
+  // 有的 CLI 会开 KKP 却不认 CSI-u 的导航键，#2434）。2026-10-29 之前我们写的是 true，
+  // 但那时的 xterm 6.0 根本不认这个选项、等于没开；换成 Orca 打过补丁的 6.1 之后它才真正生效，
+  // 所以这里必须按 Orca 关掉。Shift+Enter 之类改由按键策略按 agent 发对的编码。
+  vtExtensions: { kittyKeyboard: false },
   // ANSI 16 色（black…brightWhite）逐字取自 Orca 的默认暗色主题
   // "Ghostty Default Style Dark"，**不动** —— 它们与底色无绑定关系。
   // 只有 background / cursorAccent 跟着 --term-bg 走了我们的画布色，理由见文件顶部。
@@ -528,6 +528,9 @@ catch (e) { console.warn("[perch] serialize addon 未加载:", e); }
 term.open(host);
 // 全屏 TUI 的滚轮按 Orca 的规则换算成多次鼠标上报（attachTuiWheel，文件尾）
 attachTuiWheel(term);
+// 输出管线照 Orca：同步帧整帧写、中途的光标显示挪到帧尾、写完补刷新（11-term-output.js）
+const termOut = createTermOutput(term);
+T.termOut = termOut;
 
 // ---------------------------------------------------------------------------
 // WebGL 的挂载顺序 —— 这一段是**照 Orca 的 pane-webgl-renderer.ts 搬的**，
@@ -789,9 +792,9 @@ stream.onerror = () => {
 };
 stream.onmessage = (ev) => {
   const d = ev.data;
-  if (d instanceof ArrayBuffer)   term.write(new Uint8Array(d));
-  else if (ArrayBuffer.isView(d)) term.write(new Uint8Array(d.buffer, d.byteOffset, d.byteLength));
-  else                            term.write(String(d));
+  if (d instanceof ArrayBuffer)   termOut.pushBytes(new Uint8Array(d));
+  else if (ArrayBuffer.isView(d)) termOut.pushBytes(new Uint8Array(d.buffer, d.byteOffset, d.byteLength));
+  else                            termOut.pushText(String(d));
 };
 /* 「未开始」的门只认**用户动作**，不能用 term.onData 判 ——
    ⚠️ 2026-10-20 真机验收逮到的 bug：xterm 对终端查询的**自动应答**也走 onData
@@ -800,10 +803,10 @@ stream.onmessage = (ev) => {
    `新格开始干活 ... 触发=终端输入`，用户根本没碰键盘，⇄ 换 Agent 就没了。
    现在只认三种真的由用户发起的动作：按键（onKey）、粘贴、输入法提交。
    onData 只负责把字节送给 PTY（自动应答也必须送，否则终端会等应答）。 */
-term.onKey(() => freshCellStarted(T, "终端按键"));
+term.onKey(() => { termOut.noteInput(); freshCellStarted(T, "终端按键"); });
 if (term.textarea) {
-  term.textarea.addEventListener("paste", () => freshCellStarted(T, "粘贴"));
-  term.textarea.addEventListener("compositionend", () => freshCellStarted(T, "输入法提交"));
+  term.textarea.addEventListener("paste", () => { termOut.noteInput(); freshCellStarted(T, "粘贴"); });
+  term.textarea.addEventListener("compositionend", () => { termOut.noteInput(); freshCellStarted(T, "输入法提交"); });
 }
 term.onData((d) => { if (ready) stream.send(enc.encode(d)); });
 

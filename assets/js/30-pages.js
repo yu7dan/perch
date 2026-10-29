@@ -336,6 +336,7 @@ function closeTab(t, opts) {
   if (tabEditing && renameTab === t) cancelRename();
   let closed = false;
   try { if (t.stream) { t.stream.close(); closed = true; } } catch (e) {}
+  try { if (t.termOut) t.termOut.dispose(); } catch (e) {}
   // 关格子是**唯一**会让 Go 那边销毁 PTY 的动作，而它在界面上留下的痕迹只有
   // "少了一格" —— 连"到底关没关成"都看不见。所以结果明确回传：这条 stream
   // 关掉了没有（关掉 = Go 的 Receive 会失败 = PTY 会被收走）。
