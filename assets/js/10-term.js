@@ -175,6 +175,16 @@ const DEFAULT_SPAWN_SPEC = { agent: "claude", cwd: "", target: "scratch",
    ⚠️ 它必须**定义在 createTab 之前**：启动那次 burst 是**模块求值期间**跑的，
    而文件后半那批 LUCIDE_* 常量到那一刻还没执行到 —— 在函数体里引用它们就是
    TDZ 的 ReferenceError（表现是"第一格建不出来"，和图标本身毫无关系）。 */
+/* 滚动条一带的颜色（照 Orca terminal-appearance.ts 的 composeActiveTerminalTheme）：
+   我们设了 scrollbar.width，xterm 6 就会开概览标尺，它左边那道 1px 边框默认是亮色 ——
+   多格并排时每格右侧一根白线，和格子头的分隔线差 7px 对不齐。边框透明；
+   滑块调亮（xterm 默认约 0.2 的透明度在深底上几乎看不见）。 */
+const TERM_THEME_SCROLL = Object.freeze({
+  overviewRulerBorder: "transparent",
+  scrollbarSliderBackground: "rgba(180, 180, 185, 0.4)",
+  scrollbarSliderHoverBackground: "rgba(180, 180, 185, 0.6)",
+  scrollbarSliderActiveBackground: "rgba(180, 180, 185, 0.8)",
+});
 /* xterm 主题。深色：ANSI 16 色逐字取自 Orca 的默认暗色主题 "Ghostty Default Style Dark"，
    只有 background / cursorAccent 跟着画布 #0a0a0a 走（理由见 00-base.css 顶部）。
    浅色（2026-10-28）：ANSI 逐字取自 Orca 的 "Builtin Tango Light"
@@ -182,6 +192,7 @@ const DEFAULT_SPAWN_SPEC = { agent: "claude", cwd: "", target: "scratch",
    压深过，浅底上 agent 的强调色才读得清），底色换成我们的内容面 #fbfbfc（壳层方向 A）。
    ⚠️ 底色 / 前景改了要同步 osc_color.go 的 light/dark 常量和 00-base.css 的 --term-*。 */
 const TERM_THEME_DARK = Object.freeze({
+  ...TERM_THEME_SCROLL,
   background: "#0a0a0a", foreground: "#ffffff",
   cursor: "#ffffff", cursorAccent: "#0a0a0a",
   selectionBackground: "#5a7898", selectionForeground: "#ffffff",
@@ -192,6 +203,7 @@ const TERM_THEME_DARK = Object.freeze({
   brightCyan: "#70c0b1", brightWhite: "#eaeaea",
 });
 const TERM_THEME_LIGHT = Object.freeze({
+  ...TERM_THEME_SCROLL,
   background: "#fbfbfc", foreground: "#2e3434",
   cursor: "#2e3434", cursorAccent: "#fbfbfc",
   selectionBackground: "#accef7", selectionForeground: "#2e3434",

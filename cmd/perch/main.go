@@ -292,6 +292,8 @@ func main() {
 		Name:        "Perch",
 		Description: "面向 agent 终端的 Windows 桌面工作台",
 		Icon:        appIcon,
+		// 窗口重新激活后补一次焦点，修中文输入法候选框跑到屏幕左上角（ime_refocus_windows.go）
+		Windows: application.WindowsOptions{WndProcInterceptor: imeRefocusInterceptor},
 		Assets: application.AssetOptions{
 			Handler: application.BundledAssetFileServer(perchassets.Assets),
 		},
