@@ -3,7 +3,6 @@ module github.com/yu7dan/perch
 go 1.27.2
 
 require (
-	github.com/UserExistsError/conpty v0.1.4
 	github.com/coder/websocket v1.8.14
 	github.com/klauspost/compress v1.18.3
 	github.com/wailsapp/wails/v3 v3.0.0-beta.24

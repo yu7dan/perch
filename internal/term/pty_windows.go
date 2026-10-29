@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/UserExistsError/conpty"
+	"github.com/yu7dan/perch/internal/conpty"
 )
 
 // Session 包住 ConPTY，把「起一个真实终端」收敛成几个方法。

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/UserExistsError/conpty"
+	"github.com/yu7dan/perch/internal/conpty"
 )
 
 // 从主程序的 pty_windows.go 逐字拷来（探针不重写已有一遍的代码）。

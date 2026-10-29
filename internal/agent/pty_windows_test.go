@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/UserExistsError/conpty"
+	"github.com/yu7dan/perch/internal/conpty"
 )
 
 // 真机测试需要一个真实终端来跑 TUI。生产代码里这层归宿主（Perch 的

@@ -526,6 +526,8 @@ try { serialize = new SerializeAddon.SerializeAddon(); term.loadAddon(serialize)
 catch (e) { console.warn("[perch] serialize addon 未加载:", e); }
 
 term.open(host);
+// 全屏 TUI 的滚轮按 Orca 的规则换算成多次鼠标上报（attachTuiWheel，文件尾）
+attachTuiWheel(term);
 
 // ---------------------------------------------------------------------------
 // WebGL 的挂载顺序 —— 这一段是**照 Orca 的 pane-webgl-renderer.ts 搬的**，
@@ -1946,4 +1948,119 @@ function setOsBuild(n) {
   for (const t of (typeof TAB_LIST !== "undefined" ? TAB_LIST : [])) {
     try { if (t.term) t.term.options.windowsPty = { backend: "conpty", buildNumber: n }; } catch (_) {}
   }
+}
+
+// ---------------------------------------------------------------------------
+// 全屏 TUI（开了鼠标模式的那种，如 Pi 1.4 的 fullscreen）里的滚轮：
+// 原样搬自 Orca lib/pane-manager/pane-terminal-mouse-wheel.ts + pane-terminal-tui-wheel-reports.ts（MIT）。
+// xterm 自己对「开了鼠标上报」的程序只按像素粗算、小幅滚动会被吞掉，快速连滚也只报一次 ——
+// 实测 Pi 里滚 8 格只动 1 行。这里按 Orca 的规则把一次滚轮换算成 N 次「上 / 下一行」的鼠标上报：
+// 普通滚轮一格 ≈ 1 + log2(行数) 行（有上限），快速连滚加速，触控板按像素带余数累计。
+// 没开鼠标模式（Claude Code 这类普通屏）时完全不管，交给 xterm 自己滚回滚缓冲。
+// ---------------------------------------------------------------------------
+const TUI_WHEEL = {
+  DOM_DELTA_PIXEL: 0, DOM_DELTA_LINE: 1, DOM_DELTA_PAGE: 2,
+  LEGACY_MIN: 100, LEGACY_UNIT: 120, CONT_IDLE_MS: 300, CONT_RATIOS: [3, 1], CONT_TOL: 3,
+  CELL_H: 16, GAIN: 1.6, BURST_FULL_MS: 16, BURST_MAX_MS: 45, BURST_BONUS: 3, BURST_RAMP: 4,
+  TAIL_DECAY: 0.85, COMPRESSED_MAX: 6, BURST_MAX_ROWS: 9,
+};
+const REPLAYED_WHEEL = "__perchReplayedWheel";
+function tuiWheelDistanceState() {
+  return { continuousGestureAt: null, fastStreak: 0, lastDistanceRows: null, lastInputAt: null, pendingDirection: 0, pendingRows: 0 };
+}
+function tuiWheelLegacyDelta(e) {
+  if (typeof e.wheelDeltaY === "number" && Number.isFinite(e.wheelDeltaY)) return e.wheelDeltaY;
+  if (typeof e.wheelDelta === "number" && Number.isFinite(e.wheelDelta)) return e.wheelDelta;
+  return null;
+}
+function tuiWheelTime(e) { return typeof e.timeStamp === "number" && Number.isFinite(e.timeStamp) ? e.timeStamp : null; }
+function tuiWheelContinuous(e, st) {
+  if ((e.deltaMode ?? TUI_WHEEL.DOM_DELTA_PIXEL) !== TUI_WHEEL.DOM_DELTA_PIXEL) { st.continuousGestureAt = null; return false; }
+  const at = tuiWheelTime(e), legacy = tuiWheelLegacyDelta(e);
+  const ratioOk = legacy !== null && TUI_WHEEL.CONT_RATIOS.some((r) => Math.abs(Math.abs(e.deltaY) * r - Math.abs(legacy)) <= TUI_WHEEL.CONT_TOL);
+  const continuous = legacy === null || Math.abs(legacy) < TUI_WHEEL.LEGACY_MIN ||
+    (at !== null && st.continuousGestureAt !== null && at >= st.continuousGestureAt &&
+     at - st.continuousGestureAt <= TUI_WHEEL.CONT_IDLE_MS && ratioOk);
+  st.continuousGestureAt = continuous ? at : null;
+  return continuous;
+}
+function tuiWheelRows(e, m, continuous) {
+  const mode = e.deltaMode ?? TUI_WHEEL.DOM_DELTA_PIXEL, dy = Math.abs(e.deltaY);
+  const cell = m.cellHeight > 0 && Number.isFinite(m.cellHeight) ? m.cellHeight : TUI_WHEEL.CELL_H;
+  const fromDelta = mode === TUI_WHEEL.DOM_DELTA_LINE ? dy : mode === TUI_WHEEL.DOM_DELTA_PAGE ? dy * Math.max(1, m.rows || 1) : dy / cell;
+  if (continuous) return fromDelta;
+  const legacy = tuiWheelLegacyDelta(e);
+  return Math.max(1, fromDelta, legacy === null ? 0 : Math.abs(legacy) / TUI_WHEEL.LEGACY_UNIT);
+}
+function tuiWheelCompress(rows) {
+  return rows <= 1 ? rows : Math.min(TUI_WHEEL.COMPRESSED_MAX, 1 + Math.log2(rows) * TUI_WHEEL.GAIN);
+}
+function tuiWheelBurst(e, st, rows) {
+  const at = tuiWheelTime(e);
+  if (at === null) { st.fastStreak = 0; st.lastDistanceRows = null; st.lastInputAt = null; return 0; }
+  const elapsed = st.lastInputAt === null ? null : at - st.lastInputAt;
+  const tail = st.lastDistanceRows !== null && rows < st.lastDistanceRows * TUI_WHEEL.TAIL_DECAY;
+  st.lastDistanceRows = rows; st.lastInputAt = at;
+  if (tail || elapsed === null || elapsed < 0 || elapsed > TUI_WHEEL.BURST_MAX_MS) { st.fastStreak = 0; return 0; }
+  const cadence = elapsed <= TUI_WHEEL.BURST_FULL_MS ? 1 : (TUI_WHEEL.BURST_MAX_MS - elapsed) / (TUI_WHEEL.BURST_MAX_MS - TUI_WHEEL.BURST_FULL_MS);
+  st.fastStreak = Math.min(TUI_WHEEL.BURST_RAMP, st.fastStreak + 1);
+  return TUI_WHEEL.BURST_BONUS * cadence * (st.fastStreak / TUI_WHEEL.BURST_RAMP);
+}
+function tuiWheelReportCount(e, st, m) {
+  const dir = e.deltaY < 0 ? -1 : 1;
+  if (st.pendingDirection !== 0 && st.pendingDirection !== dir) {
+    st.fastStreak = 0; st.lastDistanceRows = null; st.lastInputAt = null; st.pendingRows = 0;
+  }
+  st.pendingDirection = dir;
+  const continuous = tuiWheelContinuous(e, st);
+  const rows = tuiWheelRows(e, m, continuous);
+  let total;
+  if (continuous) {
+    st.fastStreak = 0; st.lastDistanceRows = null; st.lastInputAt = null;
+    total = st.pendingRows + rows;
+  } else {
+    total = st.pendingRows + Math.min(TUI_WHEEL.BURST_MAX_ROWS, tuiWheelCompress(rows) + tuiWheelBurst(e, st, rows));
+  }
+  const reports = Math.trunc(total);
+  st.pendingRows = total - reports;
+  return reports;
+}
+function attachTuiWheel(term) {
+  const replay = { distance: tuiWheelDistanceState(), drainScheduled: false, pendingDirection: 0, pendingEvent: null, pendingReports: 0, pendingTarget: null };
+  const reset = () => { replay.pendingReports = 0; replay.drainScheduled = false; replay.pendingDirection = 0; replay.pendingEvent = null; replay.pendingTarget = null; };
+  const clone = (e) => {
+    const c = new WheelEvent(e.type, {
+      bubbles: e.bubbles, cancelable: e.cancelable, composed: e.composed, view: e.view, detail: e.detail,
+      screenX: e.screenX, screenY: e.screenY, clientX: e.clientX, clientY: e.clientY,
+      ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, metaKey: e.metaKey,
+      button: e.button, buttons: e.buttons, relatedTarget: e.relatedTarget,
+      deltaX: 0, deltaY: e.deltaY < 0 ? -1 : 1, deltaZ: 0, deltaMode: TUI_WHEEL.DOM_DELTA_LINE,
+    });
+    Object.defineProperty(c, REPLAYED_WHEEL, { configurable: true, value: true });
+    return c;
+  };
+  const drain = () => {
+    const target = replay.pendingTarget, e = replay.pendingEvent;
+    if (!target || !e || replay.pendingReports <= 0 || term.modes.mouseTrackingMode === "none") { reset(); return; }
+    const n = replay.pendingReports;
+    for (let i = 0; i < n; i++) target.dispatchEvent(clone(e));
+    reset();
+  };
+  term.attachCustomWheelEventHandler((e) => {
+    if (term.modes.mouseTrackingMode === "none" || e[REPLAYED_WHEEL] === true || e.deltaY === 0 || e.shiftKey ||
+        !term.element || !term.element.classList.contains("enable-mouse-events")) return true;
+    const target = e.currentTarget instanceof EventTarget ? e.currentTarget : term.element;
+    if (!target) return true;
+    const screen = term.element.querySelector(".xterm-screen");
+    const r = screen && screen.getBoundingClientRect();
+    const cellHeight = r && r.height > 0 && term.rows > 0 ? r.height / term.rows : undefined;
+    const n = tuiWheelReportCount(e, replay.distance, { cellHeight, rows: term.rows });
+    if (n > 0) {
+      const dir = e.deltaY < 0 ? -1 : 1;
+      if (replay.pendingDirection !== 0 && replay.pendingDirection !== dir) replay.pendingReports = 0;
+      replay.pendingDirection = dir; replay.pendingEvent = e; replay.pendingTarget = target; replay.pendingReports += n;
+      if (!replay.drainScheduled) { replay.drainScheduled = true; queueMicrotask(drain); }
+    }
+    return false;
+  });
 }

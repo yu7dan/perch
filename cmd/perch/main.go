@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/yu7dan/perch/internal/agenttrust"
+	"github.com/yu7dan/perch/internal/conpty"
 	"io"
 	"log"
 	"os"
@@ -126,6 +127,13 @@ func main() {
 		push:        &pushRelay{},
 	}
 	log.Printf("[perch] 版本 %s（pid %d）", buildVersion, os.Getpid())
+	// 自带的新版 ConPTY（照 Orca / node-pty 的 useConptyDll）：系统自带的那份会吞掉鼠标模式、
+	// 改坏全屏 TUI 停放的光标（Pi 全屏模式滚不动历史、输入法跑偏）。放不好就用系统的，照常起格。
+	if p, err := conpty.InstallBundled(); err != nil {
+		log.Printf("[perch] 自带 ConPTY 用不了，退回系统 ConPTY：%v", err)
+	} else {
+		log.Printf("[perch] 用自带 ConPTY：%s", p)
+	}
 
 	// 状态根按 Claude Code 自己的规则取：环境里有 CLAUDE_CONFIG_DIR 就用它，
 	// 否则 <用户主目录>\.claude。仓库里不留任何本机绝对路径。
