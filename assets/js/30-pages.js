@@ -344,6 +344,7 @@ function closeTab(t, opts) {
   // 它占着的那个 WebGL 槽位要还回去，否则关掉几个之后新格子会因为"名额满了"
   // 一律退回 DOM 渲染器（见 attachWebgl 的上限那段）。
   if (t.gfx && t.gfx.on) webglLive--;
+  try { if (t.releaseWebgl) t.releaseWebgl(); } catch (e) {}
   /* C7：这一格里**还在跑**的子代理，是我们"看着它被关掉"的 —— 「已关闭」只有这一条
      是亲眼所见（另外两条是对文件的推断，见 subStateOf）。
      只记没收到 Stop 的那些：关掉一个已经跑完的格子，不是"关闭了里面的子代理"。

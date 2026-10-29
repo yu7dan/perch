@@ -583,6 +583,7 @@ function applyShell(p) {
   });
   // 设置随首份载荷一起到（settings.go）。权威值一到就覆盖 localStorage 那份缓存；
   // 终端已经按缓存里的字体/字号建好了，这里再把它们校正到盘上的值。
+  if (STATE.osBuild && typeof setOsBuild === "function") setOsBuild(STATE.osBuild);
   if (STATE.settings) {
     applySettings(STATE.settings, { fromGo: true, effectiveCwd: STATE.cwd });
   }
@@ -646,6 +647,7 @@ function applyLibrary(p) {
   if (Array.isArray(p.activity)) STATE.activity = p.activity;
   // 设置也在这份载荷里（同一次 buildShellPayload）。重扫不该改设置，但
   // 手改过 settings.json 的人点一次「重扫」就能看到盘上的值 —— 顺手对齐。
+  if (p.osBuild && typeof setOsBuild === "function") setOsBuild(p.osBuild);
   if (p.settings) applySettings(p.settings, { fromGo: true, effectiveCwd: p.cwd });
   if (Array.isArray(p.catalog)) setCatalog(p.catalog, "lib.reload");
   // 名字表变了，正在跑的那几格的格子头也得跟着换（谁后到都得对得上，见 seedTabTitles）

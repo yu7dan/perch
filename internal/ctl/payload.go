@@ -50,6 +50,9 @@ type ShellPayload struct {
 	// Settings 是 Perch 自己的偏好。跟着首份载荷一起下来，
 	// 前端就不用为了"终端用什么字号"再发一次请求；之后的改动走 ctl 的 settings 消息。
 	Settings settings.Settings `json:"settings"`
+	// OSBuild 是 Windows 内部版本号，前端填 xterm 的 windowsPty。原来只在 settings 消息里带，
+	// 而那条消息只有进设置页才会发 —— 启动后终端一直不知道自己在 ConPTY 后面。
+	OSBuild int `json:"osBuild,omitempty"`
 }
 
 // ShellPayload 现场扫一遍，拼出首份载荷。
@@ -73,6 +76,7 @@ func (s *Server) ShellPayload() ShellPayload {
 		History:  make(map[string][]history.HistoryItem, len(sessions)),
 		Activity: activity,
 		Catalog:  s.bootAgentCards(),
+		OSBuild:  osBuild(),
 	}
 	// Prefs 在组合根里先于第一次载荷初始化；万一某条测试路径没初始化，
 	// 给默认值而不是零值（零值会让确认默认变成关）。

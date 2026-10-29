@@ -8,7 +8,7 @@
 | 部件 | 用途 | 许可 | 许可全文 |
 |---|---|---|---|
 | [Wails v3](https://github.com/wailsapp/wails) | 桌面外壳（WebView2 承载前端） | MIT | `licenses/modules/wails-v3.txt` |
-| [xterm.js](https://github.com/xtermjs/xterm.js) + 官方 addon（fit / webgl / image / ligatures / serialize / unicode11 / web-links） | 终端渲染 | MIT | `licenses/MIT-xterm.txt`；`addon-image.js` 另带 `assets/vendor/addon-image.js.LICENSE.txt` |
+| [xterm.js](https://github.com/xtermjs/xterm.js) 6.1.0-beta.304 + 官方 addon（fit / webgl / image / ligatures / serialize / unicode11 / web-links）；xterm 本体与 webgl addon 打着 [Orca](https://github.com/stablyai/orca) 的补丁（`config/patches`，同为 MIT） | 终端渲染 | MIT | `licenses/MIT-xterm.txt`；`addon-image.js` 另带 `assets/vendor/addon-image.js.LICENSE.txt` |
 | [ConPTY](https://github.com/UserExistsError/conpty) | Windows 伪终端的 Go 封装（v0.1.4，已并进 `internal/conpty` 并改成可切到自带的 conpty.dll） | MIT | `licenses/modules/conpty.txt` |
 | [Windows Terminal](https://github.com/microsoft/terminal) 的 ConPTY（`conpty.dll` + `OpenConsole.exe` 1.23.2510.08001，取自 [node-pty](https://github.com/microsoft/node-pty) 1.1.0 的 `third_party/conpty`，Orca 用的同一份） | 自带的新版伪终端（`internal/conpty/bin/`，运行时释放到用户缓存目录） | MIT | `licenses/MIT-microsoft-terminal.txt` |
 | [coder/websocket](https://github.com/coder/websocket) | Codex app-server 的 WebSocket 客户端 | ISC | `licenses/modules/coder-websocket.txt` |

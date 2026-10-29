@@ -41,6 +41,8 @@ Wails 的运行时是 ESM，而业务代码共享一份全局状态。拆文件�
 | `01-i18n.js` | 双语字典与 `t()` / `tCount()` / `tMsg()` 运行时（见 I18N.md） | 新文案 key |
 | `05-prefs.js` | 设置的前端缓存 / 生效值（字号、字体、启动落点、默认目录读数）、终端外观应用、主题 `applyTheme`（`system` 跟 Windows 明暗，结果经 `term.theme` 告诉 Go） | 设置项的前端默认值与首帧行为 |
 | `10-term.js` | 终端工厂 `createTab`、流、尺寸、标签、状态点、图标；终端深/浅两套主题（浅色 = Tango Light） | 与 xterm / PTY 前端直接相关 |
+| `11-term-output.js` | PTY 输出管线（照 Orca：DEC 2026 整帧写、帧中途光标显示后移、原地重写后补刷新）、StableCellFitAddon、ZWJ 宽度 | 终端输出显示 / 列宽 |
+| `12-term-keys.js` | 终端按键策略（照 Orca：Shift+Enter、复制/全选/粘贴、Ctrl/Alt+Backspace、Ctrl+Enter） | 终端里的组合键 |
 | `20-ctl.js` | ctl 控制流、建格请求/应答、冷恢复、`sendCtrl` / `bootFact`、推送分发 | 新的后端消息类型、启动握手 |
 | `30-pages.js` | 并行网格与独立页、标签拖拽、关格/新格、选会话面板、IME 锚点；本机 Agent 名单 `CATALOG` / `setCatalog`（shell 载荷、`catalog` 推送、冷恢复的 `agents` 三条来路） | 网格布局、页签交互、Agent 名单的消费 |
 | `40-chrome.js` | 自绘标题栏、左右栏宽度、终端收起、启动建格、群组看板 | 窗口 chrome、左栏、群组 |

@@ -553,7 +553,22 @@ attachTermKeys(term, T, termOut);
 // Orca 的解法是 attachWebglAndRefit()：挂载和重排**成对出现**，
 // 而且挂完要 refresh 一帧（新 canvas 是空的，不重绘会看起来卡住）。
 // ---------------------------------------------------------------------------
-const gfx = { addon: null, on: false };
+const gfx = { addon: null, on: false, lostAt: [], disabledAfterLoss: false };
+// 释放 WebGL 时主动丢掉上下文、把画布清零（Orca pane-webgl-renderer.ts disposeWebgl）：
+// 不这么做，驱动那边的上下文会多活一会儿，连续切格时撞上 Chromium 的上下文名额（#6874）。
+function releaseWebgl() {
+  const a = gfx.addon;
+  if (!a) return;
+  try {
+    const r = a._renderer;
+    const ext = r && r._gl && r._gl.getExtension("WEBGL_lose_context");
+    if (ext) ext.loseContext();
+    if (r && r._canvas) { r._canvas.width = 0; r._canvas.height = 0; }
+  } catch (_) {}
+  try { a.dispose(); } catch (_) {}
+  gfx.addon = null;
+}
+T.releaseWebgl = releaseWebgl;
 function attachWebgl() {
   // Bot 格平时藏在格子坞里，WebGL 名额（12）留给 Workspaces 里看得见的格子。
   if (T.group) return false;
@@ -574,8 +589,11 @@ function attachWebgl() {
       // 上下文丢失意味着字形图集被清空，必须整个退回 DOM 渲染器，
       // 并且**重排** —— 见上面：度量变了不重排，列宽就是错的。
       console.warn("[perch] WebGL 上下文丢失，退回 DOM 渲染器");
-      try { gfx.addon.dispose(); } catch (e) {}
-      gfx.addon = null;
+      // Orca pane-webgl-context-loss-policy.ts：60 秒内丢了不到 3 次，就在下次回到前台时再试
+      const now = Date.now();
+      gfx.lostAt = gfx.lostAt.filter((x) => x > now - 60000).concat(now);
+      gfx.disabledAfterLoss = true;
+      releaseWebgl();
       gfx.on = false;                       // 状态栏那格读数要跟着变
       webglLive--;                          // 名额还回去，别的格子能捡到
       requestAnimationFrame(() => { try { fit.fit(); pushSize(); } catch (e) {} });
@@ -595,6 +613,19 @@ function attachWebgl() {
 }
 
 gfx.on = attachWebgl();
+// 上下文丢失后的重试：回到前台 / 窗口重新拿到焦点时再挂（Orca："until the next resume or settled reveal"）
+function retryWebglAfterLoss() {
+  if (!gfx.disabledAfterLoss || gfx.addon || document.hidden) return;
+  const now = Date.now();
+  gfx.lostAt = gfx.lostAt.filter((x) => x > now - 60000);
+  if (gfx.lostAt.length >= 3) return;   // 不稳定的上下文不再重试
+  gfx.disabledAfterLoss = false;
+  gfx.on = attachWebgl();
+  requestAnimationFrame(() => { try { fit.fit(); pushSize(); } catch (_) {} });
+  if (activeTab === T) paintRenderStatus();
+}
+document.addEventListener("visibilitychange", retryWebglAfterLoss);
+window.addEventListener("focus", retryWebglAfterLoss);
 // 挂完渲染器才 fit —— 顺序反了列宽就是错的。
 fit.fit();
 // 再排一帧：字体/渲染器都就位后，格子度量才算稳定。
@@ -891,7 +922,7 @@ function pushSize() {
   // canvas 数量**光看个数判断不了**：xterm 一开始就有不止一个（还有测字宽用的），
   // 所以把每个的尺寸和 class 一起报出来 —— 「多出来的那一个是哪来的」只能这么问。
   const cvs = [...h.querySelectorAll("canvas")].map((c) => `${Math.round(c.clientWidth)}x${Math.round(c.clientHeight)}${c.className ? "." + c.className : ""}@${c.parentElement ? c.parentElement.tagName + "." + c.parentElement.className : "无父"}`).join(" ");
-  sendCtrl({ type: "log", msg: `tab=${T.id} fit=${p ? p.cols + "x" + p.rows : "nil"} host=${h.clientWidth}x${h.clientHeight} term=${term.cols}x${term.rows} dpr=${devicePixelRatio} webgl=${gfx.on} canvas=${h.querySelectorAll("canvas").length} [${cvs}]` });
+  sendCtrl({ type: "log", msg: `tab=${T.id} fit=${p ? p.cols + "x" + p.rows : "nil"} host=${h.clientWidth}x${h.clientHeight} term=${term.cols}x${term.rows} dpr=${devicePixelRatio} webgl=${gfx.on} wpty=${JSON.stringify(term.options.windowsPty || null)} canvas=${h.querySelectorAll("canvas").length} [${cvs}]` });
   if (!p || !p.cols || !p.rows) return;
   if (amActive) $("s-dims").textContent = `${p.cols}×${p.rows}`;
   const key = `${p.cols}x${p.rows}`;
@@ -1937,6 +1968,11 @@ function termRestoreScroll(term, s) {
       remain -= cols; line++;
     }
     term.scrollToLine(Math.min(line, buf.baseY));
+    // xterm 6 在 ydisp 没变时滚动条滑块会停在旧位置：上下抖一行，强制它对齐（Orca terminal-viewport-scrollbar-sync.ts）
+    const b2 = term.buffer.active;
+    if (b2.viewportY < b2.baseY) {
+      if (b2.viewportY > 0) { term.scrollLines(-1); term.scrollLines(1); } else { term.scrollLines(1); term.scrollLines(-1); }
+    }
   } catch (_) {
     // 渲染器正在拆装（WebGL 回收）时量不到尺寸：这一次不还原，不能把 settle 打断
   } finally {
@@ -1951,6 +1987,7 @@ function setOsBuild(n) {
   if (!n || n === OS_BUILD) return;
   OS_BUILD = n;
   try { localStorage.setItem("perch.osBuild", String(n)); } catch (_) {}
+  if (typeof bootFact === "function") bootFact(`xterm windowsPty = conpty / build ${n}`);
   for (const t of (typeof TAB_LIST !== "undefined" ? TAB_LIST : [])) {
     try { if (t.term) t.term.options.windowsPty = { backend: "conpty", buildNumber: n }; } catch (_) {}
   }
