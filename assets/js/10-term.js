@@ -510,7 +510,8 @@ const term = new Terminal({
   // 只有 background / cursorAccent 跟着 --term-bg 走了我们的画布色，理由见文件顶部。
   theme: termThemeNow(),
 });
-const fit = new FitAddon.FitAddon();
+// 格宽只取决于盒子、不取决于当前列数（Orca StableCellFitAddon，11-term-output.js）
+const fit = new StableCellFitAddon();
 term.loadAddon(fit);
 term.loadAddon(new WebLinksAddon.WebLinksAddon());
 try { term.loadAddon(new ImageAddon.ImageAddon()); }
@@ -519,7 +520,7 @@ catch (e) { console.warn("[perch] image addon 未加载:", e); }
 // Unicode 11 宽度表：中文、盒线字符按 2 列算。不加载的话宽度全按 1 列，
 // 中文和边框会整体错位。
 term.loadAddon(new Unicode11Addon.Unicode11Addon());
-term.unicode.activeVersion = "11";
+termActivateUnicode(term);   // unicode11 + ZWJ 合并（Orca 同款，11-term-output.js）
 
 let serialize = null;
 try { serialize = new SerializeAddon.SerializeAddon(); term.loadAddon(serialize); }
@@ -531,6 +532,8 @@ attachTuiWheel(term);
 // 输出管线照 Orca：同步帧整帧写、中途的光标显示挪到帧尾、写完补刷新（11-term-output.js）
 const termOut = createTermOutput(term);
 T.termOut = termOut;
+// 按键策略照 Orca：Shift+Enter 换行不提交、选中时 Ctrl+C 复制、Ctrl+Backspace 删词（12-term-keys.js）
+attachTermKeys(term, T, termOut);
 
 // ---------------------------------------------------------------------------
 // WebGL 的挂载顺序 —— 这一段是**照 Orca 的 pane-webgl-renderer.ts 搬的**，

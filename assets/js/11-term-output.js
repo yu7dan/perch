@@ -469,3 +469,70 @@ function createTermOutput(term) {
     },
   };
 }
+
+/* ---- 尺寸：StableCellFitAddon（照 Orca lib/pane-manager/terminal-stable-cell-fit-addon.ts +
+   terminal-grid-size-for-box.ts，MIT） ----
+   原版 FitAddon 用「画布宽 ÷ 当前列数」取格宽，四舍五入跟着当前网格走：同一个盒子，从 75 列量是 51、
+   从 52 列量是 52 —— 列数就在 51/52 之间来回跳，每跳一次 CLI 收一次 resize、整屏重画（画面跳动）。
+   这里改用 device 像素 ÷ dpr 的格宽，结果只取决于盒子，不取决于当前网格。 */
+function termStableCellSize(term) {
+  const d = term.dimensions;
+  if (!d) return null;
+  const dpr = (term.element && term.element.ownerDocument.defaultView && term.element.ownerDocument.defaultView.devicePixelRatio) || 1;
+  const w = d.device.cell.width / dpr, h = d.device.cell.height / dpr;
+  if (w > 0 && h > 0) return { width: w, height: h };
+  const css = d.css.cell;
+  return css.width > 0 && css.height > 0 ? { width: css.width, height: css.height } : null;
+}
+function termGridForBox(box, m) {
+  const sbw = m.scrollback === 0 || !((m.scrollbar && m.scrollbar.showScrollbar) ?? true) ? 0 : ((m.scrollbar && m.scrollbar.width) ?? 14);
+  const width = Math.max(0, Math.trunc(box.width)) - m.padding.left - m.padding.right - sbw;
+  const height = Math.max(0, Math.trunc(box.height)) - m.padding.top - m.padding.bottom;
+  return { cols: Math.max(2, Math.floor(width / m.cell.width)), rows: Math.max(1, Math.floor(height / m.cell.height)) };
+}
+class StableCellFitAddon extends FitAddon.FitAddon {
+  activate(terminal) { this._stableTerm = terminal; super.activate(terminal); }
+  proposeDimensions() {
+    const term = this._stableTerm;
+    const parent = term && term.element && term.element.parentElement;
+    if (!term || !term.element || !parent) return undefined;
+    const cell = termStableCellSize(term);
+    if (!cell) return undefined;
+    const view = term.element.ownerDocument.defaultView;
+    if (!view) return super.proposeDimensions();
+    const ps = view.getComputedStyle(parent), s = view.getComputedStyle(term.element);
+    const px = (st, k) => Number.parseInt(st.getPropertyValue(k), 10) || 0;
+    return termGridForBox({ width: px(ps, "width"), height: px(ps, "height") }, {
+      cell,
+      padding: { top: px(s, "padding-top"), right: px(s, "padding-right"), bottom: px(s, "padding-bottom"), left: px(s, "padding-left") },
+      scrollback: term.options.scrollback, scrollbar: term.options.scrollbar,
+    });
+  }
+}
+
+/* ---- Unicode：ZWJ 组合 emoji 按一个宽字算（照 Orca shared/terminal-unicode-provider.ts，MIT） ----
+   CLI 把 👨‍👩‍👧 这类 ZWJ 序列按「一个宽字」排版；xterm 的 unicode11 会给每一段各推进一格，
+   表格和边框就从这一格开始错位。在 unicode11 之上包一层，要在第一次 write 之前装上。 */
+const PERCH_UNICODE_VERSION = "perch-11-zwj";
+function termActivateUnicode(term) {
+  const u = term.unicode;
+  if (u.activeVersion === PERCH_UNICODE_VERSION) return;
+  const base = term._core && term._core.unicodeService && term._core.unicodeService._providers && term._core.unicodeService._providers["11"];
+  if (!base) { u.activeVersion = "11"; return; }
+  const ZWJ = 0x200d;
+  const width = (p) => (p >> 1) & 3, kind = (p) => p >> 3;
+  const props = (k, w, join) => ((k & 0xffffff) << 3) | ((w & 3) << 1) | (join ? 1 : 0);
+  if (!u.versions.includes(PERCH_UNICODE_VERSION)) {
+    u.register({
+      version: PERCH_UNICODE_VERSION,
+      wcwidth: (cp) => base.wcwidth(cp),
+      charProperties(cp, preceding) {
+        const pw = width(preceding), pk = kind(preceding);
+        if (cp === ZWJ && pw > 0) return props(ZWJ, pw, true);
+        if (pk === ZWJ && pw > 0 && base.wcwidth(cp) > 0) return props(cp, pw, true);
+        return base.charProperties(cp, preceding);
+      },
+    });
+  }
+  u.activeVersion = PERCH_UNICODE_VERSION;
+}
