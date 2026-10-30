@@ -58,6 +58,10 @@ type Pool struct {
 	file     string
 	Projects []Project `json:"projects"`
 	Roots    []string  `json:"roots"`
+	// Hidden 是用户从列表里**主动移除**过的目录。项目摘掉之后，那个目录里已关闭的
+	// agent 记录还会被左栏拼成一行「未归类」，长得和项目一模一样 —— 用户看到的就是
+	// 「移除了但还在」。记在这里，左栏就不再为它生成行；重新添加时清掉。
+	Hidden []string `json:"hidden,omitempty"`
 	// broken = "文件在、但解析不了"。这种情况下**一次都不许覆盖** ——
 	// 池子是用户一个个手加出来的，一次坏写就全没了，比"报错"难看得多。
 	broken bool
@@ -120,6 +124,7 @@ func Load() *Pool {
 	var disk struct {
 		Projects []Project `json:"projects"`
 		Roots    []string  `json:"roots"`
+		Hidden   []string  `json:"hidden"`
 	}
 	if err := json.Unmarshal(b, &disk); err != nil {
 		p.broken = true
@@ -130,6 +135,7 @@ func Load() *Pool {
 		p.Roots = disk.Roots
 	}
 	p.Projects = disk.Projects
+	p.Hidden = disk.Hidden
 	log.Printf("[pool] 载入 %d 个项目 / %d 个根（%s）", len(p.Projects), len(p.Roots), f)
 	return p
 }
@@ -149,7 +155,8 @@ func (p *Pool) saveLocked() error {
 	b, err := json.MarshalIndent(struct {
 		Projects []Project `json:"projects"`
 		Roots    []string  `json:"roots"`
-	}{p.Projects, p.Roots}, "", "  ")
+		Hidden   []string  `json:"hidden,omitempty"`
+	}{p.Projects, p.Roots, p.Hidden}, "", "  ")
 	if err != nil {
 		return saveFailed(err)
 	}
@@ -186,6 +193,25 @@ func (p *Pool) SnapshotRev() ([]Project, []string, uint64) {
 	roots := make([]string, len(p.Roots))
 	copy(roots, p.Roots)
 	return out, roots, p.rev
+}
+
+// HiddenDirs 返回被用户主动移除过的目录（副本）。
+func (p *Pool) HiddenDirs() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]string, len(p.Hidden))
+	copy(out, p.Hidden)
+	return out
+}
+
+func (p *Pool) hiddenIndexLocked(path string) int {
+	k := PathKey(path)
+	for i, h := range p.Hidden {
+		if PathKey(h) == k {
+			return i
+		}
+	}
+	return -1
 }
 
 // Rev 只读当前版本号；project.result 的轻量回执带它，前端用它做单调合并。
@@ -253,8 +279,21 @@ func (p *Pool) Add(path, name, source string) (Project, bool, error) {
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// 重新添加 = 用户又要它了：撤掉「已移除」标记。
+	hid := p.hiddenIndexLocked(abs)
 	if i := p.findLocked(abs); i >= 0 {
+		if hid >= 0 {
+			p.Hidden = append(p.Hidden[:hid], p.Hidden[hid+1:]...)
+			if err := p.saveLocked(); err == nil {
+				p.rev++
+			}
+		}
 		return p.Projects[i], false, nil
+	}
+	var prevHidden []string
+	if hid >= 0 {
+		prevHidden = append([]string(nil), p.Hidden...)
+		p.Hidden = append(p.Hidden[:hid], p.Hidden[hid+1:]...)
 	}
 	pr := Project{
 		Path:    abs,
@@ -267,6 +306,9 @@ func (p *Pool) Add(path, name, source string) (Project, bool, error) {
 		// 落盘失败就把内存也退回去：一个只活在内存里的池子，重开就没了，
 		// 留着它只会让"刚才明明加上了"这件事变成谎话。
 		p.Projects = p.Projects[:len(p.Projects)-1]
+		if prevHidden != nil {
+			p.Hidden = prevHidden
+		}
 		return Project{}, false, err
 	}
 	p.rev++
@@ -275,19 +317,33 @@ func (p *Pool) Add(path, name, source string) (Project, bool, error) {
 
 // Remove 只把项目**从池子里摘掉**，磁盘上一个字节都不动。
 // （"删除到回收站"是另一个动作 —— 两者绝不能合成一个按钮。）
+//
+// 同时把目录记进 Hidden：左栏不再用它里面已关闭的 agent 记录拼「未归类」行。
+// 不在池子里的目录（就是那种「未归类」行）也能这样移除 —— 只记 Hidden。
 func (p *Pool) Remove(path string) (bool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false, nil
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	i := p.findLocked(path)
-	if i < 0 {
+	hidden := p.hiddenIndexLocked(path) >= 0
+	if i < 0 && hidden {
 		return false, nil
 	}
-	gone := p.Projects[i]
-	p.Projects = append(p.Projects[:i], p.Projects[i+1:]...)
+	prevProjects := append([]Project(nil), p.Projects...)
+	prevHidden := append([]string(nil), p.Hidden...)
+	if i >= 0 {
+		path = p.Projects[i].Path
+		p.Projects = append(p.Projects[:i], p.Projects[i+1:]...)
+	}
+	if !hidden {
+		p.Hidden = append(p.Hidden, path)
+	}
 	if err := p.saveLocked(); err != nil {
-		p.Projects = append(p.Projects, Project{})
-		copy(p.Projects[i+1:], p.Projects[i:])
-		p.Projects[i] = gone
+		p.Projects = prevProjects
+		p.Hidden = prevHidden
 		return false, err
 	}
 	p.rev++

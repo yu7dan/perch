@@ -274,6 +274,7 @@ function applyProjectResultState(m) {
   const ok = m.ok !== false;
   if (m.op === "remove") {
     if (ok) STATE.projects = arr.filter((p) => !(p && normPath(p.path) === k));
+    if (ok && Array.isArray(m.hidden)) STATE.hidden = m.hidden;
   } else if (m.op === "pin") {
     if (ok && idx >= 0) {
       arr[idx] = Object.assign({}, arr[idx], { pinned: m.pinned === true });
@@ -287,6 +288,8 @@ function applyProjectResultState(m) {
     if (ok) STATE.projects = arr;
   } else if (ok && m.project) {
     const pr = m.project;
+    // 重新添加 = 撤掉「已移除」标记（Go 那边同步清掉）。
+    if (Array.isArray(STATE.hidden) && pr.path) STATE.hidden = STATE.hidden.filter((h) => normPath(h) !== normPath(pr.path));
     if (idx >= 0) {
       arr[idx] = Object.assign({}, arr[idx], pr, {
         // 轻量回执不带统计；别用 0 覆盖已经算出来的数。

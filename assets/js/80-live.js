@@ -642,6 +642,7 @@ function applyLibrary(p) {
   STATE.history = p.history || STATE.history;
   // 标题也要换：用户刚改过的名字走的是 Go 那边 titles.json，不跟着刷新就一直旧着
   STATE.titles = p.titles || STATE.titles;
+  if (Array.isArray(p.hidden)) STATE.hidden = p.hidden;
   // 总览的每日活动也在这份载荷里（同一次扫描算的，见 store.go 的 scanSessions）——
   // 不跟着换的话，"重扫会话库"之后热力图还是旧的。
   if (Array.isArray(p.activity)) STATE.activity = p.activity;

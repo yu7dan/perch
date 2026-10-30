@@ -37,6 +37,8 @@ type ShellPayload struct {
 	Assign map[string]string `json:"assign"`
 	// Roots 是"去哪儿找项目"的根目录。
 	Roots []string `json:"roots"`
+	// Hidden 是用户主动从列表移除过的目录：左栏不再用它们里面的历史记录拼「未归类」行。
+	Hidden []string `json:"hidden"`
 	// PoolRev 是这份 Projects/Assign 对应的池子版本；前端用它拒绝被
 	// 后台慢扫描的旧快照覆盖刚到的 project.result。
 	PoolRev uint64 `json:"poolRev"`
@@ -111,6 +113,7 @@ func (s *Server) ShellPayload() ShellPayload {
 		p.Projects = project.WireProjects(projects, recent, count)
 		p.Assign = assign
 		p.Roots = roots
+		p.Hidden = s.deps.Pool.HiddenDirs()
 		p.PoolRev = rev
 		// 启动这份载荷就是用户**第一眼**看到的那一屏，它也得过同一条不变量。
 		sum, nUn, nMain, nAll := project.Audit(sessions, assign, p.Projects)
@@ -153,6 +156,7 @@ func (s *Server) poolReply(err error) {
 		"projects": wire,
 		"assign":   assign,
 		"roots":    roots,
+		"hidden":   s.deps.Pool.HiddenDirs(),
 		"rev":      rev,
 		"err":      "",
 	}

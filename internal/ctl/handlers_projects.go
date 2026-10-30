@@ -159,7 +159,7 @@ func (s *Server) projectRemove(m *Msg) {
 		return
 	}
 	log.Printf("[pool] 移除项目 %s（只从池子里摘掉，磁盘未动）命中=%v req=%d", m.Path, ok, m.Req)
-	s.pushProjectResult(m.Req, "remove", nil, map[string]any{"path": m.Path, "removed": ok}, nil)
+	s.pushProjectResult(m.Req, "remove", nil, map[string]any{"path": m.Path, "removed": ok, "hidden": s.deps.Pool.HiddenDirs()}, nil)
 	if ok {
 		s.refreshPoolAsync("移除项目")
 	}

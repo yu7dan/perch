@@ -914,6 +914,15 @@ function renderWorkspaceView(key) {
     : [];
   hiddenDefaultTabs.forEach((t) => used.add(t.id));
   hiddenDefaultClosed.forEach((r) => usedClosed.add(r.paneId));
+  // 用户主动移除过的目录：里面**已关闭**的记录不再拼成「未归类」行（否则就是
+  // 「移除了但还在」）。正在跑的格子照常显示 —— 活着的 agent 不能从列表里蒸发。
+  const hiddenDirs = Array.isArray(STATE?.hidden) ? STATE.hidden : [];
+  if (hiddenDirs.length) {
+    for (const r of closedList()) {
+      if (!usedClosed.has(r.paneId) &&
+          hiddenDirs.some((h) => insidePath(r.cwd || defaultWorkspacePath(), h))) usedClosed.add(r.paneId);
+    }
+  }
 
   // 没有 Sessions / Projects 分段头：一份 Project 列表就是这一列的全部。
   // 未归类行也算列表内容：搜到未归类目录时不能再叠一句「没有匹配的项目」。
@@ -1553,7 +1562,11 @@ function adoptDir(path) {
    路径/写盘出问题时才报错；那一刻会再起一张错误卡，两张叠着，不互相顶掉。 */
 function removeProj(p) {
   poolSend({ type: "project.remove", path: p.path });
-  showToast(t("shell.toast.removedTitle"), t("shell.toast.removedNote", { name: projectName(p) }), "ok");
+  // 正在跑的 agent 不会跟着消失（不能让一个活着的格子从列表里蒸发）：说清楚。
+  const running = wsTabs().filter((t) => t.id > 0 && insidePath(effCwd(t), p.path)).length;
+  showToast(t("shell.toast.removedTitle"),
+    running ? t("shell.toast.removedRunningNote", { name: projectName(p), n: running })
+            : t("shell.toast.removedNote", { name: projectName(p) }), "ok");
 }
 
 // ---------------------------------------------------------------------------
@@ -1595,6 +1608,9 @@ function projMenuItems(p, inPool) {
       { act: "opendir", icon: ICON_DIR, label: t("shell.menu.openDir"), hint: p.path },
       { act: "reveal", icon: ICON_DIR, label: t("shell.menu.reveal"), hint: p.path },
       { act: "copy", icon: ICON_COPY, label: t("shell.menu.copyPath"), hint: p.path },
+      // 未归类行也能移除：它是已关闭 agent 记录拼出来的，移除 = 以后不再为这个目录拼行。
+      { sep: true },
+      { act: "remove", icon: ICON_TRASH, label: t("shell.menu.remove"), hint: t("shell.menu.removeHint") },
     ];
   }
   return [
@@ -2133,6 +2149,7 @@ function applyPool(m) {
   }
   if (Array.isArray(m.projects)) STATE.projects = m.projects;
   if (m.assign && typeof m.assign === "object") STATE.assign = m.assign;
+  if (Array.isArray(m.hidden)) STATE.hidden = m.hidden;
   if (typeof m.rev === "number") STATE.poolRev = m.rev;
   // 原文与 code 分开存：切语言时 poolErrText() 要按新语言重算，
   // 不能把上一次渲染好的那句话留在 STATE 里。
