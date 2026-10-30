@@ -42,7 +42,7 @@
 
 /* 搜索结果：不命中的行/区整块收起（display:none，不占位）。
    第一块露出来的区少留一点上边距，免得空出一大块。 */
-.settings-sec.is-hidden,.settings-row.is-hidden{display:none}
+.settings-sec.is-hidden,.settings-row.is-hidden,.ag-cfg-row.is-hidden{display:none}
 .settings-sec.is-first{margin-top:26px}
 .settings-empty{margin-top:34px;padding:34px 18px;border:1px dashed var(--line);
                 border-radius:12px;text-align:center}

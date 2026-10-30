@@ -343,7 +343,8 @@ function settingsRowText(row) {
 }
 
 function settingsRowEntry(row) {
-  const b = row.querySelector(".settings-lab b");
+  // Agents 页的每一块是 .ag-cfg-row（名字在 .ag-cfg-h 里），也要能被搜到。
+  const b = row.querySelector(".settings-lab b") || row.querySelector(".ag-cfg-h b");
   return {
     title: b ? b.textContent.trim() : "",
     description: settingsRowText(row),
@@ -377,7 +378,9 @@ function applySettingsSearch() {
   for (const sec of sections) {
     const secHit = settingsSearchScoreEntry(query, settingsSectionEntry(sec), true) > 0;
     let secVisible = false;
-    for (const row of sec.querySelectorAll(".settings-row")) {
+    // .ag-cfg-row 也是「行」：只认 .settings-row 的话，Agents 节一行都没有，
+    // 一跑过滤（离开设置页会清空搜索、重跑一遍）整节就被藏掉 —— 下次进来一片空白。
+    for (const row of sec.querySelectorAll(".settings-row, .ag-cfg-row")) {
       const rowHit = settingsSearchScoreEntry(query, settingsRowEntry(row), false) > 0;
       const show = !nq || secHit || rowHit;
       row.classList.toggle("is-hidden", !show);
@@ -386,7 +389,8 @@ function applySettingsSearch() {
         hits++;
       }
     }
-    sec.classList.toggle("is-hidden", !secVisible);
+    // 没在搜索时，节一律显示（哪怕里面暂时没有行，比如还在加载）。
+    sec.classList.toggle("is-hidden", !!nq && !secVisible);
     if (secVisible && !firstVisible) firstVisible = sec;
   }
   for (const sec of sections) {

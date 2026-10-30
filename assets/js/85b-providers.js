@@ -170,7 +170,8 @@ function agentRowCfgHTML(a) {
     + `<button type="button" data-envrm="${esc(n)}" aria-label="${esc(t("prov.agent.envRemove", { name: n }))}">×</button></span>`).join("");
   const err = PROV.agentErr[id] ? `<div class="set-err ag-err" role="alert">${esc(PROV.agentErr[id])}</div>` : "";
   const dirty = !!PROV.agentDirty[id];
-  return `<div class="ag-cfg-row${PROV.flashAgent === id ? " flash" : ""}" id="set-agent-${esc(id)}" data-agent="${esc(id)}">`
+  return `<div class="ag-cfg-row${PROV.flashAgent === id ? " flash" : ""}" id="set-agent-${esc(id)}" data-agent="${esc(id)}"`
+    + ` data-search="${esc([id, a.name || ""].join(" "))}">`
     + `<div class="ag-cfg-h">${iconHTML(a.icon, "sm")}<b>${esc(a.name || id)}</b>`
     + `<span class="ag-cfg-st">${esc(a.installed ? t("prov.agent.installed") : t("prov.agent.notInstalled"))}</span>`
     + (protos.length ? "" : `<span class="ag-cfg-st">${esc(t("prov.agent.envOnly"))}</span>`)
