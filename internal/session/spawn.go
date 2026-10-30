@@ -47,12 +47,21 @@ type Running struct {
 	CWD      string
 
 	cancelObserve context.CancelFunc
+	// settingsFile 是这一格专属的 --settings 文件（可能带 key）；流结束就删。
+	settingsFile string
 }
 
 // StopObserve 让 Prepare 交出来的 observe 退出。流结束时调用一次即可。
+// 顺手删掉这一格的 --settings 文件：Claude 只在启动时读它，进程没了它就只剩一把明文 key。
 func (r *Running) StopObserve() {
-	if r != nil && r.cancelObserve != nil {
+	if r == nil {
+		return
+	}
+	if r.cancelObserve != nil {
 		r.cancelObserve()
+	}
+	if r.settingsFile != "" {
+		_ = os.Remove(r.settingsFile)
 	}
 }
 
@@ -122,6 +131,7 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 	// 于是"这条事件属于哪个格子"由文件名决定，不需要任何反查。
 	// 只有 Claude 用这份 --settings；别的 agent 传空串。
 	settings := ""
+	settingsFile := ""
 	if tab.Spec.Agent == "claude" {
 		settings = BuildHookSettings(m.stateDir, tag)
 		if len(profEnv) > 0 {
@@ -129,6 +139,7 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 			// 文件路径比命令行里的 JSON 稳；写失败就退回内联串。
 			if p := writeClaudeSettings(tag, settings); p != "" {
 				settings = p
+				settingsFile = p
 			}
 		}
 	}
@@ -200,7 +211,7 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 
 	// 状态观察者跟着这条 PTY 的生命周期走：流一断/进程一关，ctx 就取消。
 	// observe 自己负责“server 还没起来就等”，不阻塞这里的启动。
-	r := &Running{Session: sess, Exe: exe, Args: args, Settings: settings, CWD: cwd}
+	r := &Running{Session: sess, Exe: exe, Args: args, Settings: settings, CWD: cwd, settingsFile: settingsFile}
 	if observe != nil {
 		octx, ocancel := context.WithCancel(context.Background())
 		r.cancelObserve = ocancel

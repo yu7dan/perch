@@ -256,6 +256,7 @@ func resetHookDir(stateDir string) {
 // 干过一次）也能自愈。格子关掉之后它的 offset 会被丢掉、文件留在盘上（下次启动清）。
 func (m *Manager) StartHookPoller() {
 	resetHookDir(m.stateDir)
+	resetClaudeSettingsDir()
 	go func() {
 		offs := map[string]int64{}
 		carry := map[string]string{}
