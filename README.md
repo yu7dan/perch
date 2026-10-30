@@ -90,8 +90,8 @@ Development builds produce both executables. The release build embeds `perch-hoo
 Build the single-file beta package with:
 
 ```powershell
-.\scripts\package.ps1 -Version 0.1.0-beta.5
-# -> dist\Perch-0.1.0-beta.5-win-x64.exe
+.\scripts\package.ps1 -Version 0.1.0-beta.6
+# -> dist\Perch-0.1.0-beta.6-win-x64.exe
 ```
 
 ## How it works
