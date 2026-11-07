@@ -121,8 +121,6 @@ const TAB_LIST = [];             // 标签模型，按创建顺序
 /* Workspaces 看得见的格子：Bot Group 的成员格（t.group）不算。网格、页签、左栏、总览的
    计数都用它；needModel / 状态点 / 会话守卫这类「每一格都要管」的仍然遍历 TAB_LIST。 */
 function wsTabs() { return TAB_LIST.filter((t) => !t.group); }
-/* Bot 格的挂载点：Bot Group 的格子坞（index.html 里常驻、永远有尺寸）。 */
-function botDockBody() { return document.getElementById("bg-dock-body") || $("termbody"); }
 // 正在用 WebGL 的格子数。**网格把"一个上下文"变成了"每格一个上下文"**：
 // Chromium 对同时存在的 WebGL 上下文有硬上限（约 16），超了会**静默丢掉最早
 // 那些**，表现是从某个格子开始整片变糊 —— 像是渲染坏了，其实是名额用光了。
@@ -193,7 +191,9 @@ const TERM_THEME_SCROLL = Object.freeze({
    ⚠️ 底色 / 前景改了要同步 osc_color.go 的 light/dark 常量和 00-base.css 的 --term-*。 */
 const TERM_THEME_DARK = Object.freeze({
   ...TERM_THEME_SCROLL,
-  background: "#0a0a0a", foreground: "#ffffff",
+  // 台面（0.1.1）：终端底色透明，透出格子那层玻璃（desk-term.css 的 .tile:has(.tterm)）。
+  // ⚠️ 只有显示是透明的；OSC 11 应答（osc_color.go）仍报 #0a0a0a，agent 照旧按暗底配色。
+  background: "#00000000", foreground: "#ffffff",
   cursor: "#ffffff", cursorAccent: "#0a0a0a",
   selectionBackground: "#5a7898", selectionForeground: "#ffffff",
   black: "#1d1f21", red: "#cc6666", green: "#b5bd68", yellow: "#f0c674",
@@ -469,8 +469,10 @@ async function createTab(spec, opts) {
   if (typeof installPaneModelChip === "function") installPaneModelChip(T);
   T.cellEl.appendChild(T.tabEl);
   T.cellEl.appendChild(T.cellBody);
-  (T.group ? botDockBody() : $("termbody")).appendChild(T.cellEl);
-  renderGrid();
+  // 台面（0.1.1）：格子由台面那一格认领（opts.mount）；还没有落点的先停在 #termpark ——
+  // 那是一块常驻、有尺寸的停车位（PTY 的启动闸是首帧尺寸，0 宽的盒子会让它一直等）。
+  ((opts && opts.mount) || document.getElementById("termpark")).appendChild(T.cellEl);
+  deskSoon("建格");
 
   // 下面整段原来直接写 $("termhost")（按 id 找唯一宿主）。现在宿主是每个标签
   // 自己一个，所以这里只认**自己的**那一个 —— 另一个格子的 PTY 推 resize 时
@@ -502,7 +504,7 @@ const term = new Terminal({
   scrollSensitivity: 1.15,
   fastScrollSensitivity: 5,
   allowProposedApi: true,           // unicode11 与 serialize 需要
-  allowTransparency: false,
+  allowTransparency: true,          // 底色透明（见 TERM_THEME_DARK），WebGL 渲染器也认
   // Orca 是按**背景亮度**分档的，不是按应用明暗模式
   // （terminal-contrast-correction.ts）：亮底 4.5（WCAG-AA 正文），
   // 暗底 3（WCAG-AA 大字）。它把 4.5 用在暗底上会"把鲜艳的 ANSI 色
@@ -804,7 +806,7 @@ installImeAnchor(T);
   stream.onopen = () => {
     ready = true; T.ready = true;
     T.connDown = false; renderAgentDot(T);
-    scheduleProjLive();
+    deskSoon("状态");
     if (activeTab === T) paintConnStatus(true);
     pushSize();
     fontProbe(); checkCanvasDpr();
@@ -830,13 +832,13 @@ stream.onclose = () => {
   // 左栏那一行也要立刻翻成「已停止」+ ▶（renderProjLive 是就地补，形状变了
   // 才整行换一次）。少了这一句，行要等到下一次有别的活才更新 —— 用户刚在格内
   // /exit，左栏却还写着"刚刚在跑"。
-  scheduleProjLive();
+  deskSoon("状态");
   if (activeTab === T) paintConnStatus(false);
 };
 stream.onerror = () => {
   T.connDown = true; renderAgentDot(T);
-  scheduleProjLive();
-  if (activeTab === T) { $("s-dot").className = "dot off"; $("s-st").textContent = t("status.connectionError"); }
+  deskSoon("状态");
+  if (activeTab === T) { sbar("s-dot").className = "dot off"; sbar("s-st").textContent = t("status.connectionError"); }
 };
 stream.onmessage = (ev) => {
   const d = ev.data;
@@ -929,7 +931,7 @@ function pushSize() {
   const p = fit.proposeDimensions();
   // 详细读数只回传日志；状态栏上留一格够用的就行。
   const amActive = activeTab === T;
-  if (amActive) $("s-render").textContent = gfx.on ? "· WebGL" : "· DOM";
+  if (amActive) sbar("s-render").textContent = gfx.on ? "· WebGL" : "· DOM";
   // webgl=true 只说明 addon 挂上了，不代表它没被回收 —— 真在用的渲染器
   // 会往容器里插 canvas，所以这个读数要和 canvas 数量一起看（状态栏那格给不出
   // 这么多信息，只在日志里留）。
@@ -938,7 +940,7 @@ function pushSize() {
   const cvs = [...h.querySelectorAll("canvas")].map((c) => `${Math.round(c.clientWidth)}x${Math.round(c.clientHeight)}${c.className ? "." + c.className : ""}@${c.parentElement ? c.parentElement.tagName + "." + c.parentElement.className : "无父"}`).join(" ");
   sendCtrl({ type: "log", msg: `tab=${T.id} fit=${p ? p.cols + "x" + p.rows : "nil"} host=${h.clientWidth}x${h.clientHeight} term=${term.cols}x${term.rows} dpr=${devicePixelRatio} webgl=${gfx.on} wpty=${JSON.stringify(term.options.windowsPty || null)} canvas=${h.querySelectorAll("canvas").length} [${cvs}]` });
   if (!p || !p.cols || !p.rows) return;
-  if (amActive) $("s-dims").textContent = `${p.cols}×${p.rows}`;
+  if (amActive) sbar("s-dims").textContent = `${p.cols}×${p.rows}`;
   const key = `${p.cols}x${p.rows}`;
   if (key === lastSizeSent) return;   // ← 就是这一行
   lastSizeSent = key;
@@ -1109,13 +1111,13 @@ function paintFontStatus() {
   for (const [label, probe] of order) {
     if (document.fonts.check(`14px "${probe}"`)) { usingFont = label; break; }
   }
-  $("s-font").textContent = usingFont ? usingFont : t("status.fontFallback");
-  $("s-font").style.color = usingFont ? "" : "var(--red)";
-  $("s-font").title = t("status.fontTitle");
-  $("s-lig").textContent = (LigaturesAddon && usingFont) ? t("status.ligatures") : "";
+  sbar("s-font").textContent = usingFont ? usingFont : t("status.fontFallback");
+  sbar("s-font").style.color = usingFont ? "" : "var(--red)";
+  sbar("s-font").title = t("status.fontTitle");
+  sbar("s-lig").textContent = (LigaturesAddon && usingFont) ? t("status.ligatures") : "";
 }
 paintFontStatus();
-$("s-render").title = t("status.renderTitle");
+sbar("s-render").title = t("status.renderTitle");
 // 从这里起，applySettings 可以安全地改所有已存在格子的外观了。
 PERCH_TERM_READY = true;
 
@@ -1124,8 +1126,8 @@ PERCH_TERM_READY = true;
 // 切换标签、以及 WebGL 上下文丢失时都要重画一次。
 function paintRenderStatus() {
   const tab = activeTab; // 不要叫 t：那会遮住 i18n 的 t()
-  if (!tab) { $("s-render").textContent = ""; return; }
-  $("s-render").textContent = tab.gfx.on ? "· WebGL" : t("status.renderDom");
+  if (!tab) { sbar("s-render").textContent = ""; return; }
+  sbar("s-render").textContent = tab.gfx.on ? "· WebGL" : t("status.renderDom");
 }
 
 // 并行格的读数（C4.5）—— 「N 格 · X 列/格」。
@@ -1138,7 +1140,7 @@ function paintRenderStatus() {
 // 65 是 Claude Code 开场介绍框的硬下限（见 PANE_MIN_COLS 那段注释），
 // 低于它就开始折行重叠 —— 那不是"我们的渲染坏了"，是没给够地方画。
 function paintGridStatus() {
-  const el = $("s-grid");
+  const el = sbar("s-grid");
   if (!el) return;
   /* C5：独立页视图下这一格报的是**那张页**（不是网格）。报的是它自己 term.cols
      —— 拎出去之后它拿到的是整块主区宽度，跟"每格多少"已经不是一回事了；
@@ -1176,36 +1178,11 @@ function paintGridStatus() {
 
 // 连接状态那一格同理 —— 每个标签一条 stream，各自可能连上/断开。
 function paintConnStatus(up) {
-  $("s-dot").className = up ? "dot on" : "dot off";
-  $("s-st").textContent = up ? t("status.connected") : t("status.disconnected");
+  sbar("s-dot").className = up ? "dot on" : "dot off";
+  sbar("s-st").textContent = up ? t("status.connected") : t("status.disconnected");
   // C7：「原生对比」那颗（#wt）删了，所以这里不再有"断连就禁用它"这件事 ——
   // 它原来守的是"没有活标签时别点"，见 HTML 标签条右侧那段注释的去向记录。
 }
-
-// --- 快照：serialize 让回滚缓冲能跨进程重启活下来。手动触发，不偷偷恢复 ---
-const SNAP = "perch.scrollback.v1";
-$("restore").addEventListener("click", () => {
-  const s = localStorage.getItem(SNAP);
-  if (!s) {
-    // 页面里没有控制台可看，而且它现在是个只有图标的浮出按钮 ——
-    // "无快照"这件事走日志通道留痕，界面上用 title 临时说一句。
-    sendCtrl({ type: "log", msg: "restore: 无快照" });
-    $("restore").title = t("term.restore.noSnap");
-    setTimeout(() => { $("restore").title = t("term.restore.title"); }, 2000);
-    return;
-  }
-  const tab = activeTab;
-  if (!tab) return;
-  tab.term.write("\r\n\x1b[90m" + t("term.restore.done") + "\x1b[0m\r\n");
-  tab.term.write(s, () => tab.term.scrollToBottom());
-});
-setInterval(() => {
-  // 快照是**页面级**的一份：一个 localStorage 键放不下 N 个标签的回滚缓冲。
-  // 存的是当前激活标签的（C1 的取舍，页面级快照按钮同理 —— 见计划书）。
-  const t = activeTab;
-  if (!t || !t.serialize) return;
-  try { localStorage.setItem(SNAP, t.serialize.serialize({ scrollback: 400 })); } catch (e) {}
-}, 5000);
 
 
 // 终端标题走的是 OSC 转义序列（`ESC ] 0 ; <标题> BEL`）—— 真终端里
@@ -1274,37 +1251,6 @@ function defaultTabTitle(tab) {
   return id || t("term.defaultTitle");
 }
 
-// 用户给会话起的名字（`T.liveTitle`，空 = 用 agent 自己写的）**挂在标签上**，
-// 因为它必须跟着会话走：切到另一个标签再切回来，名字不能丢、也不能串。
-//
-// 下面这一组 rename* 变量仍然是模块级的 —— 它们描述的是"现在有一个编辑框
-// 开着"这个**单例**事实（同一时刻只可能编辑一个标签），不需要每个标签一份。
-// renameTab 记的就是"正在编辑谁"。
-let renameTab = null;
-let tabEditing = false;
-let renameValue = "";
-let renameInputEl = null;
-let renameRefocusFrame = null;
-/* 编辑框的**第二个主语**：左栏（右栏子代理卡）里的一条会话。
-   它是一个 sessionId，不是"哪个 DOM 元素" —— 元素在提交之前可能已经被重画掉了，
-   而名字该落到会话上，不该落到某个节点上。
-   ⚠️ 不写第二份状态机：下面那三条闸（提交一次 / 失焦三态 / IME 守卫）每一条都是
-   实测出来的坑，抄一份就是等它们分叉（这个文件里"两份实现迟早会分叉"那句）。
-   这里只多这一个变量，`tabEditing` 仍是"有一个编辑框开着"的唯一判据。 */
-let renameSess = null;
-// 三个闸，语义见上面 (1)(2)：
-let renameSubmitted = false;         // Orca renameSubmittedRef
-let renameBlurCommitEnabled = false; // Orca renameBlurCommitEnabledRef
-let renameUserWantsBlur = false;     // Orca renameUserRequestedBlurCommitRef
-let renameSeq = 0;                   // Orca renameSessionIdRef：作废上一轮遗留的延迟帧
-
-// Orca isImeOwnedKeyboardEvent（ime-composition-keyboard-event.ts:11-20）：
-// isComposing 覆盖大多数浏览器，keyCode 229 是给"不移交 isComposing"的输入法兜底。
-function isImeOwnedKey(e) {
-  return e.isComposing === true || e.keyCode === 229 ||
-         (e.nativeEvent && (e.nativeEvent.isComposing === true || e.nativeEvent.keyCode === 229));
-}
-
 /* 「这一格**有**一个真标题吗」—— 用户起的名字 > agent 自己发的 OSC 标题，
    都没有 = 空串。和 runtimeTabTitle 是同一份优先级的两截：那个在末尾补产品名兜底，
    而这句判断**不能**用它的返回值（它永远非空）。
@@ -1366,7 +1312,6 @@ function renderTabTitle(t) {
   // 编辑期间整段不动（格子头里是输入框，草稿在 renameValue 里）—— 页上保留
   // 上一次定的名字，提交时这一句会再跑一次、两边一起更新。**故意不显示草稿**：
   // 草稿可能被 Esc 丢掉，而"页上跟着跳"会让人以为已经改成了。
-  if (tabEditing && t === renameTab) return;
   const nm = currentTabTitle(t);
   // 悬停提示也只给"真的标题"：dsh 会发 Windows PowerShell，那不是身份，
   // 让它从 tooltip 里也消失；没有真标题就不挂提示，别拿兜底名冒充。
@@ -1401,305 +1346,6 @@ function seedTabTitles() {
     ((bound.length || k.length) ? `（格 id 长 ${bound.length ? String(bound[0].sessionID).length : "-"}，表 key 长 ${k.length ? k[0].length : "-"}）` : "") });
 }
 
-/* 把输入框挂到**某个标题元素**上，并接好那几个闸 —— 主语无关的一段。
-   参数只有一个"要被换掉的那个 span"和初值；谁在被编辑由外面的 renameTab /
-   renameSess 记着，那两件事决定提交时名字落到哪里。 */
-function mountRenameInput(el, initial, ariaLabel) {
-  /* ⚠️ **元素不在文档里就别挂**。`replaceWith` 到一个已经不在文档里的节点上，
-     换出来的输入框也**不在文档里** —— 于是：focus() 是空操作（用户看不见它、
-     打进去的字哪儿都不去）、`document.activeElement` 永远不是它（第二帧那道闸
-     永远不开 ⇒ 点别处也永远不提交），而 tabEditing 会停在 true 上把**之后每一
-     次**改名都在 `if (tabEditing) return` 上吃掉 —— 要刷新页面才能再改名。
-     2026-10-17 实测：这一步是"第二次重命名没反应"的全部原因（提交自己触发的那次
-     列表重画就够引爆它，见 liveNmEl）。所以宁可当场说"没开成"，让调用方把状态退
-     回去 —— 返回值就是"到底开没开"。 */
-  if (!el || !el.isConnected) {
-    sendCtrl({ type: "log", msg: `重命名 没挂上：${el ? "目标标题元素已不在文档里（列表刚重画过）" : "找不到标题元素"} —— 编辑状态没进` });
-    return false;
-  }
-  const input = document.createElement("input");
-  input.type = "text";
-  input.className = "tab-input";
-  input.placeholder = t("term.rename.placeholder");
-  input.setAttribute("aria-label", ariaLabel);
-  input.value = initial;
-  input.addEventListener("input", () => { renameValue = input.value; });
-  input.addEventListener("keydown", (e) => {
-    // ⚠️ 必须放在最前面：中文输入法确认候选词的那个 Enter 不是"提交"。
-    if (isImeOwnedKey(e)) return;
-    if (e.key === "Enter") { e.preventDefault(); commitRename(); }
-    // Tab 也提交。Orca 的注释：别指望浏览器把焦点移开触发 blur ——
-    // 无窗口焦点的环境（xvfb / 某些 SSH）里焦点不一定会移开，那样就永远提交不了。
-    else if (e.key === "Tab") { e.preventDefault(); commitRename(); }
-    else if (e.key === "Escape") { e.preventDefault(); cancelRename(); }
-  });
-  input.addEventListener("blur", onRenameBlur);
-  // 输入框里的按下不能被标签/标题栏的拖拽接手（Orca 在编辑期间会摘掉 drag 监听）。
-  // 这一句对左栏同样必要：行的 click 是"接上/切主语"，按键的那一下不该被它吃掉。
-  input.addEventListener("mousedown", (e) => e.stopPropagation());
-  // 左栏那条路还要挡 click：行是 role="button"，不挡的话点输入框就会顺手把
-  // 这一行当成"点了这条会话"（切右栏主语）。标签那条路没有这个需求（标签的 click
-  // 在冒泡段，本来就被下面那句 stopPropagation 挡着）。
-  input.addEventListener("click", (e) => e.stopPropagation());
-
-  el.replaceWith(input);
-  renameInputEl = input;
-  // 「开成了」这条**只有在这里**才成立（挂上 + 还在文档里）。上面 doCardAct 那句
-  // 「点了菜单项」只是"用户点了"，不是"编辑器开了" —— 两者不许混着看。
-  sendCtrl({ type: "log", msg: `重命名 输入框挂上了（${ariaLabel}）在文档里=${input.isConnected}` });
-  // 下一帧再 focus+select：这一帧标签条刚重排完，立刻 focus 会被布局抖动吃掉。
-  const seq = renameSeq;
-  requestAnimationFrame(() => {
-    input.focus();
-    input.select();
-    // ⚠️ **第二帧**，Orca 的 use-terminal-pane-context-actions.ts:136-146：
-    // 只有"输入框确实拿到了焦点"才打开失焦提交的闸（document.activeElement===input）。
-    // 我第一版漏了这一帧 —— 后果很具体：闸永远不开，用户紧接着点到别处时那次 blur
-    // 会被当成"意外失焦"，于是焦点被抢回来、**永远提交不了**。
-    // 实测就是卡在这里（日志里只有 focus out/in 没有 rename）。
-    requestAnimationFrame(() => {
-      if (renameSeq !== seq || !tabEditing) return;
-      if (document.activeElement === renameInputEl) { renameBlurCommitEnabled = true; return; }
-      /* 焦点没落上也要留一句：这条闸不开的时候，用户看到的是"点了别处没反应"，
-         而画面上没有任何东西能说明为什么（输入框可能压根不在文档里 —— 那种情况
-         上面那道 isConnected 已经拦掉了，这里是漏网的情形）。 */
-      const a = document.activeElement;
-      sendCtrl({ type: "log", msg: `重命名 输入框在文档里=${input.isConnected} 但没拿到焦点` +
-        `（现在在 ${a ? a.tagName + (a.className ? "." + String(a.className).split(" ")[0] : "") : "null"}）—— 失焦提交的那道闸不开` });
-    });
-  });
-  return true;
-}
-
-function openRename(tab) {
-  if (tabEditing || !tab) return;
-  renameTab = tab;
-  renameSess = null;
-  renameSeq++;
-  renameSubmitted = false;
-  // 开编辑这一帧**不许**失焦提交：标签刚重排完、焦点还在抖，
-  // 这一下 blur 不是用户的意思（Orca 的 renameBlurCommitEnabledRef）。
-  renameBlurCommitEnabled = false;
-  renameUserWantsBlur = false;
-  renameValue = tab.liveTitle;   // 快照，编辑期间 OSC 的标题变化不许覆盖草稿
-  tabEditing = true;
-  // 挂不上（比如这一格刚被关掉，格子头的元素已经摘下来了）⇒ 这一次编辑**没开始**，
-  // 把状态整个退回去 —— 留在"看起来在编辑"的空上就会变成幽灵编辑器，
-  // 理由见 mountRenameInput 开头那段。
-  if (!mountRenameInput(tab.nmEl, renameValue, t("term.rename.ariaTab"))) closeRename();
-}
-
-/* 「这条会话**现在**在界面上是哪一行的标题元素」。
-   ⚠️ 必须在说的那一刻去文档里找，不能只用"开菜单时攥下来的那一份"：
-   `renderLists()` 是**整表 innerHTML 重画**，菜单开着的那一两秒里只要发生过一次
-   重画（会话库刷新、名字表被 Go 纠正、**以及这次改名自己提交时触发的那次**），
-   开菜单时记下的那个元素就成了一具尸体。往尸体的 `.nm` 里挂输入框 = 挂出一个
-   不在文档里的输入框：focus() 空转、点别处永远不提交、tabEditing 卡在 true 上
-   —— 2026-10-17 实测就是这么把"第二次改名"变成"点了没反应"的。
-   优先用调用方手里那个（它一定就是用户点的那一行），但**只在它还活着的时候**；
-   活不了才按 id 在文档里重新找一个（两种行都认：左栏的 `.arow`、右栏的 `.card`）。 */
-function liveNmEl(id, prefer) {
-  if (prefer && prefer.isConnected) return prefer;
-  /* 两个落点：右栏的子代理卡（`.card[data-id]`）和左栏的 **agent 行**
-     （`.arow[data-sid]` —— 2026-10-17 起左栏不再有会话行；agent 行的身份是
-     tab，挂在行上的是会话 id，见 agentRowHTML）。 */
-  const rows = document.querySelectorAll(
-    `.card[data-id="${CSS.escape(id)}"], .arow[data-sid="${CSS.escape(id)}"]`);
-  for (const row of rows) {
-    const nm = row.querySelector(".nm");
-    if (nm && nm.isConnected) return nm;
-  }
-  return null;
-}
-
-/* 左栏（以及右栏子代理卡）里的一条会话改名 —— 同一个编辑框的**第二个主语**。
-
-   和标签那条路只有三处不同，其余（三条闸、第二帧开闸、IME 守卫）全部共用：
-     ① 草稿的快照取的是"用户给它起过的名字"，没起过就是空的（输入框里是占位符）。
-        **不复述 agent 自己写的标题**：那样"我想给它起个名"会变成"我得先把别人的
-        字删掉"，而起名的意思本来就是"压过 agent 那个标题"（见 currentTabTitle）。
-     ② 被换掉的是这一行的标题元素：会话行是 `.nm`，卡片是 `.t` 里的那个 `.nm`。
-     ③ 提交落到 titles.json，**直接带 sessionId**（不用像标签那样反查 pid，
-        见 Go 的 title.set）。
-   ⚠️ 不复用 `openRename(t)`：那个的主语必须是标签对象（它要 t.nmEl / t.liveTitle /
-   t.ctrl 三样），这里一个都没有 —— 硬套就得往标签对象上挂假字段。 */
-function openSessionRename(s, el) {
-  if (tabEditing || !s || !el) return;
-  renameTab = null;
-  renameSess = s.id;
-  renameSeq++;
-  renameSubmitted = false;
-  renameBlurCommitEnabled = false;   // 同上：开编辑这一帧的 blur 不是用户的意思
-  renameUserWantsBlur = false;
-  renameValue = (STATE && STATE.titles && STATE.titles[s.id]) || "";
-  tabEditing = true;
-  // 同上：挂不上就把状态退回去，别留一个"看不见、却在吃掉后面每一次改名"的空。
-  if (!mountRenameInput(el, renameValue, t("term.rename.ariaRow"))) closeRename();
-}
-
-function closeRename() {
-  renameSeq++;
-  renameBlurCommitEnabled = true;   // Orca closeRenameSession()：复位，别把禁用态留给下一次
-  renameUserWantsBlur = false;
-  tabEditing = false;
-  const t = renameTab;
-  const sid = renameSess;
-  const input = renameInputEl;
-  renameInputEl = null;
-  renameTab = null;
-  renameSess = null;
-  if (input && input.parentNode) {
-    // 用一个**新的** span 换回输入框（输入框是 replaceWith 上去的，没得还原）。
-    // 不给它 id —— 现在每个标签自己一格，id 只会有一个"主人"，找不到才是对的；
-    // 元素重新挂进标签对象（t.nmEl），renderTabTitle 走的永远是标签对象。
-    const nm = document.createElement("span");
-    nm.className = "nm ell";
-    input.replaceWith(nm);
-    if (t) t.nmEl = nm;
-  }
-  if (t) { renderTabTitle(t); return; }
-  /* 会话行/卡片那条：**整表重画一次**。那一行的标题、时间、状态点都在同一次
-     重画里对齐，而名字从 STATE.titles 读（提交时已经写进去了，见 commitRename）。
-     ⚠️ 这一句必须在 `renameSess = null` **之后**：renderLists 顶上那条闸
-     （改名期间不重画列表）认的就是它，没清就等于调用了一次什么都不做的重画。 */
-  if (sid) renderLists(searchKey());
-}
-
-function commitRename() {
-  // 提交一次的闸（Orca use-sortable-tab-rename.ts:25,34-42）。blur 会在输入框
-  // 卸载时也触发一次 —— 没有这个闸，Escape 取消之后那次 blur 会把编辑**又提交上去**。
-  if (!tabEditing || renameSubmitted) return;
-  renameSubmitted = true;
-  const t = renameTab;
-  const sid = renameSess;
-  if (!t && !sid) { closeRename(); return; }
-  /* ⚠️ 兜底：手里这个输入框已经**不在文档里**了 ⇒ renameValue 是一份幽灵草稿
-     （用户看不见它也改不了它，见 mountRenameInput 开头那段）。这时候提交等于
-     凭空改一个名字 —— 直接收掉编辑、一个字都不写。
-     这是幽灵编辑器的最后一层保险：真出现了，用户点一下别处就能脱身，
-     不至于卡到"只有刷新页面才能再改名"。 */
-  if (renameInputEl && !renameInputEl.isConnected) {
-    sendCtrl({ type: "log", msg: `重命名 放弃提交：输入框已不在文档里（草稿=${JSON.stringify(renameValue)}）—— 编辑状态收掉，名字不动` });
-    closeRename();
-    return;
-  }
-  const trimmed = renameValue.trim();
-
-  // ---- 主语是**会话**（左栏/卡片那条路）----
-  if (sid) {
-    const had = !!(STATE && STATE.titles && STATE.titles[sid]);
-    // 清空 = 删掉名字，回到 agent 自己写的标题。本来就没名字就什么都不做 ——
-    // 和标签那条 `if (!t.liveTitle)` 是同一个判断，两条路的语义必须一样，
-    // 否则"在左栏清掉"和"在标签上清掉"会得到两个不同的结果。
-    if (!trimmed && !had) { closeRename(); return; }
-    // 先在本地落定，再落盘：列表重画是从 STATE.titles 读的（closeRename 里那句），
-    // 所以状态必须先写。
-    if (trimmed) {
-      STATE.titles = STATE.titles || {};
-      STATE.titles[sid] = trimmed;
-    } else if (STATE.titles) {
-      delete STATE.titles[sid];
-    }
-    /* 这条会话正跑在某一格里时，格子头的名字也要跟着改 —— "左栏改了、格子上
-       还是旧名"是同一件东西说了两句话（这个文件反复在防的病）。
-       ⚠️ 2026-10-17：**停了的那一格也要改**。`tabForSession` 对 connDown 一票
-       否决（那是给"接上"判据用的，见它那段注释）—— 拿它当改名的判据，继电
-       停了的 agent 之后就只剩旧名（左栏从 `t.liveTitle` 读，而那份没改）。
-       所以再按 sessionID 直接找一遍，含停掉的格。 */
-    const tab = tabForSession(sid)
-      || TAB_LIST.find((x) => x.id > 0 && x.sessionID === sid) || null;
-    if (tab) { tab.liveTitle = trimmed; renderTabTitle(tab); }
-    closeRename();
-    // 落盘走 ctl（这条路上手里就是 sessionId，不用像标签那样让后端反查 pid）。
-    // 写盘失败由 Go 那边把**权威的那份表**推回来纠正这里（见 main.go 的 title.set）——
-    // 所以这里可以放心先乐观更新。
-    sendCtrl({ type: "title.set", id: sid, name: trimmed });
-    sendCtrl({ type: "log", msg: `rename(左栏)：会话 ${sid.slice(0, 8)} → ${JSON.stringify(trimmed)}（空 = 回到 agent 自己写的标题）` });
-    return;
-  }
-
-  // ---- 主语是**标签**（原路，一个字没动）----
-  if (!trimmed) {
-    // 清空 = 删掉名字，回到 agent 自己写的标题（Orca 的 onSetCustomTitle(…, null)）。
-    if (!t.liveTitle) { closeRename(); return; }
-    t.liveTitle = "";
-  } else {
-    t.liveTitle = trimmed;
-  }
-  closeRename();
-  // 落盘：名字的主语是会话，后端按 pid→sessionId 反查（见 titles.go）。
-  // 发到**这个标签自己的**字节流上 —— 后端要靠这条流上的 pty 查出 pid，
-  // 发到 ctl 通道它就不知道说的是哪个会话了。
-  t.ctrl({ type: "rename", msg: t.liveTitle });
-  t.ctrl({ type: "log", msg: `rename: 会话名=${JSON.stringify(t.liveTitle)}（空 = 回到 agent 自己写的标题）` });
-}
-
-function cancelRename() {
-  // 取消也占住这个闸：否则紧随其后的那次 blur 会把取消了的编辑提交上去。
-  renameSubmitted = true;
-  closeRename();
-}
-
-function onRenameBlur() {
-  if (renameSubmitted) return;
-  /* 只有"用户自己要求的失焦"才提交（点到输入框外面，或按了 Tab）——
-     判据是 `renameUserWantsBlur`，它由 document 捕获段的 pointerdown/keydown 置上，
-     是**正面证据**。
-     ⚠️ 第二帧那道闸（renameBlurCommitEnabled）**不再参与判定**了（2026-10-17 改）。
-     它本来的用途是挡"挂载那一瞬间被布局抖动抢走焦点"那一下 —— 而那个时候
-     不可能有"落在输入框外面的 pointerdown"（开编辑的这一下 pointerdown 发生在
-     输入框还不存在的时候，那时 tabEditing 还是 false，压根不置这个标记）。
-     把它当必要条件就多出一条死路：闸因为任何原因没开（焦点没落上、输入框挂在
-     了一个不在文档里的节点上），用户点别处不但不提交，还会被下面那条"抢回焦点"
-     吃掉 —— 编辑器既不提交也不结束，接着吞掉用户后面打的每一个字。 */
-  if (renameUserWantsBlur) { commitRename(); return; }
-  if (!tabEditing || renameRefocusFrame !== null) return;
-  // 其余失焦（被程序抢走、窗口切换）一律把焦点**抢回来**：用户没打算结束编辑，
-  // 就不该结束（Orca 原逻辑，见上面 (2) 与 :84-112）。
-  const seq = renameSeq;
-  renameRefocusFrame = requestAnimationFrame(() => {
-    renameRefocusFrame = null;
-    if (renameSeq !== seq || !tabEditing) return;
-    const input = renameInputEl;
-    if (input) { input.focus(); input.select(); }
-    renameBlurCommitEnabled = true;   // 抢回来之后，下一次失焦才算数
-  });
-}
-
-// Orca use-terminal-pane-title-effects.ts:231-255 —— 编辑期间在 document 上
-// **捕获**监听，标记"这次失焦是用户自己要的"：
-//   pointerdown 落在输入框外面 → 是（他要去点别的东西了）
-//   keydown Tab               → 是
-document.addEventListener("pointerdown", (e) => {
-  if (!tabEditing) return;
-  const input = renameInputEl;
-  if (input && e.target instanceof Node && input.contains(e.target)) return;
-  renameUserWantsBlur = true;
-}, true);
-document.addEventListener("keydown", (e) => {
-  if (tabEditing && e.key === "Tab") renameUserWantsBlur = true;
-}, true);
-
-// 入口 = **双击格子头**。这是 Orca 的真实入口，不是我们发明的：
-//   components/tab-bar/SortableTab.tsx:204-210  onDoubleClick → handleRenameOpen()
-// Orca 在"还没有标题"时也进得来（那时它没有面板栏，入口就只剩这里和右键菜单）。
-// 标签栏整体双击 = 最大化窗口，所以 .tab 本来就被排除在那条规则之外（见下面）。
-//
-// ⚠️ 用**委托**而不是逐个 .cellhead 挂监听：格子是运行期增删的，逐个挂就得在
-// 每个建/关格子的地方记得挂一次/摘一次 —— 那正是"新格子双击重命名没反应"
-// 这类 bug 的温床。挂在容器上，格子怎么来都算数。
-//
-// C4 起这个容器从 #tablist 换成 #termbody：格子头现在长在网格里。
-// 元素仍然靠 `.tab` 这个类来找（格子头就是标签的 .tab 元素本体）。
-$("termbody").addEventListener("dblclick", (e) => {
-  if (e.target.closest(".x")) return;   // 双击关闭按钮不是重命名
-  const el = e.target.closest(".tab");
-  if (!el) return;
-  const t = TAB_LIST.find((x) => x.tabEl === el);
-  if (!t) return;
-  e.stopPropagation();
-  openRename(t);
-});
 
 // ===========================================================================
 // Agent 状态点 —— 状态从**标题的字形**推出来
@@ -1816,11 +1462,10 @@ function renderAgentDot(t) {
   if (t.group && typeof botStateChanged === "function") botStateChanged(t, s);
   // 群组那一屏里两个同源的点（顶部条一枚、列表行一枚）跟着一起走。它是
   // "一帧一次"的（scheduleGroup 自己挡），所以这里跟着每格调一遍不亏。
-  scheduleGroup();
   // 左栏那几个"活的数"（项目行的状态点与 N 在跑、会话行是不是当前格）同理。
   // ⚠️ 它是**就地补**的（只换点和数字，不重建行），因为这条函数每 400–700ms
   // 就可能被叫醒一次 —— 整表重建会把展开态、滚动位置、正在编辑的名字一起抹掉。
-  scheduleProjLive();
+  deskSoon("状态");
 }
 function applyAgentTitleStatus(t, rawTitle) {
   if (!t) return;

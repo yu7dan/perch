@@ -26,10 +26,14 @@ import (
    3. 收起：主窗口藏起来（不是最小化，回来是瞬间的），换一个总在最前、透明底、
       不占任务栏的小窗口（悬浮按钮 /orb.html）。两边经 Wails 事件说话：
         前端  → perch:stow {x,y}            收起，按钮摆在 x,y
-        前端  → perch:orb-state {...}       在跑 / 等你 / 气泡，转给按钮窗口
+        前端  → perch:orb-state {...}       在跑 / 等你 / 气泡（Wails 的事件本来就广播到每个窗口，按钮页直接收）
         按钮  → perch:orb-click              回到台面
         按钮  → perch:orb-moved {x,y}        拖完的新位置（主窗口记下来）
-        Go    → perch:unstowed {x,y}         告诉主窗口已经回来了（顺带按钮位置） */
+        Go    → perch:unstowed {x,y}         告诉主窗口已经回来了（顺带按钮位置）
+        Go    → perch:orb-shown              按钮窗口复位了（页面回到初始样子）
+
+   ⚠️ 别在 Go 里「转发」前端的事件：window.EmitEvent 发的也是应用级事件，会再回到同名监听器
+   手里 —— 2026-11-08 实测一个转发器自己转自己，几十秒里起了 3.9 亿个 goroutine，进程内存耗尽崩掉。 */
 
 const deskWallpaperRoute = "/__desk/wallpaper"
 
@@ -146,14 +150,6 @@ func newDeskStow(app *application.App, main *application.WebviewWindow) *deskSto
 	app.Event.On("perch:orb-click", func(*application.CustomEvent) { d.unstow() })
 	app.Event.On("perch:orb-moved", func(e *application.CustomEvent) { d.moved(e.Data) })
 	app.Event.On("perch:orb-size", func(e *application.CustomEvent) { d.resize(e.Data) })
-	app.Event.On("perch:orb-state", func(e *application.CustomEvent) {
-		d.mu.Lock()
-		orb := d.orb
-		d.mu.Unlock()
-		if orb != nil {
-			orb.EmitEvent("perch:orb-state", e.Data)
-		}
-	})
 	return d
 }
 
@@ -203,6 +199,8 @@ func (d *deskStow) stow(data any) {
 	orb.SetPosition(ox, oy)
 	d.main.Hide()
 	orb.Show()
+	// 按钮窗口是复用的：上一次收着时它可能正加宽着（提示 / 气泡），先让页面回到初始样子。
+	orb.EmitEvent("perch:orb-shown", nil)
 	log.Printf("[desk] 收起：主窗口藏起，悬浮按钮在 %d,%d", ox, oy)
 }
 

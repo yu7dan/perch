@@ -1,0 +1,75 @@
+/* desk-term.css —— 格子里的真终端：字体、终端宿主、和模拟不一样的那几处（模拟里格子画的是假对话，这里是真终端）。 */
+
+/* 终端字体随应用走，不等系统装（完整字重文件：方块元素和制表符不在任何子集里，
+   用子集会回退到中文字体、被当全角画，Claude Code 的像素 logo 就糊成一块砖）。 */
+@font-face{font-family:"JetBrains Mono WB";font-style:normal;font-weight:400;font-display:block;src:url("/fonts/jbm-full-400.woff2") format("woff2")}
+@font-face{font-family:"JetBrains Mono WB";font-style:normal;font-weight:700;font-display:block;src:url("/fonts/jbm-full-700.woff2") format("woff2")}
+@font-face{font-family:"JetBrains Mono WB";font-style:italic;font-weight:400;font-display:block;src:url("/fonts/jbm-full-400-it.woff2") format("woff2")}
+@font-face{font-family:"Cascadia Code WB";font-style:normal;font-weight:200 700;font-display:block;src:url("/fonts/CascadiaCode.woff2") format("woff2")}
+@font-face{font-family:"Cascadia Code WB";font-style:italic;font-weight:200 700;font-display:block;src:url("/fonts/CascadiaCodeItalic.woff2") format("woff2")}
+
+/* 停车位：终端建好、还没有格子认领它的时候先停在这里。必须**有尺寸**（PTY 的启动闸是首帧尺寸），
+   但看不见、点不到。 */
+#termpark{position:fixed;left:-10000px;top:0;width:900px;height:600px;overflow:hidden;visibility:hidden;pointer-events:none}
+
+/* 格子里那一层：.tterm（台面的）→ .cell → .cellbody → .termhost（10-term 的三层固定结构）。
+   ⚠️ .termhost 必须正好是 .cellbody 内缩 4px —— 10-term 的 boxOk() 拿这条断言挡"量到假尺寸"。 */
+.tterm{flex:1;min-height:0;position:relative;margin:0 4px 4px 2px}
+.zone.solo .tterm{margin-top:4px}
+.tterm .cell{position:absolute;inset:0;display:flex;flex-direction:column;overflow:clip}
+.tterm .cell > .cellhead{display:none}
+.cellbody{flex:1;position:relative;min-height:0;overflow:clip;clip-path:inset(0)}
+.termhost{box-sizing:border-box;position:relative;contain:paint;width:calc(100% - 4px);height:calc(100% - 4px);
+  margin:4px 0 0 4px;overflow:clip;clip-path:inset(0)}
+.termhost .xterm{height:100%;width:100%}
+/* xterm 的渲染补丁（照 Orca 的 terminal.css）：滚动条槽位常驻、viewport 不画黑底、
+   helpers 钉到 left:0（不然输入法候选框会被推离光标）、隐藏 textarea 不画原生光标。 */
+.xterm-viewport{overflow-y:scroll}
+.xterm:not(.allow-transparency) .xterm-viewport{background-color:transparent}
+.xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider{border-radius:4px}
+.xterm .xterm-helpers{left:0}
+.xterm .xterm-helper-textarea{caret-color:transparent}
+.tile .tterm .xterm{cursor:text}
+/* 格子里的终端底色跟着玻璃走一点，不是一块死黑。 */
+.tile:has(.tterm){background:rgba(10,10,12,.62)}
+.tile.cur{border-color:rgba(255,255,255,.12)}
+
+/* 格内横幅（冷恢复没接上那条会话时说出来）：盖在终端顶上，不改终端的尺寸。 */
+.cellbanner{position:absolute;left:0;right:0;top:0;z-index:3;display:flex;align-items:center;gap:6px;height:26px;
+  padding:0 4px 0 10px;cursor:pointer;background:rgba(28,22,12,.94);border-bottom:1px solid rgba(245,180,84,.28);
+  font-size:11.5px;color:var(--dim);border-radius:8px 8px 0 0}
+.cellbanner .ic{flex:none;display:flex;color:var(--warn)}
+.cellbanner .tx{flex:1;min-width:0;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cellbanner .x{flex:none;width:18px;height:18px;display:grid;place-items:center;color:var(--faint);border-radius:4px;font-size:13px}
+.cellbanner .x:hover{background:rgba(255,255,255,.08);color:var(--txt)}
+
+/* 「有新内容」：模拟里在输入行上面；真终端没有那一行，贴着格子底。 */
+.tile .tb-new{bottom:14px}
+/* 格子停了（agent 自己退出了）：盖一层，给一个「接着来」。 */
+.tstop{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:4;display:flex;align-items:center;gap:10px;
+  padding:6px 6px 6px 14px;border-radius:12px;font-size:12px;color:var(--dim);background:var(--sheet);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--line);box-shadow:0 10px 30px rgba(0,0,0,.4);animation:zIn .2s var(--ease)}
+.tstop .btn{display:flex;align-items:center;gap:5px}
+
+/* 状态点：模拟只有 在干活 / 等你 / 空闲 三种；真 agent 还有「跑完一轮没看」「停了」「出错了」。 */
+.dot.done{background:var(--ok);box-shadow:0 0 0 3px rgba(95,211,154,.16)}
+.dot.off{background:transparent;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.32)}
+.dot.fail{background:var(--bad)}
+.ztab .tl.done::after{content:"";position:absolute;right:-2px;bottom:-2px;width:7px;height:7px;border-radius:50%;border:1.5px solid rgba(22,23,29,.95);background:var(--ok)}
+
+/* 空格里：上次关掉的，一键接回。 */
+.tpick{position:absolute;inset:0}
+.pk-back{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:6px;font-size:11.5px;color:var(--faint);max-width:380px}
+.pk-back button{display:flex;align-items:center;gap:5px;padding:3px 10px 3px 7px;border-radius:999px;background:rgba(255,255,255,.05);color:var(--dim)}
+.pk-back button:hover{background:rgba(255,255,255,.1);color:var(--txt)}
+.pk-back img{width:13px;height:13px}
+.tile.small .pk-back{display:none}
+.ag-none{display:grid;place-items:center;color:var(--dim)}
+
+/* 台面上一块都没有时的一句话（第一次打开 / 全关了）。 */
+#deskhint{position:fixed;left:50%;top:44%;transform:translate(-50%,-50%);z-index:0;pointer-events:none;text-align:center;
+  color:rgba(255,255,255,.78);text-shadow:0 1px 10px rgba(0,0,0,.5);font-size:14px;line-height:1.7;transition:opacity .3s}
+#deskhint b{display:block;font-size:20px;font-weight:600;margin-bottom:4px;color:#fff}
+#deskhint span{color:rgba(255,255,255,.6);font-size:12.5px}
+body.has-zones #deskhint,body.drawing #deskhint{opacity:0}
+.th .x.on{opacity:1;color:var(--acc)}

@@ -318,10 +318,6 @@ ctl.onopen = () => {
   // 补发启动期攒下的错误（那段"普通脚本"抓的，见文件头部）—— 那时还没有通道。
   for (const m of window.__bootErr) ctl.send({ type: "log", msg: "启动期错误: " + m });
   window.__bootErr.length = 0;
-  // 右栏文件树可能启动时就停在「全部」：它等的就是这条通道。ctl 没连上时
-  // filesList 不发请求（sendCtrl 会静默吞掉），这里补一次。83-files.js 可能
-  // 还没求值完（defer 顺序），所以只认函数在不在，别直接碰它的状态。
-  if (typeof renderFiles === "function") { try { renderFiles(true); } catch (e) {} }
   // 通道建好之前攒下的**非错误**事实（见 bootFact）——同样补发，但不加"错误"前缀。
   for (const m of window.__facts) ctl.send({ type: "log", msg: m });
   window.__facts.length = 0;
@@ -418,7 +414,7 @@ function dispatchCtl(m) {
       /* 2026-10-17：id 到了 = 这一格正式出现在左栏（行 = agent）。必须**在这里**
          重画一次 —— 建格时 id 还是 0（不在模型里），只等下一次状态推送的话，
          新 agent 会有一两秒"看不见"（而它可能正是用户刚点 + 要用的那个）。 */
-      armRailRebuild();
+      deskSoon("rail");
       w.done(m.stream);
       return;
     }
@@ -457,7 +453,7 @@ function dispatchCtl(m) {
          整份替换（不是打补丁）：那份表就是唯一事实，推来的就是它的全部。 */
       STATE.titles = m.titles || {};
       bootFact(`名字表被 Go 纠正：${Object.keys(STATE.titles).length} 条（改名的落盘没成）`);
-      renderLists(searchKey());   // 正在编辑另一个名字时它自己会让开（见 renderLists 顶上那条闸）
+      deskSoon("titles");
       return;
     }
     case "panes.list": {
@@ -501,7 +497,7 @@ function dispatchCtl(m) {
             `${r.sessionId && !r.onDisk ? " 盘上无文件" : ""})`).join(" "));
       }
       // 左栏这时候可能已经画过一遍了（启动顺序不保证）—— 让它跟上。
-      armRailRebuild();
+      deskSoon("rail");
       if (RESTORE.panes.length) {
         // 座位序 + 每一格的身份（步 4 要照着它建）。dup 那几条也在里面：
         // 前端得说得出"这一条为什么没有座位"。
@@ -516,7 +512,7 @@ function dispatchCtl(m) {
       const pane = m.pane | 0;
       if (!m.kept || !m.found) {
         CLOSED_PANES.delete(pane);
-        armRailRebuild();
+        deskSoon("rail");
         return;
       }
       // 记录留下了：这一行从"正在关"变成可接。名字/会话 id 已经在乐观行里，
@@ -525,7 +521,7 @@ function dispatchCtl(m) {
       if (keep) {
         keep.closing = false;
         keep.optimistic = false;
-        armRailRebuild();
+        deskSoon("rail");
       }
       return;
     }
@@ -535,28 +531,28 @@ function dispatchCtl(m) {
     case "files": applyFiles(m); return;
     // 右栏「文件」：fs.list / fs.read 的应答，fs.err 是两条共用的错误通道
     // （护栏、目录没了、文件不是普通文件…）。实现和渲染都在 83-files.js。
-    case "fs.list": applyFsList(m); return;
-    case "fs.read": applyFsRead(m); return;
-    case "fs.err":  applyFsErr(m);  return;
+    case "fs.list": if (typeof applyFsList === "function") applyFsList(m); return;
+    case "fs.read": if (typeof applyFsRead === "function") applyFsRead(m); return;
+    case "fs.err":  if (typeof applyFsErr === "function") applyFsErr(m);  return;
     // 文件预览「改动」页：按需取这一格记到的 diff 正文（见 transcript.go 的 trace.diff）。
-    case "diff":    applyTraceDiff(m); return;
+    case "diff":    if (typeof applyTraceDiff === "function") applyTraceDiff(m); return;
     case "state": applyLibrary(m.state); return;
     // 安装器：start / log / phase / done 四条；done 里也带一份重扫过的 catalog。
     case "install.start":
     case "install.log":
     case "install.phase":
-    case "install.done": applyInstall(m); return;
+    case "install.done": if (typeof applyInstall === "function") applyInstall(m); return;
     // 设置 › 模型提供商 / Agents（85b-providers.js）。视图里没有任何密钥。
-    case "providers": applyProviders(m); return;
-    case "provider.result": provResult(m); return;
+    case "providers": if (typeof applyProviders === "function") applyProviders(m); return;
+    case "provider.result": if (typeof provResult === "function") provResult(m); return;
     case "botgroups": if (typeof applyBotGroups === "function") applyBotGroups(m); return;
     case "botgroup.event": if (typeof applyBotGroupEvent === "function") applyBotGroupEvent(m); return;
     case "botgroup.result": if (typeof botGroupResult === "function") botGroupResult(m); return;
     // Bot Group C：Go 的投递（前端只执行：对方空闲时粘贴，送完回执 bg.delivered）、任务账本的变化
     case "bg.deliver": if (typeof bgDeliverFromGo === "function") bgDeliverFromGo(m.delivery); return;
     case "task.update": if (typeof bgTaskUpdate === "function") bgTaskUpdate(m); return;
-    case "provider.test": provTestResult(m); return;
-    case "provider.detected": provDetected(m); return;
+    case "provider.test": if (typeof provTestResult === "function") provTestResult(m); return;
+    case "provider.detected": if (typeof provDetected === "function") provDetected(m); return;
     case "pane.model": if (typeof applyPaneModel === "function") applyPaneModel(m); return;
     case "catalog":
       if (m.catalog) setCatalog(m.catalog, "catalog 推送");
@@ -616,232 +612,3 @@ function bootFact(msg) {
   if (ctlReady) { try { ctl.send({ type: "log", msg }); return; } catch (e) {} }
   window.__facts.push(msg);
 }
-
-// ---------------------------------------------------------------------------
-// 标签条
-//
-// **渲染 = 把已有的 .tab 元素按模型顺序重新 append**，不重建 DOM。
-// 重建会有一个很难查的后果：重命名时 .nm 被换成了输入框，重建等于把用户
-// 正在打的字连输入框一起删掉。标签元素由 createTab 建一次，归属它自己。
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// 网格形状（C4.5）—— 从 ceil(sqrt(N)) 换成**按容器实测推导**
-//
-// 老规则是「正方形」启发式：1→1、2→2、3~4→2、5~9→3。它的问题不在结果，
-// 在**依据**：格子是 8×18 的竖长格（字宽 : 行高 ≈ 1:2.25），一个"每格接近
-// 正方形"的网格，等于每格的**行数**只有列数的三分之一 —— 而 claude 的 TUI
-// 是横着排版的，它先缺行、后缺列。所以"方形"从来不是这个问题的正确目标。
-//
-// ⚠️ 先说清楚**Orca 没有回答这个问题**，别以为这里有现成的答案可抄：
-//   - `pane-fit-measurability.ts:8-11`：MIN_PANE_FIT_{WIDTH_PX,HEIGHT_PX,COLS,ROWS}
-//     = 48/24/8/4，低于它**拒绝 fit**，注释理由是防止 "Fitting there pins the
-//     PTY at ~2 cols" —— 它保证的是"不把不可信的尺寸推给 PTY"（= 我们的 boxOk()），
-//     **不是**"每一格都好看"。
-//   - `terminal-grid-size-for-box.ts:2`：MINIMUM_COLS = 2，直接抄 xterm FitAddon。
-//   - `pane-divider-drag.ts:16`：拖动下限 MIN_PANE_SIZE = 50(px)，而且
-//     `effectiveMinPaneSize = Math.min(50, totalSize/2)` —— 总宽不够两个 50 时
-//     **自动让路**（否则算出负 flex）。
-//   ⇒ Orca 把"切成多小"完全交给用户的手（它默认是手工分屏）。我们既然是
-//     **自动**成网格，就必须自己定这条规则 —— 这段就是它。
-//
-// 列数：ceil(sqrt(N))。**这条一个字都没改** —— 1→1、2→2、3~4→2、5~9→3，
-// 先并排、排满一行再下一行。
-// ⚠️ 2026-10-15 我一度把它换成"按容器实测挑最平衡的摆法"，结果 N=2 排成了
-// **上下叠**（1×2）—— 用户在它出现的那一刻就否了：并行就是先并排，像之前那样。
-// 教训记在这儿别再走一遍：**"每格列数最多"不是个好目标**（叠起来每格 111 列、
-// 并排 54 列，比列数它赢），而 claude 的介绍框宽度固定 ~65 字符，多出来的列
-// 全是空的；可它错得不像"少两列"那么无害 —— 它把**并排**变成了**上下叠**，
-// 那是产品形态，不是布局细节。布局这一层不许自己改。
-//
-// 这里原先还有两个 JS 常量（CELL_HEAD_H / GRID_GAP_PX），是给"每格能排下多少
-// 列多少行"用的。那个读数算错过（见下），两个常量就一起删了 —— 间距的唯一
-// 定义回到 CSS 的 `gap: var(--grid-gap)`，不再有一份必须"记得同步"的影子副本。 */
-
-// ⚠️ 这里**故意没有**"一个格子里能排下多少列多少行"这种函数 —— 我写过一个，
-// 拿它算出"每格 34 列"写进日志，而真值是 54。错因不是公式，是**调用时机**：
-// renderGrid 跑的时候主区宽度还没被折成列数。
-// 教训：**在"摆法"这一层只允许出现 N 的纯函数**（下面的 gridCols 就是），
-// 凡是需要量容器的数，都放到布局稳定之后、由真正负责渲染的那个人去报。
-function gridCols(n) { return Math.max(1, Math.ceil(Math.sqrt(n))); }
-
-// 摆法：**只算列，不算别的**。rows 是 N 摊到列数上的结果，不是另选的参数。
-//
-// 这里**故意不量容器**：早先它顺手把"每格可用宽高"也算了（bw/bh）并写进日志，
-// 结果是错的 —— renderGrid 里那一刻主区宽度还没落地（见上面那段注释），
-// 量到的是变宽之前的中间态。既然这个数不可信，就别让它存在：
-// 要每格多大，去读各格自己 fit 完报的 `[web tN] fit=WxH`。
-//
-// ⚠️ 2026-10-17 试过一版"多了先改摆法、超限再降字号"（用户当时挑的 C 方案）：
-//    网格区 848×840 下 8 格变成 **2×4 每格 50×11**，替掉原来的 3×3 每格 32×15。
-//    字节上都对（实测日志：`网格 N=8 摆法=2×4 字号=14 预计每格=50×11`
-//    ↔ 各格 `fit=50x11`），但**用户看过实际效果后否了** —— 换来的宽度不值那些
-//    高度：2×4 每格只剩 11 行，claude 的开场框直接被切掉。整段已撤回，规则回到
-//    下面这条 N 的纯函数、字号永远 14。
-//    （否掉的是**这条规则**，不是"这些数得实测"那个教训 —— 那一次量出来的
-//     字格 8.0px（14px 字号）/ 行高 16.5px、每格被吃掉 4+14(横) / 22+4(纵)、
-//     以及"claude 那条状态行要 51 字符"这些数以后真要量"每格能排下多少字"时
-//     可以直接用，别再量一遍。）
-function gridShape(n) {
-  const cols = gridCols(n);
-  return { cols, rows: Math.ceil(n / cols) };
-}
-
-/* 只写"列数"决定的那两样东西：--gcols 和最后一行的跨度。
-   C5：独立页视图下 --gcols 必须是 1 —— 别的格虽然 display:none（不参与布局），
-   但"可见的那一格占几列"仍然由 --gcols 决定：3 列的网格里只放一个 1 跨的格子，
-   它只会拿到 1/3 宽。
-
-   最后一行的空格子**必须填掉**，理由比 C4 时更硬：网格底色现在是 #3f3f46
-   （隔离线那一层），留一个空槽就是**一块实心灰**，比 C4 时那块"看着像坏了"的
-   #151515 更刺眼。做法：最后一行的 k 格按比例吃掉整行的列（cols=3、k=2 → 2+1；
-   k=1 → 整行）。余数给**最后一格**。
-
-   ⚠️ 抽成函数只是为了给这两样东西一个名字（早先那套"摆法按容器改判"会调它
-   两次，2026-10-17 跟着整段撤了）：现在整份文件里只有 renderGrid 一个调用点。 */
-function applyGridCols(n, cols) {
-  $("termbody").style.setProperty("--gcols", String(soloTab ? 1 : cols));
-  const lastRow = n % cols === 0 ? cols : n % cols;
-  const each = lastRow > 0 ? Math.floor(cols / lastRow) : cols;
-  wsTabs().forEach((t, i) => {
-    const k = i - (n - lastRow);              // 本行第几格（0 起；负数=不在最后一行）
-    let span = 1;
-    if (!soloTab && n > 1 && lastRow < cols && k >= 0) {
-      span = k === lastRow - 1 ? cols - each * (lastRow - 1) : each;
-    }
-    // 用行内样式而不是 class：class 没法带数值，而这里的跨度是算出来的。
-    // 置空是必须的 —— 网格会自动把"上一轮的 span"继承下来（元素没换）。
-    // ⚠️ 独立页视图下**所有**格子都要置空：被拎出去那格若留着上一轮的 span，
-    // 回到网格时它会先按错的跨度渲染一帧（布局抖动，截图看得出来）。
-    t.cellEl.style.gridColumn = span > 1 ? `span ${span}` : "";
-    t.cellEl.classList.toggle("solo", t === soloTab);
-  });
-}
-
-/* 零格空态：格子在不在，和「已关闭」记录有没有，是两件事 ——
-   空态要同时说清"现在没格子"和"还能接回哪些"。这段只碰 #term-empty，
-   不参与网格布局（它是 .pane.a 里的覆盖层，见 CSS）。 */
-function renderTermEmpty() {
-  const box = $("term-empty");
-  if (!box) return;
-  const empty = wsTabs().length === 0;
-  box.hidden = !empty;
-  if (!empty) return;
-  const hasProject = (STATE?.projects || []).some((p) => p && p.path && !p.synthetic);
-  const kicker = box.querySelector(".te-kicker");
-  const h1 = box.querySelector("h1");
-  const lead = box.querySelector(".te-lead");
-  const cta = box.querySelector("#te-new > span");
-  if (kicker) kicker.textContent = t(hasProject ? "term.empty.kicker" : "term.empty.projectKicker");
-  if (h1) h1.textContent = t(hasProject ? "term.empty.title" : "term.empty.projectTitle");
-  if (lead) lead.textContent = t(hasProject ? "term.empty.lead" : "term.empty.projectLead");
-  if (cta) cta.textContent = t(hasProject ? "term.empty.cta" : "term.empty.addProject");
-  const host = $("te-closed");
-  if (!host) return;
-  const rows = (typeof closedList === "function" ? closedList() : [])
-    .filter((r) => !r.busy)
-    // 刚关掉、还在等后端答复的那一条（optimistic）只要是说过话的，就先列出来 ——
-    // 否则"关掉最后一格"的空态会一边写着"能从这儿接回"，一边一条都不给。
-    // 零轮次的空壳仍然不列（它马上会被后端摘掉）。
-    .filter((r) => !r.optimistic || r.spoke || r.talked)
-    .filter((r) => typeof closedUnresumable !== "function" || !closedUnresumable(r))
-    .slice(0, 6);
-  host.hidden = rows.length === 0;
-  host.innerHTML = rows.length
-    ? `<div class="te-closed-cap">${esc(t("term.empty.closedCap"))}</div>` +
-      rows.map((r) => `<button type="button" class="te-closed-row" data-pane="${r.paneId | 0}">` +
-        `<span class="nm">${esc(typeof closedRowName === "function" ? closedRowName(r) : r.agent || "")}</span>` +
-        `<span class="ag">${esc(r.agent || "")}</span>` +
-        `<span class="go">${esc(t("term.empty.resume"))}</span></button>`).join("")
-    : "";
-}
-
-$("te-new").addEventListener("click", () => {
-  const hasProject = (STATE?.projects || []).some((p) => p && p.path && !p.synthetic);
-  if (hasProject) openNewAgent({ why: "空态新开" });
-  else openAddProject({ why: "空态先添加项目" });
-});
-$("te-closed").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-pane]");
-  if (!b) return;
-  const r = closedList().find((x) => String(x.paneId | 0) === b.dataset.pane);
-  if (r) resumeClosedPane(r);
-});
-
-// 网格重排。**只动容器上的一个变量**，格子元素由 createTab 建、归属它自己
-// （重命名会把 .nm 换成输入框，重建 DOM 等于把用户正在打的字一起删掉）。
-function renderGrid() {
-  const n = wsTabs().length;
-  const tb = $("termbody");
-  // 摆法是 **N 的纯函数**（见上面 gridShape 那段）：不量容器、不看字号、也没有
-  // 第二份状态。要每格多大，去读各格自己 fit 完报的 `[web tN] fit=WxH`。
-  const shape = gridShape(n);
-  // 压暗只对"多个格同时可见"成立（独立页上只有一个格，压暗它自己没道理）。
-  tb.classList.toggle("multi", n > 1 && !soloTab);
-  tb.classList.toggle("solo", !!soloTab);
-  applyGridCols(n, shape.cols);
-
-  const cnt = $("pn-cnt");
-  if (cnt) { cnt.textContent = String(n); cnt.dataset.n = String(n); }
-  // 群组那一屏的"座位"跟着网格模型走（多一格/少一格/换了当前格），所以在这里
-  // 补一次。它是"一帧一次"的（scheduleGroup 自己挡），收起时才真的干活 ——
-  // 启动路径上 createTab → renderGrid 会跑到这一句，那时 collapsed 还是 false，
-  // 直接返回（这也是那批声明必须写在启动之前的原因，见 RSB_READY 那一块）。
-  scheduleGroup();
-  renderTermEmpty();
-  // C6a：这里原来还有一句 `applyPaneColsForCells()` —— 格数变了就把"每格多少列"
-  // 这个用户偏好重新折成主区宽度。现在**没有这个动作了**：
-  //   主区宽度只由"窗口 − 左栏 − 右栏"决定，格数变不改变它，只改变它怎么分
-  //   （cols = ceil(sqrt(N))）。宽度一变，各格自己的 ResizeObserver 就醒了，
-  //   各自 refit —— 不需要谁来"按 N 折一遍"。
-  // 顺带，C5 那条"独立页视图下故意不碰主区宽度"的顾虑也一起消失：
-  // 拎进拎出时本来就没人会去改主区宽度。
-  paintGridStatus();
-  /* 探针：**摆法是算出来的、屏幕上看不出它凭什么这么算**，所以回一条。
-     ⚠️ 这条只报**renderGrid 自己能确定的三件事**：几格、摆法、容器多大。
-     - **不报"每格多少列"**：这个数要等各格 fit 完才成立（C6a 之前还要等主区
-       宽度落地），而且"每格"这个概念在 N=1 时根本没意义。每格真实的列×行由它
-       自己 fit 完报的 `[web tN] tab=N fit=WxH` 给，那一条才是权威（实测过：
-       N=2 容器 906 → 每格 54 列；N=1 容器 673 → 81 列。都对得上）。
-     - **不报字格**：那条要么量的是"当前这一格"（renderGrid 跑的时候可能还没有
-       当前格），要么落到 8×18 的估数上 —— 屏幕上显示的 18 跟真实的 16 不一样，
-       等于往探针里塞了一个假的测量值。字宽/行高、DPI、字体这些"渲染是否正常"的
-       事实在 `fontprobe` / `canvas dpr` 两条里各有一份真的，别在这儿重复。
-     ⚠️ 容器走 rAF 再量：不是因为它现在量错（实测 673/906 都对），而是因为
-     网格样式（--gcols / span）是**同一帧里**刚写上去的，等一帧再读永远比
-     抢在布局中间读稳。摆法是 N 的纯函数，不用等，先取值带进闭包。
-     ⚠️ 必须走 bootFact 而不是 sendCtrl：**第一个标签是在模块求值期间同步建出来的**
-     （顶层 `await createTab(...)` 的第一个 await 之前那段），而 ctl 通道要等
-     模块求值让出主线程之后才会 onopen —— 那一刻 ctlReady 还是 false，
-     页面级 sendCtrl 会**静默 return**（`if (!ctlReady) return;`）。
-     这正是这条日志第一次跑就消失的原因，也正是本文件里 bootFact 存在的原因
-     （它自己那段注释说"现在没有调用点了" —— 现在又有了）。 */
-  const soloId = soloTab ? soloTab.id : 0;
-  requestAnimationFrame(() => {
-    /* 等一帧再量容器**只为了报数**（容器尺寸 + 关格坐标）：摆法是 N 的纯函数，
-       不用等布局；这里要避开的只是"抢在布局中间读宽度"（2026-10-15 那次翻车就是
-       这个原因，见上面 gridShape 那段注释）。 */
-    const W = Math.round(tb.clientWidth), H = Math.round(tb.clientHeight);
-    const 摆法 = soloId ? `独立页(tab=${soloId})` : `${shape.cols}×${shape.rows}`;
-    // C3 验收要按"结束这一格"的 ×（`.cellhead .x`），而它**每一格都在不同位置**、
-    // 而且 N 一变就整体重排 —— 把 N=1 那次量的坐标拿去点 N=2 的格子就是目测。
-    // 所以坐标跟着布局事实一起报：重排一次就有一行新的、可直接用的数。
-    const 关格 = wsTabs().map((t, i) => {
-      const el = t.tabEl && t.tabEl.querySelector(".x");
-      if (!el) return `#${i + 1}=?`;
-      const b = el.getBoundingClientRect();
-      // 报**序号**而不是 `t.id`：第一帧布局时标签 id 还没从 ctl 回来（那时是 0），
-      // 报出来就是 `t0` —— 一个会骗人的名字（我自己就被它绕了一下：
-      // N=1 那行的 `t0` 是"还没拿到 id 的第一格"，不是"id 为 0 的格子"）。
-      // 序号和网格里的位置一一对应，也就是"该点哪一颗"。
-      return `#${i + 1}=${Math.round(b.left + b.width / 2)},${Math.round(b.top + b.height / 2)}`;
-    }).join(" ");
-    // 点错格的排查靠这一行：关格坐标只能说明头在哪，说明不了**格子本体**
-    // 在命中测试里占多大（xterm 的 textarea/canvas 会撑出自己的盒子）。
-    const 格框 = wsTabs().map((t, i) => {
-      const b = t.cellEl.getBoundingClientRect();
-      return `#${i + 1}=${Math.round(b.left)},${Math.round(b.top)} ${Math.round(b.width)}×${Math.round(b.height)}`;
-    }).join(" ");
-    bootFact(`网格 N=${n} 摆法=${摆法} 容器=${W}×${H} 关格 ${关格} 格框 ${格框}`);
-  });
-}
-

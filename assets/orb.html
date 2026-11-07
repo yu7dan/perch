@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Perch</title>
+<!-- 收起后的悬浮按钮（像桌宠，带 Perch 的标）：Go 那边单独的一个小窗口 —— 总在最前、无边框、透明底、不占任务栏。
+     外观逐字取自定稿模拟（spec/desk/desk.css 的 #orb 那一段）。主窗口藏着的时候，状态由它推过来（perch:orb-state）。 -->
+<style>
+:root { --acc: #8aa4ff; --warn: #f5b454; --txt: #ececf1; --dim: rgba(236,236,241,.55); --ease: cubic-bezier(.2,.8,.2,1); }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+body { font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif; color: var(--txt); user-select: none; -webkit-font-smoothing: antialiased; }
+[hidden] { display: none !important; }
+#orb { position: absolute; top: 14px; right: 14px; width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; cursor: grab;
+  background: radial-gradient(circle at 35% 30%, rgba(60,64,80,.9), rgba(18,19,24,.92)); border: 1px solid rgba(255,255,255,.16);
+  box-shadow: 0 6px 16px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.12); transition: box-shadow .3s, transform .2s var(--ease); }
+#orb.on-left { right: auto; left: 14px; }
+#orb img { width: 32px; height: 32px; pointer-events: none; }
+#orb:hover { transform: scale(1.07); }
+#orb.dragging { transition: none; cursor: grabbing; transform: scale(1.1); }
+#orb.orb-in { animation: orbIn .5s var(--ease); }
+@keyframes orbIn { from { transform: scale(.3); opacity: 0; } }
+#orb.hop { animation: hop .8s var(--ease); }
+@keyframes hop { 0%, 100% { transform: translateY(0); } 25% { transform: translateY(-10px); } 50% { transform: translateY(0); } 70% { transform: translateY(-4px); } }
+.orb-ring { position: absolute; inset: -4px; border-radius: 50%; border: 2px solid transparent; pointer-events: none; }
+#orb.busy .orb-ring { border-top-color: var(--acc); border-right-color: rgba(138,164,255,.25); animation: spin 1.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#orb.waiting { box-shadow: 0 0 0 2px rgba(245,180,84,.65), 0 0 14px rgba(245,180,84,.35), 0 6px 16px rgba(0,0,0,.45); }
+.orb-bd { position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; border-radius: 10px; background: var(--warn); color: #1d1405; font-size: 11px; font-weight: 700; display: grid; place-items: center; padding: 0 5px; }
+.orb-tip, .orb-bub { position: absolute; right: 78px; top: 50%; transform: translateY(-50%); white-space: nowrap; padding: 8px 12px; border-radius: 12px; font-size: 12px;
+  background: rgba(22,23,29,.92); border: 1px solid rgba(255,255,255,.12); pointer-events: none; }
+#orb.on-left .orb-tip, #orb.on-left .orb-bub { right: auto; left: 78px; }
+.orb-tip { display: flex; flex-direction: column; gap: 2px; opacity: 0; transition: opacity .15s; }
+#orb.tip .orb-tip { opacity: 1; }
+#orb.dragging .orb-tip, #orb .orb-bub:not([hidden]) ~ .orb-tip { opacity: 0; }
+.orb-tip em { font-style: normal; color: var(--warn); }
+.orb-tip .dim { font-size: 11px; color: var(--dim); }
+.orb-bub { width: max-content; max-width: 280px; white-space: normal; line-height: 1.5; border-color: rgba(245,180,84,.5); animation: zIn .25s var(--ease); }
+@keyframes zIn { from { opacity: 0; } }
+</style>
+</head>
+<body>
+<div id="orb" class="orb-in"><i class="orb-ring"></i><img src="/icons/perch-logo.png" alt="" draggable="false"><span class="orb-bd" hidden></span><div class="orb-bub" hidden></div><div class="orb-tip"></div></div>
+<script type="module">
+import { Events, Window } from "/wails/runtime.js";
+const orb = document.getElementById("orb");
+const BASE = 92, WIDE = 400;   // 窗口边长（和 cmd/perch/desk.go 的 orbSize 一致）；提示 / 气泡要往旁边伸时加宽
+let st = { run: 0, wait: 0 };
+let wide = false, bubT = 0, drag = null, moved = false;
+
+const onLeft = () => (window.screenX + BASE / 2) < (screen.availLeft || 0) + (screen.availWidth || 1920) / 2;
+function side() { orb.classList.toggle("on-left", onLeft()); }
+// 加宽「往屏幕里面」伸：贴右边时窗口左边往左挪，贴左边时只把右边往外伸（Go 那边按 left 挪窗口）。
+function setWide(on) {
+  if (on === wide) return;
+  wide = on;
+  Events.Emit("perch:orb-size", { w: on ? WIDE : BASE, left: onLeft() ? 0 : 1 });
+}
+function paint() {
+  orb.classList.toggle("busy", st.run > 0);
+  orb.classList.toggle("waiting", st.wait > 0);
+  const bd = orb.querySelector(".orb-bd");
+  bd.hidden = !st.wait; bd.textContent = st.wait;
+  orb.querySelector(".orb-tip").innerHTML = `<b>Perch</b><span>${st.run ? `${st.run} 个在跑` : "都空闲"}${st.wait ? ` · <em>${st.wait} 个等你</em>` : ""}</span><span class="dim">点一下回到台面 · 按住能拖</span>`;
+}
+Events.On("perch:orb-state", (e) => {
+  const d = (e && e.data) || {};
+  st = { run: d.run | 0, wait: d.wait | 0 };
+  paint();
+  // 收着的时候冒出新的「等你」：像桌宠一样冒个气泡，跳一下。
+  if (d.bub) {
+    const b = orb.querySelector(".orb-bub");
+    b.textContent = d.bub; b.hidden = false;
+    setWide(true);
+    orb.classList.remove("hop"); void orb.offsetWidth; orb.classList.add("hop");
+    clearTimeout(bubT);
+    bubT = setTimeout(() => { b.hidden = true; if (!orb.classList.contains("tip")) setWide(false); }, 5000);
+  }
+});
+orb.addEventListener("mouseenter", () => { if (drag) return; orb.classList.add("tip"); setWide(true); });
+orb.addEventListener("mouseleave", () => {
+  orb.classList.remove("tip");
+  if (orb.querySelector(".orb-bub").hidden) setWide(false);
+});
+// 按住拖：窗口跟着鼠标走；松手贴到最近的左右边。没拖开就是点一下 = 回到台面。
+orb.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  orb.setPointerCapture(e.pointerId);
+  drag = { sx: e.screenX, sy: e.screenY, wx: window.screenX, wy: window.screenY };
+  moved = false;
+});
+orb.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  const dx = e.screenX - drag.sx, dy = e.screenY - drag.sy;
+  if (!moved && Math.hypot(dx, dy) < 5) return;
+  if (!moved) { moved = true; orb.classList.add("dragging"); orb.classList.remove("tip"); setWide(false); }
+  Window.SetPosition(Math.round(drag.wx + dx), Math.round(drag.wy + dy));
+});
+orb.addEventListener("pointerup", () => {
+  if (!drag) return;
+  drag = null;
+  orb.classList.remove("dragging");
+  if (!moved) { Events.Emit("perch:orb-click"); return; }
+  const L = screen.availLeft || 0, T = screen.availTop || 0, W = screen.availWidth, H = screen.availHeight;
+  const x = (window.screenX + BASE / 2) < L + W / 2 ? L + 6 : L + W - BASE - 6;
+  const y = Math.max(T + 6, Math.min(T + H - BASE - 6, window.screenY));
+  Window.SetPosition(x, y);
+  Events.Emit("perch:orb-moved", { x, y });
+  setTimeout(side, 60);
+});
+// 每次收起 Go 都会把这个窗口复位成 92×92 再显示：页面跟着回到初始样子。
+Events.On("perch:orb-shown", () => {
+  wide = false; drag = null; moved = false;
+  clearTimeout(bubT);
+  orb.querySelector(".orb-bub").hidden = true;
+  orb.classList.remove("tip", "dragging", "hop", "orb-in");
+  void orb.offsetWidth; orb.classList.add("orb-in");
+  setTimeout(side, 30);
+});
+side(); paint();
+</script>
+</body>
+</html>
