@@ -293,9 +293,12 @@ func main() {
 		Description: "面向 agent 终端的 Windows 桌面工作台",
 		Icon:        appIcon,
 		// 窗口重新激活后补一次焦点，修中文输入法候选框跑到屏幕左上角（ime_refocus_windows.go）
-		Windows: application.WindowsOptions{WndProcInterceptor: imeRefocusInterceptor, AdditionalBrowserArgs: devtoolsArgs()},
+		// 窗口过程钩子同时听「桌面壁纸换了」的广播（desk_windows.go）
+		Windows: application.WindowsOptions{WndProcInterceptor: perchWndProc, AdditionalBrowserArgs: devtoolsArgs()},
 		Assets: application.AssetOptions{
 			Handler: application.BundledAssetFileServer(perchassets.Assets),
+			// /__desk/wallpaper：台面背景用的当前桌面壁纸（desk.go）
+			Middleware: deskMiddleware,
 		},
 	})
 
@@ -317,52 +320,9 @@ func main() {
 		}
 	})
 
-	// 默认窗口尺寸是**我们自己的值**，不是 Orca 的 —— Orca 的默认尺寸在它
-	// 主进程的窗口创建代码里，那份文件不在我们抓到的源码范围内，不编。
-	//
-	// 取值依据是可测的：Claude Code 的开场介绍框需要 ≥64 列才不折行，
-	// 而 1200px 窗口 + 240px 侧栏 + 原来的 62% 分栏只给到 60 列。
-	// 1440 宽 + 74% 分栏让终端拿到 ~85 列，留出余量。
-	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:  "Perch",
-		Width:  1440,
-		Height: 900,
-
-		// Frameless：去掉 Windows 原生标题栏，改由前端自绘 36px chrome。
-		//
-		// 这就是 Orca 在 Windows 上的做法。`src/main/window/createMainWindow.ts`：
-		//
-		//	titleBarStyle: process.platform === 'win32' ? 'hidden' : ...
-		//	// Why: ... Windows 'hidden' removes the OS title bar so it doesn't double up.
-		//
-		// 它前端再按 `app-window-chrome.ts` 里的常量给这块留位置：
-		//
-		//	WINDOW_CONTROLS_WIDTH  = '138px'  // = 3 × 46px 窗口按钮
-		//	WINDOW_CONTROLS_HEIGHT = '36px'   // 标题栏本身
-		//
-		// ⚠️ 不要设 DisableFramelessWindowDecorations。那个开关一开，
-		// Win11 的圆角和 Aero 阴影会一起消失，窗口变成贴死的方片 ——
-		// 默认（false）才是我们要的"无边框但仍是原生窗口"。
-		Frameless: true,
-
-		// 最小尺寸：Orca 是 600×400（`MIN_WIDTH`/`MIN_HEIGHT`），但那是
-		// 适配它自己的侧栏可折叠布局。我们左边是**一列** 240px（2026-10-16 之前
-		// 是 132+240 两列），600 宽会让终端只剩 20 来列、开场介绍框直接折行 ——
-		// 所以这里按 **"终端至少 64 列"** 倒推：64×8.15px ≈ 522px 终端宽，
-		// 除以 74% 分栏 ≈ 711px 的主区，再加 240px 固定列 ≈ 951。
-		// ⚠️ 这个数是按"两列 372"算出来的（1080 → 951 也够用），导航栏删掉之后
-		// 它只变得更宽裕，所以**不动**它 —— 但下次要改的时候照 951 重算，
-		// 别再用那个 372。（JS 那边 `RSB_LEFT_PX` 是同一个数，那个必须跟着改，
-		// 它管的是"右栏能拖多宽"，不改会白少算 132px。）
-		MinWidth:  1080,
-		MinHeight: 560,
-
-		// 拖放只认左栏项目区（前端在 #proj-list/#un-view 上标了
-		// data-file-drop-target="projects"）。别的区域落文件不会触发添加。
-		EnableFileDrop: true,
-
-		URL: "/",
-	})
+	// 台面（0.1.1）：主窗口无边框、铺满主屏（desk.go 的 deskMainWindowOptions）。
+	// 测试实例可以用 PERCH_WINDOW_RECT 改成普通窗口摆到指定位置。
+	window := app.Window.NewWithOptions(deskMainWindowOptions())
 
 	// 原生拖放的路径只有 WebView2 知道；Go 只负责把事件转给前端，真正的
 	// 项目校验/去重仍走 project.add（Pool.Add 会拒绝文件和不存在的目录）。
@@ -381,6 +341,8 @@ func main() {
 	})
 
 	ui := &systemUI{app: app, win: window}
+	// 收起成悬浮按钮 / 回到台面（desk.go）
+	newDeskStow(app, window)
 
 	/* 关窗确认（设置页「关闭窗口前确认」）。
 	   ⚠️ 必须用 **RegisterHook**，不是 OnWindowEvent：Wails 在构造窗口时先注册了一个
