@@ -601,6 +601,9 @@ function paintOpAgentSelection() {
     go.setAttribute("aria-disabled", na ? "true" : "false");
     go.title = na ? t("pages.go.noAgent") : "";
   }
+  // 「将使用：零词元 · Opus 5.5」—— 默认在 设置 › Agents 定，开出来之后在格子头上随时换（85c-models.js）
+  const ml = $("op-model");
+  if (ml) ml.innerHTML = a && typeof naModelLineHTML === "function" ? naModelLineHTML(a.id) : "";
   const defBtn = $("op-agdef");
   if (defBtn) {
     const pinned = opDefaultPinned();

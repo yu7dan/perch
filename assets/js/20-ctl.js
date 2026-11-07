@@ -556,6 +556,8 @@ function dispatchCtl(m) {
     case "bg.deliver": if (typeof bgDeliverFromGo === "function") bgDeliverFromGo(m.delivery); return;
     case "task.update": if (typeof bgTaskUpdate === "function") bgTaskUpdate(m); return;
     case "provider.test": provTestResult(m); return;
+    case "provider.detected": provDetected(m); return;
+    case "pane.model": if (typeof applyPaneModel === "function") applyPaneModel(m); return;
     case "catalog":
       if (m.catalog) setCatalog(m.catalog, "catalog 推送");
       return;

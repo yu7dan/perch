@@ -465,6 +465,8 @@ async function createTab(spec, opts) {
     }
   });
 
+  // 格子头上的模型标签（随时换模型，不重启；85c-models.js）。提供商的快照还没到时先不装，到了再补。
+  if (typeof installPaneModelChip === "function") installPaneModelChip(T);
   T.cellEl.appendChild(T.tabEl);
   T.cellEl.appendChild(T.cellBody);
   (T.group ? botDockBody() : $("termbody")).appendChild(T.cellEl);
