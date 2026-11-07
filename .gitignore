@@ -37,6 +37,9 @@
 # --- 文档（docs/ARCHITECTURE.md、docs/FRONTEND.md 与 README 截图）---
 !/docs/
 
+# --- 台面形态的定稿模拟（0.1.1 的标准答案，spec/desk/serve.mjs 起）---
+!/spec/
+
 # assets 里还躺着改版前的备份
 /assets/*.bak
 /assets/*.bak.html
