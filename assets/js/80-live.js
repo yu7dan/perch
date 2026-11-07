@@ -590,6 +590,9 @@ function applyShell(p) {
   // 本机 Agent 名单随壳层一起到；安装 / 接入状态之后由 catalog 推送更新。
   if (Array.isArray(STATE.catalog)) setCatalog(STATE.catalog, "shell 载荷");
   renderShell();
+  // 启动载荷是项目池最早到的那一份（冷启动约 20s）：在这之前打开的「新建 Bot Group」
+  // 项目栏一直写着「先添加一个项目」，这里不通知它，它就永远停在那句上。
+  if (typeof bgCreatePoolArrived === "function") bgCreatePoolArrived();
   /* ⚠️ 播种必须在**这条**流上也做一次（不只是 hook 绑上会话那一次）：
      启动的顺序是"先按冷恢复摆座位、再收到这份壳层数据"—— 也就是说 hook 绑上会话时
      （约 +1s）名字表**还是空的**（实测 2026-10-17 03:11:44：`名字播种：有身份的格 1、
