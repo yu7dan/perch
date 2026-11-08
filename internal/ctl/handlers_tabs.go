@@ -198,10 +198,18 @@ func (s *Server) panesQuery(c Conn) {
 		return
 	}
 	plan := s.deps.Panes.RestorePlan(s.deps.SessionExists) // 这一行自己打计数 + 座位序（见 panes）
-	reply, err := json.Marshal(map[string]any{
+	out := map[string]any{
 		"type": "panes.list", "panes": plan.Views,
 		"agents": s.bootAgentCards(), "defaultAgent": s.defaultAgentSetting(),
-	})
+	}
+	// 台面（0.1.1）一起来就要项目名单（空格子里挑项目、项目面板）：先带一份**不算统计**的名单，
+	// 统计（归属 / 最近活动）要扫会话库，随后的 pool 推送再补。
+	if s.deps.Pool != nil {
+		projects, _, rev := s.deps.Pool.SnapshotRev()
+		out["projects"] = project.WireProjects(project.WithDefaultWorkspace(projects, s.customCWD), nil, nil)
+		out["poolRev"] = rev
+	}
+	reply, err := json.Marshal(out)
 	if err != nil {
 		log.Printf("[panes] 冷恢复清单序列化失败（前端会走无应答那条兜底）：%v", err)
 		return

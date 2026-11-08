@@ -609,7 +609,10 @@ function render() {
   for (const [id, el] of TABEL) if (!Z.some((z) => z.id === id)) { el.remove(); TABEL.delete(id); }
   document.body.classList.toggle("has-zones", Z.length > 0);
   syncDock();
+  for (const f of AFTER_RENDER) f();
 }
+// 其他模块的面板跟着台面一起刷新（各自按签名判断要不要重画，别每帧整块重建）。
+const AFTER_RENDER = [];
 // 格子和标签对象对一下账：标签没了（被护栏撤掉 / 关掉）的格子回到空格；paneId 到了记下来。
 function syncLeaves() {
   let changed = false;

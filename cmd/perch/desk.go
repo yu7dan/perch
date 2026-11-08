@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 /* 台面（0.1.1）在 Go 这边只有三件事，都是前端自己做不到的：
@@ -150,6 +151,18 @@ func newDeskStow(app *application.App, main *application.WebviewWindow) *deskSto
 	app.Event.On("perch:orb-click", func(*application.CustomEvent) { d.unstow() })
 	app.Event.On("perch:orb-moved", func(e *application.CustomEvent) { d.moved(e.Data) })
 	app.Event.On("perch:orb-size", func(e *application.CustomEvent) { d.resize(e.Data) })
+	// 关掉主窗口 = 退出 Perch。按钮窗口（哪怕藏着）也算一个窗口：它在，Wails 就不认为
+	// 「最后一个窗口关了」，进程会带着它一直活着（2026-11-08 测试实例攒下了四个）。
+	// 关窗确认那道 hook 在监听器之前跑，被取消的关闭走不到这里。
+	main.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
+		d.mu.Lock()
+		orb := d.orb
+		d.orb = nil
+		d.mu.Unlock()
+		if orb != nil {
+			orb.Close()
+		}
+	})
 	return d
 }
 

@@ -470,6 +470,12 @@ function dispatchCtl(m) {
       BOOT_AGENTS = Array.isArray(m.agents) ? m.agents : [];
       BOOT_DEFAULT_AGENT = typeof m.defaultAgent === "string" ? m.defaultAgent : "";
       if (!CATALOG.length && BOOT_AGENTS.length) setCatalog(BOOT_AGENTS, "冷恢复应答");
+      // 项目名单（不带统计）跟着冷恢复清单先到：台面起来就要它；完整的 pool 推送随后覆盖。
+      if (Array.isArray(m.projects) && !(STATE && Array.isArray(STATE.projects) && STATE.projects.length)) {
+        STATE = STATE || {};
+        STATE.projects = m.projects;
+        if (typeof m.poolRev === "number") STATE.poolRev = m.poolRev;
+      }
       const installed = BOOT_AGENTS.filter((a) => a && a.installed).length;
       const launchable = BOOT_AGENTS.filter((a) => a && a.installed &&
         a.caps && a.caps.launch).length;
@@ -535,6 +541,8 @@ function dispatchCtl(m) {
     case "fs.read": if (typeof applyFsRead === "function") applyFsRead(m); return;
     case "fs.err":  if (typeof applyFsErr === "function") applyFsErr(m);  return;
     // 文件预览「改动」页：按需取这一格记到的 diff 正文（见 transcript.go 的 trace.diff）。
+    // 台面「选文件夹」窗口：子文件夹清单（31-desk-projects.js）
+    case "dir.browse": if (typeof applyDirBrowse === "function") applyDirBrowse(m); return;
     case "diff":    if (typeof applyTraceDiff === "function") applyTraceDiff(m); return;
     case "state": applyLibrary(m.state); return;
     // 安装器：start / log / phase / done 四条；done 里也带一份重扫过的 catalog。

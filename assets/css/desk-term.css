@@ -73,3 +73,7 @@
 #deskhint span{color:rgba(255,255,255,.6);font-size:12.5px}
 body.has-zones #deskhint,body.drawing #deskhint{opacity:0}
 .th .x.on{opacity:1;color:var(--acc)}
+.lnk{color:var(--acc);text-decoration:underline;text-underline-offset:2px;font-size:inherit}
+.lnk:hover{color:var(--txt)}
+.fp-c .add-note{color:var(--faint);font-style:italic;padding:6px 0 0}
+.fp-c{tab-size:4}
