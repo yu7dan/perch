@@ -80,3 +80,4 @@ body.has-zones #deskhint,body.drawing #deskhint{opacity:0}
 .seg.wrap{flex-wrap:wrap;max-width:520px;justify-content:flex-end}
 .seg button img{width:14px;height:14px;vertical-align:-2px;margin-right:5px}
 .mi img{width:15px;height:15px}
+.ov-heat i.pad{background:none}
