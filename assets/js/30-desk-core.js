@@ -1350,7 +1350,8 @@ async function bootDesk() {
     else homeless.push(v);
   }
   // 有座位但这一轮不接回的（上次点了 ×）：格子留着、变回空格。
-  for (const { l } of allLeaves()) if (!seated.has(l) && !l.tab) { l.want = null; l.v++; }
+  // paneId 也清掉：Go 会把空出来的号发给下一格，留着旧号会让下次重开认错座位。
+  for (const { l } of allLeaves()) if (!seated.has(l) && !l.tab) { l.want = null; l.paneId = 0; l.v++; }
   if (homeless.length) {
     const d = desk();
     const r = findFree([[Math.round(d.w * 0.62), Math.round(d.h * 0.7)], [Math.round(d.w * 0.45), Math.round(d.h * 0.55)], [ZMIN_NEW.w + 140, ZMIN_NEW.h + 100]]) || fr(0, 0, 0.6, 0.7);
