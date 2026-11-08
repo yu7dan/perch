@@ -308,6 +308,12 @@ func main() {
 			// /__desk/wallpaper：台面背景用的当前桌面壁纸（desk.go）
 			Middleware: deskMiddleware,
 		},
+		// 网页块里那一句「页面换了」（desk_native.go）；外站页面能发任何东西，只认它自己那一种
+		RawMessageHandler: func(w application.Window, msg string, _ *application.OriginInfo) {
+			if deskNativeRef != nil {
+				deskNativeRef.onRawMessage(w, msg)
+			}
+		},
 	})
 
 	// 两条通道，职责分开：
@@ -351,6 +357,8 @@ func main() {
 	ui := &systemUI{app: app, win: window}
 	// 收起成悬浮按钮 / 回到台面（desk.go）
 	deskSet := newDeskSettings(app, newDeskStow(app, window))
+	// 网页块 / 应用块：贴在块上的外来窗口（desk_native.go）
+	newDeskNative(app, window)
 	// 全局快捷键 / 开机启动 / 铺在哪块屏：应用起来之后按当前设置落实一次，之后每次设置改了再落实（OnSettings）。
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		deskSet.apply(settings.Settings{}, a.prefs.Snapshot())

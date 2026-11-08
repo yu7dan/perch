@@ -42,5 +42,9 @@ func perchWndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (uintptr, bo
 	if msg == wmSettingChange && wParam == spiSetDeskWallpaper {
 		deskWallpaperChanged()
 	}
+	// 台面被点到前面：贴在块里的别人的窗口要回到台面之上（desk_native.go）
+	if msg == wmActivate && wParam&0xFFFF != 0 && deskNativeRef != nil && hwnd == hwndOf(deskNativeRef.main) {
+		go deskNativeRef.onMainActivated()
+	}
 	return imeRefocusInterceptor(hwnd, msg, wParam, lParam)
 }

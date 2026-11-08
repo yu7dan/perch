@@ -3,9 +3,12 @@
 // 用法：node tools/deskcheck/tour.mjs <导览脚本.mjs> <输出.mp4>
 //   导览脚本 export default async function (t) { await t.say("…"); await t.drag(…); … }
 // 画面上的说明条和假光标是录像时临时注进页面的，不是产品的一部分。
+// 贴在块上的真窗口（网页块 = Perch 自己的 WebView2 窗口、应用块 = 别的程序的窗口）不在主窗口的 screencast 里：
+// 另起一条「外来窗口」轨（网页截它自己那一页、应用用 PrintWindow 画），拼片前按时间叠到每一帧上。
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const PORT = Number(process.env.PERCH_DEVTOOLS_PORT || 9333);
 const [scriptPath, outPath] = process.argv.slice(2);
@@ -57,6 +60,53 @@ const keep = setInterval(async () => {
   fs.writeFileSync(file, Buffer.from(r.result.data, "base64"));
   frames.push({ file, t: Date.now() });
 }, 250);
+
+// ---- 外来窗口轨 ----
+const natives = [];   // { t, items: [{ x, y, f }] }
+let natOn = true, nseq = 0;
+const webConns = new Map();   // CDP 目标 id → 连接
+const pw = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(path.dirname(fileURLToPath(import.meta.url)), "printwin.ps1")], { stdio: ["pipe", "pipe", "ignore"] });
+let pwBuf = "", pwWait = null;
+pw.stdout.on("data", (d) => { pwBuf += d; let i; while ((i = pwBuf.indexOf("\n")) >= 0) { const l = pwBuf.slice(0, i).trim(); pwBuf = pwBuf.slice(i + 1); if (pwWait) { const w = pwWait; pwWait = null; w(l); } } });
+const printWin = (hwnd, f) => new Promise((res) => { pwWait = res; pw.stdin.write(hwnd + "|" + f + "\n"); setTimeout(() => { if (pwWait === res) { pwWait = null; res("err"); } }, 3000); });
+async function webShot(url, f) {
+  const list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
+  const tg = list.find((x) => x.type === "page" && !x.url.startsWith("http://wails.localhost") && (x.url === url || x.url.startsWith(url) || url.startsWith(x.url)));
+  if (!tg) return false;
+  let c = webConns.get(tg.id);
+  if (!c) {
+    const ws = new WebSocket(tg.webSocketDebuggerUrl);
+    await new Promise((r) => (ws.onopen = r));
+    let seq = 0; const pend = new Map();
+    ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } };
+    c = { send: (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, r); ws.send(JSON.stringify({ id, method, params })); }), ws };
+    webConns.set(tg.id, c);
+  }
+  const r = await Promise.race([c.send("Page.captureScreenshot", { format: "jpeg", quality: 85 }), sleep(2000).then(() => null)]);
+  if (!r || !r.result) return false;
+  fs.writeFileSync(f, Buffer.from(r.result.data, "base64"));
+  return true;
+}
+const natLoop = (async () => {
+  while (natOn) {
+    await sleep(300);
+    if (!rec) continue;
+    const st = await ev(`(() => { if (typeof NATIVE_SIG !== "string" || !NATIVE_SIG) return null; const shown = new Set(JSON.parse(NATIVE_SIG.slice(NATIVE_SIG.indexOf("|") + 1)).filter((i) => i.show).map((i) => i.id));
+      return { org: [screenX, screenY], items: Z.filter((z) => shown.has(z.id)).map((z) => { const r = document.querySelector('[data-native="' + z.id + '"]').getBoundingClientRect(); return { kind: z.kind, url: z.web && z.web.url, hwnd: z.appz && z.appz.hwnd, x: Math.round(r.left), y: Math.round(r.top) }; }) }; })()`);
+    if (!st || !st.items.length) { natives.push({ t: Date.now(), items: [] }); continue; }
+    const items = [];
+    for (const it of st.items) {
+      const f = path.join(work, `n${String(++nseq).padStart(5, "0")}` + (it.kind === "web" ? ".jpg" : ".png"));
+      if (it.kind === "web") { if (await webShot(it.url, f)) items.push({ x: it.x, y: it.y, f }); }
+      else if (it.hwnd) {
+        const r = await printWin(Number(it.hwnd).toString(16), f);
+        const m = /^ok (-?\d+) (-?\d+)/.exec(r);
+        if (m) items.push({ x: +m[1] - st.org[0], y: +m[2] - st.org[1], f });
+      }
+    }
+    natives.push({ t: Date.now(), items });
+  }
+})();
 
 // ---- 注进页面的说明条和假光标（只为录像） ----
 await ev(`(() => {
@@ -169,8 +219,26 @@ try { await mod.default(t); } finally {
   await ev(`(() => { for (const id of ["__tourcap", "__tourcur"]) { const e = document.getElementById(id); if (e) e.remove(); } })()`);
   main.ws.close();
 }
-// 拼片：concat 清单按真实时长
+natOn = false; await natLoop; pw.stdin.end(); for (const c of webConns.values()) c.ws.close();
+// 外来窗口叠到每一帧上（取这一帧之前最近的那一次）
 frames.sort((a, b) => a.t - b.t);
+if (natives.some((n) => n.items.length)) {
+  let j = -1, done = 0;
+  for (const fr of frames) {
+    while (j + 1 < natives.length && natives[j + 1].t <= fr.t + 150) j++;
+    const n = j >= 0 ? natives[j] : null;
+    if (!n || !n.items.length || fr.t - n.t > 1500) continue;
+    const args = ["-y", "-loglevel", "error", "-i", fr.file];
+    let chain = "", last = "0:v";
+    n.items.forEach((it, k) => { args.push("-i", it.f); chain += `[${last}][${k + 1}:v]overlay=${it.x}:${it.y}[v${k}];`; last = "v" + k; });
+    const out = fr.file.replace(/\.jpg$/, "-n.jpg");
+    // 最后一个叠加的输出标签去掉，它就是成品
+    args.push("-filter_complex", chain.slice(0, -1).replace(/\[v\d+\]$/, ""), "-q:v", "3", out);
+    if (spawnSync("ffmpeg", args).status === 0) { fr.file = out; done++; }
+  }
+  console.log(`外来窗口叠上了 ${done} 帧`);
+}
+// 拼片：concat 清单按真实时长
 const lines = [];
 for (let i = 0; i < frames.length; i++) {
   const d = i + 1 < frames.length ? Math.max(0.02, (frames[i + 1].t - frames[i].t) / 1000) : 1;

@@ -6,14 +6,15 @@
 //       node tools/deskcheck/cdp.mjs drag <x0> <y0> <x1> <y1> [步数]
 //       node tools/deskcheck/cdp.mjs type "<文字>"           往当前焦点里插字（Input.insertText）
 //       node tools/deskcheck/cdp.mjs key <Escape|Enter|…>
-// PERCH_PAGE=orb 时连悬浮按钮那个窗口（/orb.html），否则连主窗口。
+// PERCH_PAGE=orb 时连悬浮按钮那个窗口（/orb.html）；PERCH_PAGE=url:<片段> 连地址里带这段的页面（网页块自己那个窗口）；否则连主窗口。
 import fs from "node:fs";
 const PORT = Number(process.env.PERCH_DEVTOOLS_PORT || 9333);
 const WANT = process.env.PERCH_PAGE || "main";
 const [cmd, ...args] = process.argv.slice(2);
 const list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
-const page = list.find((p) => p.type === "page" && p.url.startsWith("http://wails.localhost")
-  && (WANT === "orb" ? p.url.includes("/orb.html") : !p.url.includes("/orb.html")));
+const page = WANT.startsWith("url:") ? list.find((p) => p.type === "page" && p.url.includes(WANT.slice(4)))
+  : list.find((p) => p.type === "page" && p.url.startsWith("http://wails.localhost")
+    && (WANT === "orb" ? p.url.includes("/orb.html") : !p.url.includes("/orb.html")));
 if (!page) { console.error(`no Perch ${WANT} page on port ${PORT}`); process.exit(2); }
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));

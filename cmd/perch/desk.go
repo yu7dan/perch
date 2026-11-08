@@ -37,10 +37,21 @@ import (
    手里 —— 2026-11-08 实测一个转发器自己转自己，几十秒里起了 3.9 亿个 goroutine，进程内存耗尽崩掉。 */
 
 const deskWallpaperRoute = "/__desk/wallpaper"
+const deskAppIconRoute = "/__desk/appicon/"
 
 // deskMiddleware 只接管壁纸这一条路由，其余请求照常交给内嵌资产。
 func deskMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// /__desk/appicon/<md5>.png：启动台里每个应用自己的图标（desk_native_windows.go 扫开始菜单时存的）
+		if strings.HasPrefix(r.URL.Path, deskAppIconRoute) {
+			if p := appIconPath(strings.TrimPrefix(r.URL.Path, deskAppIconRoute)); p != "" {
+				w.Header().Set("Cache-Control", "max-age=86400")
+				http.ServeFile(w, r, p)
+				return
+			}
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Path != deskWallpaperRoute {
 			next.ServeHTTP(w, r)
 			return
@@ -213,6 +224,9 @@ func (d *deskStow) stow(data any) {
 	orb.SetSize(orbSize, orbSize)
 	orb.SetPosition(ox, oy)
 	d.main.Hide()
+	if deskNativeRef != nil {
+		deskNativeRef.stow()
+	}
 	orb.Show()
 	// 按钮窗口是复用的：上一次收着时它可能正加宽着（提示 / 气泡），先让页面回到初始样子。
 	orb.EmitEvent("perch:orb-shown", nil)
@@ -227,6 +241,9 @@ func (d *deskStow) unstow() {
 	d.mu.Unlock()
 	if orb != nil {
 		orb.Hide()
+	}
+	if deskNativeRef != nil {
+		deskNativeRef.unstow()
 	}
 	d.main.Show()
 	d.main.Focus()

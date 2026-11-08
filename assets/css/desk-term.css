@@ -96,3 +96,11 @@ button.ov-g{display:block;width:100%;text-align:left}
 .gd-f{gap:6px}
 /* 定稿 CSS 只给 input / button 继承了字色，textarea 落成系统默认的黑字（深色玻璃上几乎看不见） */
 textarea { font: inherit; color: inherit; }
+/* 应用（37-desk-apps.js）：启动台里是每个应用自己的图标；网页块 / 应用块的身体上压着真窗口，底下这层只在它让位时看得见 */
+.lp-ic.img{background:rgba(255,255,255,.07)}
+.lp-ic img{display:block;object-fit:contain}
+.lp-grid{max-height:none}
+.nat-wait{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px;text-align:center;font-size:12px;color:var(--faint)}
+.nat-wait img{opacity:.85}
+.nat-act{margin-top:4px}
+.ap-bar img{flex:none}

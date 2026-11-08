@@ -242,7 +242,7 @@ function layoutTree(n, rc, tiles, divs) {
 function zoneLayout(z) { const tiles = [], divs = []; if (z.root) layoutTree(z.root, bodyRect(z), tiles, divs); return { tiles, divs }; }
 function zoneMin(z) {
   const k = ZONE_KINDS[z.kind];
-  if (k && k.min) return k.min;
+  if (k && k.min) return typeof k.min === "function" ? k.min(z) : k.min;
   if (z.kind === "agents" && z.root) return { w: Math.max(ZMIN_NEW.w, minW(z.root) + 2 * PAD + 2), h: Math.max(ZMIN_NEW.h, minH(z.root) + HEAD + PAD + 2) };
   return ZMIN_NEW;
 }
