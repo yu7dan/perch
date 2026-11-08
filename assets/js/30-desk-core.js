@@ -378,7 +378,12 @@ function assign(leaf, agentId, o) {
   const el = TEL.get(leaf.id);
   const mount = el ? qs(".tterm", el) : null;
   const proj = isProjPath(leaf.proj);
-  const spec = o.spec || { agent: agentId, cwd: proj ? leaf.proj : "", target: proj ? "project" : "scratch", resume: { kind: "new", id: "" } };
+  const spec = Object.assign({}, o.spec || { agent: agentId, cwd: proj ? leaf.proj : "", target: proj ? "project" : "scratch", resume: { kind: "new", id: "" } });
+  // 这一格自己选过的模型（格头上那颗按钮）跟着起：重开 / 接回都还是它
+  if (leaf.provider) spec.provider = leaf.provider;
+  if (leaf.model) spec.model = leaf.model;
+  // 没自己选过：记下它起的时候用的是哪套默认（之后设置里改了默认，也不影响这一格格头上说的话）
+  leaf.boot = leaf.provider || leaf.model ? null : typeof PROV !== "undefined" && PROV.view ? agentDefaultModel(agentId) : "pending";
   const p = createTab(spec, { fresh: !o.spec, mount: mount || undefined });
   const T = TAB_LIST[TAB_LIST.length - 1];
   leaf.tab = T; T.leaf = leaf;
@@ -687,7 +692,7 @@ function renderTiles(z, zb) {
 }
 const projSig = () => PROJECTS().map((p) => p.path).join("|") + "#" + [...CLOSED_PANES.keys()].join(",");
 // 会话标题可能是用户第一句话的原文，里面夹着 <bash-input> 这类标签：显示时剥掉，太长就截。
-const plainTitle = (s) => { const v = String(s || "").replace(/<[^>]*>/g, " ").replace(/s+/g, " ").trim(); return v.length > 28 ? v.slice(0, 27) + "…" : v; };
+const plainTitle = (s) => { const v = String(s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(); return v.length > 28 ? v.slice(0, 27) + "…" : v; };
 function tileHeadHTML(l, focused) {
   const a = ag(l.agent);
   const live = l.tab ? realTabTitle(l.tab) : "";
@@ -1286,7 +1291,7 @@ addEventListener("resize", () => { layoutDock(); render(); });
 const LAYOUT_KEY = "perch.desk.layout.v1";
 function layoutJSON() {
   const out = (n) => n.t === "leaf"
-    ? { t: "leaf", id: n.id, agent: n.agent || null, proj: n.proj, paneId: (n.tab && n.tab.paneID) || n.paneId || 0 }
+    ? { t: "leaf", id: n.id, agent: n.agent || null, proj: n.proj, paneId: (n.tab && n.tab.paneID) || n.paneId || 0, provider: n.provider || "", model: n.model || "" }
     : { t: "split", id: n.id, dir: n.dir, r: n.r, a: out(n.a), b: out(n.b) };
   return { v: 1, uid, zones: Z.map((z) => {
     const k = ZONE_KINDS[z.kind];
@@ -1311,7 +1316,7 @@ function loadLayout() {
 }
 function restoreZones(lay) {
   const inLeaf = (n) => n.t === "leaf"
-    ? { t: "leaf", id: n.id, agent: null, proj: n.proj || defProj(), tab: null, paneId: n.paneId | 0, want: n.agent || null, state: "idle", v: 1, ask: "" }
+    ? { t: "leaf", id: n.id, agent: null, proj: n.proj || defProj(), tab: null, paneId: n.paneId | 0, want: n.agent || null, provider: n.provider || "", model: n.model || "", state: "idle", v: 1, ask: "" }
     : { t: "split", id: n.id, dir: n.dir === "v" ? "v" : "h", r: clampN(+n.r || 0.5, 0.1, 0.9), a: inLeaf(n.a), b: inLeaf(n.b) };
   for (const s of lay.zones) {
     if (!s || !s.kind || s.kind === "new" && false) continue;
