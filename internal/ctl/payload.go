@@ -240,6 +240,12 @@ func (s *Server) settingsWire(err error) map[string]any {
 	m["builtinCwd"] = builtin
 	m["osBuild"] = osBuild()
 	m["defaultCwdMissing"] = s.deps.Prefs.DefaultCWDUnavailable()
+	if s.deps.Screens != nil {
+		m["screens"] = s.deps.Screens()
+	}
+	if s.deps.Version != "" {
+		m["version"] = s.deps.Version
+	}
 	return withUIErr(m, err)
 }
 
@@ -268,6 +274,9 @@ func (s *Server) applySettingsPatch(p settings.Patch, why string) {
 		pick(next.DefaultAgent, "(自动)"), pick(next.NewAgentShortcut, "(关闭)"),
 		next.ConfirmClose, next.ConfirmEndAgent)
 	s.pushSettings(nil)
+	if s.deps.OnSettings != nil {
+		s.deps.OnSettings(old, next)
+	}
 	if next.DefaultCWD != old.DefaultCWD {
 		project.EnsureDefaultWorkspace(s.customCWD)
 		s.refreshPoolAsync("默认目录改了")

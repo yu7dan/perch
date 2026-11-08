@@ -81,6 +81,10 @@ type Deps struct {
 	// CreateTab 在组合根里**先** app.HandleStream(host.Stream, …)、再返回 ——
 	// 顺序是硬约束：前端拿到 tab.ok 就会立刻去连那条流。
 	CreateTab func(session.SpawnSpec) *session.Tab
+	// 台面（0.1.1）：设置改完之后 Go 要落实的那几样（全局快捷键 / 开机启动 / 铺在哪块屏）；
+	// Screens 是设置页「铺在哪块显示器上」的选项。都可以为 nil。
+	OnSettings func(old, next settings.Settings)
+	Screens    func() []map[string]any
 
 	UI UI
 }

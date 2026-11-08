@@ -83,6 +83,16 @@ type Settings struct {
 	// 信任记录里追加这一项），免得它首启停在「信任这个文件夹吗」—— Claude 2.x 那一屏默认选的是
 	// 「退出」。默认开（Orca 也是）；关掉 = 每个新文件夹由 agent 自己问。见 internal/agenttrust。
 	TrustAgentFolders bool `json:"trustAgentFolders"`
+
+	// 台面（0.1.1）的四样 —— 都是前端自己做不到、要 Go 落实的：
+	// Hotkey 是**全局**快捷键（在别的软件里也认）：呼出 / 收起 Perch。规范形状如 "Ctrl+Alt+Space"；空 = 不注册。
+	Hotkey string `json:"hotkey"`
+	// AutoStart：登录 Windows 后自动打开 Perch（HKCU...Run 里那一项）。
+	AutoStart bool `json:"autoStart"`
+	// RestoreDesk：启动时按上次的样子摆回台面、接回上次开着的 agent。默认开。
+	RestoreDesk bool `json:"restoreDesk"`
+	// Screen：台面铺在哪块显示器上（Wails 的 Screen.ID）；空 = 主显示器。
+	Screen string `json:"screen"`
 }
 
 // Defaults 是全部默认值；任何其它地方都不许再写一份。
@@ -99,6 +109,8 @@ func Defaults() Settings {
 		ConfirmClose:      true,
 		ConfirmEndAgent:   true,
 		TrustAgentFolders: true,
+		Hotkey:            "Ctrl+Alt+Space",
+		RestoreDesk:       true,
 	}
 }
 
@@ -179,7 +191,28 @@ func (s Settings) Normalize() Settings {
 	} else {
 		s.NewAgentShortcut = ""
 	}
+	if v, ok := NormalizeHotkey(s.Hotkey); ok {
+		s.Hotkey = v
+	} else {
+		s.Hotkey = ""
+	}
+	s.Screen = strings.TrimSpace(s.Screen)
 	return s
+}
+
+// NormalizeHotkey 是全局快捷键的规范形状：和应用内快捷键同一套规则，主键多收一个 Space
+// （全局键不会落进终端，Ctrl+Alt+Space 这种组合不吃任何日常输入）。
+func NormalizeHotkey(raw string) (string, bool) {
+	s := strings.TrimSpace(raw)
+	parts := strings.Split(s, "+")
+	if len(parts) >= 2 && strings.EqualFold(strings.TrimSpace(parts[len(parts)-1]), "space") {
+		v, ok := NormalizeShortcut(strings.Join(append(parts[:len(parts)-1:len(parts)-1], "A"), "+"))
+		if !ok {
+			return "", false
+		}
+		return strings.TrimSuffix(v, "A") + "Space", true
+	}
+	return NormalizeShortcut(s)
 }
 
 // shortcutKeyPattern 是主键的白名单：字母、数字、F1-F12。
@@ -248,13 +281,18 @@ type Patch struct {
 	ConfirmClose      *bool   `json:"confirmClose,omitempty"`
 	ConfirmEndAgent   *bool   `json:"confirmEndAgent,omitempty"`
 	TrustAgentFolders *bool   `json:"trustAgentFolders,omitempty"`
+	Hotkey            *string `json:"hotkey,omitempty"`
+	AutoStart         *bool   `json:"autoStart,omitempty"`
+	RestoreDesk       *bool   `json:"restoreDesk,omitempty"`
+	Screen            *string `json:"screen,omitempty"`
 }
 
 // Empty 表示这条请求什么都没提。
 func (p Patch) Empty() bool {
 	return p.DefaultCWD == nil && p.TermFontSize == nil && p.TermFontFamily == nil &&
 		p.StartView == nil && p.Language == nil && p.UIMode == nil && p.TopMode == nil && p.Theme == nil &&
-		p.DefaultAgent == nil && p.NewAgentShortcut == nil && p.ConfirmClose == nil && p.ConfirmEndAgent == nil && p.TrustAgentFolders == nil
+		p.DefaultAgent == nil && p.NewAgentShortcut == nil && p.ConfirmClose == nil && p.ConfirmEndAgent == nil && p.TrustAgentFolders == nil &&
+		p.Hotkey == nil && p.AutoStart == nil && p.RestoreDesk == nil && p.Screen == nil
 }
 
 // Store 是设置文件的持有者。零值不可用；用 Load 构造。
@@ -392,6 +430,22 @@ func (s *Store) Patch(p Patch) (Settings, error) {
 	}
 	if p.TrustAgentFolders != nil {
 		next.TrustAgentFolders = *p.TrustAgentFolders
+	}
+	if p.Hotkey != nil {
+		v, ok := NormalizeHotkey(*p.Hotkey)
+		if !ok {
+			return old, uimsg.New("settings.badHotkey", "快捷键格式不对：需要 Ctrl 或 Alt + 字母、数字、F1–F12 或空格")
+		}
+		next.Hotkey = v
+	}
+	if p.AutoStart != nil {
+		next.AutoStart = *p.AutoStart
+	}
+	if p.RestoreDesk != nil {
+		next.RestoreDesk = *p.RestoreDesk
+	}
+	if p.Screen != nil {
+		next.Screen = *p.Screen
 	}
 	next = next.Normalize()
 	if next == old {

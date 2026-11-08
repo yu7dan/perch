@@ -342,7 +342,11 @@ func main() {
 
 	ui := &systemUI{app: app, win: window}
 	// 收起成悬浮按钮 / 回到台面（desk.go）
-	newDeskStow(app, window)
+	deskSet := newDeskSettings(app, newDeskStow(app, window))
+	// 全局快捷键 / 开机启动 / 铺在哪块屏：应用起来之后按当前设置落实一次，之后每次设置改了再落实（OnSettings）。
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		deskSet.apply(settings.Settings{}, a.prefs.Snapshot())
+	})
 
 	/* 关窗确认（设置页「关闭窗口前确认」）。
 	   ⚠️ 必须用 **RegisterHook**，不是 OnWindowEvent：Wails 在构造窗口时先注册了一个
@@ -426,6 +430,8 @@ func main() {
 		Titles:         a.titles,
 		Pool:           a.pool,
 		Prefs:          a.prefs,
+		OnSettings:     deskSet.apply,
+		Screens:        deskSet.screens,
 		Providers:      a.providers,
 		BotGroups:      a.botgroups,
 		Coordinator:    a.coord,

@@ -1338,8 +1338,10 @@ function balancedTree(n, rc, proj) {
 async function bootDesk() {
   applyCfg(); layoutDock(); buildTray(); clock();
   await fontsReady;
-  const seats = await awaitRestorePlan();
-  const lay = loadLayout();
+  // 设置 › 通用「启动时恢复上次的台面」关着：台面从空的开始，上次的 agent 不接回（记录照旧留着）。
+  const restore = SETTINGS.restoreDesk !== false;
+  const seats = restore ? await awaitRestorePlan() : [];
+  const lay = restore ? loadLayout() : null;
   if (lay) restoreZones(lay);
   render();
   const byPane = new Map();

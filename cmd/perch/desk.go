@@ -138,11 +138,12 @@ type deskStow struct {
 	app  *application.App
 	main *application.WebviewWindow
 
-	mu  sync.Mutex
-	orb *application.WebviewWindow
-	x   int
-	y   int
-	w   int
+	mu     sync.Mutex
+	orb    *application.WebviewWindow
+	stowed bool
+	x      int
+	y      int
+	w      int
 }
 
 func newDeskStow(app *application.App, main *application.WebviewWindow) *deskStow {
@@ -206,6 +207,7 @@ func (d *deskStow) stow(data any) {
 	}
 	orb := d.orb
 	d.w = orbSize
+	d.stowed = true
 	ox, oy := d.x, d.y
 	d.mu.Unlock()
 	orb.SetSize(orbSize, orbSize)
@@ -221,6 +223,7 @@ func (d *deskStow) unstow() {
 	d.mu.Lock()
 	orb := d.orb
 	x, y := d.x, d.y
+	d.stowed = false
 	d.mu.Unlock()
 	if orb != nil {
 		orb.Hide()
