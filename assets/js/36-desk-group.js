@@ -16,6 +16,9 @@
    instructions —— 开场说明里带着它（第一条消息前面），改了以后附在送给它的下一条消息前面（不用重启、不多跑一轮）。 */
 
 const ROLE_PRESETS = ["开发", "审阅", "测试", "文档", "维护", "宣发"];
+// 界面是英文时，预设的角色名和人设也是英文（角色名会进 @ 和 Go 的记录，所以是真改名字，不是只换显示）
+const ROLE_PRESETS_EN = ["Dev", "Review", "Test", "Docs", "Maintenance", "Promo"];
+const rolePresets = () => PERCH_LOCALE === "en" ? ROLE_PRESETS_EN : ROLE_PRESETS;
 const ROLE_COLORS = ["#8aa4ff", "#7dd3c0", "#f5a3c7", "#f5b454", "#c4b5fd", "#93c5fd", "#fca5a5"];
 const MGR_COLOR = "#ececf1";
 const BG_MAX = 6;   // 和 Go 的 botgroup.MaxBots 一样
@@ -29,8 +32,18 @@ const ROLE_PERSONA = {
   维护: { duty: "管构建、依赖和 CI；别人卡在环境问题上时出手。", style: "稳妥，能不升级就不升级。", scope: "package.json, .github/**", done: "构建通过，依赖没有已知漏洞" },
   宣发: { duty: "写发布文案、更新官网介绍。", style: "口语、有画面感，不夸大。", scope: "site/**", done: "给出 3 版文案让你挑" },
 };
+const ROLE_PERSONA_EN = {
+  Manager: { duty: "Split the goal into deliverable tasks and assign them to the right bots; track progress and sum up results; bring decisions to the user with the options laid out.", style: "Concise and organized; each report gives only conclusions and what needs your decision.", scope: "（no direct code changes）", done: "The goal is met, or it's clear where things are stuck and what the user needs to do" },
+  Dev: { duty: "Change code as the Manager assigns; state the plan first, then explain which places changed and why.", style: "Practical: conclusion first, details after; ask when unsure instead of guessing.", scope: "src/**, site/**", done: "It runs, it's self-tested, and the change notes are clear" },
+  Review: { duty: "Review every change from other bots: correctness, edge cases, and accidental edits to other files.", style: "Strict but specific: every comment points at a file and line.", scope: "（read-only）", done: "Every change has a verdict: approved, or what to fix" },
+  Test: { duty: "Run it, compare screenshots, hunt regressions; report problems straight to the responsible bot.", style: "Evidence first: screenshots, logs, reproduction steps.", scope: "tests/**", done: "Key pages are checked against screenshots and every problem has repro steps" },
+  Docs: { duty: "Turn changes into user-friendly docs and changelog entries.", style: "Short sentences, little jargon, how-to first.", scope: "docs/**, site/docs/**", done: "Every new feature is documented and every link works" },
+  Maintenance: { duty: "Own the build, dependencies and CI; step in when others get stuck on environment issues.", style: "Careful: don't upgrade unless needed.", scope: "package.json, .github/**", done: "The build passes and dependencies have no known vulnerabilities" },
+  Promo: { duty: "Write release notes and update the website copy.", style: "Conversational and vivid, no hype.", scope: "site/**", done: "Three versions of the copy for the user to choose from" },
+};
 function personaFor(role) {
-  const b = ROLE_PERSONA[role] || { duty: "", style: "", scope: "", done: "" };
+  const en = PERCH_LOCALE === "en";
+  const b = (role === "Manager" ? (en ? ROLE_PERSONA_EN.Manager : ROLE_PERSONA.Manager) : (ROLE_PERSONA[role] || ROLE_PERSONA_EN[role])) || { duty: "", style: "", scope: "", done: "" };
   return { duty: b.duty, style: b.style, scope: b.scope, done: b.done,
     forbid: { main: true, del: true, deps: false, net: false }, ask: { merge: true, del: true, deps: true, cost: 50 }, direct: false };
 }
@@ -40,6 +53,7 @@ const pset = (p, k, v) => { const ks = k.split("."); const last = ks.pop(); ks.r
 // 人设写成交给 agent 的那段话（Go 存成成员的 instructions，开场说明里「你的分工：」后面就是它）。
 function personaText(p) {
   if (!p) return "";
+  if (PERCH_LOCALE === "en") return personaTextEn(p);
   const L = [];
   if (p.duty) L.push("岗位职责：" + p.duty.trim());
   if (p.style) L.push("人设与风格：" + p.style.trim());
@@ -52,6 +66,22 @@ function personaText(p) {
   if (ak.length) L.push("这些时候先停下来找用户拍板：" + ak.join("、"));
   if (p.done) L.push("交付标准：" + p.done.trim());
   L.push(p.direct ? "汇报：可以绕过 Manager 直接找用户" : "汇报：向 Manager 汇报");
+  return L.join("\n");
+}
+
+function personaTextEn(p) {
+  const L = [];
+  if (p.duty) L.push("Duties: " + p.duty.trim());
+  if (p.style) L.push("Persona & style: " + p.style.trim());
+  const sc = String(p.scope || "").trim();
+  if (sc) L.push(/^（.*）$/.test(sc) ? "Where you may write: " + sc.slice(1, -1) : `Where you may write: ${sc} (everything else is read-only)`);
+  const fb = [["main", "don't change main directly"], ["del", "don't delete files"], ["deps", "don't add dependencies"], ["net", "no network access"]].filter(([k]) => p.forbid && p.forbid[k]).map((x) => x[1]);
+  if (fb.length) L.push("Not allowed: " + fb.join(", "));
+  const ak = [["merge", "before merging into main"], ["del", "before deleting files"], ["deps", "before adding dependencies"]].filter(([k]) => p.ask && p.ask[k]).map((x) => x[1]);
+  if (p.ask && +p.ask.cost > 0) ak.push(`when one task would cost more than ${+p.ask.cost}k tokens`);
+  if (ak.length) L.push("Stop and ask the user: " + ak.join(", "));
+  if (p.done) L.push("Done means: " + p.done.trim());
+  L.push(p.direct ? "Reporting: you may go straight to the user" : "Reporting: report to the Manager");
   return L.join("\n");
 }
 
@@ -68,7 +98,7 @@ function personaOf(g, b) {
   const p = PERSONAS[bk(g.id, b.id)];
   if (p) return p;
   const base = personaFor(b.manager ? "Manager" : b.role);
-  return b.instructions && !ROLE_PERSONA[b.manager ? "Manager" : b.role] ? Object.assign(base, { duty: b.instructions }) : base;
+  return b.instructions && !ROLE_PERSONA[b.manager ? "Manager" : b.role] && !ROLE_PERSONA_EN[b.manager ? "Manager" : b.role] ? Object.assign(base, { duty: b.instructions }) : base;
 }
 function savePersona(gid, bid, p) { PERSONAS[bk(gid, bid)] = clonePersona(p); lsSet("perch.bg.persona", PERSONAS); }
 
@@ -440,7 +470,7 @@ function newSetup(opts) {
   return { stage: "setup", step: 1, sv: 0, err: "", busy: false,
     name: "", goal: "", proj: opts.proj || defProj(), budget: 500,
     manager: def, mgrPersona: personaFor("Manager"), editBot: null,
-    bots: [{ role: "开发", agent: opts.agent || def, persona: personaFor("开发") }],
+    bots: [{ role: rolePresets()[0], agent: opts.agent || def, persona: personaFor(rolePresets()[0]) }],
     gid: "", sel: null, adding: false, add: { role: "", agent: def }, edit: false, pdraft: null, draft: "", term: null };
 }
 function groupValid(s, step) {
@@ -512,7 +542,7 @@ function groupSetupHTML(z) {
         + `<button class="gb-pe${s.editBot === i ? " on" : ""}" data-gbedit="${i}" title="人设与岗位">${ICON("id-card", 13)}人设</button>`
         + `<button class="gb-x" data-gbdel="${i}" title="去掉这个 Bot">${ICON("x", 13)}</button></div>`
         + (s.editBot === i ? `<div class="gb-pf">${personaFormHTML(b.persona, "s" + i)}</div>` : "")).join("")
-      + `<div class="gb-pre">${ROLE_PRESETS.filter((r) => !s.bots.some((b) => b.role.trim() === r)).map((r) => `<button data-gbpre="${r}">+ ${r}</button>`).join("")}`
+      + `<div class="gb-pre">${rolePresets().filter((r) => !s.bots.some((b) => b.role.trim() === r)).map((r) => `<button data-gbpre="${r}">+ ${r}</button>`).join("")}`
       + PERSONA_TPL.map((t, i) => `<button data-gbtpl="${i}" class="tpl">+ ${esc(t.name)}</button>`).join("")
       + `<button data-gbpre="">+ 自定义</button></div>`;
   } else {
@@ -555,7 +585,7 @@ async function startGroup(z) {
 /* ---------- 开工以后 ---------- */
 function runSkeleton(z, g) {
   const s = z.group;
-  const add = s.adding ? `<div class="g-add"><b>加一个 Bot</b><div class="gb-pre">${ROLE_PRESETS.filter((r) => !(g.bots || []).some((b) => b.role === r)).map((r) => `<button data-gaddpre="${r}" class="${s.add.role === r ? "on" : ""}">${r}</button>`).join("")}`
+  const add = s.adding ? `<div class="g-add"><b>加一个 Bot</b><div class="gb-pre">${rolePresets().filter((r) => !(g.bots || []).some((b) => b.role === r)).map((r) => `<button data-gaddpre="${r}" class="${s.add.role === r ? "on" : ""}">${r}</button>`).join("")}`
     + PERSONA_TPL.map((t, i) => `<button data-gaddtpl="${i}" class="tpl">${esc(t.name)}</button>`).join("") + `</div>`
     + `<input class="inp" data-gaddrole value="${esc(s.add.role)}" placeholder="角色名" spellcheck="false" autocomplete="off">${agentPick("data-gaddag", s.add.agent, true)}`
     + `<div class="g-add-f">${s.err ? `<span class="gs-err">${esc(s.err)}</span>` : ""}<span class="sp"></span><button class="btn" data-gaddcancel>取消</button><button class="btn pri${s.busy ? " na" : ""}" data-gaddok>${s.busy ? "正在加…" : "加进来"}</button></div></div>` : "";
@@ -895,7 +925,7 @@ function groupClick(z, t) {
   if (b.hasAttribute("data-gpedit")) { const m = bgBot(g, s.sel); if (!m) return true; s.pdraft = clonePersona(personaOf(g, m)); s.pdraft.title = roleOf(m); s.edit = true; s.term = null; return re(); }
   if (b.hasAttribute("data-gpecancel")) { s.edit = false; s.pdraft = null; return re(); }
   if (b.hasAttribute("data-gpetpl")) {
-    const m = bgBot(g, s.sel), role = (String(s.pdraft.title || roleOf(m)).trim() || roleOf(m)), name = role + "（我的模板）";
+    const m = bgBot(g, s.sel), role = (String(s.pdraft.title || roleOf(m)).trim() || roleOf(m)), name = role + (PERCH_LOCALE === "en" ? " (my template)" : "（我的模板）");
     const p = clonePersona(s.pdraft); delete p.title;
     PERSONA_TPL = PERSONA_TPL.filter((x) => x.name !== name).concat([{ name, role, persona: p }]);
     lsSet("perch.bg.personaTpl", PERSONA_TPL);

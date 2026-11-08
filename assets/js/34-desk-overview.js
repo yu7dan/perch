@@ -68,7 +68,7 @@ function overviewHTML() {
   const row = (x) => `<button class="ov-r" data-ovgo="${x.id || "z"}" data-ovz="${x.z}">${logo(x.agent)}<div><b>${esc(x.name)}</b><span>${esc(x.t || `${ST_WORD[x.st] || "空闲"} · ${x.proj}`)}</span></div><span class="sp"></span><em class="ov-b">${esc(x.block)}</em><i class="dot ${x.st}"></i></button>`;
   const projIn = new Set(d.run.concat(d.wait).map((x) => x.proj)).size;
   return `<button class="s-x" data-ovx title="关掉（Esc）">${ICON("x", 16)}</button>`
-    + `<div class="ov-h"><b>总览</b><span>${new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" })}</span></div>`
+    + `<div class="ov-h"><b>总览</b><span>${new Date().toLocaleDateString(PERCH_LOCALE === "en" ? "en-US" : "zh-CN", { month: "long", day: "numeric", weekday: "long" })}</span></div>`
     + `<div class="ov-kpis">${kpi("在干活", `${d.run.filter((x) => x.st === "work").length} 格`, `开着 ${d.run.length + d.wait.length} 格 · 在等你 ${d.wait.length}`)}`
     + kpi("今日轮次", d.today.turns || 0, `近 7 天 ${wk} · 7 天里活跃 ${d.week.filter((a) => (a.turns || 0) > 0).length} 天`)
     + kpi("今日 token", fmtK(toks), tok ? `输入 ${fmtK(inp)} · 输出 ${fmtK(tok.out || 0)}` : "今天还没有")

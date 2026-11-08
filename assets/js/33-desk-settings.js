@@ -27,7 +27,8 @@ function secHTML() {
         + row("关掉一块前先问一句", "块里有在跑的 agent 时才问", tg("confirmClose"))
         + row("退出 Perch 前先问一句", "Alt+F4 / 关窗时提醒：在跑的 agent 会停下来", tgGo("confirmClose"))
         + row("默认 Agent", "项目面板里「在这开一个 Agent」直接用它；空格子里它排在显眼位置",
-          defAgentSeg(ags, def));
+          defAgentSeg(ags, def))
+        + row("界面语言", "", `<div class="seg">${[["auto", "跟随系统"], ["zh", "中文"], ["en", "English"]].map(([v, t]) => `<button data-slang="${v}" class="${(SETTINGS.language || "auto") === v ? "on" : ""}">${t}</button>`).join("")}</div>`);
     }
     case "desk": {
       const sc = DESK_SCREENS.length > 1
@@ -93,9 +94,10 @@ function onCfgChanged() { if (!qs("#set").hidden) renderSettings(); }
 function onProjectsChanged() { if (!qs("#set").hidden && SET.sec === "proj") renderSettings(); }
 function setClick(t) {
   if (t.classList.contains("back") || t.closest("[data-sx]")) { closeSettings(); return; }
-  const b = t.closest("[data-snav],[data-cfg],[data-cfgseg],[data-acc],[data-dockpos],[data-sdef],[data-hotkey],[data-sgo],[data-sscreen],[data-squit],[data-pp]");
+  const b = t.closest("[data-snav],[data-cfg],[data-cfgseg],[data-acc],[data-dockpos],[data-sdef],[data-hotkey],[data-sgo],[data-sscreen],[data-squit],[data-pp],[data-slang]");
   if (!b) return;
   const d = b.dataset;
+  if (d.slang) { goSet({ language: d.slang }); setLocale(d.slang); saveSettingsCache(); renderSettings(); return; }
   if (d.snav) { SET.sec = d.snav; SET.rec = false; qs("#mp").hidden = true; renderSettings(); return; }
   if (d.pp) { ppAct(d.pp, b); return; }
   if (d.cfg) { CFG[d.cfg] = !CFG[d.cfg]; cfgChanged(); renderSettings(); return; }

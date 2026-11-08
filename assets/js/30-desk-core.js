@@ -1247,7 +1247,7 @@ function pushOrbState() {
   let bub = "";
   if (wait > ORB_SEEN) { const ws = waits(); bub = waitText(ws[ws.length - 1]); }
   ORB_SEEN = wait;
-  W_EV.Emit("perch:orb-state", { run, wait, bub });
+  W_EV.Emit("perch:orb-state", { run, wait, bub: typeof deskTr === "function" ? deskTr(bub) : bub, lang: PERCH_LOCALE });
 }
 setInterval(pushOrbState, 700);
 if (W_EV) {
@@ -1281,7 +1281,7 @@ function toast(msg, kind, act) {
   t.style.animation = "none"; void t.offsetWidth; t.style.animation = "";
   clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, act ? 5200 : kind === "warn" ? 4200 : 2800);
 }
-function clock() { const d = new Date(); qs("#clock").textContent = d.toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "short" }) + "  " + d.toTimeString().slice(0, 5); }
+function clock() { const d = new Date(); qs("#clock").textContent = d.toLocaleDateString(PERCH_LOCALE === "en" ? "en-US" : "zh-CN", { month: "long", day: "numeric", weekday: "short" }) + "  " + d.toTimeString().slice(0, 5); }
 setInterval(clock, 10000);
 addEventListener("resize", () => { layoutDock(); render(); });
 

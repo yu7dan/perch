@@ -61,7 +61,8 @@ function paint() {
   orb.classList.toggle("waiting", st.wait > 0);
   const bd = orb.querySelector(".orb-bd");
   bd.hidden = !st.wait; bd.textContent = st.wait;
-  orb.querySelector(".orb-tip").innerHTML = `<b>Perch</b><span>${st.run ? `${st.run} 个在跑` : "都空闲"}${st.wait ? ` · <em>${st.wait} 个等你</em>` : ""}</span><span class="dim">点一下回到台面 · 按住能拖</span>`;
+  const en = st.lang === "en";
+  orb.querySelector(".orb-tip").innerHTML = `<b>Perch</b><span>${st.run ? (en ? `${st.run} running` : `${st.run} 个在跑`) : (en ? "All idle" : "都空闲")}${st.wait ? ` · <em>${st.wait}${en ? " waiting" : " 个等你"}</em>` : ""}</span><span class="dim">${en ? "Click to return to the desk · drag to move" : "点一下回到台面 · 按住能拖"}</span>`;
 }
 Events.On("perch:orb-state", (e) => {
   const d = (e && e.data) || {};
