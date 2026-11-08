@@ -85,6 +85,8 @@ type Deps struct {
 	// Screens 是设置页「铺在哪块显示器上」的选项。都可以为 nil。
 	OnSettings func(old, next settings.Settings)
 	Screens    func() []map[string]any
+	// SwitchModel：格头上换模型（pane.model）。mode = "relay"（不用重启，已生效）| "restart"（前端重开这一格）。
+	SwitchModel func(pane int, agentID, provider, model string) (mode string, err error)
 
 	UI UI
 }
@@ -179,6 +181,8 @@ func (s *Server) dispatch(c Conn, m *Msg, tabReqCache map[int][]byte) {
 		s.fsReadReq(m)
 	case "dir.browse":
 		s.dirBrowse(m)
+	case "pane.model":
+		s.paneModel(m)
 
 	// 页面级事实、快照补发、系统打开地址
 	case "log", "term.theme", "acts.snapshot", "files.snapshot", "trace.diff", "open.url":

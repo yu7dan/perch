@@ -34,6 +34,7 @@ import (
 	"github.com/yu7dan/perch/internal/panes"
 	"github.com/yu7dan/perch/internal/project"
 	"github.com/yu7dan/perch/internal/providers"
+	"github.com/yu7dan/perch/internal/relay"
 	"github.com/yu7dan/perch/internal/session"
 	"github.com/yu7dan/perch/internal/settings"
 	"github.com/yu7dan/perch/internal/stream"
@@ -55,6 +56,8 @@ type perchApp struct {
 	titles    *session.TitleStore
 	prefs     *settings.Store
 	providers *providers.Store
+	// relay 是本机转发层（internal/relay）：选了提供商的格子连它，格子换模型不用重启。
+	relay     *relay.Relay
 	botgroups *botgroup.Store
 	coord     *botgroup.Coordinator
 	pool      *project.Pool
@@ -237,6 +240,11 @@ func main() {
 	// 每个 agent 的模型注入：开格前读 Perch 自己的「模型提供商」配置
 	// （见 agentWireProfile）。没配的 agent 按它自己的登录/配置启动；
 	// 所有 agent 都跑在用户真实的主目录里。
+	if rl, err := relay.Start(); err != nil {
+		log.Printf("[relay] 起不来（格子换模型就只能重开那一格）：%v", err)
+	} else {
+		a.relay = rl
+	}
 	a.tabs.SetWireProfile(a.agentWireProfile)
 	// Bot Group 角色配置（抽屉里设的模型 / 强度 / 权限）：成员格每次起来现查。
 	a.tabs.SetBotConfig(func(gid, bid string) (agent.BotConfig, bool) {
@@ -431,6 +439,7 @@ func main() {
 		Pool:           a.pool,
 		Prefs:          a.prefs,
 		OnSettings:     deskSet.apply,
+		SwitchModel:    a.switchPaneModel,
 		Screens:        deskSet.screens,
 		Providers:      a.providers,
 		BotGroups:      a.botgroups,
@@ -537,16 +546,33 @@ func (a *perchApp) defaultCWD() string {
 //   - 这个 agent 什么都没配：ok=false，按 agent 自己的登录 / 配置启动；
 //   - 配了但接不上（协议不对、缺模型、key 解不开）：返回 error，这一格不启动，
 //     终端里说清原因 —— 不能静默回退到 agent 自己的登录（那样看到的是 401）。
-func (a *perchApp) agentWireProfile(id string) (map[string]string, []string, bool, error) {
+func (a *perchApp) agentWireProfile(spec session.SpawnSpec, pane int) (map[string]string, []string, bool, error) {
+	id := spec.Agent
 	if a.providers == nil {
 		return nil, nil, false, nil
 	}
-	r, ok, err := a.providers.Resolve(id)
+	r, ok, err := a.providers.ResolveFor(id, spec.Provider, spec.Model)
 	if err != nil {
 		return nil, nil, false, err
 	}
 	if !ok {
 		return nil, nil, false, nil
+	}
+	// 选了提供商：经本机转发层走（地址和 key 换成这一格专用的），之后格头上换模型 / 换提供商
+	// 只改转发目标，agent 进程不用重启。真 key 只在转发层手里。
+	if r.Provider != nil && a.relay != nil && len(providers.Protocols(id)) > 0 {
+		real := *r.Provider
+		aBase, oBase := a.relay.Bind(pane, relay.Target{ProviderID: real.ID, Name: real.Name,
+			Anthropic: real.Anthropic, OpenAI: real.OpenAI, Key: r.Key, Model: r.Model})
+		cp := real
+		if cp.Anthropic != "" {
+			cp.Anthropic = aBase
+		}
+		if cp.OpenAI != "" {
+			cp.OpenAI = oBase
+		}
+		r.Provider = &cp
+		r.Key = "perch-relay"
 	}
 	home, _ := os.UserHomeDir()
 	l, err := providers.Build(id, r, home)
@@ -689,4 +715,30 @@ func errOrNil(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// switchPaneModel 是格头上「换模型」的 Go 半边（ctl 的 pane.model）。
+// 这一格走转发层、而且要换到的也是一家提供商：改转发目标就完事（mode=relay，下一个请求起生效）。
+// 别的情况（agent 自己的登录 ↔ 提供商、没走转发层的格子）进程要按新配置重开：回 mode=restart，
+// 前端用同一个 paneId 接回原来那条会话重开这一格（对话接着）。
+func (a *perchApp) switchPaneModel(pane int, agentID, provider, model string) (string, error) {
+	if a.relay == nil || a.providers == nil || provider == "" || provider == "own" {
+		return "restart", nil
+	}
+	if _, routed := a.relay.Routed(pane); !routed {
+		return "restart", nil
+	}
+	r, _, err := a.providers.ResolveFor(agentID, provider, model)
+	if err != nil {
+		return "", err
+	}
+	if r.Provider == nil {
+		return "restart", nil
+	}
+	p := *r.Provider
+	if (agentID == "claude" && p.Anthropic == "") || (agentID == "codex" && p.OpenAI == "") {
+		return "", fmt.Errorf("提供商「%s」没有 %s 能用的接口", p.Name, agentID)
+	}
+	a.relay.Switch(pane, relay.Target{ProviderID: p.ID, Name: p.Name, Anthropic: p.Anthropic, OpenAI: p.OpenAI, Key: r.Key, Model: r.Model})
+	return "relay", nil
 }

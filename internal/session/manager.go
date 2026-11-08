@@ -49,7 +49,7 @@ type Manager struct {
 	// profileMu：Perch 自己的 per-agent 配置（模型提供商 / 模型 / 强度）注入。
 	// 没配的 agent 返回 ok=false，按它自己的配置启动。
 	profileMu   sync.RWMutex
-	wireProfile func(id string) (map[string]string, []string, bool, error)
+	wireProfile func(spec SpawnSpec, pane int) (map[string]string, []string, bool, error)
 	// botConfig：Bot Group 里角色自己的模型 / 权限（角色配置抽屉），按 Spec.Group/Bot 现查。
 	botConfig func(group, bot string) (agent.BotConfig, bool)
 	// Bot Group C（编排）：起格时给成员格发口令 + 总线地址（botEnv），perch-bg 所在目录（bgBin）
@@ -92,7 +92,7 @@ func (m *Manager) SetDefs(defs map[string]agent.Def) {
 // 现查，改完设置不用重启 Perch）。Claude 的 env 会合并进 --settings；Codex 的 args 是顶层 -c 覆盖。
 // error 表示“用户确实配了这个 agent，但配置没生效”：这时绝不能静默回退到
 // agent 自己的配置（Codex 会拿旧登录去直连，出现一长串 401）。
-func (m *Manager) SetWireProfile(fn func(id string) (map[string]string, []string, bool, error)) {
+func (m *Manager) SetWireProfile(fn func(spec SpawnSpec, pane int) (map[string]string, []string, bool, error)) {
 	m.profileMu.Lock()
 	m.wireProfile = fn
 	m.profileMu.Unlock()
@@ -178,14 +178,14 @@ func (m *Manager) NoteActivity(tabID int, spoke bool) {
 	m.panes.MarkTalked(tabID, "agent 收到提示（hooks 之外的适配器）")
 }
 
-func (m *Manager) profileFor(id string) (map[string]string, []string, bool, error) {
+func (m *Manager) profileFor(spec SpawnSpec, pane int) (map[string]string, []string, bool, error) {
 	m.profileMu.RLock()
 	fn := m.wireProfile
 	m.profileMu.RUnlock()
 	if fn == nil {
 		return nil, nil, false, nil
 	}
-	return fn(id)
+	return fn(spec, pane)
 }
 
 func (m *Manager) defFor(id string) (agent.Def, bool) {

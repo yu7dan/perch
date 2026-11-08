@@ -44,4 +44,8 @@ type SpawnSpec struct {
 	// 重启后还认得、也不会因为"还没说过话"被冷恢复摘掉。
 	Group string `json:"group,omitempty"`
 	Bot   string `json:"bot,omitempty"`
+	// Provider / Model：这一格自己选的模型（台面格头上那颗模型按钮），压过 agent 的默认配置。
+	// Provider 空 = 用 agent 的默认；"own" = agent 自己的登录（Perch 不注入提供商）。
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
 }

@@ -360,8 +360,30 @@ type Resolved struct {
 
 // Resolve 解出 agent 的配置。ok=false 表示这个 agent 什么都没配。
 func (s *Store) Resolve(agentID string) (Resolved, bool, error) {
+	return s.ResolveFor(agentID, "", "")
+}
+
+// ResolveFor 和 Resolve 一样，但这一格自己选过模型（台面格头上那颗按钮）：
+// provider 非空就压过 agent 的默认（"own" = agent 自己的登录，不接提供商），model 非空就压过默认模型。
+func (s *Store) ResolveFor(agentID, provider, model string) (Resolved, bool, error) {
 	s.mu.Lock()
 	a, ok := s.f.Agents[agentID]
+	if provider != "" || model != "" {
+		if !ok {
+			a = Agent{}
+		}
+		ok = true
+		if provider == "own" {
+			a.Provider = ""
+		} else if provider != "" {
+			a.Provider = provider
+		}
+		if model != "" {
+			a.Model = model
+		} else if provider != "" {
+			a.Model = "" // 换了提供商、没说模型：用那家的默认，不能把上一家的模型名带过去
+		}
+	}
 	var p *Provider
 	if ok && a.Provider != "" {
 		if pp := s.providerLocked(a.Provider); pp != nil {

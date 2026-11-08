@@ -50,6 +50,15 @@ func Build(agentID string, r Resolved, home string) (Launch, error) {
 	p := r.Provider
 	if p == nil {
 		// 没选提供商：只有原始环境变量（和 Claude / Codex 的推理强度）。
+		// 这一格在 agent 自己的登录下选了模型（格头上那颗按钮）：Claude 认 ANTHROPIC_MODEL，Codex 认 -c model。
+		if r.Model != "" {
+			switch agentID {
+			case "claude":
+				out.Env["ANTHROPIC_MODEL"] = r.Model
+			case "codex":
+				out.Args = append(out.Args, "-c", "model="+tomlString(r.Model))
+			}
+		}
 		applyEffort(agentID, r.Effort, &out)
 		return out, nil
 	}

@@ -86,7 +86,7 @@ func (m *Manager) StartTab(tab *Tab, cols, rows int) (*Running, error) {
 	var profEnv map[string]string
 	var profArgs []string
 	t0 := time.Now()
-	e, a, ok, perr := m.profileFor(tab.Spec.Agent)
+	e, a, ok, perr := m.profileFor(tab.Spec, tab.PaneID)
 	if perr != nil {
 		return nil, &StartError{Stage: StageProfile, Agent: tab.Spec.Agent, Err: perr}
 	}

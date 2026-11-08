@@ -19,7 +19,7 @@ func TestProfileErrorBlocksLaunch(t *testing.T) {
 		"fake": {Exe: "cmd.exe"},
 	})
 	want := errors.New("model-provider settings could not be applied")
-	m.SetWireProfile(func(string) (map[string]string, []string, bool, error) {
+	m.SetWireProfile(func(SpawnSpec, int) (map[string]string, []string, bool, error) {
 		return nil, nil, false, want
 	})
 

@@ -65,6 +65,9 @@ type Msg struct {
 	Provider *providers.ProviderInput `json:"provider,omitempty"`
 	// agent.config.set 用：哪个 agent、它的配置（环境变量值同样只写不读）。
 	AgentID string `json:"agentId,omitempty"`
+	// pane.model 用：这一格要换到的提供商（"own" = agent 自己的登录）和模型。
+	ProviderID string `json:"providerId,omitempty"`
+	Model      string `json:"model,omitempty"`
 	// botgroup.* 用：建组请求、某个 Bot 的 id、一条过程流事件（组 id 走 ID，格子走 Pane）。
 	BotGroup *botgroup.CreateInput `json:"botgroup,omitempty"`
 	BotID    string                `json:"botId,omitempty"`
