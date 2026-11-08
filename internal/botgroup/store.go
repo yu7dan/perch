@@ -97,6 +97,8 @@ var EventKinds = map[string]bool{
 	"test": true, "fail": true, "retry": true, "review": true, "approval": true, "memory": true,
 	// C 阶段：交回 / 被拦 / 暂停 / 恢复
 	"return": true, "blocked": true, "paused": true, "resumed": true,
+	// 台面：群里的一行旁白（你改了人设、谁离开了群……）
+	"note": true,
 }
 
 type file struct {
@@ -164,15 +166,18 @@ type BotInput struct {
 // CreateInput 是建组请求。衍生时给 SourcePane / SourceAgent（原 Agent 当 Manager）；
 // 独立创建时给 ManagerAgent（新起一个 Manager 格）。
 type CreateInput struct {
-	Name         string     `json:"name"`
-	Goal         string     `json:"goal"`
-	Project      string     `json:"project"`
-	SourcePane   int        `json:"sourcePane,omitempty"`
-	SourceAgent  string     `json:"sourceAgent,omitempty"`
-	SourceTitle  string     `json:"sourceTitle,omitempty"`
-	ManagerAgent string     `json:"managerAgent,omitempty"`
-	Budget       int        `json:"budget,omitempty"`
-	Bots         []BotInput `json:"bots"`
+	Name         string `json:"name"`
+	Goal         string `json:"goal"`
+	Project      string `json:"project"`
+	SourcePane   int    `json:"sourcePane,omitempty"`
+	SourceAgent  string `json:"sourceAgent,omitempty"`
+	SourceTitle  string `json:"sourceTitle,omitempty"`
+	ManagerAgent string `json:"managerAgent,omitempty"`
+	// ManagerInstructions：建组时给 Manager 写的人设与岗位（台面的建组向导）。
+	ManagerInstructions string `json:"managerInstructions,omitempty"`
+	// Budget：k tokens；0 = DefaultBudget，负数 = 不限。
+	Budget int        `json:"budget,omitempty"`
+	Bots   []BotInput `json:"bots"`
 }
 
 // Create 建一个组。Manager 是第一个 Bot：衍生时直接绑上原 Agent 的格子。
@@ -193,12 +198,14 @@ func (s *Store) Create(in CreateInput) (Group, error) {
 		ID: "g" + strconv.FormatInt(time.Now().UnixMilli(), 36), Name: name,
 		Goal: strings.TrimSpace(in.Goal), Project: proj, CreatedAt: now, Budget: in.Budget,
 	}
-	if g.Budget <= 0 {
+	if g.Budget == 0 {
 		g.Budget = DefaultBudget
+	} else if g.Budget < 0 {
+		g.Budget = -1
 	}
 	// 新建的组：项目是 git 仓库就默认每个 Bot 一个 worktree（不互相踩）。
 	g.Worktrees = IsGitRepo(proj)
-	mgr := Bot{ID: "manager", Role: "Manager", Manager: true, CreatedAt: now}
+	mgr := Bot{ID: "manager", Role: "Manager", Manager: true, CreatedAt: now, Instructions: strings.TrimSpace(in.ManagerInstructions)}
 	if in.SourcePane > 0 {
 		if in.SourceAgent == "" {
 			return Group{}, fmt.Errorf("衍生时要知道原 Agent 是哪个 agent")
@@ -218,8 +225,13 @@ func (s *Store) Create(in CreateInput) (Group, error) {
 		if role == "" || b.Agent == "" {
 			return Group{}, fmt.Errorf("第 %d 个 Bot 缺少角色或 agent", i+1)
 		}
-		g.Bots = append(g.Bots, Bot{ID: fmt.Sprintf("b%d", i+1), Role: role, Agent: b.Agent,
-			Task: strings.TrimSpace(b.Task), CreatedAt: now})
+		nb := Bot{ID: fmt.Sprintf("b%d", i+1), Role: role, Agent: b.Agent,
+			Task: strings.TrimSpace(b.Task), CreatedAt: now,
+			Instructions: strings.TrimSpace(b.Instructions), Model: strings.TrimSpace(b.Model), Effort: b.Effort}
+		if ValidPermission(b.Permission) {
+			nb.Permission = b.Permission
+		}
+		g.Bots = append(g.Bots, nb)
 	}
 
 	s.mu.Lock()
@@ -710,8 +722,8 @@ func (s *Store) UpdateGroup(gid string, p GroupPatch) (Group, error) {
 		if p.Worktrees != nil {
 			g.Worktrees = *p.Worktrees
 		}
-		if p.Budget != nil && *p.Budget > 0 {
-			g.Budget = *p.Budget
+		if p.Budget != nil && *p.Budget != 0 {
+			g.Budget = max(*p.Budget, -1)
 		}
 		if err := s.saveLocked(); err != nil {
 			*g = old

@@ -349,6 +349,11 @@ func (m *Manager) handleHookLine(line string, tabID int) {
 		if id := m.PaneIDFor(tab); id > 0 && m.panes != nil {
 			m.panes.MarkSpoke(id, "一轮跑完 tab="+strconv.Itoa(tab))
 		}
+		// 一轮跑完也告诉协调器（Bot Group 的自动交回）：登记表 700ms 读一次，太快的一轮它前后都读到 idle、
+		// 一次 busy 都不报，自动交回就永远不触发（实测：假提供商秒回的那一轮，任务一直停在 delivered）。
+		if hook := m.statusHook; hook != nil && tab != 0 {
+			go hook(tab, "busy", "idle")
+		}
 	case "Notification":
 		// 「需要你」的正主：官方的人机信号，类型就在 payload 里。
 		log.Printf("[hook t%d] Notification type=%s session=%s msg=%q",

@@ -406,6 +406,9 @@ function dispatchCtl(m) {
       }
       t.id = m.tab;
       t.streamName = m.stream;
+      // 这一格的进程是这一刻起的：转录里比它早、还挂着的工具调用（上一个进程问到一半的问题 / 批准框）
+      // 已经随那个进程作废了，不能再算「在等你」（见 22-live.js 的 pendingTool）
+      liveOf(m.tab).bornAt = Date.now();
       if (m.pane) t.paneID = m.pane;
       // Go 会把无项目格的空 cwd 换成默认工作区根目录 —— 左栏归属和标题里的
       // 目录提示都要用**生效后**的那个（见 ctl handlers_tabs.go 的 tab.ok）。

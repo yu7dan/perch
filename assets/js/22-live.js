@@ -164,7 +164,14 @@ function pendingTool(v) {
   for (let i = v.acts.length - 1; i >= 0; i--) {
     const a = v.acts[i];
     if (a.kind === "prompt") return null;      // 你已经回话了 ⇒ 挂着的那个作废
-    if (a.kind === "tool") return a.ok == null ? a : null;
+    if (a.kind === "tool") {
+      if (a.ok != null) return null;
+      // 冷恢复 / 原座位接上：上一个进程挂着的那条（实测重开后 Claude 屏上写的是 User declined to answer questions，
+      // 转录里那条却永远没有结果）—— 比这一格的进程还早，作废
+      const at = Date.parse(a.at || "");
+      if (v.bornAt && at && at < v.bornAt - 1500) return null;
+      return a;
+    }
   }
   return null;
 }
@@ -398,6 +405,11 @@ function applyHook(m) {
         v.state = "done";
         v.evidence = "hook";
         v.wait = null;
+      } else if (v.st === "busy" && v.evidence === "hook") {
+        // 「忙」是 PostToolUse 这条 hook 置的（登记表 700ms 一轮，太快的一轮它前后都读到 idle、一次都不报）：
+        // 那就只有 Stop 能把它收回来，否则这一格永远「在干活」（实测：Bot Group 的投递一直等它空闲）
+        v.st = "idle";
+        v.state = "done";
       }
       // 只看没看着它。看着它跑完不是新闻（那是你等的结果，不是"有事找你"）。
       if (!watched) v.note = { kind: "stop", text: m.last || "", at };

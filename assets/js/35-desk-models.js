@@ -116,6 +116,7 @@ function applyPaneModel(m) {
   const w = modelWait.get(m.req);
   modelWait.delete(m.req);
   if (!w) return;
+  if (w.onDone) { w.onDone(m); return; }   // Bot Group 成员（36-desk-group.js）
   const { l, provider, model } = w;
   if (m.err) { toast(`换不了：${m.err}`, "warn"); l.v++; render(); return; }
   l.provider = provider; l.model = model; l.v++;

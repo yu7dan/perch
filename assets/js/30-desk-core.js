@@ -328,7 +328,8 @@ function zoneBusy(z) {
 async function closeZone(z) {
   const n = zoneBusy(z);
   if (CFG.confirmClose && n) {
-    const ok = await deskConfirm("关掉这一块？", `里面 ${n} 个 agent 会停下来。记录都留着，之后可以按原样接回。（设置 › 通用 里可以关掉这句提示）`, "关掉");
+    const k = ZONE_KINDS[z.kind];
+    const ok = await deskConfirm("关掉这一块？", (k && k.closeText ? k.closeText(z, n) : `里面 ${n} 个 agent 会停下来。记录都留着，之后可以按原样接回。`) + "（设置 › 通用 里可以关掉这句提示）", "关掉");
     if (!ok) return;
   }
   removeZone(z);
@@ -969,7 +970,7 @@ document.addEventListener("pointerdown", (e) => {
   }
   if (t.closest("#tray,.pop,#toast,.sheet-host")) return;
   // 点到格子以外的地方：键盘从终端里退出来（不然 Esc 永远是终端的，台面的 Esc 一次都轮不到）。
-  if (!t.closest(".tile") && inTerm(document.activeElement)) document.activeElement.blur();
+  if (!t.closest(".tile,.tterm") && inTerm(document.activeElement)) document.activeElement.blur();
   closePops();
   if (!t.closest(".peek,[data-tfiles]")) closePeeks();
   const tabEl = t.closest(".ztab");

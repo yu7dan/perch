@@ -87,6 +87,7 @@ func (c *Coordinator) Run() {
 				return
 			case <-t.C:
 				c.resendStale()
+				c.sweepIdle()
 			}
 		}
 	}()
@@ -361,6 +362,40 @@ func (c *Coordinator) resendStale() {
 	}
 }
 
+// sweepIdle 兜底自动交回：已送达的任务，对方空着、而且送达之后已经回过话（转录里最后一段比送达晚，
+// 也过了 AutoReturnDelay），却还挂着 —— 那一轮的「忙 → 闲」没被看见（登记表 700ms 一读，秒回的一轮
+// 前后都读到 idle；或者那一轮是在 Perch 关着的时候结束的）。照自动交回处理。
+func (c *Coordinator) sweepIdle() {
+	type cand struct {
+		id  Ident
+		tab int
+	}
+	var cs []cand
+	c.mu.Lock()
+	for tab, id := range c.tabOf {
+		s := c.seen[tab]
+		if c.status[tab] != "idle" || s == nil || s.lastTextAt.IsZero() || time.Since(s.lastTextAt) < c.AutoReturnDelay {
+			continue
+		}
+		cs = append(cs, cand{id, tab})
+	}
+	c.mu.Unlock()
+	for _, x := range cs {
+		t, ok := c.activeTask(x.id)
+		if !ok || t.Deliv == "" || (t.Status != "delivered" && t.Status != "working") {
+			continue
+		}
+		deliv, err := time.Parse(time.RFC3339Nano, t.Deliv)
+		c.mu.Lock()
+		s := c.seen[x.tab]
+		after := err == nil && s != nil && s.lastTextAt.After(deliv)
+		c.mu.Unlock()
+		if after {
+			c.autoReturn(x.id, x.tab, t)
+		}
+	}
+}
+
 // Resend：前端重新连上 / 页面重载了 —— 所有没回执的都再推一遍。
 func (c *Coordinator) Resend() {
 	c.mu.Lock()
@@ -490,8 +525,8 @@ func (c *Coordinator) handoff(g Group, me Bot, body map[string]string) Reply {
 	} else if p, ok := c.activeTask(Ident{g.ID, me.ID}); ok {
 		parent = &p
 	}
-	capK := g.Budget
-	if capK <= 0 {
+	capK := g.Budget // 负数 = 不限（CheckHandoff 只在 capK > 0 时看预算）
+	if capK == 0 {
 		capK = DefaultBudget
 	}
 	v := CheckHandoff(g, tasks, me.ID, body["to"], parent, c.UsedK(g.ID), capK)
