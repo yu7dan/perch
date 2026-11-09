@@ -140,3 +140,7 @@ body.bg-wall.bg-testwall{background:#101114 url("/__desk/wallpaper") center / co
 body:not(.topbar) #brand,body:not(.topbar) #clock{transform:translateY(-34px);opacity:0}
 #topshade{position:fixed;left:0;right:0;top:0;height:46px;z-index:89;pointer-events:none;background:linear-gradient(rgba(8,9,12,.62),rgba(8,9,12,0));opacity:0;transform:translateY(-46px);transition:transform .28s var(--ease),opacity .2s}
 body.topbar #topshade{opacity:1;transform:none}
+
+/* 嵌入桌面（41-desk-embed.js）：空白处归桌面 —— 「在空白处拖一下圈一块」那句提示不成立了，收起来；暗角也不要，桌面原样露出来 */
+body.embed #deskhint { display: none; }
+body.embed #veil { background: none; }

@@ -156,6 +156,8 @@ const ACCENTS = ["#8aa4ff", "#7dd3c0", "#f5a3c7", "#f5b454", "#c4b5fd"];
 const DEF_CFG = () => ({ bg: "wall", glass: 0.6, blur: 30, acc: "#8aa4ff", clock: true, gap: "comfy", confirmClose: true, overlap: false, lastProj: "", orb: null });
 const DEF_DK = () => ({ mode: "edge", edge: "bottom", t: 0.5 });
 let CFG = DEF_CFG(), DK = DEF_DK();
+// 沉浸 / 嵌入（41-desk-embed.js）：嵌入时空白处归桌面，背景只能是透出桌面。不记住 —— 每次打开都是沉浸。
+let EMBED = false;
 try { const s = JSON.parse(localStorage.getItem("perch.desk.v1") || "null"); if (s) { CFG = Object.assign(DEF_CFG(), s.CFG); DK = Object.assign(DEF_DK(), s.DK); } } catch (_) {}
 const save = () => { try { localStorage.setItem("perch.desk.v1", JSON.stringify({ CFG, DK })); } catch (_) {} };
 function hexA(h, a) { const n = parseInt(h.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
@@ -164,7 +166,8 @@ function applyCfg() {
   // 玻璃的浓度：深色是压暗的玻璃，浅色是白色磨砂（同一个滑块，浅色略淡一点才通透）
   // 透出桌面时块后面垫着系统的磨砂（40-desk-glass.js / desk_glass.go），桌面已经被真的糊开了：网页这层只要薄薄一层底色；
   // 渐变 / 纯色时窗口不透明，还是网页自己的玻璃，照原来的浓度。
-  const wallMode = CFG.bg !== "solid" && CFG.bg !== "grad" && window.screenX > -1000;
+  const bg = EMBED ? "wall" : CFG.bg;
+  const wallMode = bg !== "solid" && bg !== "grad" && window.screenX > -1000;
   const lightTheme = typeof themeEffective === "function" && themeEffective() === "light";
   const ga = wallMode ? CFG.glass * (lightTheme ? 0.75 : 0.5) : lightTheme ? Math.min(0.9, CFG.glass * 1.7) : CFG.glass;
   r.setProperty("--glass", lightTheme ? `rgba(244,246,250,${ga.toFixed(3)})` : `rgba(18,19,24,${ga.toFixed(3)})`);
@@ -172,12 +175,13 @@ function applyCfg() {
   r.setProperty("--acc", CFG.acc);
   r.setProperty("--acc-bg", hexA(CFG.acc, 0.16));
   // 「桌面壁纸」= 台面窗口本身透明，浮在桌面上，透出来的就是真桌面（用户 2026-11-09：不去读壁纸文件贴进来）。
-  document.body.classList.toggle("bg-wall", CFG.bg !== "solid" && CFG.bg !== "grad");
+  document.body.classList.toggle("bg-wall", bg !== "solid" && bg !== "grad");
   // 只有屏幕外的测试实例（窗口不透明）才把壁纸画上，好让截图和模拟对照；真用时窗口透明，透出来的就是桌面
   const offscreen = window.screenX < -1000;
   document.body.classList.toggle("bg-testwall", offscreen && document.body.classList.contains("bg-wall"));
-  document.body.classList.toggle("bg-solid", CFG.bg === "solid");
-  document.body.classList.toggle("bg-grad", CFG.bg === "grad");
+  document.body.classList.toggle("bg-solid", bg === "solid");
+  document.body.classList.toggle("bg-grad", bg === "grad");
+  document.body.classList.toggle("embed", EMBED);
   document.body.classList.toggle("no-clock", !CFG.clock);
   ZGAP = CFG.gap === "tight" ? 8 : 14;
 }
@@ -1104,6 +1108,7 @@ const DOCK = [
   { k: "overlap", ic: "layers", lb: "允许块叠在一起" },
   { k: "fold", ic: "minimize-2", lb: "全部收起成标签" },
   "|",
+  { k: "embed", ic: "monitor", lb: "嵌入桌面 · 空白处能点到桌面图标和文件" },
   { k: "stow", ic: "eye-off", lb: "收起 Perch，露出桌面" },
 ];
 // 其他模块的 Dock 动作：k → { act(btn), on() }（on = 那个面板开着时按钮亮着）

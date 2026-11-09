@@ -444,6 +444,9 @@ func (d *deskNative) summon(why string) {
 	if _, _, _, _, test := deskWindowRect(); test {
 		return // 屏幕外的测试实例：绝不动正在用电脑的人的窗口
 	}
+	if deskEmbedRef.isOn() {
+		return // 嵌入桌面时别的程序本来就该浮在块上面
+	}
 	d.mu.Lock()
 	if !d.hideOthers {
 		d.mu.Unlock()

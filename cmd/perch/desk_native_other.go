@@ -34,3 +34,7 @@ func glassCreate(bool) uintptr                                                  
 func glassPlace(uintptr, *application.WebviewWindow, int, int, int, int, int, bool) {}
 func glassHide(uintptr)                                                             {}
 func glassDestroy(uintptr)                                                          {}
+
+func nativeCursorPos() (int, int, bool)                   { return 0, 0, false }
+func nativeLButtonDown() bool                             { return false }
+func nativeClickThrough(*application.WebviewWindow, bool) {}
