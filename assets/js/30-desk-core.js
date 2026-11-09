@@ -166,8 +166,8 @@ function applyCfg() {
   // 渐变 / 纯色时窗口不透明，还是网页自己的玻璃，照原来的浓度。
   const wallMode = CFG.bg !== "solid" && CFG.bg !== "grad" && window.screenX > -1000;
   const lightTheme = typeof themeEffective === "function" && themeEffective() === "light";
-  const ga = wallMode ? CFG.glass * (lightTheme ? 0.75 : 0.5) : lightTheme ? Math.min(0.92, CFG.glass * 1.2) : CFG.glass;
-  r.setProperty("--glass", lightTheme ? `rgba(250,251,255,${ga.toFixed(3)})` : `rgba(18,19,24,${ga.toFixed(3)})`);
+  const ga = wallMode ? CFG.glass * (lightTheme ? 0.75 : 0.5) : lightTheme ? Math.min(0.9, CFG.glass * 1.7) : CFG.glass;
+  r.setProperty("--glass", lightTheme ? `rgba(244,246,250,${ga.toFixed(3)})` : `rgba(18,19,24,${ga.toFixed(3)})`);
   r.setProperty("--blur", CFG.blur + "px");
   r.setProperty("--acc", CFG.acc);
   r.setProperty("--acc-bg", hexA(CFG.acc, 0.16));

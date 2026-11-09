@@ -36,6 +36,9 @@ func (d *deskSettings) apply(old, next settings.Settings) {
 	}
 	if next.Screen != old.Screen {
 		d.moveToScreen(next.Screen)
+	} else if old == (settings.Settings{}) && d.stow != nil && d.stow.main != nil {
+		// 启动时「全屏」也会落歪（实测窗口在 0,-24、底下缺 24px，任务栏就压在 Dock 上）：一样量一下摆正
+		deskFixFill(d.stow.main, "启动")
 	}
 	if deskNativeRef != nil {
 		first := old == (settings.Settings{})
@@ -112,7 +115,7 @@ func (d *deskSettings) moveToScreen(id string) {
 
 // deskFixFill：等「全屏」落定后量一下窗口，没正好铺满那块屏就摆正（见 nativeFillMonitor）。
 func deskFixFill(w *application.WebviewWindow, why string) {
-	for _, ms := range []time.Duration{300, 1200} {
+	for _, ms := range []time.Duration{300, 1200, 3000} {
 		time.AfterFunc(ms*time.Millisecond, func() {
 			if _, _, _, _, test := deskWindowRect(); test {
 				return

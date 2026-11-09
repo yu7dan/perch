@@ -6,13 +6,13 @@ html.theme-light {
   --warn: #d98a14;
   --ok: #1f9d63;
   --bad: #d64545;
-  --sheet: rgba(250, 251, 254, .86);
+  --sheet: rgba(240, 242, 247, .9);
 }
 /* 底：透出桌面时窗口透明（不画底）；渐变 / 纯色换成明亮的配色 */
 html.theme-light body.bg-wall { background: transparent; }
 html.theme-light body.bg-wall.bg-testwall { background: #dfe3ea url("/__desk/wallpaper") center / cover no-repeat; }
-html.theme-light body.bg-grad { background: radial-gradient(60% 70% at 12% 8%, #c7d2fe 0, transparent 60%), radial-gradient(55% 60% at 92% 88%, #fbcfe8 0, transparent 62%), radial-gradient(45% 50% at 75% 15%, #a5f3fc 0, transparent 60%), #eef1f8; }
-html.theme-light body.bg-solid { background: #e9ecf2; }
+html.theme-light body.bg-grad { background: radial-gradient(60% 70% at 12% 8%, #a9b7ec 0, transparent 60%), radial-gradient(55% 60% at 92% 88%, #dcaecb 0, transparent 62%), radial-gradient(45% 50% at 75% 15%, #94cfdf 0, transparent 60%), #d3d9e4; }
+html.theme-light body.bg-solid { background: #d2d7e0; }
 /* 暗角换成一层极淡的亮雾（也让整面都接得住鼠标） */
 html.theme-light #veil { background: linear-gradient(rgba(255, 255, 255, .06), rgba(255, 255, 255, .06)); }
 html.theme-light body.bg-solid #veil, html.theme-light body.bg-grad #veil { background: none; }
@@ -21,7 +21,14 @@ html.theme-light .zone { border-color: rgba(255, 255, 255, .7); box-shadow: 0 24
 html.theme-light body.bg-solid .zone { border-color: rgba(20, 24, 40, .08); }
 html.theme-light .tile { background: rgba(255, 255, 255, .42); border-color: rgba(20, 24, 40, .07); }
 html.theme-light .ti { background: rgba(255, 255, 255, .7); border-color: rgba(20, 24, 40, .08); }
-html.theme-light #dock { background: rgba(255, 255, 255, .55); border-color: rgba(255, 255, 255, .75); box-shadow: 0 18px 48px rgba(30, 40, 80, .18), inset 0 1px 0 rgba(255, 255, 255, .9); }
+html.theme-light #dock { background: rgba(244, 246, 250, .62); border-color: rgba(255, 255, 255, .75); box-shadow: 0 18px 48px rgba(30, 40, 80, .18), inset 0 1px 0 rgba(255, 255, 255, .9); }
+/* Dock 的图标原来是写死的白色：浅色里看不见，选中（.on）那格更是白上加白。图标换深色，选中用强调色 */
+html.theme-light .dk { color: rgba(27, 29, 36, .78); }
+html.theme-light .dk:hover, html.theme-light .dk.thov { color: rgba(27, 29, 36, .95); }
+/* 强调色是用户在设置里挑的（深色底用的偏亮）：浅底上往深里调一截才压得住 */
+html.theme-light .dk.on { background: color-mix(in srgb, var(--acc) 20%, transparent); color: color-mix(in srgb, var(--acc) 62%, #14161d); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 40%, transparent); }
+html.theme-light #tray { background: rgba(240, 242, 247, .86); }
+html.theme-light .dsep { background: rgba(20, 24, 40, .12); }
 html.theme-light #brand, html.theme-light #clock { color: rgba(27, 29, 36, .82); text-shadow: 0 1px 6px rgba(255, 255, 255, .6); }
 html.theme-light #topshade { background: linear-gradient(rgba(255, 255, 255, .7), rgba(255, 255, 255, 0)); }
 /* 单色的 agent 图标是白的（深色底用）：浅色主题里不反色 */
