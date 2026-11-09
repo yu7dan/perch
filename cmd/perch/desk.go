@@ -128,6 +128,8 @@ func deskMainWindowOptions() application.WebviewWindowOptions {
 		Height:     900,
 		Frameless:  true,
 		StartState: application.WindowStateFullscreen,
+		// 透明：台面浮在桌面上，块之外透出来的就是真桌面（壁纸、图标），不去读壁纸文件贴进来
+		BackgroundType: application.BackgroundTypeTransparent,
 		// 拖文件进台面（比如拖一个文件夹进来当项目）由前端按落点决定怎么处理。
 		EnableFileDrop: true,
 		URL:            "/",
@@ -136,6 +138,9 @@ func deskMainWindowOptions() application.WebviewWindowOptions {
 		o.StartState = application.WindowStateNormal
 		o.InitialPosition = application.WindowXY
 		o.X, o.Y, o.Width, o.Height = x, y, w, h
+		// 测试实例摆在屏幕外：透明窗口在屏幕外不出帧，调试端口截图会一直等（实测卡死）。测试实例用不透明窗口，
+		// 页面那边看到自己在屏幕外，会把壁纸画上当背景（只为截图对照，37/30 的 applyCfg）。
+		o.BackgroundType = application.BackgroundTypeSolid
 		log.Printf("[desk] PERCH_WINDOW_RECT：普通窗口 %d,%d %dx%d（测试用）", x, y, w, h)
 	}
 	return o
@@ -213,7 +218,8 @@ func (d *deskStow) stow(data any) {
 			X:               d.x,
 			Y:               d.y,
 			URL:             "/orb.html",
-			Windows:         application.WindowsWindow{HiddenOnTaskbar: true},
+			// 不要系统给无边框窗口加的装饰（1px 边框、圆角、阴影、延伸进来的标题栏 —— 透明底上会露出一个框和一颗 ×）
+			Windows: application.WindowsWindow{HiddenOnTaskbar: true, DisableFramelessWindowDecorations: true},
 		})
 	}
 	orb := d.orb
@@ -247,6 +253,7 @@ func (d *deskStow) unstow() {
 	}
 	d.main.Show()
 	d.main.Focus()
+	deskFixFill(d.main, "回到台面")
 	d.main.EmitEvent("perch:unstowed", map[string]int{"x": x, "y": y})
 	log.Printf("[desk] 回到台面")
 }

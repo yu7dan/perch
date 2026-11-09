@@ -159,15 +159,17 @@ let CFG = DEF_CFG(), DK = DEF_DK();
 try { const s = JSON.parse(localStorage.getItem("perch.desk.v1") || "null"); if (s) { CFG = Object.assign(DEF_CFG(), s.CFG); DK = Object.assign(DEF_DK(), s.DK); } } catch (_) {}
 const save = () => { try { localStorage.setItem("perch.desk.v1", JSON.stringify({ CFG, DK })); } catch (_) {} };
 function hexA(h, a) { const n = parseInt(h.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
-let WALL_V = Date.now();
 function applyCfg() {
   const r = document.documentElement.style;
   r.setProperty("--glass", `rgba(18,19,24,${CFG.glass})`);
   r.setProperty("--blur", CFG.blur + "px");
   r.setProperty("--acc", CFG.acc);
   r.setProperty("--acc-bg", hexA(CFG.acc, 0.16));
-  // 桌面壁纸：Go 的资产服务器那条私有路由把当前壁纸原样吐出来；换了壁纸 Go 发 perch:wallpaper。
-  r.setProperty("--wall", `url("/__desk/wallpaper?v=${WALL_V}")`);
+  // 「桌面壁纸」= 台面窗口本身透明，浮在桌面上，透出来的就是真桌面（用户 2026-11-09：不去读壁纸文件贴进来）。
+  document.body.classList.toggle("bg-wall", CFG.bg !== "solid" && CFG.bg !== "grad");
+  // 只有屏幕外的测试实例（窗口不透明）才把壁纸画上，好让截图和模拟对照；真用时窗口透明，透出来的就是桌面
+  const offscreen = window.screenX < -1000;
+  document.body.classList.toggle("bg-testwall", offscreen && document.body.classList.contains("bg-wall"));
   document.body.classList.toggle("bg-solid", CFG.bg === "solid");
   document.body.classList.toggle("bg-grad", CFG.bg === "grad");
   document.body.classList.toggle("no-clock", !CFG.clock);
@@ -428,7 +430,12 @@ function reattach(leaf, r) {
 // 这一格现在是什么状态（格头的点、块的边框、Dock 的铃铛都读它）。判据全在 22-live.js 的 cellState。
 function leafState(l) {
   if (!l.tab) return "idle";
-  const s = cellState(l.tab);
+  let s = cellState(l.tab);
+  // Claude 停下 60 秒后补的那条 idle_prompt（「在等你输入」）只是这一轮完了：算「跑完一轮还没看」，不算在等你拍板
+  if (s === "ask") {
+    const v = LIVE.get(l.tab.id);
+    if (v && v.note && v.note.ntype === "idle_prompt" && v.st !== "waiting" && !pendingAsk(v) && !LOGIN_GATES.has(l.tab.id)) s = "unread";
+  }
   return s === "working" ? "work" : s === "ask" ? "wait" : s === "off" ? "off" : s === "unread" ? "done" : s === "failed" ? "fail" : "idle";
 }
 
@@ -657,7 +664,8 @@ function renderTiles(z, zb) {
       el._mode = mode; el._v = "";
       // 终端那一层建一次：之后只换格头，.tterm 里的终端元素一个字节都不碰。
       el.innerHTML = mode === "agent"
-        ? `<div class="th"></div><div class="tterm"></div><button class="tb-new" data-tbnew hidden>有新内容 ↓</button>`
+        ? `<div class="th"></div><div class="tb"></div><div class="tterm"></div><button class="tb-new" data-tbnew hidden>有新内容 ↓</button>`
+          + `<div class="ti tin"><textarea class="tin-in" rows="1" placeholder="跟它说…" spellcheck="false"></textarea><button class="tin-go" data-tsend title="发送（回车）">${ICON("arrow-up", 13, 2)}</button></div>`
           + `<div class="tstop" hidden></div>`
           + ["right", "bottom", "left", "top"].map((s) => `<button class="plus" data-plus="${s}" title="往${{ right: "右", bottom: "下", left: "左", top: "上" }[s]}切出一格">${ICON("plus", 11, 2.6)}</button>`).join("")
         : `<div class="tpick"></div>`;
@@ -676,6 +684,8 @@ function renderTiles(z, zb) {
         if (off) stop.innerHTML = `<span>${esc(ag(leaf.agent).name)} 停了</span><button class="btn pri" data-reseat>${ICON("rotate-ccw", 13)}接着来</button>`;
       }
       const nb = qs(".tb-new", el); if (nb) nb.hidden = !leaf.unseen;
+      // 格子身体：模拟里的 Agent 界面（39-desk-agentui.js）；切到「终端」时才露出真终端
+      if (typeof renderAgentBody === "function") renderAgentBody(leaf, el);
     } else {
       const key = "p:" + leaf.v + ":" + (leaf.installing || "") + ":" + CATALOG_SIG + ":" + projSig();
       if (el._v !== key) { el._v = key; qs(".tpick", el).innerHTML = pickHTML(leaf); }
@@ -710,8 +720,8 @@ function hookTerm(leaf) {
   T._deskHooked = true;
   const atBottom = () => { const b = T.term.buffer.active; return b.viewportY >= b.baseY; };
   const pill = () => { const el = TEL.get(leaf.id); const nb = el && qs(".tb-new", el); if (nb) nb.hidden = !leaf.unseen; };
-  T.term.onScroll(() => { if (leaf.unseen && atBottom()) { leaf.unseen = false; pill(); } });
-  T.term.onWriteParsed(() => { if (!leaf.unseen && !atBottom()) { leaf.unseen = true; pill(); } });
+  T.term.onScroll(() => { if (leaf.view === "term" && leaf.unseen && atBottom()) { leaf.unseen = false; pill(); } });
+  T.term.onWriteParsed(() => { if (leaf.view === "term" && !leaf.unseen && !atBottom()) { leaf.unseen = true; pill(); } });
 }
 function pickHTML(l) {
   if (l.installing) {
@@ -1037,9 +1047,11 @@ document.addEventListener("click", (e) => {
     if (t.closest("[data-tclose]")) { removeLeaf(lf.z, lf.leaf); return; }
     if (t.closest("[data-tbnew]")) {
       const T = lf.leaf.tab;
-      if (T && T.term) T.term.scrollToBottom();
       lf.leaf.unseen = false; t.closest("[data-tbnew]").hidden = true;
-      if (T) T.focus();
+      if (lf.leaf.view === "term") { if (T && T.term) T.term.scrollToBottom(); if (T) T.focus(); return; }
+      const tb = qs(".tb", TEL.get(lf.leaf.id));
+      if (tb) tb.scrollTop = tb.scrollHeight;
+      lf.leaf.pin = true;
       return;
     }
   }
@@ -1259,7 +1271,6 @@ if (W_EV) {
     if (activeTab) activeTab.focus();
   });
   // 桌面壁纸换了（Go 收到 WM_SETTINGCHANGE / SPI_SETDESKWALLPAPER）：换个查询参数重拉一次。
-  W_EV.On("perch:wallpaper", () => { WALL_V = Date.now(); applyCfg(); });
 }
 
 /* ---------- 确认 / 提示 ---------- */

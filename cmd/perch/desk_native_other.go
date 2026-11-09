@@ -23,3 +23,7 @@ func nativeLaunchAndFind(string, string) (uintptr, string)      { return 0, "uns
 func nativeAppList(bool, func([]nativeApp)) ([]nativeApp, bool) { return []nativeApp{}, false }
 func appIconPath(string) string                                 { return "" }
 func nativeWindowSize(uintptr) (int, int)                       { return 0, 0 }
+
+type rect struct{ L, T, R, B int32 }
+
+func nativeFillMonitor(*application.WebviewWindow) (bool, rect, rect) { return false, rect{}, rect{} }

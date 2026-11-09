@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
@@ -98,6 +99,21 @@ func (d *deskSettings) moveToScreen(id string) {
 	w.SetScreen(target)
 	w.Fullscreen()
 	log.Printf("[desk] 台面铺到显示器 %s（%s）", target.Name, target.ID)
+	deskFixFill(w, "铺到显示器")
+}
+
+// deskFixFill：等「全屏」落定后量一下窗口，没正好铺满那块屏就摆正（见 nativeFillMonitor）。
+func deskFixFill(w *application.WebviewWindow, why string) {
+	for _, ms := range []time.Duration{300, 1200} {
+		time.AfterFunc(ms*time.Millisecond, func() {
+			if _, _, _, _, test := deskWindowRect(); test {
+				return
+			}
+			if fixed, b, m := nativeFillMonitor(w); fixed {
+				log.Printf("[desk] 台面窗口没铺正（%d,%d-%d,%d），摆回整块屏 %d,%d-%d,%d（%s）", b.L, b.T, b.R, b.B, m.L, m.T, m.R, m.B, why)
+			}
+		})
+	}
 }
 
 // toggle 是全局快捷键的动作：收着 → 回来；在后面 → 叫到前面；就在眼前 → 收起（收起要知道按钮摆哪，交给页面）。

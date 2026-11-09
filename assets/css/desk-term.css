@@ -31,7 +31,7 @@
 .xterm .xterm-helper-textarea{caret-color:transparent}
 .tile .tterm .xterm{cursor:text}
 /* 格子里的终端底色跟着玻璃走一点，不是一块死黑。 */
-.tile:has(.tterm){background:rgba(10,10,12,.62)}
+.tile.v-term:has(.tterm){background:rgba(10,10,12,.62)}
 .tile.cur{border-color:rgba(255,255,255,.12)}
 
 /* 格内横幅（冷恢复没接上那条会话时说出来）：盖在终端顶上，不改终端的尺寸。 */
@@ -104,3 +104,34 @@ textarea { font: inherit; color: inherit; }
 .nat-wait img{opacity:.85}
 .nat-act{margin-top:4px}
 .ap-bar img{flex:none}
+
+/* 台面窗口是透明的（cmd/perch/desk.go）：背景选「桌面壁纸」时页面不铺底，透出来的就是桌面本身。
+   #veil 那层淡淡的暗角还在 —— 它也让整面都接得住鼠标（完全透明的地方点不到）。 */
+html { background: transparent; }
+body.bg-wall { background: transparent; }
+/* 格子身体 = Agent 界面（39-desk-agentui.js）。真终端还在格子里跑着：不切过去时藏在底下、但保留尺寸（PTY 要量到尺寸才起）。 */
+.tile:not(.v-term) .tterm{position:absolute;left:2px;right:4px;top:34px;bottom:4px;margin:0;visibility:hidden;pointer-events:none}
+.tile.v-term .tb,.tile.v-term .tin{display:none}
+.tile .tb{user-select:text;cursor:text}
+.tb .ln.say{white-space:pre-wrap;word-break:break-word}
+.tb .ln.say pre.code{margin:6px 0;padding:8px 10px;border-radius:8px;background:rgba(0,0,0,.28);font:11.5px/1.5 "Cascadia Code",Consolas,monospace;white-space:pre-wrap;overflow-x:auto}
+.tb .ln.say code{font:12px "Cascadia Code",Consolas,monospace;background:rgba(255,255,255,.07);padding:0 4px;border-radius:4px}
+.tb .ln.me{white-space:pre-wrap;word-break:break-word}
+.tb .ln.act{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tb .ln.act.run{color:rgba(236,236,241,.75)}
+.tb .ln.act.run::before{background:var(--acc);animation:breathe 1.8s ease-in-out infinite}
+.tb .ln.act.bad{color:#fca5a5}
+.aui-ask{flex-direction:column;align-items:stretch;gap:8px}
+.aui-q{display:flex;flex-direction:column;gap:2px}
+.aui-q em{font-style:normal;font-size:11.5px;color:var(--dim)}
+.aui-btns{display:flex;flex-wrap:wrap;gap:6px}
+.ti.tin{height:auto;min-height:34px;padding:6px 6px 6px 12px;align-items:flex-end;cursor:text}
+.tin-in{flex:1;min-width:0;height:20px;max-height:140px;resize:none;border:0;outline:none;background:none;color:var(--txt);font:12.5px/20px inherit;font-family:inherit;padding:0;overflow-y:auto}
+.tin-in::placeholder{color:var(--faint)}
+.tin-go{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;background:rgba(255,255,255,.06);color:var(--dim);flex:none}
+.tin-go:hover{background:var(--acc);color:#0d1020}
+.tin-go.stop{background:rgba(245,180,84,.18);color:var(--warn)}
+.tin-go.stop:hover{background:var(--warn);color:#1d1405}
+.ti.tin:focus-within{border-color:rgba(138,164,255,.45)}
+.th .tf.tv{padding:0 6px}
+body.bg-wall.bg-testwall{background:#101114 url("/__desk/wallpaper") center / cover no-repeat}

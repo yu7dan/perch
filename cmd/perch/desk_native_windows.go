@@ -43,6 +43,8 @@ var (
 	procSetForegroundWindow    = user32.NewProc("SetForegroundWindow")
 	procGetWindowRect          = user32.NewProc("GetWindowRect")
 	procGetClassNameW          = user32.NewProc("GetClassNameW")
+	procMonitorFromWindow      = user32.NewProc("MonitorFromWindow")
+	procGetMonitorInfoW        = user32.NewProc("GetMonitorInfoW")
 	procDwmGetWindowAttribute  = windows.NewLazySystemDLL("dwmapi.dll").NewProc("DwmGetWindowAttribute")
 )
 
@@ -147,6 +149,34 @@ func nativeWindowSize(h uintptr) (int, int) {
 	r := rect{}
 	procGetWindowRect.Call(h, uintptr(unsafe.Pointer(&r)))
 	return int(r.R - r.L), int(r.B - r.T)
+}
+
+type monitorInfo struct {
+	Size    uint32
+	Monitor rect
+	Work    rect
+	Flags   uint32
+}
+
+// nativeFillMonitor：台面窗口正好铺满它所在的那块屏。Wails 的「全屏」偶尔落不准（实测：1920×1080 的屏上
+// 窗口落在 y=-24，左上角的 Perch 标和右上角的时间被切掉一截），量一下，不对就摆正。返回原来的位置（日志用）。
+func nativeFillMonitor(w *application.WebviewWindow) (fixed bool, before rect, mon rect) {
+	h := hwndOf(w)
+	if h == 0 {
+		return false, before, mon
+	}
+	procGetWindowRect.Call(h, uintptr(unsafe.Pointer(&before)))
+	m, _, _ := procMonitorFromWindow.Call(h, 2) // MONITOR_DEFAULTTONEAREST
+	mi := monitorInfo{Size: uint32(unsafe.Sizeof(monitorInfo{}))}
+	if r, _, _ := procGetMonitorInfoW.Call(m, uintptr(unsafe.Pointer(&mi))); r == 0 {
+		return false, before, mon
+	}
+	mon = mi.Monitor
+	if before == mon {
+		return false, before, mon
+	}
+	procSetWindowPos.Call(h, 0, uintptr(mon.L), uintptr(mon.T), uintptr(mon.R-mon.L), uintptr(mon.B-mon.T), swpNoZOrder|swpNoActivate|0x0020) // SWP_FRAMECHANGED
+	return true, before, mon
 }
 
 func nativePostClose(h uintptr) { procPostMessage.Call(h, wmClose, 0, 0) }

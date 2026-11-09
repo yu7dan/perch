@@ -35,7 +35,7 @@ function secHTML() {
         ? row("铺在哪块显示器上", "Perch 只铺满一块屏；默认是主显示器", `<div class="seg wrap">${DESK_SCREENS.map((s, i) => `<button data-sscreen="${esc(s.primary ? "" : s.id)}" class="${(SETTINGS.screen || "") === (s.primary ? "" : s.id) ? "on" : ""}">${esc(s.primary ? "主显示器" : "显示器 " + (i + 1))} · ${s.w}×${s.h}</button>`).join("")}</div>`)
         : "";
       return `<h2>台面</h2><p class="sub">背景、玻璃、颜色和 Dock。改了马上生效。</p>`
-        + row("背景", "桌面壁纸：用你的桌面壁纸铺满整屏，把桌面上的图标和窗口都盖住，换了壁纸 Perch 跟着换；也可以换成渐变或纯色", seg("bg", [["wall", "桌面壁纸"], ["grad", "渐变"], ["solid", "纯色"]]))
+        + row("背景", "透出桌面：台面是透明的，浮在桌面上，块以外看到的就是你的桌面；也可以换成渐变或纯色", seg("bg", [["wall", "透出桌面"], ["grad", "渐变"], ["solid", "纯色"]]))
         + row("玻璃浓度", "越高越不透，越低桌面透得越多", `<input type="range" min="0.3" max="0.9" step="0.02" value="${CFG.glass}" data-cfgr="glass">`)
         + row("模糊", "玻璃后面的桌面糊到什么程度", `<input type="range" min="0" max="48" step="1" value="${CFG.blur}" data-cfgr="blur">`)
         + row("强调色", "", `<div class="sw">${ACCENTS.map((c) => `<button data-acc="${c}" class="${CFG.acc === c ? "on" : ""}" style="background:${c};color:${c}"></button>`).join("")}</div>`)

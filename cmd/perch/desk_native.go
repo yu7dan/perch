@@ -110,7 +110,7 @@ func (d *deskNative) webOpen(data any) {
 		Frameless: true,
 		Hidden:    true,
 		URL:       url,
-		Windows:   application.WindowsWindow{HiddenOnTaskbar: true},
+		Windows:   application.WindowsWindow{HiddenOnTaskbar: true, DisableFramelessWindowDecorations: true},
 	})
 	w.OnWindowEvent(events.Windows.WebViewNavigationCompleted, func(*application.WindowEvent) {
 		// 页面换了：让页面自己把地址和标题报回来（chrome.webview.postMessage）。单页应用换地址不触发这个事件，
