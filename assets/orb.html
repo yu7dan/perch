@@ -46,20 +46,27 @@ body { font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", 
 <body>
 <div id="orb" class="orb-in"><i class="orb-ring"></i><img src="/icons/perch-logo.png" alt="" draggable="false"><span class="orb-bd" hidden></span><div class="orb-bub" hidden></div><div class="orb-tip"></div></div>
 <script type="module">
-import { Events, Window } from "/wails/runtime.js";
+import { Events } from "/wails/runtime.js";
+/* 窗口几何只走一条路（perch:orb-bounds → Go 的 SetBounds，一次摆好位置和大小）：
+   原来加宽 / 收窄 / 拖动三件事分两条通道发、先改大小再挪位置，按钮会在屏上跳一下；
+   鼠标一跳出按钮又触发收窄 → 按钮回到鼠标底下 → 又加宽，来回乱弹（用户 2026-11-09 反馈）。
+   拖动按「抓住按钮的那一点」算位置，和窗口此刻是宽是窄无关 —— 原来按宽窗口的位置算，松手时按钮离鼠标很远。 */
 const orb = document.getElementById("orb");
-const BASE = 92, WIDE = 400;   // 窗口边长（和 cmd/perch/desk.go 的 orbSize 一致）；提示 / 气泡要往旁边伸时加宽
+const BASE = 92, WIDE = 400, PAD = 16;   // 窄窗口边长、加宽后的宽度、按钮在窄窗口里离边的距离（和 cmd/perch/desk.go 一致）
 let st = { run: 0, wait: 0 };
-let wide = false, bubT = 0, drag = null, moved = false;
+let narrow = { x: window.screenX, y: window.screenY };   // 窄窗口（92×92）此刻该在的屏幕位置
+let wide = false, bubT = 0, leaveT = 0, drag = null, moved = false, raf = 0;
 
-const onLeft = () => (window.screenX + BASE / 2) < (screen.availLeft || 0) + (screen.availWidth || 1920) / 2;
+const scr = () => ({ L: screen.availLeft || 0, T: screen.availTop || 0, W: screen.availWidth || 1920, H: screen.availHeight || 1080 });
+const onLeft = () => narrow.x + BASE / 2 < scr().L + scr().W / 2;
 function side() { orb.classList.toggle("on-left", onLeft()); }
-// 加宽「往屏幕里面」伸：贴右边时窗口左边往左挪，贴左边时只把右边往外伸（Go 那边按 left 挪窗口）。
-function setWide(on) {
-  if (on === wide) return;
-  wide = on;
-  Events.Emit("perch:orb-size", { w: on ? WIDE : BASE, left: onLeft() ? 0 : 1 });
+// 加宽「往屏幕里面」伸：贴右边时窗口往左长，按钮在屏上纹丝不动
+function bounds() {
+  if (!wide) return { x: narrow.x, y: narrow.y, w: BASE, h: BASE };
+  return onLeft() ? { x: narrow.x, y: narrow.y, w: WIDE, h: BASE } : { x: narrow.x - (WIDE - BASE), y: narrow.y, w: WIDE, h: BASE };
 }
+function push() { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; Events.Emit("perch:orb-bounds", bounds()); }); }
+function setWide(on) { if (on === wide) return; wide = on; side(); push(); }
 function paint() {
   orb.classList.toggle("busy", st.run > 0);
   orb.classList.toggle("waiting", st.wait > 0);
@@ -70,10 +77,10 @@ function paint() {
 }
 Events.On("perch:orb-state", (e) => {
   const d = (e && e.data) || {};
-  st = { run: d.run | 0, wait: d.wait | 0 };
+  st = { run: d.run | 0, wait: d.wait | 0, lang: d.lang };
   paint();
   // 收着的时候冒出新的「等你」：像桌宠一样冒个气泡，跳一下。
-  if (d.bub) {
+  if (d.bub && !drag) {
     const b = orb.querySelector(".orb-bub");
     b.textContent = d.bub; b.hidden = false;
     setWide(true);
@@ -82,46 +89,55 @@ Events.On("perch:orb-state", (e) => {
     bubT = setTimeout(() => { b.hidden = true; if (!orb.classList.contains("tip")) setWide(false); }, 5000);
   }
 });
-orb.addEventListener("mouseenter", () => { if (drag) return; orb.classList.add("tip"); setWide(true); });
+orb.addEventListener("mouseenter", () => { if (drag) return; clearTimeout(leaveT); orb.classList.add("tip"); setWide(true); });
 orb.addEventListener("mouseleave", () => {
-  orb.classList.remove("tip");
-  if (orb.querySelector(".orb-bub").hidden) setWide(false);
+  if (drag) return;
+  // 稍等一下再收：手从按钮边上擦过去不该让窗口来回伸缩
+  clearTimeout(leaveT);
+  leaveT = setTimeout(() => { orb.classList.remove("tip"); if (orb.querySelector(".orb-bub").hidden) setWide(false); }, 180);
 });
-// 按住拖：窗口跟着鼠标走；松手贴到最近的左右边。没拖开就是点一下 = 回到台面。
+// 按住拖：按钮跟着「抓住的那一点」走；松手贴到最近的左右边。没拖开就是点一下 = 回到台面。
 orb.addEventListener("pointerdown", (e) => {
   if (e.button !== 0) return;
   e.preventDefault();
   orb.setPointerCapture(e.pointerId);
-  drag = { sx: e.screenX, sy: e.screenY, wx: window.screenX, wy: window.screenY };
+  const r = orb.getBoundingClientRect();
+  drag = { sx: e.screenX, sy: e.screenY, gx: e.clientX - r.left, gy: e.clientY - r.top };
   moved = false;
 });
 orb.addEventListener("pointermove", (e) => {
   if (!drag) return;
-  const dx = e.screenX - drag.sx, dy = e.screenY - drag.sy;
-  if (!moved && Math.hypot(dx, dy) < 5) return;
-  if (!moved) { moved = true; orb.classList.add("dragging"); orb.classList.remove("tip"); setWide(false); }
-  Window.SetPosition(Math.round(drag.wx + dx), Math.round(drag.wy + dy));
+  if (!moved && Math.hypot(e.screenX - drag.sx, e.screenY - drag.sy) < 5) return;
+  if (!moved) {
+    moved = true; clearTimeout(leaveT); clearTimeout(bubT);
+    orb.classList.add("dragging"); orb.classList.remove("tip");
+    orb.querySelector(".orb-bub").hidden = true;
+    wide = false; side();
+  }
+  // 窄窗口里按钮的左上角在 (PAD, PAD)：窗口位置 = 鼠标 − 抓点 − PAD
+  narrow = { x: Math.round(e.screenX - drag.gx - PAD), y: Math.round(e.screenY - drag.gy - PAD) };
+  push();
 });
 orb.addEventListener("pointerup", () => {
   if (!drag) return;
   drag = null;
   orb.classList.remove("dragging");
   if (!moved) { Events.Emit("perch:orb-click"); return; }
-  const L = screen.availLeft || 0, T = screen.availTop || 0, W = screen.availWidth, H = screen.availHeight;
-  const x = (window.screenX + BASE / 2) < L + W / 2 ? L + 6 : L + W - BASE - 6;
-  const y = Math.max(T + 6, Math.min(T + H - BASE - 6, window.screenY));
-  Window.SetPosition(x, y);
-  Events.Emit("perch:orb-moved", { x, y });
-  setTimeout(side, 60);
+  const { L, T, W, H } = scr();
+  narrow = { x: narrow.x + BASE / 2 < L + W / 2 ? L + 6 : L + W - BASE - 6, y: Math.max(T + 6, Math.min(T + H - BASE - 6, narrow.y)) };
+  side(); push();
+  Events.Emit("perch:orb-moved", { x: narrow.x, y: narrow.y });
 });
-// 每次收起 Go 都会把这个窗口复位成 92×92 再显示：页面跟着回到初始样子。
-Events.On("perch:orb-shown", () => {
+// 每次收起 Go 都会把这个窗口复位成窄的再显示：页面跟着回到初始样子。
+Events.On("perch:orb-shown", (e) => {
+  const d = (e && e.data) || {};
   wide = false; drag = null; moved = false;
-  clearTimeout(bubT);
+  clearTimeout(bubT); clearTimeout(leaveT);
+  narrow = { x: typeof d.x === "number" ? d.x : window.screenX, y: typeof d.y === "number" ? d.y : window.screenY };
   orb.querySelector(".orb-bub").hidden = true;
   orb.classList.remove("tip", "dragging", "hop", "orb-in");
   void orb.offsetWidth; orb.classList.add("orb-in");
-  setTimeout(side, 30);
+  side();
 });
 side(); paint();
 </script>

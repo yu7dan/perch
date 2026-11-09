@@ -91,6 +91,8 @@ type Settings struct {
 	AutoStart bool `json:"autoStart"`
 	// RestoreDesk：启动时按上次的样子摆回台面、接回上次开着的 agent。默认开。
 	RestoreDesk bool `json:"restoreDesk"`
+	// HideOthers：呼出台面时像「显示桌面」那样把别的窗口先收到任务栏，收起台面再原样放回。默认开。
+	HideOthers bool `json:"hideOthers"`
 	// Screen：台面铺在哪块显示器上（Wails 的 Screen.ID）；空 = 主显示器。
 	Screen string `json:"screen"`
 }
@@ -111,6 +113,7 @@ func Defaults() Settings {
 		TrustAgentFolders: true,
 		Hotkey:            "Ctrl+Alt+Space",
 		RestoreDesk:       true,
+		HideOthers:        true,
 	}
 }
 
@@ -284,6 +287,7 @@ type Patch struct {
 	Hotkey            *string `json:"hotkey,omitempty"`
 	AutoStart         *bool   `json:"autoStart,omitempty"`
 	RestoreDesk       *bool   `json:"restoreDesk,omitempty"`
+	HideOthers        *bool   `json:"hideOthers,omitempty"`
 	Screen            *string `json:"screen,omitempty"`
 }
 
@@ -292,7 +296,7 @@ func (p Patch) Empty() bool {
 	return p.DefaultCWD == nil && p.TermFontSize == nil && p.TermFontFamily == nil &&
 		p.StartView == nil && p.Language == nil && p.UIMode == nil && p.TopMode == nil && p.Theme == nil &&
 		p.DefaultAgent == nil && p.NewAgentShortcut == nil && p.ConfirmClose == nil && p.ConfirmEndAgent == nil && p.TrustAgentFolders == nil &&
-		p.Hotkey == nil && p.AutoStart == nil && p.RestoreDesk == nil && p.Screen == nil
+		p.Hotkey == nil && p.AutoStart == nil && p.RestoreDesk == nil && p.HideOthers == nil && p.Screen == nil
 }
 
 // Store 是设置文件的持有者。零值不可用；用 Load 构造。
@@ -440,6 +444,9 @@ func (s *Store) Patch(p Patch) (Settings, error) {
 	}
 	if p.AutoStart != nil {
 		next.AutoStart = *p.AutoStart
+	}
+	if p.HideOthers != nil {
+		next.HideOthers = *p.HideOthers
 	}
 	if p.RestoreDesk != nil {
 		next.RestoreDesk = *p.RestoreDesk

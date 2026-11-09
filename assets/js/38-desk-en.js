@@ -545,6 +545,10 @@ const DESK_EN = {
   "屏上有个选择": "There's a choice on screen",
   "去终端看看": "Open the terminal",
   "{} 停了 —— 点格子里的「接着来」": "{} stopped — click Continue in the tile",
+  "呼出时收起别的窗口": "Hide other windows when summoned",
+  "台面是透明的、浮在桌面上：呼出时像「显示桌面」那样把别的窗口先收到任务栏，收起台面再原样放回": "The desk is transparent and floats over your desktop: when summoned it minimizes other windows like Show desktop, and puts them back when you stow it",
+  "显示时间": "Show the time",
+  "鼠标靠到屏幕最上沿时，顶上滑出 Perch 标和时间": "Move the mouse to the very top of the screen to slide down the Perch mark and the time",
   // —— 收起 / 悬浮按钮
   "{} 在等你：{}": "{} is waiting for you: {}",
   "都空闲": "All idle",

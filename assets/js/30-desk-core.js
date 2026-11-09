@@ -14,7 +14,7 @@ const qs = (s, r = document) => r.querySelector(s);
 const qsa = (s, r = document) => [...r.querySelectorAll(s)];
 const clampN = (v, a, b) => Math.max(a, Math.min(b, v));
 
-const GAP = 6, PAD = 6, HEAD = 34, MINW = 200, MINH = 132, TOP = 44, SIDE = 20, DOCK_R = 92;
+const GAP = 6, PAD = 6, HEAD = 34, MINW = 200, MINH = 132, TOP = 20, SIDE = 20, DOCK_R = 92;
 let ZGAP = 14;
 const ZMIN_NEW = { w: 260, h: 180 }, ZMIN_GROUP = { w: 340, h: 260 }, ZMIN_FILES = { w: 360, h: 240 };
 
@@ -1294,6 +1294,15 @@ function toast(msg, kind, act) {
 }
 function clock() { const d = new Date(); qs("#clock").textContent = d.toLocaleDateString(PERCH_LOCALE === "en" ? "en-US" : "zh-CN", { month: "long", day: "numeric", weekday: "short" }) + "  " + d.toTimeString().slice(0, 5); }
 setInterval(clock, 10000);
+/* 顶上那一行（Perch 标、时间）平时收着，不占台面：鼠标靠到屏幕最上沿才滑下来，离开那一带就收回去（用户 2026-11-09）。 */
+let TOPBAR_T = 0;
+document.addEventListener("mousemove", (e) => {
+  const on = document.body.classList.contains("topbar");
+  if (e.clientY <= 4) { clearTimeout(TOPBAR_T); TOPBAR_T = 0; if (!on) document.body.classList.add("topbar"); }
+  else if (on && e.clientY > 56 && !TOPBAR_T) TOPBAR_T = setTimeout(() => { TOPBAR_T = 0; document.body.classList.remove("topbar"); }, 350);
+  else if (on && e.clientY <= 56 && TOPBAR_T) { clearTimeout(TOPBAR_T); TOPBAR_T = 0; }
+}, { passive: true });
+document.documentElement.addEventListener("mouseleave", () => { if (document.body.classList.contains("topbar")) { clearTimeout(TOPBAR_T); TOPBAR_T = setTimeout(() => { TOPBAR_T = 0; document.body.classList.remove("topbar"); }, 350); } });
 addEventListener("resize", () => { layoutDock(); render(); });
 
 /* ---------- 台面的摆法会记住 ----------

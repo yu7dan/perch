@@ -27,3 +27,5 @@ func nativeWindowSize(uintptr) (int, int)                       { return 0, 0 }
 type rect struct{ L, T, R, B int32 }
 
 func nativeFillMonitor(*application.WebviewWindow) (bool, rect, rect) { return false, rect{}, rect{} }
+func nativeHideOthers(map[uintptr]bool) []uintptr                     { return nil }
+func nativeRestoreOthers([]uintptr)                                   {}

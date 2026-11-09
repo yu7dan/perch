@@ -167,7 +167,7 @@ func newDeskStow(app *application.App, main *application.WebviewWindow) *deskSto
 	app.Event.On("perch:stow", func(e *application.CustomEvent) { d.stow(e.Data) })
 	app.Event.On("perch:orb-click", func(*application.CustomEvent) { d.unstow() })
 	app.Event.On("perch:orb-moved", func(e *application.CustomEvent) { d.moved(e.Data) })
-	app.Event.On("perch:orb-size", func(e *application.CustomEvent) { d.resize(e.Data) })
+	app.Event.On("perch:orb-bounds", func(e *application.CustomEvent) { d.bounds(e.Data) })
 	// 关掉主窗口 = 退出 Perch。按钮窗口（哪怕藏着）也算一个窗口：它在，Wails 就不认为
 	// 「最后一个窗口关了」，进程会带着它一直活着（2026-11-08 测试实例攒下了四个）。
 	// 关窗确认那道 hook 在监听器之前跑，被取消的关闭走不到这里。
@@ -232,10 +232,11 @@ func (d *deskStow) stow(data any) {
 	d.main.Hide()
 	if deskNativeRef != nil {
 		deskNativeRef.stow()
+		deskNativeRef.dismiss("收起台面")
 	}
 	orb.Show()
 	// 按钮窗口是复用的：上一次收着时它可能正加宽着（提示 / 气泡），先让页面回到初始样子。
-	orb.EmitEvent("perch:orb-shown", nil)
+	orb.EmitEvent("perch:orb-shown", map[string]int{"x": ox, "y": oy})
 	log.Printf("[desk] 收起：主窗口藏起，悬浮按钮在 %d,%d", ox, oy)
 }
 
@@ -250,6 +251,7 @@ func (d *deskStow) unstow() {
 	}
 	if deskNativeRef != nil {
 		deskNativeRef.unstow()
+		deskNativeRef.summon("回到台面")
 	}
 	d.main.Show()
 	d.main.Focus()
@@ -269,29 +271,22 @@ func (d *deskStow) moved(data any) {
 	d.mu.Unlock()
 }
 
-// resize：按钮页面要显示提示 / 气泡时请求加宽，「往屏幕里面」伸 —— 贴右边时窗口
-// 左边往左挪，贴左边时只把右边往外伸。
-func (d *deskStow) resize(data any) {
-	w, ok := intField(data, "w")
-	if !ok {
+// bounds：按钮页面一次给出窗口该在的位置和大小（加宽 / 收窄 / 拖动都走这一条，SetBounds 一次摆好，不跳）。
+func (d *deskStow) bounds(data any) {
+	x, okx := intField(data, "x")
+	y, oky := intField(data, "y")
+	w, okw := intField(data, "w")
+	h, okh := intField(data, "h")
+	if !okx || !oky || !okw || !okh || w < 40 || h < 40 || w > 800 || h > 400 {
 		return
 	}
-	left, _ := intField(data, "left")
 	d.mu.Lock()
 	orb := d.orb
-	if orb == nil {
-		d.mu.Unlock()
-		return
-	}
-	if w < orbSize {
-		w = orbSize
-	}
-	x := d.x
-	if left == 1 {
-		x = d.x - (w - orbSize)
-	}
+	stowed := d.stowed
 	d.w = w
 	d.mu.Unlock()
-	orb.SetSize(w, orbSize)
-	orb.SetPosition(x, d.y)
+	if orb == nil || !stowed {
+		return
+	}
+	orb.SetBounds(application.Rect{X: x, Y: y, Width: w, Height: h})
 }

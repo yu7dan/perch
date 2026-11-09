@@ -42,7 +42,8 @@ function secHTML() {
         + row("Dock 的位置", "也可以直接按住 Dock 拖到任何地方；贴左右边时会竖过来", `<div class="seg">${[["bottom", "下"], ["top", "上"], ["left", "左"], ["right", "右"]].map(([v, t]) => `<button data-dockpos="${v}" class="${DK.mode === "edge" && DK.edge === v ? "on" : ""}">${t}</button>`).join("")}${DK.mode === "free" ? `<button class="on">自由</button>` : ""}</div>`)
         + row("允许块叠在一起", "关着时块和块互不重叠，挤到别人会有红框提醒；打开后可以叠着放，点哪块哪块到最前面。Dock 上也有这个开关", tg("overlap"))
         + row("块之间的间距", "", seg("gap", [["tight", "紧凑"], ["comfy", "舒适"]]))
-        + row("右上角显示时间", "全屏会盖住任务栏的时钟", tg("clock"))
+        + row("显示时间", "鼠标靠到屏幕最上沿时，顶上滑出 Perch 标和时间", tg("clock"))
+        + row("呼出时收起别的窗口", "台面是透明的、浮在桌面上：呼出时像「显示桌面」那样把别的窗口先收到任务栏，收起台面再原样放回", tgGo("hideOthers"))
         + sc;
     }
     case "proj": {

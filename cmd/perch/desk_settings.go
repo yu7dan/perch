@@ -37,6 +37,14 @@ func (d *deskSettings) apply(old, next settings.Settings) {
 	if next.Screen != old.Screen {
 		d.moveToScreen(next.Screen)
 	}
+	if deskNativeRef != nil {
+		first := old == (settings.Settings{})
+		deskNativeRef.setHideOthers(next.HideOthers)
+		if first || (next.HideOthers && !old.HideOthers) {
+			// 启动时台面铺开（或刚打开这个开关）：后面的窗口先收起来
+			time.AfterFunc(600*time.Millisecond, func() { deskNativeRef.summon("台面铺开") })
+		}
+	}
 }
 
 func (d *deskSettings) setHotkey(accel string) {
@@ -125,6 +133,9 @@ func (s *deskStow) toggle() {
 	case stowed:
 		s.unstow()
 	case !s.main.IsVisible() || !s.main.IsFocused():
+		if deskNativeRef != nil {
+			deskNativeRef.summon("全局快捷键")
+		}
 		s.main.Show()
 		s.main.Focus()
 		log.Printf("[desk] 全局快捷键：把台面叫到前面")

@@ -179,6 +179,49 @@ func nativeFillMonitor(w *application.WebviewWindow) (fixed bool, before rect, m
 	return true, before, mon
 }
 
+// nativeHideOthers：像「显示桌面」那样把别的程序的窗口收到任务栏（台面浮在桌面上，后面不该透出一堆窗口）。
+// 只收真正的应用窗口：看得见、有标题、不是工具窗、没被 DWM 藏着、没收着、不是置顶的、不是桌面 / 任务栏，也不是 Perch 自己的。
+// 返回收了哪些（从上到下），放回去时倒着来，原来最上面的还在最上面。
+func nativeHideOthers(keep map[uintptr]bool) []uintptr {
+	self := uint32(os.Getpid())
+	var out []uintptr
+	for _, h := range nativeTopWindows() {
+		if keep[h] {
+			continue
+		}
+		if _, pid := nativeWindowExe(h); pid == self {
+			continue
+		}
+		switch nativeWindowClass(h) {
+		case "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd":
+			continue
+		}
+		if r, _, _ := procIsIconic.Call(h); r != 0 {
+			continue
+		}
+		if ex, _, _ := procGetWindowLongPtr.Call(h, gwlExStyle); ex&0x8 != 0 { // WS_EX_TOPMOST
+			continue
+		}
+		procShowWindow.Call(h, swShowMinNoActive)
+		out = append(out, h)
+	}
+	return out
+}
+
+// nativeRestoreOthers：把 nativeHideOthers 收起来的放回去（用户自己已经点开的不动）。
+func nativeRestoreOthers(hs []uintptr) {
+	for i := len(hs) - 1; i >= 0; i-- {
+		h := hs[i]
+		if !nativeIsWindow(h) {
+			continue
+		}
+		if r, _, _ := procIsIconic.Call(h); r == 0 {
+			continue
+		}
+		procShowWindow.Call(h, swRestore)
+	}
+}
+
 func nativePostClose(h uintptr) { procPostMessage.Call(h, wmClose, 0, 0) }
 
 func nativeWindowTitle(h uintptr) string {

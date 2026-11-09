@@ -135,3 +135,8 @@ body.bg-wall { background: transparent; }
 .ti.tin:focus-within{border-color:rgba(138,164,255,.45)}
 .th .tf.tv{padding:0 6px}
 body.bg-wall.bg-testwall{background:#101114 url("/__desk/wallpaper") center / cover no-repeat}
+/* 顶上那一行平时收着（30-desk-core 的 TOPBAR）：鼠标靠到最上沿才和一层淡淡的底一起滑下来 */
+#brand,#clock{z-index:90;transition:transform .28s var(--ease),opacity .2s}
+body:not(.topbar) #brand,body:not(.topbar) #clock{transform:translateY(-34px);opacity:0}
+#topshade{position:fixed;left:0;right:0;top:0;height:46px;z-index:89;pointer-events:none;background:linear-gradient(rgba(8,9,12,.62),rgba(8,9,12,0));opacity:0;transform:translateY(-46px);transition:transform .28s var(--ease),opacity .2s}
+body.topbar #topshade{opacity:1;transform:none}

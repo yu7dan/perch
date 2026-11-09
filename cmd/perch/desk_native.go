@@ -44,6 +44,9 @@ type deskNative struct {
 	dpr    float64
 	stowed bool
 	minned map[uintptr]bool // 收起时被我们最小化的
+
+	hideOthers bool      // 设置「呼出时把别的窗口收到任务栏」（desk_settings.go 落实）
+	hidden     []uintptr // 呼出台面时替用户收起来的别的窗口
 }
 
 var deskNativeRef *deskNative
@@ -418,12 +421,68 @@ func (d *deskNative) unstow() {
 }
 
 func (d *deskNative) shutdown() {
+	d.dismiss("退出 Perch")
 	d.mu.Lock()
 	webs := d.webs
 	d.webs = map[string]*application.WebviewWindow{}
 	d.mu.Unlock()
 	for _, w := range webs {
 		w.Close()
+	}
+}
+
+// ---- 呼出时「显示桌面」（用户 2026-11-09 选的 A）----
+
+// summon：台面到了眼前。台面是透明的、浮在桌面上 —— 后面开着的窗口会透出来，所以先像 Win+D 那样把它们收到任务栏。
+func (d *deskNative) summon(why string) {
+	if _, _, _, _, test := deskWindowRect(); test {
+		return // 屏幕外的测试实例：绝不动正在用电脑的人的窗口
+	}
+	d.mu.Lock()
+	if !d.hideOthers {
+		d.mu.Unlock()
+		return
+	}
+	keep := map[uintptr]bool{}
+	for _, h := range d.apps {
+		keep[h] = true // 贴在块上的应用归台面管
+	}
+	d.mu.Unlock()
+	hs := nativeHideOthers(keep)
+	d.mu.Lock()
+	seen := map[uintptr]bool{}
+	for _, h := range d.hidden {
+		seen[h] = true
+	}
+	for _, h := range hs {
+		if !seen[h] {
+			d.hidden = append(d.hidden, h)
+		}
+	}
+	d.mu.Unlock()
+	if len(hs) > 0 {
+		log.Printf("[desk] 呼出台面（%s）：把 %d 个窗口收到任务栏", why, len(hs))
+	}
+}
+
+// dismiss：台面收起 / 退出 —— 替用户收起来的窗口原样放回去。
+func (d *deskNative) dismiss(why string) {
+	d.mu.Lock()
+	hs := d.hidden
+	d.hidden = nil
+	d.mu.Unlock()
+	if len(hs) > 0 {
+		nativeRestoreOthers(hs)
+		log.Printf("[desk] 台面让开（%s）：把 %d 个窗口放回去", why, len(hs))
+	}
+}
+
+func (d *deskNative) setHideOthers(on bool) {
+	d.mu.Lock()
+	d.hideOthers = on
+	d.mu.Unlock()
+	if !on {
+		d.dismiss("关掉了「呼出时收起别的窗口」")
 	}
 }
 
