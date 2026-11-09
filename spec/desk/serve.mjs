@@ -2,7 +2,7 @@
 // 用法：node spec/desk/serve.mjs            —— 起本地服务并全屏打开导览
 //       NO_OPEN=1 node spec/desk/serve.mjs  —— 只起服务（给无头连拍 / 对比用）
 // 地址后面加 #ch=<章节> 只放那一章：shape fold group persona dock files apps ov set
-// 壁纸取当前桌面壁纸（不进仓库）；agent 图标直接读 assets/icons/agents。
+// 壁纸取当前桌面壁纸（不进仓库；WALL=<图片> 可指定）；agent 图标直接读 assets/icons/agents。
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
@@ -14,6 +14,7 @@ const AGENT_ICONS = path.join(ROOT, "..", "..", "assets", "icons", "agents");
 const PORT = Number(process.env.PORT || 8815);
 
 function wallpaper() {
+  if (process.env.WALL && fs.existsSync(process.env.WALL)) return process.env.WALL; // README 动图用中性的壁纸，不拿谁的桌面
   try {
     const out = execSync('reg query "HKCU\\Control Panel\\Desktop" /v WallPaper', { encoding: "utf8" });
     const m = out.match(/WallPaper\s+REG_SZ\s+(.+)/);
