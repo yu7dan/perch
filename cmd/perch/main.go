@@ -16,8 +16,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -92,6 +94,12 @@ func teeLogToFile() {
 	// 文件放第一个：双击启动时 os.Stderr 可能是无效句柄，写它会返回错误；
 	// MultiWriter 遇到错误就停，放在后面才能保证文件一定拿到这一行。
 	log.SetOutput(io.MultiWriter(f, os.Stderr))
+	// 进程崩掉（panic / fatal）时，Go 把现场打到 stderr —— 双击启动时那里没人接，闪退就什么都查不到。
+	// 让运行时另抄一份到 crash.log（追加，带时间头）。
+	if cf, err := os.OpenFile(filepath.Join(filepath.Dir(p), "crash.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+		fmt.Fprintf(cf, "\n==== %s 启动 pid=%d ====\n", time.Now().Format("2006-01-02 15:04:05"), os.Getpid())
+		_ = debug.SetCrashOutput(cf, debug.CrashOptions{})
+	}
 }
 
 // isProjectDropTarget accepts both the explicit attribute and the container

@@ -184,9 +184,13 @@ func nativeWindowExe(h uintptr) (string, uint32) {
 }
 
 // 像个「应用窗口」的顶层窗口：看得见、有标题、不是工具窗、没有 owner、没被 DWM 藏着（商店应用的后台窗口是 cloaked 的）。
-func nativeTopWindows() []uintptr {
-	var out []uintptr
-	cb := syscall.NewCallback(func(h, _ uintptr) uintptr {
+//
+// ⚠️ 回调只建一次：syscall.NewCallback 建出来的回调永不释放，一个进程最多两千来个，用完就 panic
+// （「too many callback functions」）—— 认窗口时每 300ms 列一次顶层窗口，开十几次应用就会把 Perch 带走。
+var (
+	enumMu  sync.Mutex
+	enumOut []uintptr
+	enumCB  = syscall.NewCallback(func(h, _ uintptr) uintptr {
 		if r, _, _ := procIsWindowVisible.Call(h); r == 0 {
 			return 1
 		}
@@ -204,10 +208,18 @@ func nativeTopWindows() []uintptr {
 		if cloaked != 0 {
 			return 1
 		}
-		out = append(out, h)
+		enumOut = append(enumOut, h)
 		return 1
 	})
-	procEnumWindows.Call(cb, 0)
+)
+
+func nativeTopWindows() []uintptr {
+	enumMu.Lock()
+	defer enumMu.Unlock()
+	enumOut = nil
+	procEnumWindows.Call(enumCB, 0)
+	out := enumOut
+	enumOut = nil
 	return out
 }
 
