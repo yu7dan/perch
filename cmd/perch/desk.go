@@ -119,8 +119,10 @@ func deskWindowRect() (x, y, w, h int, ok bool) {
 // deskMainWindowOptions：台面窗口无边框、铺满主屏（全屏，盖住任务栏 —— 台面本身就是
 // 一整张盖住桌面的面板；暂时不用就「收起」成悬浮按钮）。
 //
-// ⚠️ 不要设 DisableFramelessWindowDecorations：那个开关会连 Win11 的阴影一起去掉，
-// 普通窗口模式（测试实例）下就成了贴死的方片。
+// 铺满整屏的台面关掉无边框窗口的系统装饰（DisableFramelessWindowDecorations）：Wails 每次窗口激活都会把 DWM 边框
+// 「延伸进整个客户区」，透明窗口激活时整屏就蒙上一层系统的灰色磨砂，一失去焦点又没了 —— 嵌入桌面时点一下块整屏一暗、
+// 点回桌面又亮（用户 2026-11-09 第三轮）。整屏那层玻璃改由我们自己垫（40-desk-glass.js 的整屏一块），什么时候有由台面定。
+// ⚠️ 测试实例是普通窗口：那里留着装饰，不然连 Win11 的阴影一起去掉，成了贴死的方片。
 func deskMainWindowOptions() application.WebviewWindowOptions {
 	o := application.WebviewWindowOptions{
 		Title:      "Perch",
@@ -133,6 +135,7 @@ func deskMainWindowOptions() application.WebviewWindowOptions {
 		// 拖文件进台面（比如拖一个文件夹进来当项目）由前端按落点决定怎么处理。
 		EnableFileDrop: true,
 		URL:            "/",
+		Windows:        application.WindowsWindow{DisableFramelessWindowDecorations: true},
 	}
 	if x, y, w, h, ok := deskWindowRect(); ok {
 		o.StartState = application.WindowStateNormal
@@ -141,6 +144,7 @@ func deskMainWindowOptions() application.WebviewWindowOptions {
 		// 测试实例摆在屏幕外：透明窗口在屏幕外不出帧，调试端口截图会一直等（实测卡死）。测试实例用不透明窗口，
 		// 页面那边看到自己在屏幕外，会把壁纸画上当背景（只为截图对照，37/30 的 applyCfg）。
 		o.BackgroundType = application.BackgroundTypeSolid
+		o.Windows.DisableFramelessWindowDecorations = false
 		log.Printf("[desk] PERCH_WINDOW_RECT：普通窗口 %d,%d %dx%d（测试用）", x, y, w, h)
 	}
 	return o

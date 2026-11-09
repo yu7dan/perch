@@ -22,13 +22,12 @@ type hitRect struct{ X, Y, W, H float64 }
 type deskEmbed struct {
 	main *application.WebviewWindow
 
-	mu      sync.Mutex
-	on      bool
-	full    bool
-	rects   []hitRect
-	dpr     float64
-	through bool // 现在窗口是不是点得穿
-	stop    chan struct{}
+	mu    sync.Mutex
+	on    bool
+	full  bool
+	rects []hitRect
+	dpr   float64
+	stop  chan struct{}
 }
 
 var deskEmbedRef *deskEmbed
@@ -135,21 +134,19 @@ func (e *deskEmbed) loop(stop chan struct{}) {
 			}
 			inside = x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H
 		}
-		cur := e.through
 		e.mu.Unlock()
-		if want := !inside; want != cur {
+		// 每次都问窗口本身，不记在自己这儿：激活、挪位置这些时候窗口样式会被别人改回去（实测点一下块再点桌面，
+		// 记着的「已经点得穿」和窗口真实样式对不上，后面就一直点不穿了）
+		if want := !inside; want != nativeIsClickThrough(e.main) {
 			e.setThrough(want)
 		}
 	}
 }
 
 func (e *deskEmbed) setThrough(on bool) {
-	e.mu.Lock()
-	if e.through == on {
-		e.mu.Unlock()
-		return
-	}
-	e.through = on
-	e.mu.Unlock()
 	application.InvokeSync(func() { nativeClickThrough(e.main, on) })
+	if on {
+		// 鼠标是「穿出去」的，网页收不到 mouseleave：告诉它一声，好把悬停才出来的东西（顶上的 Perch 标和时间）收回去
+		e.main.EmitEvent("perch:hit-out", nil)
+	}
 }

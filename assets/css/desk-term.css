@@ -144,3 +144,7 @@ body.topbar #topshade{opacity:1;transform:none}
 /* 嵌入桌面（41-desk-embed.js）：空白处归桌面 —— 「在空白处拖一下圈一块」那句提示不成立了，收起来；暗角也不要，桌面原样露出来 */
 body.embed #deskhint { display: none; }
 body.embed #veil { background: none; }
+/* 整屏那层玻璃（41-desk-embed.js 的 deskLayer；后面垫着整屏的系统磨砂）：在原来的暗角上再压一层灰，桌面退到后面去 */
+body.bg-wall.layer #veil { background: radial-gradient(ellipse at 50% 45%, rgba(0,0,0,0) 45%, rgba(0,0,0,.28)), linear-gradient(rgba(26,26,34,.42), rgba(26,26,34,.42)); }
+html.theme-light body.bg-wall.layer #veil { background: linear-gradient(rgba(232,235,242,.42), rgba(232,235,242,.42)); }
+body.embed #brand, body.embed #clock, body.embed #topshade { display: none; }

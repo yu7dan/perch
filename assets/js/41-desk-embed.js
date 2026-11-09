@@ -9,8 +9,9 @@
 
 const HIT_SEL = ".zone, .ztab, #dock, #tray:not([hidden]), .pop:not([hidden]), .peek, #toast:not([hidden])";
 let HIT_SIG = "";
+// 整块屏归 Perch 的时候：圈块、开着 Agent 托盘（要把 Agent 拖到空白处开新的一块）、整屏的面板（设置、选文件夹……）
 function hitFull() {
-  if (document.body.classList.contains("drawing")) return true;
+  if (document.body.classList.contains("drawing") || !qs("#tray").hidden) return true;
   return [...document.querySelectorAll(".sheet-host")].some((el) => !el.hidden);
 }
 function hitItems() {
@@ -22,12 +23,16 @@ function hitItems() {
     // 块的阴影、缩放手柄会伸出去一点：外扩几像素，免得边缘一碰就点到后面的桌面
     push(r.left - 6, r.top - 6, r.width + 12, r.height + 12);
   }
-  // 最上沿一条细缝留给「靠上去滑出 Perch 标和时间」；滑出来以后那一整条都归 Perch
-  push(0, 0, innerWidth, document.body.classList.contains("topbar") ? 56 : 4);
+  // 顶上的 Perch 标和时间嵌入时不出（任务栏上就有时间；悬停才滑出来的东西压在桌面图标上只添乱），最上沿也就不用留缝
   return out;
 }
+/* 整屏那层玻璃（暗一档 + 系统磨砂）：沉浸时一直在；嵌入时只在要整块屏的时候出来（用户 2026-11-09：
+   平时点块、点桌面、关掉别的程序都不该一闪一闪，只有开新 Agent、圈块这类时候才显）。40-desk-glass.js 按它垫整屏的磨砂。 */
+function deskLayer() { return !EMBED || hitFull(); }
 function hitTick() {
   requestAnimationFrame(hitTick);
+  const layer = deskLayer();
+  if (document.body.classList.contains("layer") !== layer) document.body.classList.toggle("layer", layer);
   if (!EMBED || STOWED || document.hidden) return;
   const full = hitFull();
   const items = full ? [] : hitItems();
@@ -52,4 +57,5 @@ DOCK_ACTS.embed = { act() { setEmbed(!EMBED); }, on: () => EMBED };
 if (W_EV) {
   requestAnimationFrame(hitTick);
   W_EV.On("perch:unstowed", () => { HIT_SIG = ""; });
+  W_EV.On("perch:hit-out", () => { clearTimeout(TOPBAR_T); TOPBAR_T = 0; document.body.classList.remove("topbar"); });
 }

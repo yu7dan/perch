@@ -34,6 +34,15 @@ func nativeLButtonDown() bool {
 	return r&0x8000 != 0
 }
 
+func nativeIsClickThrough(w *application.WebviewWindow) bool {
+	h := hwndOf(w)
+	if h == 0 {
+		return false
+	}
+	ex, _, _ := procGetWindowLongPtr.Call(h, gwlExStyle)
+	return ex&wsExTransparent != 0
+}
+
 // nativeClickThrough：整扇窗口点得穿 / 点不穿。WS_EX_TRANSPARENT 要配 WS_EX_LAYERED 才对别的进程的窗口生效；
 // 分层窗口不设一次 SetLayeredWindowAttributes 就整个不画 —— 设成不透明（alpha 255），画面交给 WebView2 自己的透明。
 // 切回点不穿时只摘 TRANSPARENT，LAYERED 留着（来回加减分层会闪一下）。

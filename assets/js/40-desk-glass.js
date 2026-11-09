@@ -29,7 +29,10 @@ function glassTick() {
   requestAnimationFrame(glassTick);
   if (!W_EV || document.hidden || STOWED) return;
   // 渐变 / 纯色时页面自己铺了底，窗口后面的桌面看不见：不用垫
-  const items = document.body.classList.contains("bg-wall") ? glassItems() : [];
+  const wall = document.body.classList.contains("bg-wall");
+  const items = wall ? glassItems() : [];
+  // 整屏那层（41-desk-embed.js 的 deskLayer）：垫在最底下，不圆角
+  if (wall && typeof deskLayer === "function" && deskLayer()) items.unshift({ x: 0, y: 0, w: innerWidth, h: innerHeight, r: 0 });
   const light = typeof themeEffective === "function" && themeEffective() === "light";
   const sig = devicePixelRatio + "|" + light + "|" + JSON.stringify(items);
   if (sig === GLASS_SIG) return;

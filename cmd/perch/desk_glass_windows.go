@@ -72,7 +72,8 @@ var (
 		return r
 	})
 	glassClassPtr = windows.StringToUTF16Ptr(glassClass)
-	glassTint     = map[uintptr]bool{} // 小窗 → 现在是不是浅色的底
+	glassTint     = map[uintptr]bool{}   // 小窗 → 现在是不是浅色的底
+	glassCorner   = map[uintptr]uint32{} // 小窗 → 现在的 DWM 圆角设置
 )
 
 func glassRegister() bool {
@@ -97,8 +98,7 @@ func glassAccent(h uintptr, light bool) {
 	margins := [4]int32{-1, -1, -1, -1}
 	procDwmExtendFrame.Call(h, uintptr(unsafe.Pointer(&margins)))
 	// 圆角交给 DWM（8px）：自己用 SetWindowRgn 裁圆角，DWM 就不再给这扇窗画磨砂了（实测一块纯色）
-	corner := uint32(2) // DWMWCP_ROUND
-	procDwmSetWindowAttribute.Call(h, 33, uintptr(unsafe.Pointer(&corner)), 4)
+	glassSetCorner(h, 2)       // DWMWCP_ROUND
 	tint := uint32(0x10000000) // ABGR
 	if light {
 		tint = 0x10FFFFFF
@@ -107,6 +107,11 @@ func glassAccent(h uintptr, light bool) {
 	d := winCompAttrData{Attrib: wcaAccentPolicy, Data: uintptr(unsafe.Pointer(&ap)), Size: unsafe.Sizeof(ap)}
 	procSetWindowCompositionAttribute.Call(h, uintptr(unsafe.Pointer(&d)))
 	glassTint[h] = light
+}
+
+func glassSetCorner(h uintptr, c uint32) {
+	procDwmSetWindowAttribute.Call(h, 33, uintptr(unsafe.Pointer(&c)), 4) // DWMWA_WINDOW_CORNER_PREFERENCE
+	glassCorner[h] = c
 }
 
 func glassCreate(light bool) uintptr {
@@ -130,6 +135,14 @@ func glassPlace(h uintptr, main *application.WebviewWindow, x, y, w, ht, r int, 
 	if glassTint[h] != light {
 		glassAccent(h, light)
 	}
+	// 整屏那一块（r=0）不要圆角：铺满整屏的窗口四个角圆了，屏幕角上会露出四个小缺口
+	c := uint32(1) // DWMWCP_DONOTROUND
+	if r > 0 {
+		c = 2
+	}
+	if glassCorner[h] != c {
+		glassSetCorner(h, c)
+	}
 	in := 0
 	if r > 8 {
 		in = (r - 8 + 2) / 3
@@ -142,4 +155,5 @@ func glassHide(h uintptr) { procShowWindow.Call(h, swHide) }
 func glassDestroy(h uintptr) {
 	procDestroyWindow.Call(h)
 	delete(glassTint, h)
+	delete(glassCorner, h)
 }
