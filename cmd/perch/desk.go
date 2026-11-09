@@ -234,6 +234,9 @@ func (d *deskStow) stow(data any) {
 		deskNativeRef.stow()
 		deskNativeRef.dismiss("收起台面")
 	}
+	if deskGlassRef != nil {
+		deskGlassRef.stow()
+	}
 	orb.Show()
 	// 按钮窗口是复用的：上一次收着时它可能正加宽着（提示 / 气泡），先让页面回到初始样子。
 	orb.EmitEvent("perch:orb-shown", map[string]int{"x": ox, "y": oy})
@@ -252,6 +255,9 @@ func (d *deskStow) unstow() {
 	if deskNativeRef != nil {
 		deskNativeRef.unstow()
 		deskNativeRef.summon("回到台面")
+	}
+	if deskGlassRef != nil {
+		deskGlassRef.unstow()
 	}
 	d.main.Show()
 	d.main.Focus()

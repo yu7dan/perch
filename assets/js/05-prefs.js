@@ -217,9 +217,9 @@ function applySettings(next, meta) {
    终端跟着换 xterm 主题；Go 那边换 OSC 10/11 应答和新进程的 COLORFGBG。 */
 const THEME_MQ = (() => { try { return window.matchMedia("(prefers-color-scheme: light)"); } catch (_) { return null; } })();
 let THEME_NOW = "";
-// 台面（0.1.1）只有一套外观：深色玻璃压在桌面壁纸上（定稿模拟）。设置里存的那一档不再生效，
-// 终端的配色（10-term 的 termThemeNow）跟着这里走，所以一律是暗色。
-function themeEffective() { return "dark"; }
+// 台面（0.1.1）两套外观：深色（定稿模拟那套）和浅色（用户 2026-11-09 要的白色磨砂玻璃）。
+// 「跟随系统」这一档台面上不提供：没选过浅色就是深色。终端的配色（10-term 的 termThemeNow）跟着这里走。
+function themeEffective() { return SETTINGS.theme === "light" ? "light" : "dark"; }
 function applyTheme(why) {
   const eff = themeEffective();
   if (eff === THEME_NOW) return;
@@ -229,6 +229,7 @@ function applyTheme(why) {
   if (!first) root.classList.add("theme-switching");
   root.classList.toggle("theme-light", eff === "light");
   root.classList.toggle("theme-dark", eff === "dark");
+  if (typeof applyCfg === "function" && typeof CFG !== "undefined") applyCfg();
   if (!first) requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove("theme-switching")));
   applyTermAppearance();
   if (typeof sendCtrl === "function") {

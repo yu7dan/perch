@@ -367,6 +367,8 @@ func main() {
 	deskSet := newDeskSettings(app, newDeskStow(app, window))
 	// 网页块 / 应用块：贴在块上的外来窗口（desk_native.go）
 	newDeskNative(app, window)
+	// 真毛玻璃：块后面垫系统磨砂小窗（desk_glass.go）
+	newDeskGlass(app, window)
 	// 全局快捷键 / 开机启动 / 铺在哪块屏：应用起来之后按当前设置落实一次，之后每次设置改了再落实（OnSettings）。
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		deskSet.apply(settings.Settings{}, a.prefs.Snapshot())

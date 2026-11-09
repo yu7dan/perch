@@ -35,6 +35,7 @@ function secHTML() {
         ? row("铺在哪块显示器上", "Perch 只铺满一块屏；默认是主显示器", `<div class="seg wrap">${DESK_SCREENS.map((s, i) => `<button data-sscreen="${esc(s.primary ? "" : s.id)}" class="${(SETTINGS.screen || "") === (s.primary ? "" : s.id) ? "on" : ""}">${esc(s.primary ? "主显示器" : "显示器 " + (i + 1))} · ${s.w}×${s.h}</button>`).join("")}</div>`)
         : "";
       return `<h2>台面</h2><p class="sub">背景、玻璃、颜色和 Dock。改了马上生效。</p>`
+        + row("主题", "深色是压暗的玻璃，浅色是白色磨砂玻璃；下面的背景两种主题都能选", `<div class="seg">${[["dark", "深色"], ["light", "浅色"]].map(([v, t]) => `<button data-stheme="${v}" class="${(SETTINGS.theme === "light" ? "light" : "dark") === v ? "on" : ""}">${t}</button>`).join("")}</div>`)
         + row("背景", "透出桌面：台面是透明的，浮在桌面上，块以外看到的就是你的桌面；也可以换成渐变或纯色", seg("bg", [["wall", "透出桌面"], ["grad", "渐变"], ["solid", "纯色"]]))
         + row("玻璃浓度", "越高越不透，越低桌面透得越多", `<input type="range" min="0.3" max="0.9" step="0.02" value="${CFG.glass}" data-cfgr="glass">`)
         + row("模糊", "玻璃后面的桌面糊到什么程度", `<input type="range" min="0" max="48" step="1" value="${CFG.blur}" data-cfgr="blur">`)
@@ -95,9 +96,10 @@ function onCfgChanged() { if (!qs("#set").hidden) renderSettings(); }
 function onProjectsChanged() { if (!qs("#set").hidden && SET.sec === "proj") renderSettings(); }
 function setClick(t) {
   if (t.classList.contains("back") || t.closest("[data-sx]")) { closeSettings(); return; }
-  const b = t.closest("[data-snav],[data-cfg],[data-cfgseg],[data-acc],[data-dockpos],[data-sdef],[data-hotkey],[data-sgo],[data-sscreen],[data-squit],[data-pp],[data-slang]");
+  const b = t.closest("[data-snav],[data-cfg],[data-cfgseg],[data-acc],[data-dockpos],[data-sdef],[data-hotkey],[data-sgo],[data-sscreen],[data-squit],[data-pp],[data-slang],[data-stheme]");
   if (!b) return;
   const d = b.dataset;
+  if (d.stheme) { goSet({ theme: d.stheme }); saveSettingsCache(); applyTheme("设置 › 台面"); applyCfg(); renderSettings(); return; }
   if (d.slang) { goSet({ language: d.slang }); setLocale(d.slang); saveSettingsCache(); renderSettings(); return; }
   if (d.snav) { SET.sec = d.snav; SET.rec = false; qs("#mp").hidden = true; renderSettings(); return; }
   if (d.pp) { ppAct(d.pp, b); return; }

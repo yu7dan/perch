@@ -1,0 +1,43 @@
+/* desk-light.css —— 浅色主题里手调的那几处（在生成的 desk-light.gen.css 后面加载，优先）。
+   用户 2026-11-09 定的：主题分两层 —— 先深色 / 浅色，每个主题下面再选「透出桌面 / 渐变 / 纯色」；浅色是白色磨砂玻璃配深色字。 */
+html.theme-light {
+  --acc: #4f6bed;
+  --acc-bg: rgba(79, 107, 237, .13);
+  --warn: #d98a14;
+  --ok: #1f9d63;
+  --bad: #d64545;
+  --sheet: rgba(250, 251, 254, .86);
+}
+/* 底：透出桌面时窗口透明（不画底）；渐变 / 纯色换成明亮的配色 */
+html.theme-light body.bg-wall { background: transparent; }
+html.theme-light body.bg-wall.bg-testwall { background: #dfe3ea url("/__desk/wallpaper") center / cover no-repeat; }
+html.theme-light body.bg-grad { background: radial-gradient(60% 70% at 12% 8%, #c7d2fe 0, transparent 60%), radial-gradient(55% 60% at 92% 88%, #fbcfe8 0, transparent 62%), radial-gradient(45% 50% at 75% 15%, #a5f3fc 0, transparent 60%), #eef1f8; }
+html.theme-light body.bg-solid { background: #e9ecf2; }
+/* 暗角换成一层极淡的亮雾（也让整面都接得住鼠标） */
+html.theme-light #veil { background: linear-gradient(rgba(255, 255, 255, .06), rgba(255, 255, 255, .06)); }
+html.theme-light body.bg-solid #veil, html.theme-light body.bg-grad #veil { background: none; }
+/* 块：白色磨砂玻璃，一圈白色亮边，阴影淡而柔 */
+html.theme-light .zone { border-color: rgba(255, 255, 255, .7); box-shadow: 0 24px 60px rgba(30, 40, 80, .18), 0 2px 6px rgba(30, 40, 80, .10), inset 0 1px 0 rgba(255, 255, 255, .85); }
+html.theme-light body.bg-solid .zone { border-color: rgba(20, 24, 40, .08); }
+html.theme-light .tile { background: rgba(255, 255, 255, .42); border-color: rgba(20, 24, 40, .07); }
+html.theme-light .ti { background: rgba(255, 255, 255, .7); border-color: rgba(20, 24, 40, .08); }
+html.theme-light #dock { background: rgba(255, 255, 255, .55); border-color: rgba(255, 255, 255, .75); box-shadow: 0 18px 48px rgba(30, 40, 80, .18), inset 0 1px 0 rgba(255, 255, 255, .9); }
+html.theme-light #brand, html.theme-light #clock { color: rgba(27, 29, 36, .82); text-shadow: 0 1px 6px rgba(255, 255, 255, .6); }
+html.theme-light #topshade { background: linear-gradient(rgba(255, 255, 255, .7), rgba(255, 255, 255, 0)); }
+/* 单色的 agent 图标是白的（深色底用）：浅色主题里不反色 */
+html.theme-light img.mono { filter: none; }
+html.theme-light #dragi.mono { filter: drop-shadow(0 6px 14px rgba(30, 40, 80, .3)); }
+html.theme-light .pk-a.ni img.mono, html.theme-light .g-ag.ni img.mono, html.theme-light #tray .tr-a.ni img.mono { filter: grayscale(.5); }
+html.theme-light .agi.ni > img.mono, html.theme-light .pk-a.ni .agi.ni > img.mono, html.theme-light .g-ag.ni .agi.ni > img.mono, html.theme-light #tray .tr-a.ni .agi.ni > img.mono { filter: grayscale(1); }
+html.theme-light .agi-fill img.mono { filter: none; }
+/* 原样终端（格头「终端」按钮切过去时）：浅底 */
+html.theme-light .tile.v-term:has(.tterm) { background: rgba(255, 255, 255, .78); }
+/* 等你的琥珀在浅底上要深一点才看得清 */
+html.theme-light .tile.st-wait { border-color: rgba(217, 138, 20, .6); box-shadow: 0 0 0 1px rgba(217, 138, 20, .3), 0 0 26px rgba(217, 138, 20, .14); }
+html.theme-light .ask { background: rgba(245, 180, 84, .16); border-color: rgba(217, 138, 20, .35); }
+html.theme-light .ask button.y { background: #f5b454; color: #1d1405; }
+html.theme-light .plus { color: #fff; }
+html.theme-light .tb .ln.say pre.code { background: rgba(20, 24, 40, .06); }
+html.theme-light .tb .ln.say code { background: rgba(20, 24, 40, .07); }
+html.theme-light .tb .ln.act.bad { color: #c03d3d; }
+html.theme-light .tin-go:hover { color: #fff; }

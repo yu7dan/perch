@@ -41,6 +41,12 @@ body { font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", 
 .orb-tip .dim { font-size: 11px; color: var(--dim); }
 .orb-bub { width: max-content; max-width: 280px; white-space: normal; line-height: 1.5; border-color: rgba(245,180,84,.5); animation: zIn .25s var(--ease); }
 @keyframes zIn { from { opacity: 0; } }
+/* 浅色主题：白色的漆面按钮、白底提示 */
+html.light #orb { background: radial-gradient(120% 120% at 32% 18%, rgba(255,255,255,.95) 0%, rgba(255,255,255,0) 50%), linear-gradient(165deg, #ffffff 0%, #eef0f5 55%, #dde1ea 100%);
+  box-shadow: 0 0 0 1px rgba(20,24,40,.14), inset 0 1px 0 rgba(255,255,255,1), inset 0 -2px 6px rgba(20,24,40,.08), 0 4px 10px rgba(30,40,80,.22); }
+html.light #orb img { filter: invert(1) drop-shadow(0 1px 0 rgba(255,255,255,.6)); }
+html.light .orb-tip, html.light .orb-bub { background: rgba(250,251,254,.96); border-color: rgba(20,24,40,.10); color: #1b1d24; }
+html.light .orb-tip .dim { color: rgba(27,29,36,.55); }
 </style>
 </head>
 <body>
@@ -78,6 +84,7 @@ function paint() {
 Events.On("perch:orb-state", (e) => {
   const d = (e && e.data) || {};
   st = { run: d.run | 0, wait: d.wait | 0, lang: d.lang };
+  document.documentElement.classList.toggle("light", d.theme === "light");
   paint();
   // 收着的时候冒出新的「等你」：像桌宠一样冒个气泡，跳一下。
   if (d.bub && !drag) {

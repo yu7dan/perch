@@ -161,7 +161,13 @@ const save = () => { try { localStorage.setItem("perch.desk.v1", JSON.stringify(
 function hexA(h, a) { const n = parseInt(h.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
 function applyCfg() {
   const r = document.documentElement.style;
-  r.setProperty("--glass", `rgba(18,19,24,${CFG.glass})`);
+  // 玻璃的浓度：深色是压暗的玻璃，浅色是白色磨砂（同一个滑块，浅色略淡一点才通透）
+  // 透出桌面时块后面垫着系统的磨砂（40-desk-glass.js / desk_glass.go），桌面已经被真的糊开了：网页这层只要薄薄一层底色；
+  // 渐变 / 纯色时窗口不透明，还是网页自己的玻璃，照原来的浓度。
+  const wallMode = CFG.bg !== "solid" && CFG.bg !== "grad" && window.screenX > -1000;
+  const lightTheme = typeof themeEffective === "function" && themeEffective() === "light";
+  const ga = wallMode ? CFG.glass * (lightTheme ? 0.75 : 0.5) : lightTheme ? Math.min(0.92, CFG.glass * 1.2) : CFG.glass;
+  r.setProperty("--glass", lightTheme ? `rgba(250,251,255,${ga.toFixed(3)})` : `rgba(18,19,24,${ga.toFixed(3)})`);
   r.setProperty("--blur", CFG.blur + "px");
   r.setProperty("--acc", CFG.acc);
   r.setProperty("--acc-bg", hexA(CFG.acc, 0.16));
@@ -1259,7 +1265,7 @@ function pushOrbState() {
   let bub = "";
   if (wait > ORB_SEEN) { const ws = waits(); bub = waitText(ws[ws.length - 1]); }
   ORB_SEEN = wait;
-  W_EV.Emit("perch:orb-state", { run, wait, bub: typeof deskTr === "function" ? deskTr(bub) : bub, lang: PERCH_LOCALE });
+  W_EV.Emit("perch:orb-state", { run, wait, bub: typeof deskTr === "function" ? deskTr(bub) : bub, lang: PERCH_LOCALE, theme: themeEffective() });
 }
 setInterval(pushOrbState, 700);
 if (W_EV) {

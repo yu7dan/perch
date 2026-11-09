@@ -309,6 +309,9 @@ func (d *deskNative) onMainActivated() {
 	if stowed {
 		return
 	}
+	if deskGlassRef != nil {
+		go deskGlassRef.raise()
+	}
 	// 激活这件事本身还会再把主窗口往前挪一次（实测：回到台面后立刻压回去，过一会儿主窗口又在上面）—— 稍后再压一次
 	nativeRaiseOver(d.main, d.appList())
 	time.AfterFunc(250*time.Millisecond, func() { nativeRaiseOver(d.main, d.appList()) })
@@ -422,6 +425,9 @@ func (d *deskNative) unstow() {
 
 func (d *deskNative) shutdown() {
 	d.dismiss("退出 Perch")
+	if deskGlassRef != nil {
+		deskGlassRef.shutdown()
+	}
 	d.mu.Lock()
 	webs := d.webs
 	d.webs = map[string]*application.WebviewWindow{}

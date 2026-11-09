@@ -29,3 +29,8 @@ type rect struct{ L, T, R, B int32 }
 func nativeFillMonitor(*application.WebviewWindow) (bool, rect, rect) { return false, rect{}, rect{} }
 func nativeHideOthers(map[uintptr]bool) []uintptr                     { return nil }
 func nativeRestoreOthers([]uintptr)                                   {}
+
+func glassCreate(bool) uintptr                                                      { return 0 }
+func glassPlace(uintptr, *application.WebviewWindow, int, int, int, int, int, bool) {}
+func glassHide(uintptr)                                                             {}
+func glassDestroy(uintptr)                                                          {}
