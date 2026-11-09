@@ -62,6 +62,8 @@ const DESK_EN = {
   "现在没有在等你的 agent": "No agent is waiting for you",
   "有人在等你": "Someone is waiting for you",
   "收起要在 Perch 里用（这里没有窗口通道）": "Stowing only works inside Perch",
+  "嵌入要在 Perch 里用（这里没有窗口通道）": "Embedding only works inside Perch",
+  "屏幕外的测试窗口不能嵌入桌面": "The off-screen test window cannot embed in the desktop",
   // —— 格子
   "这一格放哪个 Agent？{}": "Which agent goes in this tile? {}",
   "这一格放哪个 Agent？": "Which agent goes in this tile?",
